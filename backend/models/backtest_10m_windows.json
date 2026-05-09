@@ -1,0 +1,51 @@
+{
+  "symbol": "BTCUSDT",
+  "duration": "10m",
+  "trade_confidence_threshold": 0.85,
+  "windows": [
+    {
+      "train_window_days": 30,
+      "test_auc": 0.8477307187935416,
+      "test_f1": 0.7634641941211284,
+      "strategy_return": 1.1403665760046309,
+      "buy_hold_return": -0.15449681215569755,
+      "win_rate": 0.6095563139931741,
+      "avg_trade_return": 0.0005205348336786547,
+      "test_trades": 1465,
+      "test_rows": 5038
+    },
+    {
+      "train_window_days": 45,
+      "test_auc": 0.8445318228618539,
+      "test_f1": 0.7703390883120109,
+      "strategy_return": 5.111583066599944,
+      "buy_hold_return": 0.10875594398128507,
+      "win_rate": 0.6141759776536313,
+      "avg_trade_return": 0.0006336609817340702,
+      "test_trades": 2864,
+      "test_rows": 7682
+    },
+    {
+      "train_window_days": 60,
+      "test_auc": 0.8414094870935056,
+      "test_f1": 0.7681236673773987,
+      "strategy_return": 9.899621567076396,
+      "buy_hold_return": 0.08601089308428667,
+      "win_rate": 0.6333333333333333,
+      "avg_trade_return": 0.0006284433676873222,
+      "test_trades": 3810,
+      "test_rows": 10485
+    }
+  ],
+  "best_by_strategy_return": {
+    "train_window_days": 60,
+    "test_auc": 0.8414094870935056,
+    "test_f1": 0.7681236673773987,
+    "strategy_return": 9.899621567076396,
+    "buy_hold_return": 0.08601089308428667,
+    "win_rate": 0.6333333333333333,
+    "avg_trade_return": 0.0006284433676873222,
+    "test_trades": 3810,
+    "test_rows": 10485
+  }
+}

@@ -1,0 +1,679 @@
+{
+  "symbol": "BTCUSDT",
+  "strategyKey": "daily_trade_floor_tree",
+  "duration": "10m",
+  "source": "kline_boundary_daily_trade_floor_tree_rule_engine",
+  "liveExecutionUsesOrderbook": true,
+  "historicalOrderbookSnapshots": 650,
+  "target": {
+    "dailyWinRateMin": 0.7,
+    "dailyTradeLimit": null,
+    "minDailyTrades": 10
+  },
+  "overall": {
+    "trades": 1876,
+    "wins": 1713,
+    "winRate": 0.9131130063965884,
+    "avgPnlPerStake": 0.6436034115138594,
+    "tradesPerDay": 28.424242424242426
+  },
+  "daily": [
+    {
+      "day": "2026-02-25",
+      "trades": 23,
+      "wins": 19,
+      "winRate": 0.8260869565217391,
+      "avgPnlPerStake": 0.48695652173913045
+    },
+    {
+      "day": "2026-02-26",
+      "trades": 47,
+      "wins": 43,
+      "winRate": 0.9148936170212766,
+      "avgPnlPerStake": 0.6468085106382979
+    },
+    {
+      "day": "2026-02-27",
+      "trades": 28,
+      "wins": 27,
+      "winRate": 0.9642857142857143,
+      "avgPnlPerStake": 0.7357142857142858
+    },
+    {
+      "day": "2026-02-28",
+      "trades": 18,
+      "wins": 16,
+      "winRate": 0.8888888888888888,
+      "avgPnlPerStake": 0.6000000000000001
+    },
+    {
+      "day": "2026-03-01",
+      "trades": 40,
+      "wins": 33,
+      "winRate": 0.825,
+      "avgPnlPerStake": 0.48500000000000004
+    },
+    {
+      "day": "2026-03-02",
+      "trades": 39,
+      "wins": 35,
+      "winRate": 0.8974358974358975,
+      "avgPnlPerStake": 0.6153846153846154
+    },
+    {
+      "day": "2026-03-03",
+      "trades": 47,
+      "wins": 43,
+      "winRate": 0.9148936170212766,
+      "avgPnlPerStake": 0.6468085106382979
+    },
+    {
+      "day": "2026-03-04",
+      "trades": 47,
+      "wins": 44,
+      "winRate": 0.9361702127659575,
+      "avgPnlPerStake": 0.6851063829787235
+    },
+    {
+      "day": "2026-03-05",
+      "trades": 42,
+      "wins": 36,
+      "winRate": 0.8571428571428571,
+      "avgPnlPerStake": 0.5428571428571429
+    },
+    {
+      "day": "2026-03-06",
+      "trades": 32,
+      "wins": 29,
+      "winRate": 0.90625,
+      "avgPnlPerStake": 0.6312500000000001
+    },
+    {
+      "day": "2026-03-07",
+      "trades": 32,
+      "wins": 31,
+      "winRate": 0.96875,
+      "avgPnlPerStake": 0.74375
+    },
+    {
+      "day": "2026-03-08",
+      "trades": 25,
+      "wins": 22,
+      "winRate": 0.88,
+      "avgPnlPerStake": 0.5840000000000001
+    },
+    {
+      "day": "2026-03-09",
+      "trades": 19,
+      "wins": 16,
+      "winRate": 0.8421052631578947,
+      "avgPnlPerStake": 0.5157894736842106
+    },
+    {
+      "day": "2026-03-10",
+      "trades": 32,
+      "wins": 28,
+      "winRate": 0.875,
+      "avgPnlPerStake": 0.5750000000000001
+    },
+    {
+      "day": "2026-03-11",
+      "trades": 35,
+      "wins": 30,
+      "winRate": 0.8571428571428571,
+      "avgPnlPerStake": 0.5428571428571428
+    },
+    {
+      "day": "2026-03-12",
+      "trades": 35,
+      "wins": 31,
+      "winRate": 0.8857142857142857,
+      "avgPnlPerStake": 0.5942857142857143
+    },
+    {
+      "day": "2026-03-13",
+      "trades": 29,
+      "wins": 27,
+      "winRate": 0.9310344827586207,
+      "avgPnlPerStake": 0.6758620689655173
+    },
+    {
+      "day": "2026-03-14",
+      "trades": 36,
+      "wins": 32,
+      "winRate": 0.8888888888888888,
+      "avgPnlPerStake": 0.6000000000000001
+    },
+    {
+      "day": "2026-03-15",
+      "trades": 23,
+      "wins": 20,
+      "winRate": 0.8695652173913043,
+      "avgPnlPerStake": 0.5652173913043478
+    },
+    {
+      "day": "2026-03-16",
+      "trades": 32,
+      "wins": 32,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-03-17",
+      "trades": 30,
+      "wins": 28,
+      "winRate": 0.9333333333333333,
+      "avgPnlPerStake": 0.68
+    },
+    {
+      "day": "2026-03-18",
+      "trades": 24,
+      "wins": 20,
+      "winRate": 0.8333333333333334,
+      "avgPnlPerStake": 0.5
+    },
+    {
+      "day": "2026-03-19",
+      "trades": 25,
+      "wins": 24,
+      "winRate": 0.96,
+      "avgPnlPerStake": 0.7280000000000001
+    },
+    {
+      "day": "2026-03-20",
+      "trades": 19,
+      "wins": 18,
+      "winRate": 0.9473684210526315,
+      "avgPnlPerStake": 0.7052631578947368
+    },
+    {
+      "day": "2026-03-21",
+      "trades": 25,
+      "wins": 24,
+      "winRate": 0.96,
+      "avgPnlPerStake": 0.7280000000000001
+    },
+    {
+      "day": "2026-03-22",
+      "trades": 32,
+      "wins": 27,
+      "winRate": 0.84375,
+      "avgPnlPerStake": 0.51875
+    },
+    {
+      "day": "2026-03-23",
+      "trades": 31,
+      "wins": 30,
+      "winRate": 0.967741935483871,
+      "avgPnlPerStake": 0.7419354838709677
+    },
+    {
+      "day": "2026-03-24",
+      "trades": 29,
+      "wins": 26,
+      "winRate": 0.896551724137931,
+      "avgPnlPerStake": 0.6137931034482759
+    },
+    {
+      "day": "2026-03-25",
+      "trades": 20,
+      "wins": 17,
+      "winRate": 0.85,
+      "avgPnlPerStake": 0.53
+    },
+    {
+      "day": "2026-03-26",
+      "trades": 32,
+      "wins": 27,
+      "winRate": 0.84375,
+      "avgPnlPerStake": 0.51875
+    },
+    {
+      "day": "2026-03-27",
+      "trades": 22,
+      "wins": 20,
+      "winRate": 0.9090909090909091,
+      "avgPnlPerStake": 0.6363636363636364
+    },
+    {
+      "day": "2026-03-28",
+      "trades": 31,
+      "wins": 29,
+      "winRate": 0.9354838709677419,
+      "avgPnlPerStake": 0.6838709677419356
+    },
+    {
+      "day": "2026-03-29",
+      "trades": 25,
+      "wins": 23,
+      "winRate": 0.92,
+      "avgPnlPerStake": 0.6560000000000001
+    },
+    {
+      "day": "2026-03-30",
+      "trades": 20,
+      "wins": 17,
+      "winRate": 0.85,
+      "avgPnlPerStake": 0.53
+    },
+    {
+      "day": "2026-03-31",
+      "trades": 26,
+      "wins": 25,
+      "winRate": 0.9615384615384616,
+      "avgPnlPerStake": 0.7307692307692307
+    },
+    {
+      "day": "2026-04-01",
+      "trades": 17,
+      "wins": 14,
+      "winRate": 0.8235294117647058,
+      "avgPnlPerStake": 0.48235294117647065
+    },
+    {
+      "day": "2026-04-02",
+      "trades": 42,
+      "wins": 38,
+      "winRate": 0.9047619047619048,
+      "avgPnlPerStake": 0.6285714285714287
+    },
+    {
+      "day": "2026-04-03",
+      "trades": 21,
+      "wins": 20,
+      "winRate": 0.9523809523809523,
+      "avgPnlPerStake": 0.7142857142857143
+    },
+    {
+      "day": "2026-04-04",
+      "trades": 32,
+      "wins": 29,
+      "winRate": 0.90625,
+      "avgPnlPerStake": 0.6312500000000001
+    },
+    {
+      "day": "2026-04-05",
+      "trades": 17,
+      "wins": 15,
+      "winRate": 0.8823529411764706,
+      "avgPnlPerStake": 0.5882352941176471
+    },
+    {
+      "day": "2026-04-06",
+      "trades": 33,
+      "wins": 33,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-04-07",
+      "trades": 37,
+      "wins": 34,
+      "winRate": 0.918918918918919,
+      "avgPnlPerStake": 0.6540540540540541
+    },
+    {
+      "day": "2026-04-08",
+      "trades": 44,
+      "wins": 40,
+      "winRate": 0.9090909090909091,
+      "avgPnlPerStake": 0.6363636363636364
+    },
+    {
+      "day": "2026-04-09",
+      "trades": 31,
+      "wins": 27,
+      "winRate": 0.8709677419354839,
+      "avgPnlPerStake": 0.567741935483871
+    },
+    {
+      "day": "2026-04-10",
+      "trades": 28,
+      "wins": 25,
+      "winRate": 0.8928571428571429,
+      "avgPnlPerStake": 0.6071428571428571
+    },
+    {
+      "day": "2026-04-11",
+      "trades": 30,
+      "wins": 28,
+      "winRate": 0.9333333333333333,
+      "avgPnlPerStake": 0.68
+    },
+    {
+      "day": "2026-04-12",
+      "trades": 33,
+      "wins": 32,
+      "winRate": 0.9696969696969697,
+      "avgPnlPerStake": 0.7454545454545455
+    },
+    {
+      "day": "2026-04-13",
+      "trades": 26,
+      "wins": 22,
+      "winRate": 0.8461538461538461,
+      "avgPnlPerStake": 0.5230769230769231
+    },
+    {
+      "day": "2026-04-14",
+      "trades": 17,
+      "wins": 17,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-04-15",
+      "trades": 35,
+      "wins": 32,
+      "winRate": 0.9142857142857143,
+      "avgPnlPerStake": 0.6457142857142858
+    },
+    {
+      "day": "2026-04-16",
+      "trades": 29,
+      "wins": 29,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-04-17",
+      "trades": 35,
+      "wins": 34,
+      "winRate": 0.9714285714285714,
+      "avgPnlPerStake": 0.7485714285714287
+    },
+    {
+      "day": "2026-04-18",
+      "trades": 26,
+      "wins": 23,
+      "winRate": 0.8846153846153846,
+      "avgPnlPerStake": 0.5923076923076923
+    },
+    {
+      "day": "2026-04-19",
+      "trades": 26,
+      "wins": 23,
+      "winRate": 0.8846153846153846,
+      "avgPnlPerStake": 0.5923076923076923
+    },
+    {
+      "day": "2026-04-20",
+      "trades": 26,
+      "wins": 25,
+      "winRate": 0.9615384615384616,
+      "avgPnlPerStake": 0.7307692307692307
+    },
+    {
+      "day": "2026-04-21",
+      "trades": 42,
+      "wins": 38,
+      "winRate": 0.9047619047619048,
+      "avgPnlPerStake": 0.6285714285714287
+    },
+    {
+      "day": "2026-04-22",
+      "trades": 19,
+      "wins": 18,
+      "winRate": 0.9473684210526315,
+      "avgPnlPerStake": 0.7052631578947368
+    },
+    {
+      "day": "2026-04-23",
+      "trades": 28,
+      "wins": 27,
+      "winRate": 0.9642857142857143,
+      "avgPnlPerStake": 0.7357142857142858
+    },
+    {
+      "day": "2026-04-24",
+      "trades": 19,
+      "wins": 19,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-04-25",
+      "trades": 20,
+      "wins": 18,
+      "winRate": 0.9,
+      "avgPnlPerStake": 0.62
+    },
+    {
+      "day": "2026-04-26",
+      "trades": 18,
+      "wins": 17,
+      "winRate": 0.9444444444444444,
+      "avgPnlPerStake": 0.7000000000000001
+    },
+    {
+      "day": "2026-04-27",
+      "trades": 23,
+      "wins": 22,
+      "winRate": 0.9565217391304348,
+      "avgPnlPerStake": 0.7217391304347827
+    },
+    {
+      "day": "2026-04-28",
+      "trades": 13,
+      "wins": 12,
+      "winRate": 0.9230769230769231,
+      "avgPnlPerStake": 0.6615384615384616
+    },
+    {
+      "day": "2026-04-29",
+      "trades": 25,
+      "wins": 22,
+      "winRate": 0.88,
+      "avgPnlPerStake": 0.5840000000000001
+    },
+    {
+      "day": "2026-04-30",
+      "trades": 14,
+      "wins": 14,
+      "winRate": 1.0,
+      "avgPnlPerStake": 0.8
+    },
+    {
+      "day": "2026-05-01",
+      "trades": 18,
+      "wins": 17,
+      "winRate": 0.9444444444444444,
+      "avgPnlPerStake": 0.7000000000000001
+    }
+  ],
+  "failedDays": [],
+  "lowTradeDays": [],
+  "noTradeDays": [],
+  "walkForward": {
+    "method": "anchored_walk_forward_with_purge",
+    "minTrainDays": 14,
+    "testDays": 7,
+    "purgeMinutes": 10,
+    "folds": [
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-03-10",
+        "testStart": "2026-03-11",
+        "testEnd": "2026-03-17",
+        "trainRows": 1990,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 471,
+          "wins": 422,
+          "winRate": 0.8959660297239915,
+          "avgPnlPerStake": 0.6127388535031848
+        },
+        "overall": {
+          "trades": 220,
+          "wins": 200,
+          "winRate": 0.9090909090909091,
+          "avgPnlPerStake": 0.6363636363636364
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-03-17",
+        "testStart": "2026-03-18",
+        "testEnd": "2026-03-24",
+        "trainRows": 2998,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 691,
+          "wins": 622,
+          "winRate": 0.9001447178002895,
+          "avgPnlPerStake": 0.620260492040521
+        },
+        "overall": {
+          "trades": 185,
+          "wins": 169,
+          "winRate": 0.9135135135135135,
+          "avgPnlPerStake": 0.6443243243243243
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-03-24",
+        "testStart": "2026-03-25",
+        "testEnd": "2026-03-31",
+        "trainRows": 4006,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 876,
+          "wins": 791,
+          "winRate": 0.9029680365296804,
+          "avgPnlPerStake": 0.6253424657534248
+        },
+        "overall": {
+          "trades": 176,
+          "wins": 158,
+          "winRate": 0.8977272727272727,
+          "avgPnlPerStake": 0.615909090909091
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-03-31",
+        "testStart": "2026-04-01",
+        "testEnd": "2026-04-07",
+        "trainRows": 5014,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 1052,
+          "wins": 949,
+          "winRate": 0.9020912547528517,
+          "avgPnlPerStake": 0.6237642585551332
+        },
+        "overall": {
+          "trades": 199,
+          "wins": 183,
+          "winRate": 0.9195979899497487,
+          "avgPnlPerStake": 0.6552763819095477
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-04-07",
+        "testStart": "2026-04-08",
+        "testEnd": "2026-04-14",
+        "trainRows": 6022,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 1251,
+          "wins": 1132,
+          "winRate": 0.9048760991207034,
+          "avgPnlPerStake": 0.6287769784172662
+        },
+        "overall": {
+          "trades": 209,
+          "wins": 191,
+          "winRate": 0.9138755980861244,
+          "avgPnlPerStake": 0.644976076555024
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-04-14",
+        "testStart": "2026-04-15",
+        "testEnd": "2026-04-21",
+        "trainRows": 7030,
+        "purgedRows": 1,
+        "testRows": 1008,
+        "trainOverall": {
+          "trades": 1460,
+          "wins": 1323,
+          "winRate": 0.9061643835616439,
+          "avgPnlPerStake": 0.6310958904109589
+        },
+        "overall": {
+          "trades": 219,
+          "wins": 204,
+          "winRate": 0.9315068493150684,
+          "avgPnlPerStake": 0.6767123287671234
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-04-21",
+        "testStart": "2026-04-22",
+        "testEnd": "2026-04-28",
+        "trainRows": 8038,
+        "purgedRows": 1,
+        "testRows": 991,
+        "trainOverall": {
+          "trades": 1678,
+          "wins": 1526,
+          "winRate": 0.9094159713945172,
+          "avgPnlPerStake": 0.6369487485101311
+        },
+        "overall": {
+          "trades": 140,
+          "wins": 133,
+          "winRate": 0.95,
+          "avgPnlPerStake": 0.7100000000000001
+        },
+        "failedDays": []
+      },
+      {
+        "trainStart": "2026-02-25",
+        "trainEnd": "2026-04-28",
+        "testStart": "2026-04-29",
+        "testEnd": "2026-05-01",
+        "trainRows": 9029,
+        "purgedRows": 1,
+        "testRows": 395,
+        "trainOverall": {
+          "trades": 1819,
+          "wins": 1660,
+          "winRate": 0.9125893347993403,
+          "avgPnlPerStake": 0.6426608026388125
+        },
+        "overall": {
+          "trades": 57,
+          "wins": 53,
+          "winRate": 0.9298245614035088,
+          "avgPnlPerStake": 0.6736842105263159
+        },
+        "failedDays": []
+      }
+    ],
+    "overall": {
+      "trades": 1405,
+      "wins": 1291,
+      "winRate": 0.9188612099644128,
+      "avgPnlPerStake": 0.6539501779359431
+    },
+    "passed": true
+  },
+  "passed": true
+}

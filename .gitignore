@@ -1,0 +1,57 @@
+.ace-tool/
+
+# --- Environment & secrets (never commit real credentials) ---
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# --- Python ---
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.pytest_cache/
+pytest-cache-files-*/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- Node / frontend build ---
+node_modules/
+frontend/dist/
+
+# --- Logs & runtime ---
+*.log
+logs/
+runtime/
+
+# --- SQLite（勿提交；否则 Git 历史会再次膨胀） ---
+backend/data.db
+backend/data.db-shm
+backend/data.db-wal
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Editors / IDE ---
+.idea/
+*.swp
+*.swo
+*~

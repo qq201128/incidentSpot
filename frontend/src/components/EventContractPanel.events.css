@@ -1,0 +1,137 @@
+.settle-btn {
+  background: var(--blue);
+  color: #06111f;
+  min-width: 64px;
+}
+
+.event-strategy-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+
+.event-strategy-filter label {
+  color: var(--muted);
+}
+
+.event-strategy-filter select {
+  min-width: 168px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(69, 88, 96, 0.72);
+  background: rgba(9, 14, 19, 0.92);
+  color: var(--text, #e8eef2);
+  font-size: 13px;
+}
+
+.event-pagination {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.event-pagination-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.event-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  background:
+    linear-gradient(90deg, rgba(63, 211, 166, 0.05), transparent 55%),
+    rgba(8, 13, 18, 0.92);
+  border: 1px solid rgba(69, 88, 96, 0.74);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.event-list p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.order-card-head {
+  align-items: flex-start;
+}
+
+.order-pair-row,
+.ai-event-meta,
+.settlement-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.strategy-tag {
+  background: rgba(247, 198, 91, 0.12);
+  border: 1px solid rgba(247, 198, 91, 0.32);
+  color: #f3d48a;
+}
+
+.side-tag.up,
+.status-tag.settled {
+  background: rgba(63, 211, 166, 0.15);
+  border: 1px solid rgba(63, 211, 166, 0.38);
+  color: #83e9c9;
+}
+
+.side-tag.down {
+  background: rgba(240, 109, 123, 0.14);
+  border: 1px solid rgba(240, 109, 123, 0.36);
+  color: #ffa3ae;
+}
+
+.side-tag.neutral,
+.status-tag.open {
+  background: rgba(120, 167, 255, 0.14);
+  border: 1px solid rgba(120, 167, 255, 0.34);
+  color: #b7ceff;
+}
+
+.order-time {
+  font-size: 12px;
+  text-align: right;
+}
+
+.ai-event-meta {
+  margin: 7px 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #334047;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.order-grid {
+  margin-top: 8px;
+}
+
+.settlement-note {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .event-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .order-card-head {
+    display: grid;
+  }
+
+  .order-time {
+    text-align: left;
+  }
+}

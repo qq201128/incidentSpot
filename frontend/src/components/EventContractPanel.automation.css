@@ -1,0 +1,125 @@
+.automation-toggles .toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.automation-toggles input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: var(--green);
+}
+
+.trade-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  border: 1px solid rgba(120, 167, 255, 0.36);
+  background: rgba(120, 167, 255, 0.1);
+  color: var(--text);
+  padding-inline: 12px;
+}
+
+.trade-mode-btn.live {
+  border-color: rgba(63, 211, 166, 0.52);
+  background: rgba(31, 185, 121, 0.14);
+}
+
+.mode-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--blue);
+  box-shadow: 0 0 0 4px rgba(120, 167, 255, 0.12);
+}
+
+.trade-mode-btn.live .mode-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(63, 211, 166, 0.14);
+}
+
+.toggle-hint {
+  margin: -2px 0 0 27px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trade-mode-hint {
+  margin-left: 0;
+}
+
+.clear-all-row {
+  display: grid;
+  gap: 6px;
+}
+
+.clear-all-events-btn {
+  justify-self: start;
+  background: var(--red);
+  color: #fff7f8;
+}
+
+.strategy-control-list {
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  align-items: center;
+  gap: 10px;
+  background: rgba(9, 14, 19, 0.86);
+  border: 1px solid rgba(69, 88, 96, 0.72);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.strategy-control-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.strategy-control-row span,
+.strategy-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.strategy-metric {
+  color: #f3d48a;
+}
+
+.strategy-disabled {
+  color: #ff98ab;
+}
+
+.strategy-toggle {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.strategy-toggle.on {
+  background: rgba(31, 185, 121, 0.18);
+  border: 1px solid rgba(63, 211, 166, 0.48);
+  color: #83e9c9;
+}
+
+.strategy-toggle.off {
+  background: rgba(120, 167, 255, 0.1);
+  border: 1px solid rgba(120, 167, 255, 0.32);
+  color: #b7ceff;
+}
+
+@media (max-width: 720px) {
+  .strategy-control-row {
+    grid-template-columns: 1fr;
+  }
+}
