@@ -222,6 +222,7 @@ STRATEGIES = (
             "则对**当前新开**这根 10m 押与前 3 根趋势相反（涨押跌、跌押涨）。"
             "连亏后不再自动补单；须再次满足三连形态才下注。上一笔已结算（不论输赢）之后，用于判定的 n 根 K 须全部落在该笔对应 10m 桶之后，避免形态 K 与上一笔重叠。"
             "自动下单名义为面板基础数量，无倍投。"
+            "避险（默认开启，可用环境变量关闭）：指数 1h 收盘相对 SMA 若与反转方向逆势则跳过；上一根已收盘指数 10m 真实波幅超过 k×ATR(14) 则跳过（与四连、五连共用同一套 gate）。"
         ),
         requires_vegas_confirmation=False,
         signal_source="three_bar_10m_reverse_martingale_v1",
@@ -236,6 +237,7 @@ STRATEGIES = (
         description=(
             "若前 4 根已收盘 10m **指数 K** 为连续四阳或连续四阴，则对当前新开 10m 押反向。"
             "连亏后不补单；须再次满足四连形态才下注；形态 K 须在上一笔已结算事件对应桶之后（规则同三连）。名义为面板基础数量。"
+            "避险（默认开启，可用环境变量关闭）：指数 1h 收盘相对 SMA 若与反转方向逆势则跳过；上一根已收盘指数 10m 真实波幅超过 k×ATR(14) 则跳过（与三连、五连共用同一套 gate）。"
         ),
         requires_vegas_confirmation=False,
         signal_source="four_bar_10m_reverse_martingale_v1",
@@ -250,6 +252,7 @@ STRATEGIES = (
         description=(
             "若前 5 根已收盘 10m **指数 K** 为连续五阳或连续五阴，则对当前新开 10m 押反向。"
             "连亏后不补单；须再次满足五连形态才下注；形态 K 须在上一笔已结算事件对应桶之后（规则同三连）。名义为面板基础数量。"
+            "避险（默认开启，可用环境变量关闭）：指数 1h 收盘相对 SMA 若与反转方向逆势则跳过；上一根已收盘指数 10m 真实波幅超过 k×ATR(14) 则跳过（与三连、四连共用同一套 gate）。"
         ),
         requires_vegas_confirmation=False,
         signal_source="five_bar_10m_reverse_martingale_v1",

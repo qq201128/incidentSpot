@@ -12,6 +12,11 @@ from app.services.kline_timing import (
     current_rule_entry_open_time,
     is_within_entry_grace,
 )
+from app.services.n_bar_rm_htf_vol_gate import (
+    evaluate_htf_counter_trend_suppress,
+    evaluate_volatility_spike_suppress,
+    n_bar_rm_htf_vol_gate_enabled,
+)
 from app.services.rule_config import RULE_DURATION
 from app.services.strategy_registry import (
     FIVE_BAR_10M_RM_STRATEGY_KEY,
@@ -177,9 +182,37 @@ def predict_n_bar_10m_reverse_martingale_direction(
         label = f"{pfx}_NO_PATTERN"
         pattern_ok = False
 
+    # HTF 1h + 10m TR/ATR：三连 / 四连 / 五连均走本函数，共用 gate（见 n_bar_rm_htf_vol_gate）。
+    vol_suppress = False
+    htf_suppress = False
+    vol_gate_meta: dict[str, Any] = {}
+    htf_gate_meta: dict[str, Any] = {}
+    suppress_label: str | None = None
+    if pattern_ok and n_bar_rm_htf_vol_gate_enabled():
+        vol_suppress, vol_gate_meta = evaluate_volatility_spike_suppress(sym, int(open_time))
+        htf_suppress, htf_gate_meta = evaluate_htf_counter_trend_suppress(
+            sym, int(open_time), direction
+        )
+        if vol_suppress:
+            suppress_label = f"{pfx}_VOL_SPIKE_SKIP_TR_VS_ATR"
+        elif htf_suppress:
+            suppress_label = f"{pfx}_HTF_1H_SMA_COUNTER_TREND_SKIP"
+
     confidence = 0.5
     probability_up = confidence if direction == "up" else 1.0 - confidence
-    trade_quality_passed = entry_window_passed and pattern_ok
+    trade_quality_passed = (
+        entry_window_passed
+        and pattern_ok
+        and not vol_suppress
+        and not htf_suppress
+    )
+
+    if not entry_window_passed:
+        certainty_label_out = f"{pfx}_WAIT_WINDOW"
+    elif suppress_label:
+        certainty_label_out = suppress_label
+    else:
+        certainty_label_out = label
 
     return {
         "symbol": sym,
@@ -190,7 +223,7 @@ def predict_n_bar_10m_reverse_martingale_direction(
         "direction": direction,
         "probability_up": round(probability_up, PROBABILITY_DECIMALS),
         "confidence": confidence,
-        "certainty_label": (f"{pfx}_WAIT_WINDOW" if not entry_window_passed else label),
+        "certainty_label": certainty_label_out,
         "threshold": None,
         "trade_quality_score": 1.0 if trade_quality_passed else 0.0,
         "trade_quality_passed": trade_quality_passed,
@@ -212,6 +245,19 @@ def predict_n_bar_10m_reverse_martingale_direction(
             f"pattern_ok={pattern_ok}",
             f"entry_window_passed={entry_window_passed}",
             f"direction_mode={label}",
+            f"n_bar_htf_vol_gate_enabled={n_bar_rm_htf_vol_gate_enabled()}",
+            f"vol_spike_suppress={vol_suppress}",
+            f"htf_counter_trend_suppress={htf_suppress}",
+            *(
+                [f"vol_gate={vol_gate_meta.get('reason')}", f"vol_meta={vol_gate_meta}"]
+                if vol_gate_meta
+                else []
+            ),
+            *(
+                [f"htf_gate={htf_gate_meta.get('reason')}", f"htf_meta={htf_gate_meta}"]
+                if htf_gate_meta
+                else []
+            ),
             *(
                 [
                     "post_settle_pattern_suppressed=1",
@@ -234,6 +280,10 @@ def predict_n_bar_10m_reverse_martingale_direction(
             "streakLength": streak_length,
             "cycleAnchorPredicted": None,
             "recoverySameAsAnchor": False,
+            "volSpikeSuppress": vol_suppress,
+            "htfCounterTrendSuppress": htf_suppress,
+            "volGate": vol_gate_meta,
+            "htfGate": htf_gate_meta,
         },
         "timeframe_votes": [],
     }
