@@ -41,7 +41,7 @@ FOUR_BAR_10M_RM_RULE_NAME = "four_bar_10m_reverse_martingale_v1"
 FIVE_BAR_10M_RM_STRATEGY_KEY = "five_bar_10m_reverse_martingale_v1"
 FIVE_BAR_10M_RM_RULE_NAME = "five_bar_10m_reverse_martingale_v1"
 
-# 与 blind RM 相同 10/20/45 倍投链；自动下单用 load_blind_rm_settlement_state(strategy_key, symbol)
+# 三连/四连/五连 10m：自动下单用面板基础数量；仅在指数 n 连形态再现时下注，无 Recovery 补单。
 N_BAR_10M_RM_STRATEGY_KEYS: frozenset[str] = frozenset(
     {
         THREE_BAR_10M_RM_STRATEGY_KEY,
@@ -216,12 +216,12 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=THREE_BAR_10M_RM_STRATEGY_KEY,
-        name="三连10m反向·倍投(10/20/45)",
+        name="三连10m反向·不倍投",
         description=(
-            "仅在「新开一轮、当前无连亏记录」时：若前 3 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续三阳或连续三阴，则押反向。"
-            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注；名义按 10→20→45 USDT 递进。"
-            "倍投方向规则：每一档押注方向与「本轮第一笔已结算亏损单」预测方向**相同**（同向加码，例如首轮押跌则 Recovery 仍押跌），"
-            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求三连 K 形态。"
+            "若前 3 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续三阳或连续三阴，"
+            "则对**当前新开**这根 10m 押与前 3 根趋势相反（涨押跌、跌押涨）。"
+            "连亏后不再自动补单；须再次满足三连形态才下注。上一笔已结算（不论输赢）之后，用于判定的 n 根 K 须全部落在该笔对应 10m 桶之后，避免形态 K 与上一笔重叠。"
+            "自动下单名义为面板基础数量，无倍投。"
         ),
         requires_vegas_confirmation=False,
         signal_source="three_bar_10m_reverse_martingale_v1",
@@ -232,11 +232,10 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=FOUR_BAR_10M_RM_STRATEGY_KEY,
-        name="四连10m反向·倍投(10/20/45)",
+        name="四连10m反向·不倍投",
         description=(
-            "仅在「新开一轮、当前无连亏记录」时：若前 4 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续四阳或连续四阴，则押反向。"
-            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注（方向与本轮第一笔已结算亏损单的预测方向相同），名义按 10→20→45 USDT 递进，"
-            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求四连 K 形态。"
+            "若前 4 根已收盘 10m **指数 K** 为连续四阳或连续四阴，则对当前新开 10m 押反向。"
+            "连亏后不补单；须再次满足四连形态才下注；形态 K 须在上一笔已结算事件对应桶之后（规则同三连）。名义为面板基础数量。"
         ),
         requires_vegas_confirmation=False,
         signal_source="four_bar_10m_reverse_martingale_v1",
@@ -247,11 +246,10 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=FIVE_BAR_10M_RM_STRATEGY_KEY,
-        name="五连10m反向·倍投(10/20/45)",
+        name="五连10m反向·不倍投",
         description=(
-            "仅在「新开一轮、当前无连亏记录」时：若前 5 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续五阳或连续五阴，则押反向。"
-            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注（方向与本轮第一笔已结算亏损单的预测方向相同），名义按 10→20→45 USDT 递进，"
-            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求五连 K 形态。"
+            "若前 5 根已收盘 10m **指数 K** 为连续五阳或连续五阴，则对当前新开 10m 押反向。"
+            "连亏后不补单；须再次满足五连形态才下注；形态 K 须在上一笔已结算事件对应桶之后（规则同三连）。名义为面板基础数量。"
         ),
         requires_vegas_confirmation=False,
         signal_source="five_bar_10m_reverse_martingale_v1",

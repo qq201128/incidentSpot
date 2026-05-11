@@ -5,10 +5,7 @@ from typing import Any
 
 from app.db.session import get_conn
 from app.services.binance_service import fetch_index_price_klines, fetch_premium_index
-from app.services.blind_reverse_martingale_strategy import (
-    BLIND_RM_MAX_CONSECUTIVE_LOSSES,
-    load_blind_rm_settlement_state,
-)
+from app.services.blind_reverse_martingale_strategy import load_blind_rm_settlement_state
 from app.services.kline_timing import (
     RULE_INTERVAL_MS,
     align_to_rule_interval_bucket,
@@ -73,26 +70,13 @@ def _event_start_to_boundary_ms(start_time: str) -> int:
     return (ms // bar) * bar
 
 
-def _last_win_prediction_open_time_ms(strategy_key: str, symbol: str) -> int | None:
-    """最近一次「猜对」对应的预测 open_time（10m 边界）；predictions 未回填时用 events 起始时间对齐到边界。"""
+def last_settled_event_boundary_ms(strategy_key: str, symbol: str) -> int | None:
+    """最近一次已结算事件的 10m 桶起点（不论输赢）。用于要求下一笔的 n 连形态 K 全部落在该桶之后，避免与上一笔共用重叠 K。"""
     conn = get_conn()
-    row = conn.execute(
-        """
-        SELECT open_time FROM predictions
-        WHERE strategy_key = ? AND symbol = ? AND prediction_correct = 1
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (strategy_key, symbol.upper()),
-    ).fetchone()
-    if row is not None and row["open_time"] is not None:
-        conn.close()
-        return int(row["open_time"])
     row = conn.execute(
         """
         SELECT start_time FROM events
         WHERE strategy_key = ? AND symbol = ? AND status = 'SETTLED'
-          AND ai_prediction_correct = 1
         ORDER BY id DESC
         LIMIT 1
         """,
@@ -104,14 +88,14 @@ def _last_win_prediction_open_time_ms(strategy_key: str, symbol: str) -> int | N
     return _event_start_to_boundary_ms(str(row["start_time"]))
 
 
-def _post_win_wait_label(streak_length: int) -> str:
+def _post_settle_wait_label(streak_length: int) -> str:
     if streak_length == 3:
-        return "THREE_BAR_RM_POST_WIN_WAIT_FRESH_TRIPLE"
+        return "THREE_BAR_RM_POST_SETTLE_WAIT_FRESH_TRIPLE"
     if streak_length == 4:
-        return "FOUR_BAR_RM_POST_WIN_WAIT_FRESH_STREAK"
+        return "FOUR_BAR_RM_POST_SETTLE_WAIT_FRESH_STREAK"
     if streak_length == 5:
-        return "FIVE_BAR_RM_POST_WIN_WAIT_FRESH_STREAK"
-    return f"{streak_length}_BAR_RM_POST_WIN_WAIT_FRESH_STREAK"
+        return "FIVE_BAR_RM_POST_SETTLE_WAIT_FRESH_STREAK"
+    return f"{streak_length}_BAR_RM_POST_SETTLE_WAIT_FRESH_STREAK"
 
 
 def _bar_rm_label_prefix(streak_length: int) -> str:
@@ -156,64 +140,42 @@ def predict_n_bar_10m_reverse_martingale_direction(
     )
 
     n_loss = state.consecutive_losses
-    # 本轮首笔已结算亏损单的预测方向；倍投各档与该方向相同（同向加码）。
-    cycle_anchor_predicted = state.cycle_anchor_direction()
     label: str
     direction: str
     pattern_ok = False
-    post_win_block = False
-    last_win_ot: int | None = None
+    post_settle_block = False
+    last_settled_ot: int | None = None
     oldest_bar_open: int | None = None
     fresh_floor: int | None = None
 
-    # 倍投阶段（已有连亏、尚未满 4 笔）：每一根新的 10m 都应继续下单并加码档，不再要求「前 n 根连」形态。
-    if 1 <= n_loss < BLIND_RM_MAX_CONSECUTIVE_LOSSES:
-        anchor = cycle_anchor_predicted
-        if anchor:
-            direction = anchor
-            label = f"{pfx}_SAME_AS_CYCLE"
-        elif state.rows_considered:
-            raw = str((state.rows_considered[-1].get("pred") or "")).lower()
-            if raw in ("up", "down"):
-                direction = raw
-                label = f"{pfx}_SAME_ANCHOR_FALLBACK"
-            else:
-                direction = "up"
-                label = f"{pfx}_SAME_LAST_UNKNOWN"
-        else:
-            direction = "up"
-            label = f"{pfx}_SAME_NO_ROWS"
+    # 仅当「前 n 根已收盘指数 10m」构成 n 连阴/阳时下注；对**当前新开**这根 10m 押与前 n 根趋势相反。
+    # 连亏后不补单：下一笔仍须再次满足形态；且形态所含 K 须全部落在「上一笔已结算事件」对应 10m 桶之后（与猜赢后等待新鲜形态同理）。
+    streak_raw, last_bars = streak_and_last_n_10m_rest(sym, open_time, streak_length)
+    last_settled_ot = last_settled_event_boundary_ms(strategy.key, sym)
+    streak = streak_raw
+    if streak_raw is not None and last_settled_ot is not None and last_bars:
+        oldest_bar_open = min(int(b["openTime"]) for b in last_bars)
+        fresh_floor = last_settled_ot + int(RULE_INTERVAL_MS)
+        if oldest_bar_open < fresh_floor:
+            streak = None
+            post_settle_block = True
+
+    if post_settle_block:
+        direction = "up"
+        label = _post_settle_wait_label(streak_length)
+        pattern_ok = False
+    elif streak == "bull":
+        direction = "down"
+        label = f"{pfx}_STREAK_BULL_REV"
+        pattern_ok = True
+    elif streak == "bear":
+        direction = "up"
+        label = f"{pfx}_STREAK_BEAR_REV"
         pattern_ok = True
     else:
-        streak_raw, last_bars = streak_and_last_n_10m_rest(sym, open_time, streak_length)
-        last_win_ot = _last_win_prediction_open_time_ms(strategy.key, sym)
-        streak = streak_raw
-        post_win_block = False
-        oldest_bar_open = None
-        fresh_floor = None
-        if streak_raw is not None and last_win_ot is not None and last_bars:
-            oldest_bar_open = min(int(b["openTime"]) for b in last_bars)
-            fresh_floor = last_win_ot + int(RULE_INTERVAL_MS)
-            if oldest_bar_open < fresh_floor:
-                streak = None
-                post_win_block = True
-
-        if post_win_block:
-            direction = "up"
-            label = _post_win_wait_label(streak_length)
-            pattern_ok = False
-        elif streak == "bull":
-            direction = "down"
-            label = f"{pfx}_STREAK_BULL_REV"
-            pattern_ok = True
-        elif streak == "bear":
-            direction = "up"
-            label = f"{pfx}_STREAK_BEAR_REV"
-            pattern_ok = True
-        else:
-            direction = "up"
-            label = f"{pfx}_NO_PATTERN"
-            pattern_ok = False
+        direction = "up"
+        label = f"{pfx}_NO_PATTERN"
+        pattern_ok = False
 
     confidence = 0.5
     probability_up = confidence if direction == "up" else 1.0 - confidence
@@ -243,7 +205,8 @@ def predict_n_bar_10m_reverse_martingale_direction(
         "rule_reasons": [
             f"rule={rule_name}",
             f"consecutive_losses={n_loss}",
-            "mg_steps_usdt=10/20/45",
+            "order_qty=flat_panel_base_no_mg",
+            "entry_policy=pattern_only_no_recovery",
             f"index_streak_len={streak_length}",
             "streak_source=binance_index_price_10m",
             f"pattern_ok={pattern_ok}",
@@ -251,20 +214,15 @@ def predict_n_bar_10m_reverse_martingale_direction(
             f"direction_mode={label}",
             *(
                 [
-                    f"cycle_anchor_predicted={cycle_anchor_predicted}",
-                    "recovery_direction=same_as_cycle_anchor",
-                ]
-                if 1 <= n_loss < BLIND_RM_MAX_CONSECUTIVE_LOSSES
-                else []
-            ),
-            *(
-                [
-                    "post_win_pattern_suppressed=1",
-                    f"last_win_prediction_open_time_ms={last_win_ot}",
+                    "post_settle_pattern_suppressed=1",
+                    f"last_settled_event_boundary_ms={last_settled_ot}",
                     f"require_streak_bars_open_on_or_after_ms={fresh_floor}",
                     f"oldest_bar_among_streak_candidates_ms={oldest_bar_open}",
                 ]
-                if post_win_block and last_win_ot is not None and fresh_floor is not None and oldest_bar_open is not None
+                if post_settle_block
+                and last_settled_ot is not None
+                and fresh_floor is not None
+                and oldest_bar_open is not None
                 else []
             ),
         ],
@@ -274,10 +232,8 @@ def predict_n_bar_10m_reverse_martingale_direction(
             "entryWindowPassed": entry_window_passed,
             "patternOk": pattern_ok,
             "streakLength": streak_length,
-            "cycleAnchorPredicted": cycle_anchor_predicted
-            if 1 <= n_loss < BLIND_RM_MAX_CONSECUTIVE_LOSSES
-            else None,
-            "recoverySameAsAnchor": bool(1 <= n_loss < BLIND_RM_MAX_CONSECUTIVE_LOSSES),
+            "cycleAnchorPredicted": None,
+            "recoverySameAsAnchor": False,
         },
         "timeframe_votes": [],
     }

@@ -9,9 +9,9 @@ export const STRATEGY_LABELS = {
   orderbook_trade_flow_1k: "挂单波动+成交流向",
   orderbook_trade_flow_1k_invert_mg: "挂单波动+成交流向·反向倍投",
   blind_reverse_martingale_v1: "随意首单·反向倍投(10/20/45)",
-  three_bar_10m_reverse_martingale_v1: "三连10m反向·倍投(10/20/45)",
-  four_bar_10m_reverse_martingale_v1: "四连10m反向·倍投(10/20/45)",
-  five_bar_10m_reverse_martingale_v1: "五连10m反向·倍投(10/20/45)",
+  three_bar_10m_reverse_martingale_v1: "三连10m反向·不倍投",
+  four_bar_10m_reverse_martingale_v1: "四连10m反向·不倍投",
+  five_bar_10m_reverse_martingale_v1: "五连10m反向·不倍投",
 };
 
 export function strategyLabel(key) {

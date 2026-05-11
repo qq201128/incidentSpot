@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-复核「三连 10m 反向·倍投」在某一 UTC 10m 桶的判定与连亏状态（与自动预测/自动下单逻辑一致）。
+复核「三连 10m 反向（不倍投）」在某一 UTC 10m 桶的判定（仅形态入场、无 Recovery；与自动预测/自动下单逻辑一致）。
 
 在 backend 目录下执行（需已安装依赖、且存在与运行中服务相同的 SQLite 库）:
 
@@ -18,6 +18,7 @@ from app.services.blind_reverse_martingale_strategy import load_blind_rm_settlem
 from app.services.kline_timing import RULE_INTERVAL_MS, current_rule_entry_open_time
 from app.services.strategy_registry import THREE_BAR_10M_RM_STRATEGY_KEY
 from app.services.three_bar_10m_reverse_martingale_strategy import (
+    last_settled_event_boundary_ms,
     predict_three_bar_10m_reverse_martingale_direction,
     streak_and_last_n_10m_rest,
 )
@@ -56,12 +57,9 @@ def main() -> None:
     streak_raw, last_bars = streak_and_last_n_10m_rest(sym, bucket_ms, 3)
 
     print(f"symbol={sym} bucket_open_time_ms={bucket_ms}")
-    print(f"consecutive_losses(n_loss)={state.consecutive_losses}")
-    anchor = state.cycle_anchor_direction()
-    print(f"cycle_anchor_predicted(本轮首笔亏损单的押注方向)={anchor!r}")
-    print("loss_chain rows_considered (index 0=最近一笔亏损 … [-1]=本轮首笔亏损):")
-    for i, row in enumerate(state.rows_considered):
-        print(f"  [{i}] pred={row.get('pred')!r} correct={row.get('correct')!r}")
+    print(f"consecutive_losses(n_loss)={state.consecutive_losses} (仅展示，不影响是否入场)")
+    lb = last_settled_event_boundary_ms(THREE_BAR_10M_RM_STRATEGY_KEY, sym)
+    print(f"last_settled_event_boundary_ms={lb!r} (形态 K 须全部在该 10m 桶之后)")
     print(f"streak_raw={streak_raw!r} pattern_ok implicit from pred rule_reasons")
     print(f"trade_quality_passed={pred.get('trade_quality_passed')}")
     print(f"certainty_label={pred.get('certainty_label')}")

@@ -22,13 +22,12 @@ from app.services.settlement_service import settle_event
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
     MANUAL_STRATEGY_KEY,
-    N_BAR_10M_RM_STRATEGY_KEYS,
     strategy_definition,
 )
 
-# 与 auto_trade 一致：随意倍投 / 三连·倍投 等用面板数量为「基础档」，实际名义按连亏套用 10→20→45（或大于基础的第一档）。
+# 与 auto_trade 一致：仅「随意首单·反向倍投」用面板数量为「基础档」，实际名义按连亏套用 10→20→45（或大于基础的第一档）。
 _QUICK_TRADE_MARTINGALE_QTY_KEYS: frozenset[str] = frozenset(
-    {BLIND_REVERSE_MARTINGALE_STRATEGY_KEY, *N_BAR_10M_RM_STRATEGY_KEYS}
+    {BLIND_REVERSE_MARTINGALE_STRATEGY_KEY}
 )
 
 router = APIRouter(prefix="/api/events", tags=["events"])
