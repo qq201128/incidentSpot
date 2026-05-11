@@ -161,6 +161,10 @@ def predict_n_bar_10m_reverse_martingale_direction(
     label: str
     direction: str
     pattern_ok = False
+    post_win_block = False
+    last_win_ot: int | None = None
+    oldest_bar_open: int | None = None
+    fresh_floor: int | None = None
 
     # 倍投阶段（已有连亏、尚未满 4 笔）：每一根新的 10m 都应继续下单并加码档，不再要求「前 n 根连」形态。
     if 1 <= n_loss < BLIND_RM_MAX_CONSECUTIVE_LOSSES:
@@ -185,8 +189,8 @@ def predict_n_bar_10m_reverse_martingale_direction(
         last_win_ot = _last_win_prediction_open_time_ms(strategy.key, sym)
         streak = streak_raw
         post_win_block = False
-        oldest_bar_open: int | None = None
-        fresh_floor: int | None = None
+        oldest_bar_open = None
+        fresh_floor = None
         if streak_raw is not None and last_win_ot is not None and last_bars:
             oldest_bar_open = min(int(b["openTime"]) for b in last_bars)
             fresh_floor = last_win_ot + int(RULE_INTERVAL_MS)
