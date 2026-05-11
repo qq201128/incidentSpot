@@ -7,6 +7,7 @@ from app.services.strategy_registry import (
     FIVE_BAR_10M_RM_STRATEGY_KEY,
     FOUR_BAR_10M_RM_STRATEGY_KEY,
     THREE_BAR_10M_RM_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
@@ -150,6 +151,51 @@ def test_notional_mg_caps_at_max(monkeypatch) -> None:
         lambda: _FakeMultiConn([{"qty": 15.0, "correct": 0}]),
     )
     assert martingale_order_qty_usdt(_settings(ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY)) == MARTINGALE_MAX_USDT
+
+
+def test_notional_mg_5102045_base_after_win(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.auto_trade_execution.get_conn",
+        lambda: _FakeMultiConn([{"qty": 45.0, "correct": 1}]),
+    )
+    assert martingale_order_qty_usdt(_settings(ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY)) == 5.0
+
+
+def test_notional_mg_5102045_after_one_loss(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.auto_trade_execution.get_conn",
+        lambda: _FakeMultiConn([{"qty": 5.0, "correct": 0}]),
+    )
+    assert martingale_order_qty_usdt(_settings(ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY)) == 10.0
+
+
+def test_notional_mg_5102045_after_three_losses_next_is_45(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.auto_trade_execution.get_conn",
+        lambda: _FakeMultiConn(
+            [
+                {"qty": 20.0, "correct": 0},
+                {"qty": 10.0, "correct": 0},
+                {"qty": 5.0, "correct": 0},
+            ]
+        ),
+    )
+    assert martingale_order_qty_usdt(_settings(ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY)) == 45.0
+
+
+def test_notional_mg_5102045_resets_after_four_losses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.auto_trade_execution.get_conn",
+        lambda: _FakeMultiConn(
+            [
+                {"qty": 45.0, "correct": 0},
+                {"qty": 20.0, "correct": 0},
+                {"qty": 10.0, "correct": 0},
+                {"qty": 5.0, "correct": 0},
+            ]
+        ),
+    )
+    assert martingale_order_qty_usdt(_settings(ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY)) == 5.0
 
 
 def _patch_blind_conn(rows: list[dict]):

@@ -6,10 +6,12 @@ import pytest
 
 from app.services import auto_predict_service as service
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.kline_timing import KLINE_ENTRY_GRACE_MS
+from app.services.kline_timing import N_BAR_10M_RM_ENTRY_GRACE_MS
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
+    ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
+    THREE_BAR_10M_RM_STRATEGY_KEY,
 )
 
 ASYNC_TEST_TIMEOUT_SECONDS = 1.0
@@ -23,10 +25,9 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
     refresh_calls = []
     settlement_calls = []
     strategy_settings = [
-        _settings("vegas_fib_resonance"),
         _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY),
-        _settings("daily_trade_floor_tree"),
-        _settings("high_winrate_rules", symbol="ETHUSDT"),
+        _settings(ORDERBOOK_TRADE_FLOW_STRATEGY_KEY),
+        _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY, symbol="ETHUSDT"),
     ]
 
     def refresh(symbol: str, entry_open_time: int) -> None:
@@ -40,10 +41,7 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
 
     asyncio.run(service._prepare_prediction_inputs(strategy_settings, ENTRY_OPEN_TIME))
 
-    assert sorted(refresh_calls) == [
-        ("BTCUSDT", ENTRY_OPEN_TIME),
-        ("ETHUSDT", ENTRY_OPEN_TIME),
-    ]
+    assert refresh_calls == []
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 
 
@@ -69,13 +67,13 @@ def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
     monkeypatch.setattr(service, "prediction_passed_exists", prediction_passed_exists)
 
     assert service._should_predict_entry(_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY), ENTRY_OPEN_TIME)
-    assert service._should_predict_entry(_settings("vegas_fib_resonance"), ENTRY_OPEN_TIME)
+    assert service._should_predict_entry(_settings(THREE_BAR_10M_RM_STRATEGY_KEY), ENTRY_OPEN_TIME)
     assert calls == [
         (ENTRY_OPEN_TIME, ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS),
-        (ENTRY_OPEN_TIME, KLINE_ENTRY_GRACE_MS),
+        (ENTRY_OPEN_TIME, N_BAR_10M_RM_ENTRY_GRACE_MS),
     ]
     assert [call["strategy_key"] for call in passed_calls] == [ORDERBOOK_NOTIONAL_STRATEGY_KEY]
-    assert [call["strategy_key"] for call in existing_calls] == ["vegas_fib_resonance"]
+    assert [call["strategy_key"] for call in existing_calls] == [THREE_BAR_10M_RM_STRATEGY_KEY]
 
 
 def test_should_predict_entry_retries_orderbook_until_trade_signal(monkeypatch) -> None:
@@ -109,7 +107,7 @@ def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
 
     asyncio.run(run_prediction(ORDERBOOK_NOTIONAL_STRATEGY_KEY))
-    asyncio.run(run_prediction("vegas_fib_resonance"))
+    asyncio.run(run_prediction(THREE_BAR_10M_RM_STRATEGY_KEY))
 
     assert allow_existing_flags == [True, False]
 
@@ -123,9 +121,9 @@ def test_next_predict_wait_polls_during_entry_window(monkeypatch) -> None:
 
 def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> None:
     strategy_settings = [
-        _settings("vegas_fib_resonance"),
-        _settings("high_winrate_rules"),
-        _settings("daily_trade_floor_tree"),
+        _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY),
+        _settings(ORDERBOOK_TRADE_FLOW_STRATEGY_KEY),
+        _settings(THREE_BAR_10M_RM_STRATEGY_KEY),
     ]
     started = []
     completed = []

@@ -15,7 +15,7 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE events ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'manual'",
   "ALTER TABLE events ADD COLUMN ai_quality_score REAL",
   "ALTER TABLE events ADD COLUMN ai_quality_passed INTEGER",
-  "ALTER TABLE predictions ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'vegas_fib_resonance'",
+  "ALTER TABLE predictions ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'orderbook_notional_40m'",
   "ALTER TABLE predictions ADD COLUMN trade_quality_score REAL",
   "ALTER TABLE predictions ADD COLUMN trade_quality_passed INTEGER",
   "ALTER TABLE predictions ADD COLUMN trade_quality_gate TEXT",
@@ -90,17 +90,14 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   _delete_retired_auto_trade_strategies(conn)
   default_exists = conn.execute(
     "SELECT 1 FROM auto_trade_strategies WHERE strategy_key = ?",
-    ("vegas_fib_resonance",),
+    ("orderbook_notional_40m",),
   ).fetchone()
   seed_rows = (
-    ("vegas_fib_resonance",),
-    ("high_winrate_rules",),
-    ("pure_rule_precision",),
     ("orderbook_notional_40m",),
     ("orderbook_notional_40m_mg",),
+    ("orderbook_notional_10m_mg_5102045",),
     ("orderbook_trade_flow_1k",),
     ("orderbook_trade_flow_1k_invert_mg",),
-    ("daily_trade_floor_tree",),
   )
   conn.executemany(
     """
@@ -120,6 +117,17 @@ def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:
     "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
     ("complete_day_10m_production",),
   )
+  for key in (
+      "vegas_fib_resonance",
+      "high_winrate_rules",
+      "pure_rule_precision",
+      "win70_trade_max_rules",
+      "daily_trade_floor_tree",
+  ):
+    conn.execute(
+        "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
+        (key,),
+    )
 
 
 def _rename_orderbook_notional_strategy(conn: sqlite3.Connection) -> None:
@@ -151,7 +159,7 @@ def _copy_legacy_auto_trade_settings(conn: sqlite3.Connection) -> None:
       duration_minutes = (SELECT duration_minutes FROM auto_trade_settings WHERE id = 1),
       qty = (SELECT qty FROM auto_trade_settings WHERE id = 1),
       updated_at = datetime('now')
-    WHERE strategy_key = 'vegas_fib_resonance'
+    WHERE strategy_key = 'orderbook_notional_40m'
     """
   )
 

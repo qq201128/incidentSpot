@@ -4,17 +4,17 @@ from dataclasses import dataclass
 
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
 
-DEFAULT_STRATEGY_KEY = "vegas_fib_resonance"
+DEFAULT_STRATEGY_KEY = "orderbook_notional_40m"
 MANUAL_STRATEGY_KEY = "manual"
-DAILY_TRADE_FLOOR_TREE_STRATEGY_KEY = "daily_trade_floor_tree"
-DAILY_TRADE_FLOOR_RULE_NAME = "daily_trade_floor_tree_v1"
-DAILY_TRADE_FLOOR_MIN_DAILY_TRADES = 10
 ORDERBOOK_NOTIONAL_STRATEGY_KEY = "orderbook_notional_40m"
 ORDERBOOK_NOTIONAL_RULE_NAME = "orderbook_notional_value_delta_8m"
 ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS = KLINE_ENTRY_GRACE_MS
 
 ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY = "orderbook_notional_40m_mg"
 ORDERBOOK_NOTIONAL_MG_RULE_NAME = "orderbook_notional_value_delta_8m_mg"
+
+ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY = "orderbook_notional_10m_mg_5102045"
+ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME = "orderbook_notional_value_delta_8m_mg_5102045"
 
 ORDERBOOK_TRADE_FLOW_STRATEGY_KEY = "orderbook_trade_flow_1k"
 ORDERBOOK_TRADE_FLOW_RULE_NAME = "orderbook_depth_trade_flow_v1"
@@ -48,6 +48,7 @@ CONTINUOUS_ORDERBOOK_STRATEGY_KEYS: frozenset[str] = frozenset(
     {
         ORDERBOOK_NOTIONAL_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
         ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
         ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
         BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
@@ -80,61 +81,19 @@ class StrategyDefinition:
     entry_grace_ms: int = KLINE_ENTRY_GRACE_MS
 
 
-PURE_RULE_PRECISION_RULE_NAMES = (
-    "strong_adx_low_volume_ratio",
-    "five_minute_pullback_early_day",
-    "macd_washout_1h_rebound",
-    "ema_cross_capitulation_low_volume",
-    "macd_washout_late_session",
-    "deep_ma120_afternoon",
-    "fifteen_minute_pullback_morning",
-)
-
-WIN70_TRADE_MAX_RULE_NAMES = (
-    "strong_adx_low_volume_ratio",
-    "five_minute_pullback_early_day",
-    "macd_washout_1h_rebound",
-    "ema_cross_capitulation_low_volume",
-    "asian_session_15m_flush",
-    "macd_washout_late_session",
-    "deep_ma120_afternoon",
-    "fifteen_minute_pullback_morning",
-)
+OPTIMIZED_RULES_BACKTEST_META_KEY = "optimized_rules_10m"
 
 
 STRATEGIES = (
     StrategyDefinition(
-        key=DEFAULT_STRATEGY_KEY,
-        name="Vegas/Fib 共振",
-        description="10m 边界入场，EMA Vegas 通道 + 斐波那契 + 多周期共振确认。",
-        requires_vegas_confirmation=True,
-        signal_source="kline_boundary_vegas_fib_rule_engine",
-    ),
-    StrategyDefinition(
-        key="high_winrate_rules",
-        name="高胜率规则",
-        description="10m 边界入场，仅使用已优化的多周期高胜率规则。",
+        key=OPTIMIZED_RULES_BACKTEST_META_KEY,
+        name="优化规则集（回测）",
+        description="历史 K 线优化规则目录回测；仅用于 /api/rules/backtest。",
         requires_vegas_confirmation=False,
-        signal_source="kline_boundary_high_winrate_rule_engine",
-        requires_high_winrate_gate=True,
-    ),
-    StrategyDefinition(
-        key="pure_rule_precision",
-        name="纯规则高精度",
-        description="10m 边界入场，不使用模型，只启用历史验证通过的高精度规则组合。",
-        requires_vegas_confirmation=False,
-        signal_source="kline_boundary_pure_rule_precision_engine",
-        requires_high_winrate_gate=True,
-        rule_names=PURE_RULE_PRECISION_RULE_NAMES,
-    ),
-    StrategyDefinition(
-        key="win70_trade_max_rules",
-        name="70胜率高频",
-        description="10m 边界入场，筛选历史日胜率守住 70% 且单数更多的规则组合。",
-        requires_vegas_confirmation=False,
-        signal_source="kline_boundary_win70_trade_max_rule_engine",
-        requires_high_winrate_gate=True,
-        rule_names=WIN70_TRADE_MAX_RULE_NAMES,
+        signal_source="optimized_rules_catalog_simulation",
+        rule_names=None,
+        tradable=False,
+        disabled_reason="仅供规则回测 API",
     ),
     StrategyDefinition(
         key=ORDERBOOK_NOTIONAL_STRATEGY_KEY,
@@ -157,6 +116,21 @@ STRATEGIES = (
         requires_vegas_confirmation=False,
         signal_source="kline_refresh_orderbook_notional_delta_mg",
         rule_names=(ORDERBOOK_NOTIONAL_MG_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
+        name="订单簿10M差额·倍投",
+        description=(
+            "与「订单簿8M差额」同一套信号（千档名义差额>8M 跟随大额方向）；"
+            "自动下单名义固定阶梯：首单 5 USDT，连亏后依次为 10 / 20 / 45 USDT，最多连续倍投 3 档；"
+            "连亏满 4 笔（含 45 档仍未中）后下一笔回到 5 USDT。面板数量对该策略名义无影响。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="kline_refresh_orderbook_notional_delta_mg_5102045",
+        rule_names=(ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME,),
         requires_kline_features=False,
         uses_trade_policy_gates=False,
         entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
@@ -250,16 +224,6 @@ STRATEGIES = (
         uses_trade_policy_gates=False,
         entry_grace_ms=N_BAR_10M_RM_ENTRY_GRACE_MS,
     ),
-    StrategyDefinition(
-        key=DAILY_TRADE_FLOOR_TREE_STRATEGY_KEY,
-        name="70胜率日频树规则",
-        description="10m 边界入场，新建树形规则；仅交易历史叶子胜率大于 70% 的信号，每日不少于 10 单。",
-        requires_vegas_confirmation=False,
-        signal_source="kline_boundary_daily_trade_floor_tree_rule_engine",
-        requires_high_winrate_gate=True,
-        rule_names=(DAILY_TRADE_FLOOR_RULE_NAME,),
-        min_daily_trades=DAILY_TRADE_FLOOR_MIN_DAILY_TRADES,
-    ),
 )
 
 
@@ -291,6 +255,7 @@ def strategy_payloads() -> list[dict]:
             "entryGraceMs": strategy.entry_grace_ms,
         }
         for strategy in STRATEGIES
+        if strategy.tradable
     ]
 
 

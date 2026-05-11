@@ -4,14 +4,9 @@ from typing import Any
 
 import pandas as pd
 
-from app.services.daily_trade_floor_tree_rule import evaluate_daily_trade_floor_rule
 from app.services.enhanced_features import build_enhanced_feature_frame
-from app.services.rule_config import (
-    OPTIMIZED_EVENT_RULES,
-    VEGAS_MIN_DIRECTION_SCORE,
-    VEGAS_MIN_RESONANCE_SCORE,
-)
-from app.services.strategy_registry import DAILY_TRADE_FLOOR_TREE_STRATEGY_KEY, strategy_definition
+from app.services.rule_config import OPTIMIZED_EVENT_RULES
+from app.services.strategy_registry import strategy_definition
 
 
 def build_optimized_feature_frame(
@@ -34,12 +29,8 @@ def evaluate_optimized_rules(
     strategy_key: str | None = None,
 ) -> dict[str, Any] | None:
     strategy = strategy_definition(strategy_key)
-    if strategy.key == DAILY_TRADE_FLOOR_TREE_STRATEGY_KEY:
-        return evaluate_daily_trade_floor_rule(feature_row)
     for rule in _strategy_rules(strategy.rule_names):
         if not _rule_matches(feature_row, rule):
-            continue
-        if strategy.requires_vegas_confirmation and not _vegas_confirms(feature_row, rule):
             continue
         return rule
     return None
@@ -68,19 +59,3 @@ def _condition_matches(feature_row: dict[str, Any], condition: tuple[str, str, f
     if operator == "==":
         return value == float(threshold)
     raise ValueError(f"unsupported rule operator: {operator}")
-
-
-def _vegas_confirms(feature_row: dict[str, Any], rule: dict[str, Any]) -> bool:
-    direction = 1.0 if rule["direction"] == "up" else -1.0
-    resonance = _required_feature_float(feature_row, "vegas_resonance_score")
-    vegas_direction = _required_feature_float(feature_row, "vegas_direction_score")
-    return (
-        resonance >= VEGAS_MIN_RESONANCE_SCORE
-        and vegas_direction * direction >= VEGAS_MIN_DIRECTION_SCORE
-    )
-
-
-def _required_feature_float(feature_row: dict[str, Any], feature: str) -> float:
-    if feature not in feature_row:
-        raise KeyError(f"optimized rule feature missing: {feature}")
-    return float(feature_row[feature])

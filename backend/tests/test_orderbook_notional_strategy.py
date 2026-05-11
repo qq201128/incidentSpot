@@ -15,6 +15,8 @@ from app.services.orderbook_notional_strategy import (
 )
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME,
+    ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_RULE_NAME,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
@@ -123,6 +125,30 @@ def test_predict_orderbook_notional_mg_shares_signal_but_distinct_registry() -> 
     assert result["strategy_key"] == ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY
     assert result["trade_quality_gate"] == ORDERBOOK_NOTIONAL_MG_RULE_NAME
     assert result["direction"] == "down"
+
+
+def test_predict_orderbook_notional_mg_5102045_registry() -> None:
+    config = OrderbookNotionalConfig(
+        levels_per_side=TEST_LEVELS_PER_SIDE,
+        min_qty=TEST_MIN_QTY,
+        difference_threshold=TEST_THRESHOLD,
+    )
+    dependencies = OrderbookNotionalDependencies(
+        fetch_depth=_depth,
+        fetch_price=lambda symbol: {"symbol": symbol, "indexPrice": TEST_INDEX_PRICE},
+    )
+
+    result = predict_orderbook_notional_direction(
+        "btcusdt",
+        entry_open_time=ENTRY_OPEN_TIME,
+        now_ms=ENTRY_OPEN_TIME + WITHIN_ORDERBOOK_GRACE_MS,
+        result_strategy_key=ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
+        config=config,
+        dependencies=dependencies,
+    )
+
+    assert result["strategy_key"] == ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY
+    assert result["trade_quality_gate"] == ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME
 
 
 def test_predict_orderbook_notional_requires_entry_window_to_trade() -> None:

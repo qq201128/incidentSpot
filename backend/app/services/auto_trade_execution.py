@@ -20,6 +20,7 @@ from app.services.blind_reverse_martingale_strategy import (
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
     N_BAR_10M_RM_STRATEGY_KEYS,
+    ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
     strategy_definition,
@@ -27,6 +28,9 @@ from app.services.strategy_registry import (
 
 MARTINGALE_MAX_USDT = 20.0
 MARTINGALE_NOTIONAL_MAX_CONSECUTIVE_LOSSES = 3
+
+ORDERBOOK_NOTIONAL_MG_5102045_AMOUNTS_USDT: tuple[float, ...] = (5.0, 10.0, 20.0, 45.0)
+ORDERBOOK_NOTIONAL_MG_5102045_RESET_AFTER_LOSSES = len(ORDERBOOK_NOTIONAL_MG_5102045_AMOUNTS_USDT)
 
 PERCENT_SCALE = 1000
 PERCENT_DECIMALS = 10
@@ -86,6 +90,8 @@ def martingale_order_qty_usdt(settings: AutoTradeSettings) -> float:
     key = settings.strategy_key
     if key == ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY:
         return _orderbook_notional_mg_qty(settings, base)
+    if key == ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY:
+        return _orderbook_notional_mg_5102045_qty(settings)
     if key == BLIND_REVERSE_MARTINGALE_STRATEGY_KEY or key in N_BAR_10M_RM_STRATEGY_KEYS:
         state = load_blind_rm_settlement_state(key, settings.symbol)
         return blind_rm_order_qty_usdt(base, state)
@@ -143,6 +149,37 @@ def _orderbook_notional_mg_qty(settings: AutoTradeSettings, base: float) -> floa
     prev = float(rows[0]["qty"] or 0)
     step = base * 2.0 if prev <= 0 else prev * 2.0
     return min(step, MARTINGALE_MAX_USDT)
+
+
+def _orderbook_notional_mg_5102045_qty(settings: AutoTradeSettings) -> float:
+    """固定阶梯 5→10→20→45；面板 qty 不参与名义（与策略说明一致）。"""
+    ladder = ORDERBOOK_NOTIONAL_MG_5102045_AMOUNTS_USDT
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT o.qty AS qty, e.ai_prediction_correct AS correct
+            FROM events e
+            INNER JOIN orders o ON o.event_id = e.id
+            WHERE e.strategy_key = ? AND e.symbol = ? AND e.status = 'SETTLED'
+              AND e.ai_prediction_correct IS NOT NULL
+            ORDER BY e.end_time DESC, o.id DESC
+            LIMIT 50
+            """,
+            (settings.strategy_key, settings.symbol.upper()),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows or int(rows[0]["correct"] or 0) == 1:
+        return float(ladder[0])
+    streak = 0
+    for row in rows:
+        if int(row["correct"] or 0) == 1:
+            break
+        streak += 1
+    if streak >= ORDERBOOK_NOTIONAL_MG_5102045_RESET_AFTER_LOSSES:
+        return float(ladder[0])
+    return float(ladder[streak])
 
 
 def _event_title(settings: AutoTradeSettings, prediction: dict[str, Any], side: str) -> str:

@@ -11,7 +11,6 @@ import pandas as pd
 from app.db.session import get_conn
 from app.services.enhanced_timeframes import add_online_timeframe_features
 from app.services.kline_features import build_feature_frame as _base_build_features
-from app.services.vegas_resonance_features import add_vegas_resonance_features
 
 # --------------------------------------------------------------------------- #
 # Constants
@@ -151,7 +150,7 @@ def build_enhanced_feature_frame(
 
     # ---- 2. Online multi-timeframe features from 1m ----
     base_df = add_online_timeframe_features(base_df, d)
-    base_df = add_vegas_resonance_features(base_df, d)
+    base_df = _add_stub_vegas_columns(base_df)
 
     base_df = _add_orderbook_features(base_df, ob_df)
     base_df = _add_funding_features(base_df, funding_df)
@@ -163,6 +162,16 @@ def build_enhanced_feature_frame(
         raise ValueError(f"insufficient rows after feature engineering: {len(out)} < {min_history}")
 
     return out, feature_cols
+
+
+def _add_stub_vegas_columns(base_df: pd.DataFrame) -> pd.DataFrame:
+    """Placeholder columns so downstream observation helpers stay compatible."""
+    out = base_df.copy()
+    out["vegas_resonance_score"] = 0.0
+    out["vegas_direction_score"] = 0.0
+    out["vegas_bull_score"] = 0.0
+    out["vegas_bear_score"] = 0.0
+    return out
 
 
 def _prepare_ohlcv_frame(df_1m: pd.DataFrame) -> pd.DataFrame:

@@ -96,8 +96,6 @@ def _rule_conditions(strategy: StrategyDefinition) -> list[dict[str, Any]]:
         {"feature": "orderbook_imbalance", "operator": "directional_alignment"},
         {"feature": "1d_4h_1h_30m_trend", "operator": "supports_10m"},
     ]
-    if strategy.requires_vegas_confirmation:
-        conditions.append({"feature": "vegas_fib_resonance", "operator": "directional_confirmation"})
     if strategy.rule_names is not None:
         conditions.append({"feature": "optimized_rule_subset", "operator": "in", "value": list(strategy.rule_names)})
     if strategy.min_daily_trades is not None:

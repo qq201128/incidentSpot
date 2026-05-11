@@ -24,7 +24,11 @@ from app.services.rule_config import (
     RULE_HORIZON_MINUTES,
     RULE_TARGET_WIN_RATE,
 )
-from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, StrategyDefinition, strategy_definition
+from app.services.strategy_registry import (
+    OPTIMIZED_RULES_BACKTEST_META_KEY,
+    StrategyDefinition,
+    strategy_definition,
+)
 
 RULE_ARTIFACT_DIR = Path(__file__).resolve().parent.parent.parent / "rules"
 MINUTES_PER_DAY = 24 * 60
@@ -46,13 +50,14 @@ def run_rule_backtest(
     duration: str = RULE_DURATION,
     save: bool = True,
     *,
-    strategy_key: str | None = DEFAULT_STRATEGY_KEY,
+    strategy_key: str | None = None,
 ) -> dict[str, Any]:
     if duration != RULE_DURATION:
         raise ValueError(f"rule backtest supports only {RULE_DURATION}, got {duration}")
-    strategy = strategy_definition(strategy_key)
+    resolved_key = strategy_key or OPTIMIZED_RULES_BACKTEST_META_KEY
+    strategy = strategy_definition(resolved_key)
     feature_frame = _labeled_feature_frame(symbol)
-    trades = _simulate_trades(feature_frame, strategy.key)
+    trades = _simulate_trades(feature_frame, resolved_key)
     walk_forward = walk_forward_validation(feature_frame, trades)
     report = _backtest_report(
         BacktestReportInput(
@@ -213,7 +218,7 @@ def _orderbook_snapshot_count(symbol: str) -> int:
 
 def _write_report(duration: str, strategy_key: str, report: dict[str, Any]) -> None:
     RULE_ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = "" if strategy_key == DEFAULT_STRATEGY_KEY else f"_{strategy_key}"
+    suffix = "" if strategy_key == OPTIMIZED_RULES_BACKTEST_META_KEY else f"_{strategy_key}"
     path = RULE_ARTIFACT_DIR / f"rule_backtest_{duration}{suffix}.json"
     with open(path, "w", encoding="utf-8") as file:
         json.dump(report, file, ensure_ascii=False, indent=2)
