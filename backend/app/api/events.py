@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.event_ai_validation import validate_ai_trade_probability
@@ -14,8 +14,22 @@ from app.api.event_quick_trade import (
 from app.api.event_response import event_response
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
+from app.services.blind_reverse_martingale_strategy import (
+    blind_rm_order_qty_usdt,
+    load_blind_rm_settlement_state,
+)
 from app.services.settlement_service import settle_event
-from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
+from app.services.strategy_registry import (
+    BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
+    MANUAL_STRATEGY_KEY,
+    N_BAR_10M_RM_STRATEGY_KEYS,
+    strategy_definition,
+)
+
+# 与 auto_trade 一致：随意倍投 / 三连·倍投 等用面板数量为「基础档」，实际名义按连亏套用 10→20→45（或大于基础的第一档）。
+_QUICK_TRADE_MARTINGALE_QTY_KEYS: frozenset[str] = frozenset(
+    {BLIND_REVERSE_MARTINGALE_STRATEGY_KEY, *N_BAR_10M_RM_STRATEGY_KEYS}
+)
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -88,14 +102,31 @@ def list_events() -> list[dict]:
         conn.close()
 
 @router.delete("")
-def delete_all_events() -> dict:
+def delete_events(strategyKey: str | None = Query(None)) -> dict:
+    """删除事件；不传 strategyKey 时清空全部；传入时仅删除该 strategy_key 对应事件及关联订单、结算。"""
     conn = get_conn()
-    conn.execute("DELETE FROM settlements")
-    conn.execute("DELETE FROM orders")
-    conn.execute("DELETE FROM events")
-    conn.commit()
-    conn.close()
-    return {"ok": True}
+    try:
+        if strategyKey is None or not strategyKey.strip():
+            conn.execute("DELETE FROM settlements")
+            conn.execute("DELETE FROM orders")
+            conn.execute("DELETE FROM events")
+            conn.commit()
+            return {"ok": True}
+        key = strategyKey.strip()
+        conn.execute(
+            "DELETE FROM settlements WHERE event_id IN (SELECT id FROM events WHERE strategy_key = ?)",
+            (key,),
+        )
+        conn.execute(
+            "DELETE FROM orders WHERE event_id IN (SELECT id FROM events WHERE strategy_key = ?)",
+            (key,),
+        )
+        cursor = conn.execute("DELETE FROM events WHERE strategy_key = ?", (key,))
+        deleted = int(cursor.rowcount or 0)
+        conn.commit()
+        return {"ok": True, "deleted": deleted, "strategyKey": key}
+    finally:
+        conn.close()
 
 @router.post("")
 def create_event(payload: EventCreate) -> dict:
@@ -166,6 +197,7 @@ def create_quick_trade(payload: QuickTradeCreate) -> dict:
     )
     symbol = payload.event.symbol.upper()
     entry_price = _entry_price_from_payload(payload.event)
+    payload = _adjust_quick_trade_qty_for_martingale(payload, strategy_key, symbol)
     return create_quick_trade_record(
         QuickTradeContext(
             payload=payload,
@@ -178,6 +210,29 @@ def create_quick_trade(payload: QuickTradeCreate) -> dict:
             entry_price=entry_price,
             live_trading_enabled=payload.liveTradingEnabled,
         )
+    )
+
+
+def _adjust_quick_trade_qty_for_martingale(
+    payload: QuickTradeCreate, strategy_key: str, symbol: str
+) -> QuickTradeCreate:
+    if strategy_key not in _QUICK_TRADE_MARTINGALE_QTY_KEYS:
+        return payload
+    base = float(payload.order.qty)
+    state = load_blind_rm_settlement_state(strategy_key, symbol.upper())
+    qty = blind_rm_order_qty_usdt(base, state)
+    if abs(qty - base) < 1e-9:
+        return payload
+    order = payload.order
+    new_order = (
+        order.model_copy(update={"qty": qty})
+        if hasattr(order, "model_copy")
+        else order.copy(update={"qty": qty})
+    )
+    return (
+        payload.model_copy(update={"order": new_order})
+        if hasattr(payload, "model_copy")
+        else payload.copy(update={"order": new_order})
     )
 
 

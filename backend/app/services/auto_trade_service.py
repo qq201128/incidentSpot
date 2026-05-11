@@ -9,9 +9,12 @@ from app.db.session import get_conn
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.position_guard import has_open_position
+from app.services.kline_timing import current_rule_entry_open_time
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
+from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
+    N_BAR_10M_RM_STRATEGY_KEYS,
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
@@ -101,7 +104,14 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
     if not settings.enabled or _has_open_position(settings.symbol, settings.strategy_key):
         return None
     prediction = _latest_prediction_row(settings)
-    if prediction is None or not _is_fresh_prediction(prediction, settings.strategy_key):
+    if prediction is None:
+        return None
+    if not _prediction_matches_current_kline_bucket(prediction, settings):
+        return None
+    if not _is_fresh_prediction(prediction, settings.strategy_key):
+        return None
+    prediction = _refresh_n_bar_prediction_if_needed(settings, prediction)
+    if prediction is None:
         return None
     if not _is_prediction_tradable(prediction, settings):
         return None
@@ -117,6 +127,63 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
 
 def _create_trade(settings: AutoTradeSettings, prediction: dict[str, Any]) -> dict:
     return create_trade_from_prediction(settings, prediction)
+
+
+def _refresh_n_bar_prediction_if_needed(
+    settings: AutoTradeSettings, prediction: dict[str, Any]
+) -> dict[str, Any] | None:
+    """三连/四连/五连策略：下单前用同一 open_time 即时重算，避免仅用缓存预测导致与当前指数 K 不一致。"""
+    if settings.strategy_key not in N_BAR_10M_RM_STRATEGY_KEYS:
+        return prediction
+    try:
+        fresh = predict_rule_direction(
+            settings.symbol,
+            settings.duration,
+            entry_open_time=int(prediction["open_time"]),
+            strategy_key=settings.strategy_key,
+        )
+    except Exception:
+        logger.exception(
+            "auto trade n-bar refresh failed strategy=%s symbol=%s open_time=%s",
+            settings.strategy_key,
+            settings.symbol,
+            prediction.get("open_time"),
+        )
+        return None
+    db_passed = _as_bool(prediction.get("trade_quality_passed"))
+    fresh_passed = _as_bool(fresh.get("trade_quality_passed"))
+    if db_passed != fresh_passed:
+        logger.info(
+            "auto trade n-bar quality mismatch strategy=%s symbol=%s open_time=%s db_passed=%s fresh_passed=%s label=%s",
+            settings.strategy_key,
+            settings.symbol,
+            prediction.get("open_time"),
+            db_passed,
+            fresh_passed,
+            fresh.get("certainty_label"),
+        )
+    return fresh
+
+
+def _prediction_matches_current_kline_bucket(
+    prediction: dict[str, Any], settings: AutoTradeSettings
+) -> bool:
+    """10m 信号必须用「当前这根 UTC 10m 桶」的 open_time，避免误用其它桶的缓存预测。"""
+    if settings.duration != "10m":
+        return True
+    now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
+    bucket = int(current_rule_entry_open_time(now_ms))
+    pred_ot = int(prediction["open_time"])
+    if pred_ot == bucket:
+        return True
+    logger.debug(
+        "auto trade skip bucket mismatch strategy=%s symbol=%s pred_open=%s current_bucket=%s",
+        settings.strategy_key,
+        settings.symbol,
+        pred_ot,
+        bucket,
+    )
+    return False
 
 
 def _is_prediction_tradable(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:

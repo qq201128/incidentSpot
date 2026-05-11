@@ -137,6 +137,14 @@ export async function deleteAllEvents() {
   return data;
 }
 
+/** @param {string} strategyKey */
+export async function deleteEventsByStrategy(strategyKey) {
+  const { data } = await axios.delete(`${BASE_URL}/api/events`, {
+    params: { strategyKey },
+  });
+  return data;
+}
+
 export async function updateAutoTradeSettings(payload) {
   const { data } = await axios.put(`${BASE_URL}/api/auto-trade/settings`, payload);
   return data;

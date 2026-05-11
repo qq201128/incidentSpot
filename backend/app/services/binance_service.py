@@ -92,6 +92,23 @@ def _aggregate_1m_klines(rows_1m: list[dict], bar_ms: int) -> list[dict]:
     return out
 
 
+def _trim_leading_aggregate_if_first_bucket_incomplete(
+    raw_rows_asc: list[dict], aggregated: list[dict], bar_ms: int
+) -> list[dict]:
+    """
+    If the oldest 1m candle starts after the open of its aggregate bucket (common when
+    ``limit`` pulls history mid-bucket), the first merged bar uses the wrong open —
+    bull/bear streak logic diverges from exchange-grade OHLC. Drop that bar.
+    """
+    if not aggregated or not raw_rows_asc:
+        return aggregated
+    first_ot = int(raw_rows_asc[0]["openTime"])
+    bucket_start = (first_ot // bar_ms) * bar_ms
+    if first_ot > bucket_start:
+        return aggregated[1:]
+    return aggregated
+
+
 def fetch_klines(
     symbol: str,
     interval: str,
@@ -112,6 +129,7 @@ def fetch_klines(
         rows = _retry_get(f"{FAPI_BASE_URL}/fapi/v1/klines", params)
         k1 = _raw_klines_from_response(rows)
         agg = _aggregate_1m_klines(k1, ten)
+        agg = _trim_leading_aggregate_if_first_bucket_incomplete(k1, agg, ten)
         return agg[-limit:] if len(agg) > limit else agg
 
     params = {"symbol": sym, "interval": parse_interval(interval), "limit": limit}
@@ -160,6 +178,7 @@ def fetch_index_price_klines(
         )
         k1 = _raw_klines_from_response(rows)
         agg = _aggregate_1m_klines(k1, ten)
+        agg = _trim_leading_aggregate_if_first_bucket_incomplete(k1, agg, ten)
         return agg[-limit:] if len(agg) > limit else agg
 
     params = {"pair": pair_u, "interval": parse_interval(interval), "limit": limit}

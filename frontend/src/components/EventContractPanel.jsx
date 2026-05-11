@@ -18,6 +18,7 @@ export default function EventContractPanel({
   onPredict,
   latestPrediction,
   onClearAllEvents,
+  onClearStrategyEvents,
 }) {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [amount, setAmount] = useState(5);
@@ -212,7 +213,11 @@ export default function EventContractPanel({
       )}
       {panelTab === "events" && (
         <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-events">
-          <EventList events={events} onSettle={onSettle} />
+          <EventList
+            events={events}
+            onSettle={onSettle}
+            onClearStrategyEvents={onClearStrategyEvents}
+          />
         </div>
       )}
     </section>
@@ -383,7 +388,7 @@ function _aiHistorySuccessByStrategy(events, symbol) {
       pnlU,
       rate: total > 0 ? hits / total : null,
     }))
-    .sort((a, b) => b.total - a.total || a.strategyKey.localeCompare(b.strategyKey));
+    .sort((a, b) => b.pnlU - a.pnlU || a.strategyKey.localeCompare(b.strategyKey));
   return { overall, byStrategy };
 }
 

@@ -7,6 +7,7 @@ import "./components/EventContractPanel.css";
 import {
   createQuickTrade,
   deleteAllEvents,
+  deleteEventsByStrategy,
   fetchAggTrades,
   fetchEvents,
   fetchIndexKlines,
@@ -14,6 +15,7 @@ import {
   openIndexKlineSocket,
   settleEvent,
 } from "./api/client";
+import { strategyLabel } from "./utils/strategyLabels";
 import { useLatestPrediction } from "./hooks/useLatestPrediction";
 import { mergeKlineCandle, normalizeChartCandle } from "./utils/klineCandles";
 
@@ -241,6 +243,15 @@ export default function App() {
     setStatus("已清除全部事件");
   }, [reloadEvents]);
 
+  const handleClearStrategyEvents = useCallback(
+    async (strategyKey) => {
+      await deleteEventsByStrategy(strategyKey);
+      await reloadEvents();
+      setStatus(`已清除「${strategyLabel(strategyKey)}」策略的事件`);
+    },
+    [reloadEvents],
+  );
+
   async function handleQuickTrade(payload) {
     const quickTradeResult = await createQuickTrade(payload);
     const simulated = quickTradeResult.simulated || quickTradeResult.externalStatus === "SIMULATED";
@@ -312,6 +323,7 @@ export default function App() {
             onPredict={getFreshPrediction}
             latestPrediction={latestPrediction}
             onClearAllEvents={handleClearAllEvents}
+            onClearStrategyEvents={handleClearStrategyEvents}
           />
         </div>
       </div>

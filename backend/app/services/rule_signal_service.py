@@ -8,6 +8,11 @@ from app.db.session import get_conn
 from app.services.binance_service import fetch_orderbook, fetch_premium_index
 from app.services.optimized_rule_engine import build_optimized_feature_frame, evaluate_optimized_rules
 from app.services.blind_reverse_martingale_strategy import predict_blind_reverse_martingale_direction
+from app.services.three_bar_10m_reverse_martingale_strategy import (
+    predict_five_bar_10m_reverse_martingale_direction,
+    predict_four_bar_10m_reverse_martingale_direction,
+    predict_three_bar_10m_reverse_martingale_direction,
+)
 from app.services.orderbook_notional_strategy import predict_orderbook_notional_direction
 from app.services.orderbook_trade_flow_strategy import predict_orderbook_trade_flow_direction
 from app.services.rule_observation_service import observation_signal
@@ -30,6 +35,9 @@ from app.services.rule_config import (
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
     DEFAULT_STRATEGY_KEY,
+    FIVE_BAR_10M_RM_STRATEGY_KEY,
+    FOUR_BAR_10M_RM_STRATEGY_KEY,
+    THREE_BAR_10M_RM_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
@@ -80,6 +88,24 @@ def predict_rule_direction(
         )
     if strategy.key == BLIND_REVERSE_MARTINGALE_STRATEGY_KEY:
         return predict_blind_reverse_martingale_direction(
+            symbol,
+            duration,
+            entry_open_time=entry_open_time,
+        )
+    if strategy.key == THREE_BAR_10M_RM_STRATEGY_KEY:
+        return predict_three_bar_10m_reverse_martingale_direction(
+            symbol,
+            duration,
+            entry_open_time=entry_open_time,
+        )
+    if strategy.key == FOUR_BAR_10M_RM_STRATEGY_KEY:
+        return predict_four_bar_10m_reverse_martingale_direction(
+            symbol,
+            duration,
+            entry_open_time=entry_open_time,
+        )
+    if strategy.key == FIVE_BAR_10M_RM_STRATEGY_KEY:
+        return predict_five_bar_10m_reverse_martingale_direction(
             symbol,
             duration,
             entry_open_time=entry_open_time,

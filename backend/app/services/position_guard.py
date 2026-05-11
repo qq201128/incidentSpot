@@ -18,11 +18,11 @@ def has_open_position(conn, symbol: str, strategy_key: str | None = None) -> boo
 
 
 def _has_open_strategy_position(conn, symbol: str, strategy_key: str) -> bool:
+    # 仅用「未结算事件」判断持仓：避免仅有 events 无 orders 时误判无仓而重复开仓。
     row = conn.execute(
         """
         SELECT e.id
         FROM events e
-        JOIN orders o ON o.event_id = e.id
         WHERE e.symbol = ? AND e.strategy_key = ? AND e.status = 'OPEN'
         LIMIT 1
         """,

@@ -27,6 +27,25 @@
   font-size: 13px;
 }
 
+.clear-strategy-events-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 94, 94, 0.45);
+  background: rgba(232, 94, 94, 0.12);
+  color: #f0a8a8;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clear-strategy-events-btn:hover:not(:disabled) {
+  background: rgba(232, 94, 94, 0.22);
+}
+
+.clear-strategy-events-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .event-pagination {
   color: var(--muted);
   font-size: 13px;

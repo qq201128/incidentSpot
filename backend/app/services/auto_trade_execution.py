@@ -19,6 +19,7 @@ from app.services.blind_reverse_martingale_strategy import (
 )
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
+    N_BAR_10M_RM_STRATEGY_KEYS,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
     strategy_definition,
@@ -85,7 +86,7 @@ def martingale_order_qty_usdt(settings: AutoTradeSettings) -> float:
     key = settings.strategy_key
     if key == ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY:
         return _orderbook_notional_mg_qty(settings, base)
-    if key == BLIND_REVERSE_MARTINGALE_STRATEGY_KEY:
+    if key == BLIND_REVERSE_MARTINGALE_STRATEGY_KEY or key in N_BAR_10M_RM_STRATEGY_KEYS:
         state = load_blind_rm_settlement_state(key, settings.symbol)
         return blind_rm_order_qty_usdt(base, state)
     if key != ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY:

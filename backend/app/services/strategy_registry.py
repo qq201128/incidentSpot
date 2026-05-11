@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.services.kline_timing import KLINE_ENTRY_GRACE_MS
+from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
 
 DEFAULT_STRATEGY_KEY = "vegas_fib_resonance"
 MANUAL_STRATEGY_KEY = "manual"
@@ -25,6 +25,24 @@ ORDERBOOK_TRADE_FLOW_INVERT_RULE_NAME = "orderbook_depth_trade_flow_v1_invert_mg
 
 BLIND_REVERSE_MARTINGALE_STRATEGY_KEY = "blind_reverse_martingale_v1"
 BLIND_REVERSE_MARTINGALE_RULE_NAME = "blind_reverse_martingale_v1"
+
+THREE_BAR_10M_RM_STRATEGY_KEY = "three_bar_10m_reverse_martingale_v1"
+THREE_BAR_10M_RM_RULE_NAME = "three_bar_10m_reverse_martingale_v1"
+
+FOUR_BAR_10M_RM_STRATEGY_KEY = "four_bar_10m_reverse_martingale_v1"
+FOUR_BAR_10M_RM_RULE_NAME = "four_bar_10m_reverse_martingale_v1"
+
+FIVE_BAR_10M_RM_STRATEGY_KEY = "five_bar_10m_reverse_martingale_v1"
+FIVE_BAR_10M_RM_RULE_NAME = "five_bar_10m_reverse_martingale_v1"
+
+# 与 blind RM 相同 10/20/45 倍投链；自动下单用 load_blind_rm_settlement_state(strategy_key, symbol)
+N_BAR_10M_RM_STRATEGY_KEYS: frozenset[str] = frozenset(
+    {
+        THREE_BAR_10M_RM_STRATEGY_KEY,
+        FOUR_BAR_10M_RM_STRATEGY_KEY,
+        FIVE_BAR_10M_RM_STRATEGY_KEY,
+    }
+)
 
 CONTINUOUS_ORDERBOOK_STRATEGY_KEYS: frozenset[str] = frozenset(
     {
@@ -185,6 +203,52 @@ STRATEGIES = (
         requires_kline_features=False,
         uses_trade_policy_gates=False,
         entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=THREE_BAR_10M_RM_STRATEGY_KEY,
+        name="三连10m反向·倍投(10/20/45)",
+        description=(
+            "仅在「新开一轮、当前无连亏记录」时：若前 3 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续三阳或连续三阴，则押反向。"
+            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注；名义按 10→20→45 USDT 递进。"
+            "倍投方向规则：每一档押注方向与「本轮第一笔已结算亏损单」预测方向**相同**（同向加码，例如首轮押跌则 Recovery 仍押跌），"
+            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求三连 K 形态。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="three_bar_10m_reverse_martingale_v1",
+        rule_names=(THREE_BAR_10M_RM_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=N_BAR_10M_RM_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=FOUR_BAR_10M_RM_STRATEGY_KEY,
+        name="四连10m反向·倍投(10/20/45)",
+        description=(
+            "仅在「新开一轮、当前无连亏记录」时：若前 4 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续四阳或连续四阴，则押反向。"
+            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注（方向与本轮第一笔已结算亏损单的预测方向相同），名义按 10→20→45 USDT 递进，"
+            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求四连 K 形态。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="four_bar_10m_reverse_martingale_v1",
+        rule_names=(FOUR_BAR_10M_RM_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=N_BAR_10M_RM_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=FIVE_BAR_10M_RM_STRATEGY_KEY,
+        name="五连10m反向·倍投(10/20/45)",
+        description=(
+            "仅在「新开一轮、当前无连亏记录」时：若前 5 根已收盘 10m **指数 K**（indexPriceKlines 与界面指数 10m 一致）为连续五阳或连续五阴，则押反向。"
+            "一旦出现亏损进入倍投链：之后每一根 10m 均继续自动下注（方向与本轮第一笔已结算亏损单的预测方向相同），名义按 10→20→45 USDT 递进，"
+            "直到猜对止盈、或连亏满 4 笔（含 45 档仍未中）后结束本轮并恢复基础数量；倍投阶段不再要求五连 K 形态。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="five_bar_10m_reverse_martingale_v1",
+        rule_names=(FIVE_BAR_10M_RM_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=N_BAR_10M_RM_ENTRY_GRACE_MS,
     ),
     StrategyDefinition(
         key=DAILY_TRADE_FLOOR_TREE_STRATEGY_KEY,

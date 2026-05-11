@@ -5,9 +5,10 @@ import { strategyLabel } from "../utils/strategyLabels";
 const PAGE_SIZE = 6;
 const FILTER_ALL = "";
 
-export default function EventList({ events, onSettle }) {
+export default function EventList({ events, onSettle, onClearStrategyEvents }) {
   const [eventPage, setEventPage] = useState(1);
   const [strategyFilter, setStrategyFilter] = useState(FILTER_ALL);
+  const [clearStrategyLoading, setClearStrategyLoading] = useState(false);
 
   const strategyOptions = useMemo(() => _distinctStrategyKeys(events), [events]);
   const filteredEvents = useMemo(() => {
@@ -27,6 +28,26 @@ export default function EventList({ events, onSettle }) {
     setEventPage(1);
   }, [strategyFilter]);
 
+  async function handleClearStrategy() {
+    if (!onClearStrategyEvents || !strategyFilter || clearStrategyLoading) return;
+    const label = strategyLabel(strategyFilter);
+    if (
+      !window.confirm(`确定删除「${label}」下的全部事件及关联订单、结算记录？`)
+    ) {
+      return;
+    }
+    setClearStrategyLoading(true);
+    try {
+      await onClearStrategyEvents(strategyFilter);
+      setStrategyFilter(FILTER_ALL);
+    } finally {
+      setClearStrategyLoading(false);
+    }
+  }
+
+  const canClearStrategy =
+    Boolean(strategyFilter && onClearStrategyEvents && filteredEvents.length);
+
   return (
     <div className="card">
       <h3>持仓事件</h3>
@@ -44,6 +65,17 @@ export default function EventList({ events, onSettle }) {
             </option>
           ))}
         </select>
+        {strategyFilter && onClearStrategyEvents ? (
+          <button
+            type="button"
+            className="clear-strategy-events-btn"
+            onClick={() => void handleClearStrategy()}
+            disabled={!canClearStrategy || clearStrategyLoading}
+            title={!filteredEvents.length ? "当前筛选下没有可删除的事件" : undefined}
+          >
+            {clearStrategyLoading ? "删除中…" : "清除该策略事件"}
+          </button>
+        ) : null}
       </div>
       <EventPager eventPage={eventPage} totalPages={totalPages} setEventPage={setEventPage} />
       <ul className="event-list">

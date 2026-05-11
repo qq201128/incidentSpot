@@ -4,6 +4,9 @@ from app.services.auto_trade_execution import MARTINGALE_MAX_USDT, martingale_or
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
+    FIVE_BAR_10M_RM_STRATEGY_KEY,
+    FOUR_BAR_10M_RM_STRATEGY_KEY,
+    THREE_BAR_10M_RM_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
@@ -172,6 +175,15 @@ def test_blind_rm_qty_after_one_loss(monkeypatch) -> None:
     assert martingale_order_qty_usdt(_settings(BLIND_REVERSE_MARTINGALE_STRATEGY_KEY, qty=7)) == 10.0
 
 
+def test_blind_rm_qty_after_one_loss_escalates_when_base_matches_first_rung(monkeypatch) -> None:
+    """Base 10 + first ladder 10 looked like no martingale; next tier must be higher."""
+    monkeypatch.setattr(
+        "app.services.blind_reverse_martingale_strategy.get_conn",
+        _patch_blind_conn([{"pred": "up", "correct": 0}]),
+    )
+    assert martingale_order_qty_usdt(_settings(BLIND_REVERSE_MARTINGALE_STRATEGY_KEY, qty=10)) == 20.0
+
+
 def test_blind_rm_qty_after_two_losses(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.blind_reverse_martingale_strategy.get_conn",
@@ -225,3 +237,27 @@ def test_blind_rm_qty_resets_after_win(monkeypatch) -> None:
         ),
     )
     assert martingale_order_qty_usdt(_settings(BLIND_REVERSE_MARTINGALE_STRATEGY_KEY, qty=7)) == 7.0
+
+
+def test_three_bar_rm_qty_shares_blind_martingale(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.blind_reverse_martingale_strategy.get_conn",
+        _patch_blind_conn([{"pred": "up", "correct": 0}]),
+    )
+    assert martingale_order_qty_usdt(_settings(THREE_BAR_10M_RM_STRATEGY_KEY, qty=7)) == 10.0
+
+
+def test_four_bar_rm_qty_shares_blind_martingale(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.blind_reverse_martingale_strategy.get_conn",
+        _patch_blind_conn([{"pred": "up", "correct": 0}]),
+    )
+    assert martingale_order_qty_usdt(_settings(FOUR_BAR_10M_RM_STRATEGY_KEY, qty=7)) == 10.0
+
+
+def test_five_bar_rm_qty_shares_blind_martingale(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.blind_reverse_martingale_strategy.get_conn",
+        _patch_blind_conn([{"pred": "up", "correct": 0}]),
+    )
+    assert martingale_order_qty_usdt(_settings(FIVE_BAR_10M_RM_STRATEGY_KEY, qty=7)) == 10.0

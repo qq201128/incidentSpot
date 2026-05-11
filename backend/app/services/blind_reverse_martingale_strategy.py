@@ -45,16 +45,28 @@ class BlindRmSettlementState:
         return d if d in ("up", "down") else None
 
 
+def _effective_prediction_correct(row: dict[str, Any]) -> int | None:
+    """用于连亏统计：优先读 ai_prediction_correct；为空时用结算结果 YES/NO 与方向推算（与 settlement._prediction_correct 一致）。"""
+    raw = row.get("correct")
+    if raw is not None:
+        return int(raw)
+    pred = str(row.get("pred") or "").lower()
+    outcome = str(row.get("outcome") or "").upper()
+    if pred in ("up", "down") and outcome in ("YES", "NO"):
+        hit = (pred == "up" and outcome == "YES") or (pred == "down" and outcome == "NO")
+        return 1 if hit else 0
+    return None
+
+
 def load_blind_rm_settlement_state(strategy_key: str, symbol: str) -> BlindRmSettlementState:
     conn = get_conn()
     try:
         rows = conn.execute(
             """
-            SELECT e.ai_predicted_direction AS pred, e.ai_prediction_correct AS correct
+            SELECT e.ai_predicted_direction AS pred, e.ai_prediction_correct AS correct, e.result AS outcome
             FROM events e
             WHERE e.strategy_key = ? AND e.symbol = ? AND e.status = 'SETTLED'
-              AND e.ai_prediction_correct IS NOT NULL
-            ORDER BY e.end_time DESC, e.id DESC
+            ORDER BY e.id DESC
             LIMIT 16
             """,
             (strategy_key, symbol.upper()),
@@ -66,7 +78,10 @@ def load_blind_rm_settlement_state(strategy_key: str, symbol: str) -> BlindRmSet
     dict_rows: list[dict[str, Any]] = []
     for row in rows:
         r = dict(row)
-        if int(r.get("correct") or 0) == 1:
+        eff = _effective_prediction_correct(r)
+        if eff is None:
+            continue
+        if eff == 1:
             break
         dict_rows.append(r)
         streak += 1
@@ -75,18 +90,29 @@ def load_blind_rm_settlement_state(strategy_key: str, symbol: str) -> BlindRmSet
 
 
 def blind_rm_order_qty_usdt(settings_qty: float, state: BlindRmSettlementState) -> float:
-    """下一笔下单名义：无连亏或已重置→基础 qty；连亏 1/2/3 次后依次为 10、20、45；连亏满 4 次→基础 qty。
+    """下一笔下单名义：无连亏或已重置→基础 qty；连亏后按固定档 10→20→45；连亏满 4 次→基础 qty。
 
     连亏计数在遇到任意一笔结算为赢时会被打断（中间中了即重新从基础档开始）。
+
+    若设置的基础数量等于 10，原先「连亏 1 次后下一档仍为 10」会与首单金额相同，看起来像没有倍投；
+    因此在**首次 Recovery（连亏数 n==1）**时改为：使用阶梯里第一个**严格大于基础数量**的名义金额；
+    例如 base=10 → 第一笔 Recovery 用 20；base=5 → 仍用 10。
     """
     base = float(settings_qty)
     n = state.consecutive_losses
     if n <= 0 or n >= BLIND_RM_MAX_CONSECUTIVE_LOSSES:
         return base
+    ladder = BLIND_RM_MARTINGALE_AMOUNTS_USDT
     idx = n - 1
-    if 0 <= idx < len(BLIND_RM_MARTINGALE_AMOUNTS_USDT):
-        return BLIND_RM_MARTINGALE_AMOUNTS_USDT[idx]
-    return base
+    if not (0 <= idx < len(ladder)):
+        return base
+    step = ladder[idx]
+    if idx == 0:
+        for amt in ladder:
+            if amt > base + 1e-9:
+                return float(amt)
+        return float(max(step, base))
+    return float(step)
 
 
 def predict_blind_reverse_martingale_direction(
