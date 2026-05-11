@@ -7,13 +7,19 @@ from app.services.kline_timing import KLINE_ENTRY_GRACE_MS
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.orderbook_notional_strategy import (
     ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD,
+    ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M,
+    ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M,
     ORDERBOOK_NOTIONAL_LEVELS_PER_SIDE,
     OrderbookNotionalConfig,
     OrderbookNotionalDependencies,
     evaluate_orderbook_notional,
+    notional_config_for_strategy_key,
     predict_orderbook_notional_direction,
 )
 from app.services.strategy_registry import (
+    ORDERBOOK_NOTIONAL_10M_RULE_NAME,
+    ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME,
     ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
@@ -50,6 +56,40 @@ def test_orderbook_notional_strategy_declares_no_policy_gates() -> None:
 
 def test_orderbook_notional_default_difference_threshold_is_8m() -> None:
     assert ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD == ORDERBOOK_NOTIONAL_THRESHOLD
+
+
+def test_notional_config_for_strategy_key_sets_10m_and_15m_thresholds() -> None:
+    assert (
+        notional_config_for_strategy_key(ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY).difference_threshold
+        == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M
+    )
+    assert (
+        notional_config_for_strategy_key(ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY).difference_threshold
+        == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M
+    )
+    assert (
+        notional_config_for_strategy_key(ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY).difference_threshold
+        == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD
+    )
+
+
+def test_predict_orderbook_notional_10m_registry_without_explicit_config() -> None:
+    dependencies = OrderbookNotionalDependencies(
+        fetch_depth=_depth,
+        fetch_price=lambda symbol: {"symbol": symbol, "indexPrice": TEST_INDEX_PRICE},
+    )
+
+    result = predict_orderbook_notional_direction(
+        "btcusdt",
+        entry_open_time=ENTRY_OPEN_TIME,
+        now_ms=ENTRY_OPEN_TIME + WITHIN_ORDERBOOK_GRACE_MS,
+        result_strategy_key=ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+        dependencies=dependencies,
+    )
+
+    assert result["strategy_key"] == ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY
+    assert result["trade_quality_gate"] == ORDERBOOK_NOTIONAL_10M_RULE_NAME
+    assert result["threshold"] == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M
 
 
 def test_orderbook_notional_default_levels_match_binance_depth_limit() -> None:

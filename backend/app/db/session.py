@@ -94,6 +94,8 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   ).fetchone()
   seed_rows = (
     ("orderbook_notional_40m",),
+    ("orderbook_notional_10m",),
+    ("orderbook_notional_15m",),
     ("orderbook_notional_40m_mg",),
     ("orderbook_notional_10m_mg_5102045",),
     ("orderbook_trade_flow_1k",),

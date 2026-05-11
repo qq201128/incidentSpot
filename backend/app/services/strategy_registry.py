@@ -16,6 +16,12 @@ ORDERBOOK_NOTIONAL_MG_RULE_NAME = "orderbook_notional_value_delta_8m_mg"
 ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY = "orderbook_notional_10m_mg_5102045"
 ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME = "orderbook_notional_value_delta_8m_mg_5102045"
 
+ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY = "orderbook_notional_10m"
+ORDERBOOK_NOTIONAL_10M_RULE_NAME = "orderbook_notional_value_delta_10m"
+
+ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY = "orderbook_notional_15m"
+ORDERBOOK_NOTIONAL_15M_RULE_NAME = "orderbook_notional_value_delta_15m"
+
 ORDERBOOK_TRADE_FLOW_STRATEGY_KEY = "orderbook_trade_flow_1k"
 ORDERBOOK_TRADE_FLOW_RULE_NAME = "orderbook_depth_trade_flow_v1"
 ORDERBOOK_TRADE_FLOW_ENTRY_GRACE_MS = KLINE_ENTRY_GRACE_MS
@@ -47,6 +53,8 @@ N_BAR_10M_RM_STRATEGY_KEYS: frozenset[str] = frozenset(
 CONTINUOUS_ORDERBOOK_STRATEGY_KEYS: frozenset[str] = frozenset(
     {
         ORDERBOOK_NOTIONAL_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
         ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
@@ -131,6 +139,34 @@ STRATEGIES = (
         requires_vegas_confirmation=False,
         signal_source="kline_refresh_orderbook_notional_delta_mg_5102045",
         rule_names=(ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+        name="订单簿10M差额",
+        description=(
+            "与「订单簿8M差额」同一套计算（10m K 线刷新后窗口内千档，统计数量>1 的名义价值）；"
+            "多空名义差额大于 10M USDT 时跟随大额方向；自动下单使用面板基础数量，无倍投。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="kline_refresh_orderbook_notional_delta_10m",
+        rule_names=(ORDERBOOK_NOTIONAL_10M_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
+        name="订单簿15M差额",
+        description=(
+            "与「订单簿8M差额」同一套计算；多空名义差额大于 15M USDT 时跟随大额方向；"
+            "自动下单使用面板基础数量，无倍投。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="kline_refresh_orderbook_notional_delta_15m",
+        rule_names=(ORDERBOOK_NOTIONAL_15M_RULE_NAME,),
         requires_kline_features=False,
         uses_trade_policy_gates=False,
         entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,

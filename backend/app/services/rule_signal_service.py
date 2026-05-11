@@ -16,6 +16,8 @@ from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     FIVE_BAR_10M_RM_STRATEGY_KEY,
     FOUR_BAR_10M_RM_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
@@ -43,7 +45,12 @@ def predict_rule_direction(
             duration,
             entry_open_time=entry_open_time,
         )
-    if strategy.key in (ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY, ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY):
+    if strategy.key in (
+        ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
+    ):
         return predict_orderbook_notional_direction(
             symbol,
             duration,

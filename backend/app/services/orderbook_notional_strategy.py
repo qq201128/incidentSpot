@@ -8,6 +8,8 @@ from app.services.binance_service import fetch_premium_index
 from app.services.kline_timing import is_within_entry_grace
 from app.services.rule_config import RULE_DURATION
 from app.services.strategy_registry import (
+    ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_RULE_NAME,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
@@ -18,6 +20,8 @@ from app.services.strategy_registry import (
 ORDERBOOK_NOTIONAL_LEVELS_PER_SIDE = 1_000
 ORDERBOOK_NOTIONAL_MIN_QTY = 1.0
 ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD = 8_000_000.0
+ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M = 10_000_000.0
+ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M = 15_000_000.0
 NOTIONAL_SCORE_LIMIT = 1.0
 PRICE_DECIMALS = 8
 PROBABILITY_DECIMALS = 4
@@ -56,6 +60,15 @@ DEFAULT_CONFIG = OrderbookNotionalConfig()
 DEFAULT_DEPENDENCIES = OrderbookNotionalDependencies()
 
 
+def notional_config_for_strategy_key(strategy_key: str) -> OrderbookNotionalConfig:
+    """差额阈值：8M 默认；10M / 15M 策略单独提高门槛。倍投策略仍与 8M 规则共用同一阈值。"""
+    if strategy_key == ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY:
+        return OrderbookNotionalConfig(difference_threshold=ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M)
+    if strategy_key == ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY:
+        return OrderbookNotionalConfig(difference_threshold=ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M)
+    return DEFAULT_CONFIG
+
+
 def predict_orderbook_notional_direction(
     symbol: str,
     duration: str = RULE_DURATION,
@@ -63,19 +76,19 @@ def predict_orderbook_notional_direction(
     entry_open_time: int | None = None,
     now_ms: int | None = None,
     result_strategy_key: str | None = None,
-    config: OrderbookNotionalConfig = DEFAULT_CONFIG,
+    config: OrderbookNotionalConfig | None = None,
     dependencies: OrderbookNotionalDependencies = DEFAULT_DEPENDENCIES,
 ) -> dict[str, Any]:
     if duration != RULE_DURATION:
         raise ValueError(f"orderbook notional strategy supports only {RULE_DURATION}, got {duration}")
-    cfg = _validated_config(config)
+    out_key = result_strategy_key or ORDERBOOK_NOTIONAL_STRATEGY_KEY
+    cfg = _validated_config(config if config is not None else notional_config_for_strategy_key(out_key))
     sym = symbol.upper()
     depth = dependencies.fetch_depth(sym, cfg.levels_per_side)
     evaluation = evaluate_orderbook_notional(depth["bids"], depth["asks"], config=cfg)
     entry_price = _entry_price(dependencies.fetch_price(sym))
     open_time = _open_time(entry_open_time, depth)
     entry_window_passed = is_within_entry_grace(open_time, now_ms, grace_ms=cfg.entry_grace_ms)
-    out_key = result_strategy_key or ORDERBOOK_NOTIONAL_STRATEGY_KEY
     strategy = strategy_definition(out_key)
     return _prediction_payload(
         sym,
