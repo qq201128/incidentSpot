@@ -5,7 +5,7 @@ from typing import Any
 from app.services.blind_reverse_martingale_strategy import predict_blind_reverse_martingale_direction
 from app.services.orderbook_notional_strategy import predict_orderbook_notional_direction
 from app.services.orderbook_trade_flow_strategy import predict_orderbook_trade_flow_direction
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.three_bar_10m_reverse_martingale_strategy import (
     predict_five_bar_10m_reverse_martingale_direction,
     predict_four_bar_10m_reverse_martingale_direction,
@@ -35,8 +35,8 @@ def predict_rule_direction(
     entry_open_time: int | None = None,
     strategy_key: str | None = DEFAULT_STRATEGY_KEY,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
-        raise ValueError(f"rule engine supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}")
     symbol = symbol.upper()
     strategy = strategy_definition(strategy_key)
     if strategy.key == ORDERBOOK_NOTIONAL_STRATEGY_KEY:

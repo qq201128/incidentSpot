@@ -77,7 +77,7 @@ def _disable_invalid_auto_trade(
     exc: ValueError,
     strategy_key: str,
 ) -> None:
-    if "supports only 10m" not in str(exc):
+    if "duration must be one of" not in str(exc):
         return
     update_auto_trade_settings(
         AutoTradeSettings(

@@ -1,22 +1,40 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
 
-export default function AutoStrategyControls({
-  symbol,
-  duration,
-  durationMinutes,
-  amount,
-  liveTradingEnabled,
-}) {
+export default function AutoStrategyControls({ symbol, amount, liveTradingEnabled }) {
   const [strategies, setStrategies] = useState([]);
+  const strategiesRef = useRef([]);
   const [loading, setLoading] = useState(true);
   const [updatingKey, setUpdatingKey] = useState("");
   const [error, setError] = useState("");
 
+  const groups = useMemo(() => _groupStrategies(strategies), [strategies]);
+
   const enabledKeys = useMemo(
-    () => strategies.filter((item) => item.enabled).map((item) => item.strategyKey).join("|"),
+    () =>
+      strategies
+        .filter((item) => item.enabled)
+        .map((item) => `${item.strategyKey}\t${item.duration}`)
+        .sort()
+        .join("|"),
     [strategies],
   );
+
+  function buildSlotUpdate(slot, enabled) {
+    return updateAutoTradeStrategy(slot.strategyKey, {
+      strategyKey: slot.strategyKey,
+      enabled,
+      liveTradingEnabled,
+      symbol,
+      duration: slot.duration,
+      durationMinutes: slot.durationMinutes,
+      qty: Number(amount),
+    });
+  }
+
+  useEffect(() => {
+    strategiesRef.current = strategies;
+  }, [strategies]);
 
   useEffect(() => {
     let stopped = false;
@@ -35,11 +53,13 @@ export default function AutoStrategyControls({
     };
   }, []);
 
+  /** 交易对 / 数量 / 模拟开关变更时同步到已开启的周期槽位 */
   useEffect(() => {
     if (!enabledKeys) return;
+    const enabled = strategiesRef.current.filter((item) => item.enabled);
+    if (!enabled.length) return;
     let stopped = false;
-    const enabled = strategies.filter((item) => item.enabled);
-    Promise.all(enabled.map((item) => _updateStrategy(item, true)))
+    Promise.all(enabled.map((item) => buildSlotUpdate(item, true)))
       .then((rows) => {
         if (!stopped) _mergeStrategyRows(setStrategies, rows);
       })
@@ -49,14 +69,16 @@ export default function AutoStrategyControls({
     return () => {
       stopped = true;
     };
-  }, [amount, duration, durationMinutes, enabledKeys, liveTradingEnabled, symbol]);
+  }, [amount, enabledKeys, liveTradingEnabled, symbol]);
 
-  const toggleStrategy = useCallback(
-    async (strategy) => {
-      setUpdatingKey(strategy.strategyKey);
+  const toggleSlot = useCallback(
+    async (slot) => {
+      if (slot.tradable === false) return;
+      const key = `${slot.strategyKey}:${slot.duration}`;
+      setUpdatingKey(key);
       setError("");
       try {
-        const updated = await _updateStrategy(strategy, !strategy.enabled);
+        const updated = await buildSlotUpdate(slot, !slot.enabled);
         _mergeStrategyRows(setStrategies, [updated]);
       } catch (err) {
         setError(_errorMessage(err, "更新策略配置失败"));
@@ -64,20 +86,8 @@ export default function AutoStrategyControls({
         setUpdatingKey("");
       }
     },
-    [amount, duration, durationMinutes, liveTradingEnabled, symbol],
+    [amount, liveTradingEnabled, symbol],
   );
-
-  function _updateStrategy(strategy, enabled) {
-    return updateAutoTradeStrategy(strategy.strategyKey, {
-      strategyKey: strategy.strategyKey,
-      enabled,
-      liveTradingEnabled,
-      symbol,
-      duration,
-      durationMinutes,
-      qty: Number(amount),
-    });
-  }
 
   if (loading) {
     return <div className="strategy-empty">正在读取策略配置...</div>;
@@ -85,34 +95,72 @@ export default function AutoStrategyControls({
 
   return (
     <div className="strategy-control-list">
-      {strategies.map((strategy) => (
-        <div key={strategy.strategyKey} className="strategy-control-row">
-          <div>
-            <strong>{strategy.name || strategy.strategyKey}</strong>
-            <span>{strategy.description}</span>
-            <StrategyBacktestSummary summary={strategy.backtestSummary} />
-            {strategy.tradable === false && <span className="strategy-disabled">{strategy.disabledReason}</span>}
+      {groups.map((group) => (
+        <div key={group.strategyKey} className="strategy-control-row">
+          <div className="strategy-control-main">
+            <strong>{group.name || group.strategyKey}</strong>
+            <span>{group.description}</span>
+            <StrategyBacktestSummary summary={group.backtestSummary} />
+            {group.tradable === false && (
+              <span className="strategy-disabled">{group.disabledReason}</span>
+            )}
+            <div className="strategy-duration-row">
+              <span className="strategy-duration-label">预测与下单周期（可多选）</span>
+              <div className="strategy-duration-chips">
+                {group.slots.map((slot) => (
+                  <button
+                    key={slot.duration}
+                    type="button"
+                    className={`chip ${slot.enabled ? "active" : ""}`}
+                    disabled={
+                      updatingKey === `${slot.strategyKey}:${slot.duration}` || group.tradable === false
+                    }
+                    onClick={() => void toggleSlot(slot)}
+                    title={slot.enabled ? "点击关闭该周期" : "点击开启该周期"}
+                  >
+                    {_durationChipLabel(slot.durationMinutes)}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <button
-            type="button"
-            className={strategy.enabled ? "strategy-toggle on" : "strategy-toggle off"}
-            disabled={updatingKey === strategy.strategyKey || strategy.tradable === false}
-            onClick={() => void toggleStrategy(strategy)}
-          >
-            {_toggleLabel(strategy, updatingKey)}
-          </button>
         </div>
       ))}
-      {!strategies.length && <div className="strategy-empty">暂无可用策略</div>}
+      {!groups.length && <div className="strategy-empty">暂无可用策略</div>}
       {!!error && <div className="predict-error">{error}</div>}
     </div>
   );
 }
 
+function _groupStrategies(flat) {
+  const map = new Map();
+  for (const row of flat) {
+    const k = row.strategyKey;
+    if (!map.has(k)) {
+      map.set(k, {
+        strategyKey: k,
+        name: row.name,
+        description: row.description,
+        tradable: row.tradable,
+        disabledReason: row.disabledReason,
+        backtestSummary: row.backtestSummary,
+        slots: [],
+      });
+    }
+    map.get(k).slots.push(row);
+  }
+  return [...map.values()].map((g) => ({
+    ...g,
+    slots: g.slots.sort((a, b) => Number(a.durationMinutes) - Number(b.durationMinutes)),
+  }));
+}
+
 function _mergeStrategyRows(setStrategies, rows) {
   setStrategies((prev) =>
     prev.map((item) => {
-      const updated = rows.find((row) => row.strategyKey === item.strategyKey);
+      const updated = rows.find(
+        (row) => row.strategyKey === item.strategyKey && row.duration === item.duration,
+      );
       return updated ? { ...item, ...updated } : item;
     }),
   );
@@ -129,12 +177,12 @@ function StrategyBacktestSummary({ summary }) {
   );
 }
 
-function _toggleLabel(strategy, updatingKey) {
-  if (strategy.tradable === false) return "待接入";
-  if (updatingKey === strategy.strategyKey) return "同步中";
-  return strategy.enabled ? "开启" : "关闭";
-}
-
 function _errorMessage(err, fallback) {
   return err?.response?.data?.detail || err?.message || fallback;
+}
+
+function _durationChipLabel(minutes) {
+  const n = Number(minutes);
+  if (n === 1440) return "1天";
+  return `${n}分钟`;
 }

@@ -5,6 +5,16 @@ from typing import Any
 
 RULE_DURATION = "10m"
 RULE_HORIZON_MINUTES = 10
+
+# 预测 / 自动下单 / 事件合约共用周期（与 train_10m.DURATION_TO_HORIZON、Binance 事件周期一致）
+DURATION_TO_MINUTES: dict[str, int] = {"10m": 10, "30m": 30, "60m": 60, "1d": 1440}
+SUPPORTED_RULE_DURATIONS = frozenset(DURATION_TO_MINUTES.keys())
+
+
+def horizon_minutes_for_duration(duration: str) -> int:
+    if duration not in DURATION_TO_MINUTES:
+        raise ValueError(f"unsupported duration: {duration}")
+    return DURATION_TO_MINUTES[duration]
 RULE_GATE_NAME = "kline_boundary_vegas_fib_orderbook_10m"
 RULE_TARGET_WIN_RATE = 0.70
 RULE_MIN_CONFIDENCE = 0.70

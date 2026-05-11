@@ -7,6 +7,7 @@ from typing import Any
 from app.services.rule_config import (
     RULE_DURATION,
     RULE_GATE_NAME,
+    SUPPORTED_RULE_DURATIONS,
     RULE_MIN_CONFIDENCE,
     RULE_MIN_QUALITY_SCORE,
     RULE_TARGET_WIN_RATE,
@@ -113,5 +114,5 @@ def _load_rule_backtest(duration: str, strategy_key: str) -> dict[str, Any] | No
 
 
 def _assert_supported_duration(duration: str) -> None:
-    if duration != RULE_DURATION:
-        raise ValueError(f"rule policy supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(f"rule policy supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}")

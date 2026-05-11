@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data.db"
+
+# 与 auto_trade_service.SUPPORTED_AUTO_DURATIONS、rule_config.DURATION_TO_MINUTES 对齐
+_AUTO_TRADE_SLOT_DURATIONS: tuple[str, ...] = ("10m", "30m", "60m", "1d")
+_DURATION_MINUTES = {"10m": 10, "30m": 30, "60m": 60, "1d": 1440}
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 SCHEMA_MIGRATIONS = (
   "ALTER TABLE events ADD COLUMN rule_type TEXT NOT NULL DEFAULT 'ABOVE'",
@@ -59,6 +64,7 @@ def init_db() -> None:
   with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
     conn.executescript(f.read())
   _apply_schema_migrations(conn)
+  _migrate_auto_trade_strategies_composite_pk(conn)
   _ensure_auto_trade_settings(conn)
   _ensure_auto_trade_strategies(conn)
   _ensure_ai_event_columns(conn)
@@ -85,31 +91,67 @@ def _ensure_auto_trade_settings(conn: sqlite3.Connection) -> None:
   )
 
 
+def _migrate_auto_trade_strategies_composite_pk(conn: sqlite3.Connection) -> None:
+  """旧库仅有 PRIMARY KEY(strategy_key) 时重建为 (strategy_key, duration)。"""
+  row = conn.execute(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='auto_trade_strategies'"
+  ).fetchone()
+  sql = (row["sql"] or "") if row else ""
+  normalized = sql.replace(" ", "").upper()
+  if "PRIMARYKEY(strategy_key,duration)" in normalized or (
+      "PRIMARYKEY(strategy_key," in normalized and "duration)" in normalized
+  ):
+    return
+  if not sql:
+    return
+  conn.executescript(
+    """
+    CREATE TABLE IF NOT EXISTS auto_trade_strategies__migration (
+      strategy_key TEXT NOT NULL,
+      duration TEXT NOT NULL DEFAULT '10m',
+      enabled INTEGER NOT NULL DEFAULT 0,
+      live_trading_enabled INTEGER NOT NULL DEFAULT 0,
+      symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
+      duration_minutes INTEGER NOT NULL DEFAULT 10,
+      qty REAL NOT NULL DEFAULT 5,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (strategy_key, duration)
+    );
+    INSERT OR IGNORE INTO auto_trade_strategies__migration(
+      strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+    )
+    SELECT strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+    FROM auto_trade_strategies;
+    DROP TABLE auto_trade_strategies;
+    ALTER TABLE auto_trade_strategies__migration RENAME TO auto_trade_strategies;
+    """
+  )
+
+
 def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   _rename_orderbook_notional_strategy(conn)
   _delete_retired_auto_trade_strategies(conn)
   default_exists = conn.execute(
-    "SELECT 1 FROM auto_trade_strategies WHERE strategy_key = ?",
+    "SELECT 1 FROM auto_trade_strategies WHERE strategy_key = ? LIMIT 1",
     ("orderbook_notional_40m",),
   ).fetchone()
-  seed_rows = (
-    ("orderbook_notional_40m",),
-    ("orderbook_notional_10m",),
-    ("orderbook_notional_15m",),
-    ("orderbook_notional_40m_mg",),
-    ("orderbook_notional_10m_mg_5102045",),
-    ("orderbook_trade_flow_1k",),
-    ("orderbook_trade_flow_1k_invert_mg",),
-  )
-  conn.executemany(
-    """
-    INSERT OR IGNORE INTO auto_trade_strategies(
-      strategy_key, enabled, live_trading_enabled, symbol, duration, duration_minutes, qty, updated_at
-    )
-    VALUES(?, 0, 0, 'BTCUSDT', '10m', 10, 5, datetime('now'))
-    """,
-    seed_rows,
-  )
+
+  from app.services.strategy_registry import strategy_payloads
+
+  ts = datetime.now(timezone.utc).isoformat()
+  for payload in strategy_payloads():
+    key = str(payload["key"])
+    for dur in _AUTO_TRADE_SLOT_DURATIONS:
+      dm = _DURATION_MINUTES[dur]
+      conn.execute(
+        """
+        INSERT OR IGNORE INTO auto_trade_strategies(
+          strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+        )
+        VALUES(?, ?, 0, 0, 'BTCUSDT', ?, 5, ?)
+        """,
+        (key, dur, dm, ts),
+      )
   if default_exists is None:
     _copy_legacy_auto_trade_settings(conn)
 
@@ -157,11 +199,11 @@ def _copy_legacy_auto_trade_settings(conn: sqlite3.Connection) -> None:
       enabled = (SELECT enabled FROM auto_trade_settings WHERE id = 1),
       live_trading_enabled = (SELECT live_trading_enabled FROM auto_trade_settings WHERE id = 1),
       symbol = (SELECT symbol FROM auto_trade_settings WHERE id = 1),
-      duration = (SELECT duration FROM auto_trade_settings WHERE id = 1),
       duration_minutes = (SELECT duration_minutes FROM auto_trade_settings WHERE id = 1),
       qty = (SELECT qty FROM auto_trade_settings WHERE id = 1),
       updated_at = datetime('now')
     WHERE strategy_key = 'orderbook_notional_40m'
+      AND duration = (SELECT duration FROM auto_trade_settings WHERE id = 1)
     """
   )
 

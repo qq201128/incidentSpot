@@ -38,10 +38,18 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
 
     monkeypatch.setattr(service, "_refresh_prediction_input", refresh)
     monkeypatch.setattr(service, "settle_due_predictions", settle)
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
 
-    asyncio.run(service._prepare_prediction_inputs(strategy_settings, ENTRY_OPEN_TIME))
+    asyncio.run(service._prepare_prediction_inputs(strategy_settings))
 
-    assert refresh_calls == []
+    assert refresh_calls == [
+        ("BTCUSDT", ENTRY_OPEN_TIME),
+        ("ETHUSDT", ENTRY_OPEN_TIME),
+    ]
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 
 
@@ -49,6 +57,12 @@ def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
     calls = []
     existing_calls = []
     passed_calls = []
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
 
     def is_within_entry_grace(open_time: int, *, grace_ms: int) -> bool:
         calls.append((open_time, grace_ms))
@@ -66,8 +80,8 @@ def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
     monkeypatch.setattr(service, "prediction_exists", prediction_exists)
     monkeypatch.setattr(service, "prediction_passed_exists", prediction_passed_exists)
 
-    assert service._should_predict_entry(_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY), ENTRY_OPEN_TIME)
-    assert service._should_predict_entry(_settings(THREE_BAR_10M_RM_STRATEGY_KEY), ENTRY_OPEN_TIME)
+    assert service._should_predict_entry(_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY))
+    assert service._should_predict_entry(_settings(THREE_BAR_10M_RM_STRATEGY_KEY))
     assert calls == [
         (ENTRY_OPEN_TIME, ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS),
         (ENTRY_OPEN_TIME, N_BAR_10M_RM_ENTRY_GRACE_MS),
@@ -77,20 +91,30 @@ def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
 
 
 def test_should_predict_entry_retries_orderbook_until_trade_signal(monkeypatch) -> None:
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
     monkeypatch.setattr(service, "is_within_entry_grace", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(service, "prediction_passed_exists", lambda **_kwargs: True)
     monkeypatch.setattr(service, "prediction_exists", _raise_prediction_exists_call)
 
-    assert not service._should_predict_entry(_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY), ENTRY_OPEN_TIME)
+    assert not service._should_predict_entry(_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY))
 
 
 def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
     allow_existing_flags = []
 
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+
     async def run_prediction(strategy_key: str) -> None:
         await service._run_prediction(
             _settings(strategy_key),
-            ENTRY_OPEN_TIME,
             write_lock=asyncio.Lock(),
         )
 
@@ -113,10 +137,14 @@ def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
 
 
 def test_next_predict_wait_polls_during_entry_window(monkeypatch) -> None:
-    monkeypatch.setattr(service, "current_rule_entry_open_time", lambda: ENTRY_OPEN_TIME)
-    monkeypatch.setattr(service, "is_within_entry_grace", lambda _open_time: True)
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "is_within_entry_grace", lambda *_a, **_k: True)
 
-    assert service._next_predict_wait(1) == 1.0
+    assert service._next_predict_wait([_settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY)], 1) == 1.0
 
 
 def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> None:
@@ -134,7 +162,6 @@ def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> Non
 
         async def run_prediction(
             setting: AutoTradeSettings,
-            entry_open_time: int,
             *,
             write_lock: asyncio.Lock,
         ) -> None:
@@ -146,7 +173,7 @@ def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> Non
 
         monkeypatch.setattr(service, "_run_prediction", run_prediction)
         await asyncio.wait_for(
-            service._run_prediction_batch(strategy_settings, ENTRY_OPEN_TIME),
+            service._run_prediction_batch(strategy_settings),
             timeout=ASYNC_TEST_TIMEOUT_SECONDS,
         )
 
@@ -163,7 +190,6 @@ def test_run_prediction_batch_reports_failures_after_batch_finishes(monkeypatch)
     async def run_batch() -> None:
         async def run_prediction(
             setting: AutoTradeSettings,
-            entry_open_time: int,
             *,
             write_lock: asyncio.Lock,
         ) -> None:
@@ -175,7 +201,7 @@ def test_run_prediction_batch_reports_failures_after_batch_finishes(monkeypatch)
         monkeypatch.setattr(service, "_run_prediction", run_prediction)
         with pytest.raises(RuntimeError, match="bad_one"):
             await asyncio.wait_for(
-                service._run_prediction_batch(strategy_settings, ENTRY_OPEN_TIME),
+                service._run_prediction_batch(strategy_settings),
                 timeout=ASYNC_TEST_TIMEOUT_SECONDS,
             )
 

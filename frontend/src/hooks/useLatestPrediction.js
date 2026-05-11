@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchLatestPrediction, openPredictionSocket } from "../api/client";
 
 const FRESH_PREDICTION_MS = 30000;
-const PREDICTION_DURATION = "10m";
 
-export function useLatestPrediction(symbol, onStatus) {
+/** @param {string} predictionDuration API 周期：10m | 30m | 60m | 1d（与图表 / 事件合约一致） */
+export function useLatestPrediction(symbol, onStatus, predictionDuration = "10m") {
   const [latestPrediction, setLatestPrediction] = useState(null);
 
   useEffect(() => {
@@ -15,7 +15,7 @@ export function useLatestPrediction(symbol, onStatus) {
 
     const connect = () => {
       if (stopped) return;
-      ws = openPredictionSocket(symbol, PREDICTION_DURATION, setLatestPrediction);
+      ws = openPredictionSocket(symbol, predictionDuration, setLatestPrediction);
       ws.onopen = () => {
         retryCount = 0;
         onStatus("预测实时连接已建立");
@@ -36,7 +36,7 @@ export function useLatestPrediction(symbol, onStatus) {
       if (retryTimer) clearTimeout(retryTimer);
       if (ws) ws.close();
     };
-  }, [onStatus, symbol]);
+  }, [onStatus, symbol, predictionDuration]);
 
   const getFreshPrediction = useCallback(async (targetSymbol, duration) => {
     if (_isFreshPrediction(latestPrediction, targetSymbol, duration)) return latestPrediction;

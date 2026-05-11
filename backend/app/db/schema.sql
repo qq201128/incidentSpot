@@ -167,12 +167,13 @@ CREATE TABLE IF NOT EXISTS auto_trade_settings (
 );
 
 CREATE TABLE IF NOT EXISTS auto_trade_strategies (
-  strategy_key TEXT PRIMARY KEY,
+  strategy_key TEXT NOT NULL,
+  duration TEXT NOT NULL DEFAULT '10m',
   enabled INTEGER NOT NULL DEFAULT 0,
   live_trading_enabled INTEGER NOT NULL DEFAULT 0,
   symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
-  duration TEXT NOT NULL DEFAULT '10m',
   duration_minutes INTEGER NOT NULL DEFAULT 10,
   qty REAL NOT NULL DEFAULT 5,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (strategy_key, duration)
 );

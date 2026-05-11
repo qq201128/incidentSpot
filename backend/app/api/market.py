@@ -4,9 +4,9 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.db.session import get_conn
 from app.services.prediction_cache_service import get_latest_prediction
-from app.services.kline_timing import current_rule_entry_open_time
+from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_policy_payload
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 from app.services.binance_service import (
@@ -186,8 +186,11 @@ def predict(
     limit: int = Query(2000, ge=300, le=5000),
     strategyKey: str | None = Query(None),
 ) -> dict:
-    if duration != RULE_DURATION:
-        raise HTTPException(status_code=400, detail=f"rule engine supports only {RULE_DURATION}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}",
+        )
 
     sym = symbol.upper()
     _refresh_latest_1m_klines(sym, limit)
@@ -199,8 +202,11 @@ def latest_prediction(
     duration: str = Query("10m"),
     strategyKey: str | None = Query(None),
 ) -> dict:
-    if duration != RULE_DURATION:
-        raise HTTPException(status_code=400, detail=f"rule engine supports only {RULE_DURATION}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}",
+        )
     try:
         return get_latest_prediction(symbol, duration, strategy_key=strategyKey or DEFAULT_STRATEGY_KEY)
     except ValueError as exc:
@@ -221,7 +227,7 @@ def _predict_rule(symbol: str, duration: str, strategy_key: str | None) -> dict:
         result = predict_rule_direction(
             symbol,
             duration,
-            entry_open_time=current_rule_entry_open_time(),
+            entry_open_time=current_rule_entry_open_time_for_duration(duration),
             strategy_key=strategy_key,
         )
         return _rule_prediction_response(result)

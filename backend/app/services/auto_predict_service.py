@@ -10,9 +10,10 @@ from app.services.binance_service import fetch_klines
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.kline_timing import (
     MS_PER_MINUTE,
-    current_rule_entry_open_time,
+    current_rule_entry_open_time_for_duration,
     is_within_entry_grace,
-    seconds_until_next_rule_entry,
+    seconds_until_next_rule_entry_for_duration,
+    utc_now_ms,
 )
 from app.services.prediction_cache_service import (
     prediction_exists,
@@ -25,7 +26,6 @@ from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     is_continuous_orderbook_strategy,
     strategy_entry_grace_ms,
-    strategy_requires_kline_features,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -38,35 +38,38 @@ DEFAULT_DURATION = "10m"
 
 
 async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAULT_PREDICT_SECONDS) -> None:
-    logger.info("predict loop: running during each %s kline entry window", DEFAULT_DURATION)
+    logger.info("predict loop: running during each enabled strategy's kline entry window")
     while not stop_event.is_set():
-        wait_seconds = seconds_until_next_rule_entry()
         try:
             targets = await asyncio.to_thread(_prediction_targets)
-            entry_open_time = current_rule_entry_open_time()
-            await _predict_due_entries(targets, entry_open_time)
-            wait_seconds = _next_predict_wait(poll_seconds)
+            await _predict_due_entries(targets)
+            wait_seconds = _next_predict_wait(targets, poll_seconds)
         except Exception:
             logger.exception("auto prediction failed")
             wait_seconds = float(poll_seconds)
         await _sleep_for(stop_event, wait_seconds)
 
 
-async def _predict_due_entries(targets: list[AutoTradeSettings], entry_open_time: int) -> None:
-    due_targets = await asyncio.to_thread(_due_prediction_targets, targets, entry_open_time)
+async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
+    due_targets = await asyncio.to_thread(_due_prediction_targets, targets)
     if not due_targets:
         return
-    await _prepare_prediction_inputs(due_targets, entry_open_time)
-    await _run_prediction_batch(due_targets, entry_open_time)
+    await _prepare_prediction_inputs(due_targets)
+    await _run_prediction_batch(due_targets)
 
 
-async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings], entry_open_time: int) -> None:
-    kline_symbols = _unique_kline_symbols(settings_list)
-    if kline_symbols:
+async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
+    # 每次预测前拉取最新 1m K 写入库，保证任意周期（10m/30m/60m/1d）结算与规则输入与行情对齐。
+    by_symbol: dict[str, list[int]] = {}
+    for settings in settings_list:
+        sym = settings.symbol.upper()
+        by_symbol.setdefault(sym, []).append(current_rule_entry_open_time_for_duration(settings.duration))
+    if by_symbol:
         await asyncio.gather(
             *(
-                asyncio.to_thread(_refresh_prediction_input, symbol, entry_open_time)
-                for symbol in kline_symbols
+                asyncio.to_thread(_refresh_prediction_input, symbol, max(buckets))
+                for symbol, buckets in by_symbol.items()
+                if buckets
             )
         )
     await asyncio.gather(
@@ -77,13 +80,10 @@ async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings], ent
     )
 
 
-async def _run_prediction_batch(settings_list: list[AutoTradeSettings], entry_open_time: int) -> None:
+async def _run_prediction_batch(settings_list: list[AutoTradeSettings]) -> None:
     write_lock = asyncio.Lock()
     results = await asyncio.gather(
-        *(
-            _run_prediction(settings, entry_open_time, write_lock=write_lock)
-            for settings in settings_list
-        ),
+        *(_run_prediction(settings, write_lock=write_lock) for settings in settings_list),
         return_exceptions=True,
     )
     _raise_prediction_failures(settings_list, results)
@@ -91,10 +91,10 @@ async def _run_prediction_batch(settings_list: list[AutoTradeSettings], entry_op
 
 async def _run_prediction(
     settings: AutoTradeSettings,
-    entry_open_time: int,
     *,
     write_lock: asyncio.Lock,
 ) -> None:
+    entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
     result = await asyncio.to_thread(
         predict_rule_direction,
         settings.symbol,
@@ -160,16 +160,14 @@ def _prediction_targets() -> list[AutoTradeSettings]:
     return [get_auto_trade_settings(DEFAULT_STRATEGY_KEY)]
 
 
-def _due_prediction_targets(
-    targets: list[AutoTradeSettings],
-    entry_open_time: int,
-) -> list[AutoTradeSettings]:
-    return [settings for settings in targets if _should_predict_entry(settings, entry_open_time)]
+def _due_prediction_targets(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    return [settings for settings in targets if _should_predict_entry(settings)]
 
 
-def _should_predict_entry(settings: AutoTradeSettings, entry_open_time: int) -> bool:
+def _should_predict_entry(settings: AutoTradeSettings) -> bool:
+    bucket = current_rule_entry_open_time_for_duration(settings.duration)
     if not is_within_entry_grace(
-        entry_open_time,
+        bucket,
         grace_ms=strategy_entry_grace_ms(settings.strategy_key),
     ):
         return False
@@ -178,25 +176,15 @@ def _should_predict_entry(settings: AutoTradeSettings, entry_open_time: int) -> 
             strategy_key=settings.strategy_key,
             symbol=settings.symbol,
             duration=settings.duration,
-            open_time=entry_open_time,
+            open_time=bucket,
         )
     return (
         not prediction_exists(
             strategy_key=settings.strategy_key,
             symbol=settings.symbol,
             duration=settings.duration,
-            open_time=entry_open_time,
+            open_time=bucket,
         )
-    )
-
-
-def _unique_kline_symbols(settings_list: list[AutoTradeSettings]) -> list[str]:
-    return sorted(
-        {
-            settings.symbol.upper()
-            for settings in settings_list
-            if strategy_requires_kline_features(settings.strategy_key)
-        }
     )
 
 
@@ -266,11 +254,19 @@ def _upsert_1m_klines(symbol: str, rows: list[dict]) -> None:
     conn.close()
 
 
-def _next_predict_wait(poll_seconds: int) -> float:
-    entry_open_time = current_rule_entry_open_time()
-    if is_within_entry_grace(entry_open_time):
+def _next_predict_wait(targets: list[AutoTradeSettings], poll_seconds: int) -> float:
+    if not targets:
         return float(poll_seconds)
-    return seconds_until_next_rule_entry()
+    now_ms = utc_now_ms()
+    min_wait = float("inf")
+    for settings in targets:
+        bucket = current_rule_entry_open_time_for_duration(settings.duration, now_ms)
+        grace_ms = strategy_entry_grace_ms(settings.strategy_key)
+        if is_within_entry_grace(bucket, now_ms, grace_ms=grace_ms):
+            min_wait = min(min_wait, float(poll_seconds))
+        else:
+            min_wait = min(min_wait, seconds_until_next_rule_entry_for_duration(settings.duration, now_ms))
+    return float(min_wait) if min_wait != float("inf") else float(poll_seconds)
 
 
 async def _sleep_for(stop_event: asyncio.Event, wait_seconds: float) -> None:

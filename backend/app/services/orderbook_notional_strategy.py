@@ -6,7 +6,7 @@ from typing import Any, Callable, Sequence
 from app.services.binance_orderbook_depth import fetch_orderbook_depth_levels
 from app.services.binance_service import fetch_premium_index
 from app.services.kline_timing import is_within_entry_grace
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
@@ -79,8 +79,10 @@ def predict_orderbook_notional_direction(
     config: OrderbookNotionalConfig | None = None,
     dependencies: OrderbookNotionalDependencies = DEFAULT_DEPENDENCIES,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
-        raise ValueError(f"orderbook notional strategy supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(
+            f"orderbook notional strategy supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}"
+        )
     out_key = result_strategy_key or ORDERBOOK_NOTIONAL_STRATEGY_KEY
     cfg = _validated_config(config if config is not None else notional_config_for_strategy_key(out_key))
     sym = symbol.upper()

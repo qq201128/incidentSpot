@@ -8,7 +8,7 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
 from app.services.kline_timing import is_within_entry_grace
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_RULE_NAME,
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
@@ -122,8 +122,10 @@ def predict_blind_reverse_martingale_direction(
     entry_open_time: int | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
-        raise ValueError(f"blind reverse martingale supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(
+            f"blind reverse martingale supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}"
+        )
     sym = symbol.upper()
     strategy = strategy_definition(BLIND_REVERSE_MARTINGALE_STRATEGY_KEY)
     state = load_blind_rm_settlement_state(strategy.key, sym)

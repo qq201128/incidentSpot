@@ -11,6 +11,7 @@ const PANEL_TABS = /** @type {const} */ (["strategies", "trade", "events"]);
 
 export default function EventContractPanel({
   symbol,
+  chartInterval = "10m",
   currentPrice,
   events,
   onQuickTrade,
@@ -20,7 +21,9 @@ export default function EventContractPanel({
   onClearAllEvents,
   onClearStrategyEvents,
 }) {
-  const [durationMinutes, setDurationMinutes] = useState(10);
+  const [durationMinutes, setDurationMinutes] = useState(() =>
+    intervalToTradeMinutes(chartInterval),
+  );
   const [amount, setAmount] = useState(5);
   const [prediction, setPrediction] = useState(null);
   const [predictLoading, setPredictLoading] = useState(false);
@@ -51,6 +54,10 @@ export default function EventContractPanel({
   useEffect(() => {
     localStorage.setItem(STORAGE_PANEL_TAB, panelTab);
   }, [panelTab]);
+
+  useEffect(() => {
+    setDurationMinutes(intervalToTradeMinutes(chartInterval));
+  }, [chartInterval]);
 
   useEffect(() => {
     setPrediction(null);
@@ -252,15 +259,9 @@ function AutomationCard({
       <p className="toggle-hint trade-mode-hint">
         {liveTradingEnabled ? "当前会调用 Binance 事件合约下单接口。" : "当前只创建本地事件与订单记录。"}
       </p>
-      <AutoStrategyControls
-        symbol={symbol}
-        duration="10m"
-        durationMinutes={10}
-        amount={amount}
-        liveTradingEnabled={liveTradingEnabled}
-      />
+      <AutoStrategyControls symbol={symbol} amount={amount} liveTradingEnabled={liveTradingEnabled} />
       <p className="toggle-hint trade-mode-hint">
-        自动策略固定在每根 10m 新K线开始时评估；多个策略可同时开启，持仓按策略隔离。
+        每条策略下可同时点亮多个结算周期；同一策略在不同周期上的持仓相互独立；多策略亦可并行。
       </p>
       <div className="clear-all-row">
         <button
@@ -414,6 +415,20 @@ function predictDurationKey(minutes) {
   if (minutes === 60) return "60m";
   if (minutes === 1440) return "1d";
   return "10m";
+}
+
+/** 与指数 K 线周期选项一致 */
+function intervalToTradeMinutes(interval) {
+  switch (interval) {
+    case "30m":
+      return 30;
+    case "60m":
+      return 60;
+    case "1d":
+      return 1440;
+    default:
+      return 10;
+  }
 }
 
 function resolveEventIntervalByDuration(minutes) {

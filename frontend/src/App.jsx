@@ -32,7 +32,7 @@ export default function App() {
   const [aggTrades, setAggTrades] = useState(null);
   const lastKlineAtRef = useRef(0);
   const chartWsGraceStartRef = useRef(0);
-  const { latestPrediction, getFreshPrediction } = useLatestPrediction(symbol, setStatus);
+  const { latestPrediction, getFreshPrediction } = useLatestPrediction(symbol, setStatus, interval);
 
   const chartData = useMemo(() => history.map(normalizeChartCandle), [history]);
   const currentPrice = useMemo(() => {
@@ -316,6 +316,7 @@ export default function App() {
         <div className="trade-column">
           <EventContractPanel
             symbol={symbol}
+            chartInterval={interval}
             currentPrice={currentPrice}
             events={events}
             onQuickTrade={handleQuickTrade}

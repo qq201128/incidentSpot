@@ -31,7 +31,8 @@ def _strategy_status(settings: AutoTradeSettings) -> dict[str, Any]:
 
 def _default_status(strategies: list[dict[str, Any]]) -> dict[str, Any]:
     for status in strategies:
-        if status["settings"]["strategyKey"] == DEFAULT_STRATEGY_KEY:
+        settings = status["settings"]
+        if settings["strategyKey"] == DEFAULT_STRATEGY_KEY and settings.get("duration") == "10m":
             return status
     return strategies[0] if strategies else {}
 
@@ -110,7 +111,12 @@ def _latest_prediction(settings: AutoTradeSettings) -> dict[str, Any] | None:
 def _has_open_position(settings: AutoTradeSettings) -> bool:
     conn = get_conn()
     try:
-        return has_open_position(conn, settings.symbol, settings.strategy_key)
+        return has_open_position(
+            conn,
+            settings.symbol,
+            settings.strategy_key,
+            event_interval=settings.duration,
+        )
     finally:
         conn.close()
 

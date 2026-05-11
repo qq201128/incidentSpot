@@ -7,7 +7,7 @@ from typing import Any, Callable, Sequence
 from app.services.binance_orderbook_depth import fetch_orderbook_depth_levels
 from app.services.binance_service import fetch_agg_trades_display, fetch_premium_index
 from app.services.kline_timing import is_within_entry_grace
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     ORDERBOOK_TRADE_FLOW_ENTRY_GRACE_MS,
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
@@ -81,8 +81,10 @@ def predict_orderbook_trade_flow_direction(
     config: OrderbookTradeFlowConfig = DEFAULT_CONFIG,
     dependencies: OrderbookTradeFlowDependencies = DEFAULT_DEPENDENCIES,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
-        raise ValueError(f"orderbook trade flow strategy supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(
+            f"orderbook trade flow strategy supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}"
+        )
     cfg = _validated_config(config)
     sym = symbol.upper()
     depth_a = dependencies.fetch_depth(sym, cfg.levels_per_side)

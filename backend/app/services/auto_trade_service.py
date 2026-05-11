@@ -9,9 +9,10 @@ from app.db.session import get_conn
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.position_guard import has_open_position
-from app.services.kline_timing import current_rule_entry_open_time
+from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.rule_signal_service import predict_rule_direction
+from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     N_BAR_10M_RM_STRATEGY_KEYS,
@@ -27,7 +28,8 @@ DEFAULT_SYMBOL = "BTCUSDT"
 DEFAULT_DURATION = "10m"
 DEFAULT_DURATION_MINUTES = 10
 DEFAULT_QTY = 5.0
-SUPPORTED_AUTO_DURATIONS = {"10m"}
+SUPPORTED_AUTO_DURATIONS = frozenset({"10m", "30m", "60m", "1d"})
+AUTO_TRADE_SLOT_DURATIONS: tuple[str, ...] = ("10m", "30m", "60m", "1d")
 MS_PER_SECOND = 1000
 
 
@@ -45,21 +47,27 @@ async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> N
 
 
 def list_auto_trade_settings() -> list[AutoTradeSettings]:
+    """每个可交易策略 × 每个结算周期一条配置（可同时开启多周期）。"""
     conn = get_conn()
     try:
         rows = conn.execute("SELECT * FROM auto_trade_strategies").fetchall()
-        by_key = {_row_strategy_key(row): _settings_from_row(row) for row in rows}
-        return [
-            by_key.get(payload["key"]) or _default_settings(payload["key"])
-            for payload in strategy_payloads()
-        ]
+        by_pair = {(str(r["strategy_key"]), str(r["duration"])): r for r in rows}
+        result: list[AutoTradeSettings] = []
+        for payload in strategy_payloads():
+            key = str(payload["key"])
+            for dur in AUTO_TRADE_SLOT_DURATIONS:
+                row = by_pair.get((key, dur))
+                if row is not None:
+                    result.append(_settings_from_row(row))
+                else:
+                    result.append(_default_settings(key, dur))
+        return result
     finally:
         conn.close()
 
 
 def list_auto_trade_strategy_payloads() -> list[dict[str, Any]]:
-    settings_by_key = {settings.strategy_key: settings for settings in list_auto_trade_settings()}
-    return [_strategy_payload(settings_by_key[payload["key"]]) for payload in strategy_payloads()]
+    return [_strategy_payload(settings) for settings in list_auto_trade_settings()]
 
 
 def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY) -> AutoTradeSettings:
@@ -67,12 +75,12 @@ def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY) -> AutoTra
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM auto_trade_strategies WHERE strategy_key = ?",
-            (strategy.key,),
+            "SELECT * FROM auto_trade_strategies WHERE strategy_key = ? AND duration = ?",
+            (strategy.key, DEFAULT_DURATION),
         ).fetchone()
         if row is not None:
             return _settings_from_row(row)
-        settings = _default_settings(strategy.key)
+        settings = _default_settings(strategy.key, DEFAULT_DURATION)
         _write_settings(conn, settings)
         conn.commit()
         return settings
@@ -101,7 +109,7 @@ def run_auto_trade_once() -> list[dict[str, Any]]:
 
 
 def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
-    if not settings.enabled or _has_open_position(settings.symbol, settings.strategy_key):
+    if not settings.enabled or _has_open_position(settings.symbol, settings.strategy_key, settings.duration):
         return None
     prediction = _latest_prediction_row(settings)
     if prediction is None:
@@ -168,18 +176,17 @@ def _refresh_n_bar_prediction_if_needed(
 def _prediction_matches_current_kline_bucket(
     prediction: dict[str, Any], settings: AutoTradeSettings
 ) -> bool:
-    """10m 信号必须用「当前这根 UTC 10m 桶」的 open_time，避免误用其它桶的缓存预测。"""
-    if settings.duration != "10m":
-        return True
+    """预测记录的 open_time 须与当前 UTC 周期桶起点一致，避免误用其它桶的缓存预测。"""
     now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
-    bucket = int(current_rule_entry_open_time(now_ms))
+    bucket = int(current_rule_entry_open_time_for_duration(settings.duration, now_ms))
     pred_ot = int(prediction["open_time"])
     if pred_ot == bucket:
         return True
     logger.debug(
-        "auto trade skip bucket mismatch strategy=%s symbol=%s pred_open=%s current_bucket=%s",
+        "auto trade skip bucket mismatch strategy=%s symbol=%s duration=%s pred_open=%s current_bucket=%s",
         settings.strategy_key,
         settings.symbol,
+        settings.duration,
         pred_ot,
         bucket,
     )
@@ -231,10 +238,10 @@ def fresh_prediction_ms_for_strategy(strategy_key: str) -> int:
     return strategy_entry_grace_ms(strategy_key)
 
 
-def _has_open_position(symbol: str, strategy_key: str) -> bool:
+def _has_open_position(symbol: str, strategy_key: str, duration: str) -> bool:
     conn = get_conn()
     try:
-        return has_open_position(conn, symbol, strategy_key)
+        return has_open_position(conn, symbol, strategy_key, event_interval=duration)
     finally:
         conn.close()
 
@@ -247,17 +254,21 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
     if len(symbol) < 6:
         raise ValueError("symbol must contain at least 6 characters")
     if settings.enabled and settings.duration not in SUPPORTED_AUTO_DURATIONS:
-        raise ValueError("backend auto trade currently supports only 10m rule signals")
+        raise ValueError(
+            "backend auto trade duration must be one of "
+            + ", ".join(sorted(SUPPORTED_AUTO_DURATIONS))
+        )
     if settings.duration_minutes <= 0:
         raise ValueError("durationMinutes must be > 0")
     if settings.qty <= 0:
         raise ValueError("qty must be > 0")
+    canonical_minutes = DURATION_TO_MINUTES[settings.duration]
     return AutoTradeSettings(
         strategy_key=strategy.key,
         enabled=settings.enabled,
         symbol=symbol,
         duration=settings.duration,
-        duration_minutes=settings.duration_minutes,
+        duration_minutes=canonical_minutes,
         qty=settings.qty,
         live_trading_enabled=settings.live_trading_enabled,
     )
@@ -267,16 +278,16 @@ def _write_settings(conn: Any, settings: AutoTradeSettings) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO auto_trade_strategies(
-          strategy_key, enabled, live_trading_enabled, symbol, duration, duration_minutes, qty, updated_at
+          strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
         )
         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             settings.strategy_key,
+            settings.duration,
             int(settings.enabled),
             int(settings.live_trading_enabled),
             settings.symbol,
-            settings.duration,
             settings.duration_minutes,
             settings.qty,
             datetime.now(timezone.utc).isoformat(),
@@ -296,13 +307,14 @@ def _settings_from_row(row: Any) -> AutoTradeSettings:
     )
 
 
-def _default_settings(strategy_key: str = DEFAULT_STRATEGY_KEY) -> AutoTradeSettings:
+def _default_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, duration: str = DEFAULT_DURATION) -> AutoTradeSettings:
+    minutes = int(DURATION_TO_MINUTES.get(duration, DEFAULT_DURATION_MINUTES))
     return AutoTradeSettings(
         strategy_key=strategy_key,
         enabled=False,
         symbol=DEFAULT_SYMBOL,
-        duration=DEFAULT_DURATION,
-        duration_minutes=DEFAULT_DURATION_MINUTES,
+        duration=duration,
+        duration_minutes=minutes,
         qty=DEFAULT_QTY,
         live_trading_enabled=False,
     )

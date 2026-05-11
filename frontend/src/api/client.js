@@ -163,23 +163,6 @@ export async function updateAutoTradeStrategy(strategyKey, payload) {
   return data;
 }
 
-export async function fetchModelDashboard() {
-  const { data } = await axios.get(`${BASE_URL}/api/models`);
-  return data;
-}
-
-export async function triggerModelTraining() {
-  const { data } = await axios.post(`${BASE_URL}/api/models/train`);
-  return data;
-}
-
-export async function activateModelVersion(modelKey, versionId) {
-  const { data } = await axios.post(
-    `${BASE_URL}/api/models/${encodeURIComponent(modelKey)}/versions/${encodeURIComponent(versionId)}/activate`,
-  );
-  return data;
-}
-
 export async function predictDirection(symbol, duration = "10m", limit = 2000, strategyKey) {
   const params = { symbol, duration, limit };
   if (strategyKey) params.strategyKey = strategyKey;

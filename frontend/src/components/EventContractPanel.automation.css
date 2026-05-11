@@ -71,8 +71,8 @@
 
 .strategy-control-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 74px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   background: rgba(9, 14, 19, 0.86);
   border: 1px solid rgba(69, 88, 96, 0.72);
@@ -80,10 +80,37 @@
   padding: 10px;
 }
 
-.strategy-control-row div {
+.strategy-control-main {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.strategy-duration-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.strategy-duration-label {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.strategy-duration-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.strategy-duration-chips .chip {
+  padding: 4px 8px;
+  font-size: 11px;
+  min-height: auto;
 }
 
 .strategy-control-row span,
@@ -120,6 +147,6 @@
 
 @media (max-width: 720px) {
   .strategy-control-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
