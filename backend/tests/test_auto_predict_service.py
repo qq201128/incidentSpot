@@ -7,6 +7,7 @@ import pytest
 from app.services import auto_predict_service as service
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.kline_timing import N_BAR_10M_RM_ENTRY_GRACE_MS
+from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
@@ -16,7 +17,6 @@ from app.services.strategy_registry import (
 
 ASYNC_TEST_TIMEOUT_SECONDS = 1.0
 DEFAULT_DURATION = "10m"
-DEFAULT_DURATION_MINUTES = 10
 DEFAULT_QTY = 5.0
 ENTRY_OPEN_TIME = 1778121600000
 
@@ -136,6 +136,18 @@ def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
     assert allow_existing_flags == [True, False]
 
 
+def test_prediction_targets_skip_n_bar_strategies_on_non_10m_duration(monkeypatch) -> None:
+    mixed = [
+        _settings(THREE_BAR_10M_RM_STRATEGY_KEY, duration="30m"),
+        _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY, duration="10m"),
+    ]
+    monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
+    targets = service._prediction_targets()
+    assert len(targets) == 1
+    assert targets[0].strategy_key == ORDERBOOK_NOTIONAL_STRATEGY_KEY
+    assert targets[0].duration == "10m"
+
+
 def test_next_predict_wait_polls_during_entry_window(monkeypatch) -> None:
     monkeypatch.setattr(
         service,
@@ -210,13 +222,18 @@ def test_run_prediction_batch_reports_failures_after_batch_finishes(monkeypatch)
     assert set(completed) == {settings.strategy_key for settings in strategy_settings}
 
 
-def _settings(strategy_key: str, *, symbol: str = "BTCUSDT") -> AutoTradeSettings:
+def _settings(
+    strategy_key: str,
+    *,
+    symbol: str = "BTCUSDT",
+    duration: str = DEFAULT_DURATION,
+) -> AutoTradeSettings:
     return AutoTradeSettings(
         strategy_key=strategy_key,
         enabled=True,
         symbol=symbol,
-        duration=DEFAULT_DURATION,
-        duration_minutes=DEFAULT_DURATION_MINUTES,
+        duration=duration,
+        duration_minutes=int(DURATION_TO_MINUTES[duration]),
         qty=DEFAULT_QTY,
         live_trading_enabled=False,
     )
