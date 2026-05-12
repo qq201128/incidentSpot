@@ -7,8 +7,6 @@ from app.db.session import get_conn
 from app.services.binance_service import fetch_index_price_klines, fetch_premium_index
 from app.services.blind_reverse_martingale_strategy import load_blind_rm_settlement_state
 from app.services.kline_timing import (
-    RULE_INTERVAL_MS,
-    align_to_rule_interval_bucket,
     align_to_rule_interval_bucket_for_duration,
     current_rule_entry_open_time_for_duration,
     is_within_entry_grace,
@@ -18,6 +16,7 @@ from app.services.n_bar_rm_htf_vol_gate import (
     evaluate_volatility_spike_suppress,
     n_bar_rm_htf_vol_gate_enabled,
 )
+from app.services.kline_timing import rule_interval_ms_for_duration
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     FIVE_BAR_10M_RM_STRATEGY_KEY,
@@ -28,21 +27,38 @@ from app.services.strategy_registry import (
 
 PRICE_DECIMALS = 8
 PROBABILITY_DECIMALS = 4
-# Binance 无原生 10m：indexPriceKlines 的 10m 由 1m 指数 K 按 UTC 聚合成 10m 桶（与 APP 「指数 / Index」10 分钟一致），不用合约成交价 K。
-FETCH_10M_KLINE_LIMIT = 80
+FETCH_KLINE_LIMIT = 80
+
+# duration 到 Binance API interval 的映射
+DURATION_TO_BINANCE_INTERVAL: dict[str, str] = {
+    "10m": "10m",
+    "30m": "30m",
+    "60m": "1h",
+    "1d": "1d",
+}
 
 
-def streak_and_last_n_10m_rest(
-    symbol: str, entry_open_time: int, n: int
+def _binance_interval_for_duration(duration: str) -> str:
+    """将 duration (10m/30m/60m/1d) 转换为 Binance API 的 interval 格式。"""
+    interval = DURATION_TO_BINANCE_INTERVAL.get(duration)
+    if not interval:
+        raise ValueError(f"unsupported duration for index klines: {duration}")
+    return interval
+
+
+def streak_and_last_n_bars(
+    symbol: str, entry_open_time: int, n: int, duration: str = RULE_DURATION
 ) -> tuple[str | None, list[dict[str, Any]] | None]:
     """
-    用 GET /fapi/v1/indexPriceKlines 的 **指数价 10m OHLC** 判最近 n 根是否同向连涨/连跌（与「指数 K 线」一致）。
+    用 GET /fapi/v1/indexPriceKlines 的指数价 OHLC 判最近 n 根是否同向连涨/连跌。
+    根据 duration 参数获取对应周期的 K 线数据（10m/30m/1h/1d）。
     """
     if n < 1:
         raise ValueError("n must be >= 1")
-    entry_open_time = align_to_rule_interval_bucket(int(entry_open_time))
+    entry_open_time = align_to_rule_interval_bucket_for_duration(int(entry_open_time), duration)
     pair = symbol.upper()
-    bars = fetch_index_price_klines(pair, "10m", limit=FETCH_10M_KLINE_LIMIT)
+    interval = _binance_interval_for_duration(duration)
+    bars = fetch_index_price_klines(pair, interval, limit=FETCH_KLINE_LIMIT)
     if len(bars) < n:
         return None, None
     completed = [b for b in bars if int(b["openTime"]) < int(entry_open_time)]
@@ -66,18 +82,25 @@ def streak_and_last_n_10m_rest(
     return None, last_n
 
 
-def _event_start_to_boundary_ms(start_time: str) -> int:
+def streak_and_last_n_10m_rest(
+    symbol: str, entry_open_time: int, n: int
+) -> tuple[str | None, list[dict[str, Any]] | None]:
+    """兼容旧代码：使用 10m 周期。"""
+    return streak_and_last_n_bars(symbol, entry_open_time, n, RULE_DURATION)
+
+
+def _event_start_to_boundary_ms(start_time: str, duration: str = RULE_DURATION) -> int:
     normalized = str(start_time).strip().replace("Z", "+00:00")
     dt = datetime.fromisoformat(normalized)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     ms = int(dt.timestamp() * 1000)
-    bar = int(RULE_INTERVAL_MS)
+    bar = rule_interval_ms_for_duration(duration)
     return (ms // bar) * bar
 
 
-def last_settled_event_boundary_ms(strategy_key: str, symbol: str) -> int | None:
-    """最近一次已结算事件的 10m 桶起点（不论输赢）。用于要求下一笔的 n 连形态 K 全部落在该桶之后，避免与上一笔共用重叠 K。"""
+def last_settled_event_boundary_ms(strategy_key: str, symbol: str, duration: str = RULE_DURATION) -> int | None:
+    """最近一次已结算事件的桶起点（不论输赢）。用于要求下一笔的 n 连形态 K 全部落在该桶之后，避免与上一笔共用重叠 K。"""
     conn = get_conn()
     row = conn.execute(
         """
@@ -91,7 +114,7 @@ def last_settled_event_boundary_ms(strategy_key: str, symbol: str) -> int | None
     conn.close()
     if row is None or not row["start_time"]:
         return None
-    return _event_start_to_boundary_ms(str(row["start_time"]))
+    return _event_start_to_boundary_ms(str(row["start_time"]), duration)
 
 
 def _post_settle_wait_label(streak_length: int) -> str:
@@ -154,14 +177,14 @@ def predict_n_bar_10m_reverse_martingale_direction(
     oldest_bar_open: int | None = None
     fresh_floor: int | None = None
 
-    # 形态仍由「前 n 根已收盘指数 10m」判定；open_time / duration 与所选事件合约结算周期对齐（10m/30m/60m/1d 桶起点均在 10m 网格上）。
-    # 连亏后不补单：下一笔仍须再次满足形态；且形态所含 K 须全部落在「上一笔已结算事件」对应 10m 桶之后（与猜赢后等待新鲜形态同理）。
-    streak_raw, last_bars = streak_and_last_n_10m_rest(sym, open_time, streak_length)
-    last_settled_ot = last_settled_event_boundary_ms(strategy.key, sym)
+    # 使用对应 duration 的指数 K 线判定连续阳/阴形态
+    # 连亏后不补单：下一笔仍须再次满足形态；且形态所含 K 须全部落在「上一笔已结算事件」对应桶之后（与猜赢后等待新鲜形态同理）。
+    streak_raw, last_bars = streak_and_last_n_bars(sym, open_time, streak_length, duration)
+    last_settled_ot = last_settled_event_boundary_ms(strategy.key, sym, duration)
     streak = streak_raw
     if streak_raw is not None and last_settled_ot is not None and last_bars:
         oldest_bar_open = min(int(b["openTime"]) for b in last_bars)
-        fresh_floor = last_settled_ot + int(RULE_INTERVAL_MS)
+        fresh_floor = last_settled_ot + rule_interval_ms_for_duration(duration)
         if oldest_bar_open < fresh_floor:
             streak = None
             post_settle_block = True

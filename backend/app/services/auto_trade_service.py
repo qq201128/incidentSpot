@@ -19,6 +19,7 @@ from app.services.strategy_registry import (
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
+    strategy_supports_duration,
     strategy_uses_trade_policy_gates,
 )
 
@@ -258,6 +259,11 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
             "backend auto trade duration must be one of "
             + ", ".join(sorted(SUPPORTED_AUTO_DURATIONS))
         )
+    if settings.enabled and not strategy_supports_duration(settings.strategy_key, settings.duration):
+        raise ValueError(
+            f"strategy {strategy.key} does not support duration {settings.duration}, "
+            f"supported: {', '.join(sorted(strategy.supported_durations))}"
+        )
     if settings.duration_minutes <= 0:
         raise ValueError("durationMinutes must be > 0")
     if settings.qty <= 0:
@@ -338,6 +344,7 @@ def _strategy_payload(settings: AutoTradeSettings) -> dict[str, Any]:
         "requiresKlineFeatures": strategy.requires_kline_features,
         "usesTradePolicyGates": strategy.uses_trade_policy_gates,
         "entryGraceMs": strategy.entry_grace_ms,
+        "supportedDurations": sorted(strategy.supported_durations),
     }
 
 

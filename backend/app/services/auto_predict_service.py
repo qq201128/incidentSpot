@@ -26,6 +26,7 @@ from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     is_continuous_orderbook_strategy,
     strategy_entry_grace_ms,
+    strategy_supports_duration,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -154,7 +155,10 @@ def _prediction_failures(
 
 def _prediction_targets() -> list[AutoTradeSettings]:
     settings = list_auto_trade_settings()
-    enabled = [item for item in settings if item.enabled]
+    enabled = [
+        item for item in settings
+        if item.enabled and strategy_supports_duration(item.strategy_key, item.duration)
+    ]
     if enabled:
         return enabled
     return [get_auto_trade_settings(DEFAULT_STRATEGY_KEY)]

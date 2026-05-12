@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 DEFAULT_STRATEGY_KEY = "orderbook_notional_40m"
 MANUAL_STRATEGY_KEY = "manual"
@@ -91,6 +92,7 @@ class StrategyDefinition:
     requires_kline_features: bool = True
     uses_trade_policy_gates: bool = True
     entry_grace_ms: int = KLINE_ENTRY_GRACE_MS
+    supported_durations: frozenset[str] = SUPPORTED_RULE_DURATIONS
 
 
 OPTIMIZED_RULES_BACKTEST_META_KEY = "optimized_rules_10m"
@@ -309,6 +311,7 @@ def strategy_payloads() -> list[dict]:
             "requiresKlineFeatures": strategy.requires_kline_features,
             "usesTradePolicyGates": strategy.uses_trade_policy_gates,
             "entryGraceMs": strategy.entry_grace_ms,
+            "supportedDurations": sorted(strategy.supported_durations),
         }
         for strategy in STRATEGIES
         if strategy.tradable
@@ -325,3 +328,11 @@ def strategy_uses_trade_policy_gates(strategy_key: str | None) -> bool:
 
 def strategy_entry_grace_ms(strategy_key: str | None) -> int:
     return strategy_definition(strategy_key).entry_grace_ms
+
+
+def strategy_supported_durations(strategy_key: str | None) -> frozenset[str]:
+    return strategy_definition(strategy_key).supported_durations
+
+
+def strategy_supports_duration(strategy_key: str | None, duration: str) -> bool:
+    return duration in strategy_supported_durations(strategy_key)
