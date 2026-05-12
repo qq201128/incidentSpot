@@ -54,8 +54,17 @@ SCHEMA_MIGRATIONS = (
 
 
 def get_conn() -> sqlite3.Connection:
-  conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+  """timeout：等锁最长时间（秒）。WAL + busy_timeout 减轻多协程/多请求下的 database is locked。"""
+  conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
   conn.row_factory = sqlite3.Row
+  try:
+    conn.execute("PRAGMA journal_mode=WAL")
+  except sqlite3.Error:
+    pass
+  try:
+    conn.execute("PRAGMA busy_timeout=30000")
+  except sqlite3.Error:
+    pass
   return conn
 
 

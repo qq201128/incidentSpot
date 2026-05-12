@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { contractDurationLabel } from "../utils/eventDuration";
 import { formatPnlU } from "../utils/eventSettlement";
 import { strategyLabel } from "../utils/strategyLabels";
 
@@ -116,6 +118,7 @@ function PredictionResult({ prediction }) {
 
 function AiSuccessSummary({ symbol, aiHistorySuccess }) {
   const { overall, byStrategy } = aiHistorySuccess;
+  const durationGroups = useMemo(() => _groupAiSuccessByTradeDuration(byStrategy), [byStrategy]);
   return (
     <div className="ai-success-summary">
       <div className="ai-success-row ai-success-overall">
@@ -126,22 +129,51 @@ function AiSuccessSummary({ symbol, aiHistorySuccess }) {
             : `${Math.round(overall.rate * 100)}%（${overall.hits}/${overall.total}） · 盈亏 ${formatPnlU(overall.pnlU)}`}
         </strong>
       </div>
-      {byStrategy.length > 0 && (
+      {durationGroups.length > 0 && (
         <ul className="ai-success-by-strategy">
-          {byStrategy.map((row) => (
-            <li key={row.strategyKey} className="ai-success-row">
-              <span>{strategyLabel(row.strategyKey)}</span>
-              <strong>
-                {row.total === 0
-                  ? "—"
-                  : `${Math.round(row.rate * 100)}%（${row.hits}/${row.total}） · 盈亏 ${formatPnlU(row.pnlU)}`}
-              </strong>
+          {durationGroups.map((group) => (
+            <li key={group.durationKey} className="ai-success-period-block">
+              <div className="ai-success-period-heading">时长 · {group.heading}</div>
+              <ul className="ai-success-period-rows">
+                {group.rows.map((row) => (
+                  <li key={`${row.strategyKey}-${row.durationMinutes}`} className="ai-success-row">
+                    <span>{strategyLabel(row.strategyKey)}</span>
+                    <strong>
+                      {row.total === 0
+                        ? "—"
+                        : `${Math.round(row.rate * 100)}%（${row.hits}/${row.total}） · 盈亏 ${formatPnlU(row.pnlU)}`}
+                    </strong>
+                  </li>
+                ))}
+              </ul>
             </li>
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+const UNKNOWN_DURATION = -1;
+
+/** @param {Array<{ strategyKey: string, durationMinutes: number, total: number, hits: number, pnlU: number, rate: number | null }>} rows */
+function _groupAiSuccessByTradeDuration(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const dm = row.durationMinutes;
+    const durationKey = dm === UNKNOWN_DURATION ? "unknown" : String(dm);
+    if (!map.has(durationKey)) {
+      const sortKey = dm === UNKNOWN_DURATION ? Number.POSITIVE_INFINITY : dm;
+      const heading =
+        dm === UNKNOWN_DURATION ? contractDurationLabel(null) : contractDurationLabel(dm);
+      map.set(durationKey, { durationKey, sortKey, heading, rows: [] });
+    }
+    map.get(durationKey).rows.push(row);
+  }
+  for (const g of map.values()) {
+    g.rows.sort((a, b) => b.pnlU - a.pnlU || a.strategyKey.localeCompare(b.strategyKey));
+  }
+  return [...map.values()].sort((a, b) => a.sortKey - b.sortKey);
 }
 
 function PredictionDirection({ prediction }) {

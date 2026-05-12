@@ -368,3 +368,34 @@ select:focus-visible {
     max-height: var(--market-chart-h);
   }
 }
+
+.app-nav {
+  width: min(100%, 1520px);
+  margin: 0 auto;
+  padding: 10px 24px 0;
+  display: flex;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.app-nav-link {
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  background: rgba(13, 18, 23, 0.72);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.app-nav-link:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.app-nav-link-active {
+  color: var(--green);
+  border-color: rgba(63, 211, 166, 0.45);
+  background: rgba(63, 211, 166, 0.1);
+}

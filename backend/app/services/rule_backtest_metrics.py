@@ -6,23 +6,31 @@ import pandas as pd
 
 from app.services.rule_config import (
     MS_PER_MINUTE,
+    RULE_DURATION,
     RULE_TARGET_WIN_RATE,
     WALK_FORWARD_MIN_TRAIN_DAYS,
     WALK_FORWARD_PURGE_MINUTES,
     WALK_FORWARD_TEST_DAYS,
+    walk_forward_purge_minutes_for_duration,
 )
 
 
-def walk_forward_validation(frame: pd.DataFrame, trades: list[dict[str, Any]]) -> dict[str, Any]:
+def walk_forward_validation(
+    frame: pd.DataFrame,
+    trades: list[dict[str, Any]],
+    *,
+    duration: str = RULE_DURATION,
+) -> dict[str, Any]:
+    purge_minutes = walk_forward_purge_minutes_for_duration(duration)
     days = sorted(str(day) for day in frame["trade_day"].unique())
-    fold_results = _walk_forward_folds(frame, days, trades)
+    fold_results = _walk_forward_folds(frame, days, trades, purge_minutes=purge_minutes)
     test_trades = [trade for fold in fold_results for trade in fold["_testTrades"]]
     folds = [_public_walk_forward_fold(fold) for fold in fold_results]
     return {
         "method": "anchored_walk_forward_with_purge",
         "minTrainDays": WALK_FORWARD_MIN_TRAIN_DAYS,
         "testDays": WALK_FORWARD_TEST_DAYS,
-        "purgeMinutes": WALK_FORWARD_PURGE_MINUTES,
+        "purgeMinutes": purge_minutes,
         "folds": folds,
         "overall": summary(test_trades),
         "passed": _walk_forward_passed(folds, test_trades),
@@ -64,6 +72,8 @@ def _walk_forward_folds(
     frame: pd.DataFrame,
     days: list[str],
     trades: list[dict[str, Any]],
+    *,
+    purge_minutes: int = WALK_FORWARD_PURGE_MINUTES,
 ) -> list[dict[str, Any]]:
     folds = []
     start = WALK_FORWARD_MIN_TRAIN_DAYS
@@ -72,7 +82,9 @@ def _walk_forward_folds(
         test_days = days[start:start + WALK_FORWARD_TEST_DAYS]
         if not test_days:
             break
-        folds.append(_walk_forward_fold(frame, train_days, test_days, trades=trades))
+        folds.append(_walk_forward_fold(
+            frame, train_days, test_days, trades=trades, purge_minutes=purge_minutes
+        ))
         start += WALK_FORWARD_TEST_DAYS
     return folds
 
@@ -83,10 +95,11 @@ def _walk_forward_fold(
     test_days: list[str],
     *,
     trades: list[dict[str, Any]],
+    purge_minutes: int = WALK_FORWARD_PURGE_MINUTES,
 ) -> dict[str, Any]:
     test = frame[frame["trade_day"].isin(test_days)].copy()
     train_before = frame[frame["trade_day"].isin(train_days)].copy()
-    train = _purged_train_frame(train_before, test)
+    train = _purged_train_frame(train_before, test, purge_minutes=purge_minutes)
     train_trades = _trades_in_frame(trades, train)
     test_trades = _trades_in_frame(trades, test)
     return {
@@ -121,10 +134,15 @@ def _public_walk_forward_fold(fold: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fold.items() if not key.startswith("_")}
 
 
-def _purged_train_frame(train: pd.DataFrame, test: pd.DataFrame) -> pd.DataFrame:
+def _purged_train_frame(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    *,
+    purge_minutes: int = WALK_FORWARD_PURGE_MINUTES,
+) -> pd.DataFrame:
     if train.empty or test.empty:
         return train
-    purge_ms = WALK_FORWARD_PURGE_MINUTES * MS_PER_MINUTE
+    purge_ms = purge_minutes * MS_PER_MINUTE
     test_start = int(test["open_time"].min())
     return train[train["open_time"] < test_start - purge_ms]
 

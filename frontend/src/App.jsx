@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FactorsPage from "./pages/FactorsPage";
 import KlineChart from "./components/KlineChart";
 import OrderBook from "./components/OrderBook";
 import RecentTrades from "./components/RecentTrades";
@@ -20,6 +21,7 @@ import { useLatestPrediction } from "./hooks/useLatestPrediction";
 import { mergeKlineCandle, normalizeChartCandle } from "./utils/klineCandles";
 
 export default function App() {
+  const [appView, setAppView] = useState("trade");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [interval, setIntervalValue] = useState("10m");
   const [history, setHistory] = useState([]);
@@ -274,8 +276,40 @@ export default function App() {
     setStatus("事件已结算");
   }
 
+  const appNav = (
+    <nav className="app-nav" aria-label="主导航">
+      <button
+        type="button"
+        className={`app-nav-link${appView === "trade" ? " app-nav-link-active" : ""}`}
+        onClick={() => setAppView("trade")}
+        aria-current={appView === "trade" ? "page" : undefined}
+      >
+        工作台
+      </button>
+      <button
+        type="button"
+        className={`app-nav-link${appView === "factors" ? " app-nav-link-active" : ""}`}
+        onClick={() => setAppView("factors")}
+        aria-current={appView === "factors" ? "page" : undefined}
+      >
+        因子库
+      </button>
+    </nav>
+  );
+
+  if (appView === "factors") {
+    return (
+      <>
+        {appNav}
+        <FactorsPage />
+      </>
+    );
+  }
+
   return (
-    <main className="layout">
+    <>
+      {appNav}
+      <main className="layout">
       <header className="topbar">
         <div>
           <span className="eyebrow">规则事件交易工作台</span>
@@ -329,5 +363,6 @@ export default function App() {
         </div>
       </div>
     </main>
+    </>
   );
 }

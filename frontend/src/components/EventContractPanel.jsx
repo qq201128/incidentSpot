@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import AutoStrategyControls from "./AutoStrategyControls";
 import EventList from "./EventList";
@@ -351,9 +352,12 @@ function _aiHistorySuccessByStrategy(events, symbol) {
     rate: settled.length > 0 ? overallHits / settled.length : null,
     pnlU: overallPnl,
   };
+  const UNKNOWN_DURATION = -1;
   const byKey = new Map();
   for (const event of settled) {
-    const key = event.strategyKey || "manual";
+    const strategyKey = event.strategyKey || "manual";
+    const durationMinutes = eventDurationMinutesFromWindow(event) ?? UNKNOWN_DURATION;
+    const key = `${strategyKey}\t${durationMinutes}`;
     let bucket = byKey.get(key);
     if (!bucket) {
       bucket = { total: 0, hits: 0, pnlU: 0 };
@@ -365,14 +369,27 @@ function _aiHistorySuccessByStrategy(events, symbol) {
     if (pnl != null) bucket.pnlU += pnl;
   }
   const byStrategy = [...byKey.entries()]
-    .map(([strategyKey, { total, hits, pnlU }]) => ({
-      strategyKey,
-      total,
-      hits,
-      pnlU,
-      rate: total > 0 ? hits / total : null,
-    }))
-    .sort((a, b) => b.pnlU - a.pnlU || a.strategyKey.localeCompare(b.strategyKey));
+    .map(([compoundKey, { total, hits, pnlU }]) => {
+      const tab = compoundKey.lastIndexOf("\t");
+      const strategyKey = tab >= 0 ? compoundKey.slice(0, tab) : compoundKey;
+      const durStr = tab >= 0 ? compoundKey.slice(tab + 1) : "";
+      const durationMinutes = Number(durStr);
+      return {
+        strategyKey,
+        durationMinutes: Number.isFinite(durationMinutes) ? durationMinutes : UNKNOWN_DURATION,
+        total,
+        hits,
+        pnlU,
+        rate: total > 0 ? hits / total : null,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.durationMinutes === UNKNOWN_DURATION ? 1e9 : a.durationMinutes) -
+          (b.durationMinutes === UNKNOWN_DURATION ? 1e9 : b.durationMinutes) ||
+        b.pnlU - a.pnlU ||
+        a.strategyKey.localeCompare(b.strategyKey),
+    );
   return { overall, byStrategy };
 }
 

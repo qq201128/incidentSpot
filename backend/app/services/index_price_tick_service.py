@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+import time
 from typing import Any
 
 from app.db.session import get_conn
@@ -12,18 +14,31 @@ def persist_index_price_tick(row: dict[str, Any]) -> None:
     mark_price = float(row.get("markPrice") or 0)
     if not symbol or quote_time <= 0 or index_price <= 0:
         raise ValueError("premium index response cannot be persisted")
-    conn = get_conn()
-    try:
-        conn.execute(
-            """
+
+    sql = """
             INSERT OR REPLACE INTO index_price_ticks(symbol, quote_time, index_price, mark_price)
             VALUES(?, ?, ?, ?)
-            """,
-            (symbol, quote_time, index_price, mark_price),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+            """
+    params = (symbol, quote_time, index_price, mark_price)
+    backoff_s = (0.0, 0.04, 0.1, 0.25)
+    last: sqlite3.OperationalError | None = None
+    for delay in backoff_s:
+        if delay:
+            time.sleep(delay)
+        conn = get_conn()
+        try:
+            conn.execute(sql, params)
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "locked" not in msg and "busy" not in msg:
+                raise
+            last = exc
+        finally:
+            conn.close()
+    if last is not None:
+        raise last
 
 
 def nearest_index_price_tick(symbol: str, target_time_ms: int, max_drift_ms: int):

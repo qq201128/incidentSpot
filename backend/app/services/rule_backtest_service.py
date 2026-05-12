@@ -9,7 +9,7 @@ import pandas as pd
 
 from app.db.session import get_conn
 from app.services.enhanced_features import load_orderbook_features
-from app.services.kline_timing import is_rule_entry_boundary
+from app.services.kline_timing import is_rule_entry_boundary_for_duration
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 from app.services.optimized_rule_engine import build_optimized_feature_frame, evaluate_optimized_rules
 from app.services.rule_backtest_metrics import (
@@ -21,8 +21,9 @@ from app.services.rule_backtest_metrics import (
 from app.services.rule_config import (
     MS_PER_MINUTE,
     RULE_DURATION,
-    RULE_HORIZON_MINUTES,
     RULE_TARGET_WIN_RATE,
+    SUPPORTED_RULE_DURATIONS,
+    horizon_minutes_for_duration,
 )
 from app.services.strategy_registry import (
     OPTIMIZED_RULES_BACKTEST_META_KEY,
@@ -32,7 +33,11 @@ from app.services.strategy_registry import (
 
 RULE_ARTIFACT_DIR = Path(__file__).resolve().parent.parent.parent / "rules"
 MINUTES_PER_DAY = 24 * 60
-LAST_EVALUABLE_MINUTE = MINUTES_PER_DAY - RULE_HORIZON_MINUTES - 1
+
+
+def _last_evaluable_minute(duration: str) -> int:
+    """当日最后可评估的分钟（确保有足够时间计算前向收益）。"""
+    return MINUTES_PER_DAY - horizon_minutes_for_duration(duration) - 1
 
 
 @dataclass(frozen=True)
@@ -52,13 +57,15 @@ def run_rule_backtest(
     *,
     strategy_key: str | None = None,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
-        raise ValueError(f"rule backtest supports only {RULE_DURATION}, got {duration}")
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(
+            f"rule backtest supports {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}"
+        )
     resolved_key = strategy_key or OPTIMIZED_RULES_BACKTEST_META_KEY
     strategy = strategy_definition(resolved_key)
-    feature_frame = _labeled_feature_frame(symbol)
+    feature_frame = _labeled_feature_frame(symbol, duration)
     trades = _simulate_trades(feature_frame, resolved_key)
-    walk_forward = walk_forward_validation(feature_frame, trades)
+    walk_forward = walk_forward_validation(feature_frame, trades, duration=duration)
     report = _backtest_report(
         BacktestReportInput(
             symbol=symbol.upper(),
@@ -74,19 +81,26 @@ def run_rule_backtest(
     return report
 
 
-def _labeled_feature_frame(symbol: str) -> pd.DataFrame:
+def _labeled_feature_frame(symbol: str, duration: str = RULE_DURATION) -> pd.DataFrame:
     klines = _load_1m_klines(symbol)
     orderbook = load_orderbook_features(symbol)
     features = build_optimized_feature_frame(klines, ob_df=orderbook)
-    labeled = _entry_labeled_frame(features, klines)
-    return _drop_incomplete_latest_day(labeled)
+    labeled = _entry_labeled_frame(features, klines, duration)
+    return _drop_incomplete_latest_day(labeled, duration)
 
 
-def _entry_labeled_frame(features: pd.DataFrame, klines: pd.DataFrame) -> pd.DataFrame:
+def _entry_labeled_frame(
+    features: pd.DataFrame,
+    klines: pd.DataFrame,
+    duration: str = RULE_DURATION,
+) -> pd.DataFrame:
+    horizon_minutes = horizon_minutes_for_duration(duration)
     frame = features.copy()
     frame["entry_open_time"] = frame["open_time"] + MS_PER_MINUTE
-    frame = frame[frame["entry_open_time"].map(is_rule_entry_boundary)].copy()
-    frame["exit_open_time"] = frame["entry_open_time"] + RULE_HORIZON_MINUTES * MS_PER_MINUTE
+    frame = frame[
+        frame["entry_open_time"].map(lambda t: is_rule_entry_boundary_for_duration(t, duration))
+    ].copy()
+    frame["exit_open_time"] = frame["entry_open_time"] + horizon_minutes * MS_PER_MINUTE
     prices = klines.set_index("open_time")["open"]
     frame["entry_price"] = frame["entry_open_time"].map(prices)
     frame["exit_price"] = frame["exit_open_time"].map(prices)
@@ -105,14 +119,17 @@ def _with_entry_time_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _drop_incomplete_latest_day(frame: pd.DataFrame) -> pd.DataFrame:
+def _drop_incomplete_latest_day(
+    frame: pd.DataFrame,
+    duration: str = RULE_DURATION,
+) -> pd.DataFrame:
     if frame.empty:
         return frame
     local_time = pd.to_datetime(frame["open_time"], unit="ms", utc=True).dt.tz_convert("Asia/Shanghai")
     latest_day = str(local_time.dt.date.max())
     latest_time = local_time[frame["trade_day"] == latest_day].max()
     latest_minute = int(latest_time.hour) * 60 + int(latest_time.minute)
-    if latest_minute >= LAST_EVALUABLE_MINUTE:
+    if latest_minute >= _last_evaluable_minute(duration):
         return frame
     return frame[frame["trade_day"] != latest_day].reset_index(drop=True)
 

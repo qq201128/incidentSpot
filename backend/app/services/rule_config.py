@@ -40,6 +40,11 @@ WALK_FORWARD_MIN_TRAIN_DAYS = 14
 WALK_FORWARD_TEST_DAYS = 7
 WALK_FORWARD_PURGE_MINUTES = RULE_HORIZON_MINUTES
 
+
+def walk_forward_purge_minutes_for_duration(duration: str) -> int:
+    """Walk-forward purge 分钟数 = 该周期的 horizon 分钟数（防止前瞻偏差）。"""
+    return horizon_minutes_for_duration(duration)
+
 HIGHER_TIMEFRAME_WEIGHT = 0.35
 TEN_MINUTE_WEIGHT = 0.25
 ORDERBOOK_WEIGHT = 0.20

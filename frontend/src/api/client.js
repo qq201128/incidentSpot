@@ -172,6 +172,45 @@ export async function predictDirection(symbol, duration = "10m", limit = 2000, s
   return data;
 }
 
+/** 因子库列表（可选 category 过滤）。 */
+export async function fetchFactorsList(category) {
+  const params = {};
+  if (category) params.category = category;
+  const { data } = await axios.get(`${BASE_URL}/api/factors/list`, { params });
+  return data;
+}
+
+/** 单个因子元数据。 */
+export async function fetchFactorDetail(factorName) {
+  const { data } = await axios.get(
+    `${BASE_URL}/api/factors/detail/${encodeURIComponent(factorName)}`,
+  );
+  return data;
+}
+
+/** 单因子回测指标。 */
+export async function fetchFactorBacktest(factorName, symbol, duration = "10m") {
+  const { data } = await axios.get(
+    `${BASE_URL}/api/factors/backtest/${encodeURIComponent(factorName)}`,
+    {
+      params: { symbol, duration },
+    },
+  );
+  return data;
+}
+
+/** 全因子按 IR 排名（需本地有该交易对 1m K 线）。options.signal 可中止；默认 3 分钟超时避免界面永久「计算中」。 */
+export async function fetchFactorRanking(symbol, duration = "10m", category, options = {}) {
+  const params = { symbol, duration };
+  if (category) params.category = category;
+  const { data } = await axios.get(`${BASE_URL}/api/factors/ranking`, {
+    params,
+    signal: options.signal,
+    timeout: options.timeoutMs ?? 180_000,
+  });
+  return data;
+}
+
 export async function fetchLatestPrediction(symbol, duration = "10m", strategyKey) {
   const params = { symbol, duration };
   if (strategyKey) params.strategyKey = strategyKey;
