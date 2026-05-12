@@ -213,14 +213,17 @@ def predict_n_bar_10m_reverse_martingale_direction(
     htf_gate_meta: dict[str, Any] = {}
     suppress_label: str | None = None
     if pattern_ok and n_bar_rm_htf_vol_gate_enabled():
-        vol_suppress, vol_gate_meta = evaluate_volatility_spike_suppress(sym, int(open_time))
+        vol_suppress, vol_gate_meta = evaluate_volatility_spike_suppress(
+            sym, int(open_time), duration=duration
+        )
         htf_suppress, htf_gate_meta = evaluate_htf_counter_trend_suppress(
-            sym, int(open_time), direction
+            sym, int(open_time), direction, duration=duration
         )
         if vol_suppress:
             suppress_label = f"{pfx}_VOL_SPIKE_SKIP_TR_VS_ATR"
         elif htf_suppress:
-            suppress_label = f"{pfx}_HTF_1H_SMA_COUNTER_TREND_SKIP"
+            htf_interval = htf_gate_meta.get("htfInterval", "1h").upper()
+            suppress_label = f"{pfx}_HTF_{htf_interval}_SMA_COUNTER_TREND_SKIP"
 
     confidence = 0.5
     probability_up = confidence if direction == "up" else 1.0 - confidence

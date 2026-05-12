@@ -1,9 +1,11 @@
 """
-Higher-timeframe + volatility gates for n-bar index 10m reverse strategies
+Higher-timeframe + volatility gates for n-bar index reverse strategies
 (three / four / five bar; shared implementation).
 
-- Index 10m: last completed bar true range vs Wilder ATR(period); spike → skip.
-- Index 1h: close vs SMA on completed bars; if reversal bet fights HTF trend → skip.
+- Volatility: last completed bar true range vs Wilder ATR(period); spike → skip.
+  Uses the same interval as the trading duration (10m/30m/1h/1d).
+- HTF trend: close vs SMA on completed bars; if reversal bet fights HTF trend → skip.
+  Uses a higher timeframe relative to the trading duration.
 """
 
 from __future__ import annotations
@@ -12,8 +14,25 @@ import os
 from typing import Any
 
 from app.services.binance_service import fetch_index_price_klines
+from app.services.rule_config import RULE_DURATION
 
-FETCH_1H_LIMIT = 80
+FETCH_KLINE_LIMIT = 80
+
+# duration 到 Binance API interval 的映射（波动率检查使用相同周期）
+DURATION_TO_VOL_INTERVAL: dict[str, str] = {
+    "10m": "10m",
+    "30m": "30m",
+    "60m": "1h",
+    "1d": "1d",
+}
+
+# duration 到更高时间框架的映射（趋势检查使用更高周期）
+DURATION_TO_HTF_INTERVAL: dict[str, str] = {
+    "10m": "1h",
+    "30m": "4h",
+    "60m": "4h",
+    "1d": "1d",  # 日线使用自身，无更高周期
+}
 PRICE_DECIMALS_FOR_META = 8
 
 _DEFAULT_ENABLED = True
@@ -92,28 +111,32 @@ def evaluate_volatility_spike_suppress(
     pair: str,
     entry_open_time_ms: int,
     *,
+    duration: str = RULE_DURATION,
     atr_period: int | None = None,
     tr_atr_mult: float | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """
-    True → suppress trade (last completed 10m TR > mult * ATR(period)).
+    True → suppress trade (last completed bar TR > mult * ATR(period)).
+    Uses the same interval as the trading duration.
     If insufficient bars for ATR, do not suppress (fail-open).
     """
     period = atr_period if atr_period is not None else n_bar_rm_atr_period()
     mult = tr_atr_mult if tr_atr_mult is not None else n_bar_rm_tr_atr_multiplier()
+    interval = DURATION_TO_VOL_INTERVAL.get(duration, "10m")
     meta: dict[str, Any] = {
         "volGateEvaluated": True,
         "volSuppress": False,
+        "volInterval": interval,
         "atrPeriod": period,
         "trAtrMult": mult,
         "lastBarTr": None,
         "lastBarAtr": None,
         "reason": None,
     }
-    bars = fetch_index_price_klines(pair, "10m", limit=80)
+    bars = fetch_index_price_klines(pair, interval, limit=FETCH_KLINE_LIMIT)
     completed = _completed_before(bars, entry_open_time_ms)
     if len(completed) < period:
-        meta["reason"] = "insufficient_10m_bars_for_atr"
+        meta["reason"] = f"insufficient_{interval}_bars_for_atr"
         meta["volGateEvaluated"] = False
         return False, meta
 
@@ -145,29 +168,32 @@ def evaluate_htf_counter_trend_suppress(
     entry_open_time_ms: int,
     predicted_direction: str,
     *,
+    duration: str = RULE_DURATION,
     sma_period: int | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """
-    Suppress when reversal bet fights index 1h trend (close vs SMA on last closed 1h).
+    Suppress when reversal bet fights HTF trend (close vs SMA on last closed bar).
+    Uses a higher timeframe relative to the trading duration.
 
-    - predicted_direction 'up' after bear streak: skip if 1h bearish (close < SMA).
-    - predicted_direction 'down' after bull streak: skip if 1h bullish (close > SMA).
+    - predicted_direction 'up' after bear streak: skip if HTF bearish (close < SMA).
+    - predicted_direction 'down' after bull streak: skip if HTF bullish (close > SMA).
     """
     p = sma_period if sma_period is not None else n_bar_rm_htf_sma_period()
+    htf_interval = DURATION_TO_HTF_INTERVAL.get(duration, "1h")
     meta: dict[str, Any] = {
         "htfGateEvaluated": True,
         "htfSuppress": False,
-        "htfInterval": "1h",
+        "htfInterval": htf_interval,
         "htfSmaPeriod": p,
         "htfLastClose": None,
         "htfSma": None,
         "htfTrend": None,
         "reason": None,
     }
-    bars_1h = fetch_index_price_klines(pair, "1h", limit=FETCH_1H_LIMIT)
-    completed = _completed_before(bars_1h, entry_open_time_ms)
+    bars_htf = fetch_index_price_klines(pair, htf_interval, limit=FETCH_KLINE_LIMIT)
+    completed = _completed_before(bars_htf, entry_open_time_ms)
     if len(completed) < p + 1:
-        meta["reason"] = "insufficient_1h_bars_for_sma"
+        meta["reason"] = f"insufficient_{htf_interval}_bars_for_sma"
         meta["htfGateEvaluated"] = False
         return False, meta
 
@@ -192,11 +218,11 @@ def evaluate_htf_counter_trend_suppress(
     d = predicted_direction.lower()
     if d == "up" and trend == "bear":
         meta["htfSuppress"] = True
-        meta["reason"] = "counter_trend_long_vs_bearish_1h"
+        meta["reason"] = f"counter_trend_long_vs_bearish_{htf_interval}"
         return True, meta
     if d == "down" and trend == "bull":
         meta["htfSuppress"] = True
-        meta["reason"] = "counter_trend_short_vs_bullish_1h"
+        meta["reason"] = f"counter_trend_short_vs_bullish_{htf_interval}"
         return True, meta
     meta["reason"] = "aligned_or_no_conflict"
     return False, meta
