@@ -187,11 +187,20 @@
 }
 
 .factors-code {
+  display: inline-block;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--blue);
   background: rgba(120, 167, 255, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+.factors-name-cn {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .factors-desc-preview {

@@ -50,6 +50,52 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE orderbook_features ADD COLUMN ofi REAL",
   "ALTER TABLE orderbook_features ADD COLUMN ofi_ratio REAL",
   "ALTER TABLE orderbook_features ADD COLUMN quote_time INTEGER",
+  """
+  CREATE TABLE IF NOT EXISTS futures_positioning_features (
+    symbol TEXT NOT NULL,
+    open_time INTEGER NOT NULL,
+    open_interest REAL,
+    open_interest_value REAL,
+    long_short_ratio REAL,
+    long_account REAL,
+    short_account REAL,
+    taker_buy_sell_ratio REAL,
+    taker_buy_vol REAL,
+    taker_sell_vol REAL,
+    PRIMARY KEY (symbol, open_time)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS market_sentiment_features (
+    source TEXT NOT NULL,
+    open_time INTEGER NOT NULL,
+    fear_greed_value REAL,
+    fear_greed_classification TEXT,
+    PRIMARY KEY (source, open_time)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS onchain_features (
+    symbol TEXT NOT NULL,
+    open_time INTEGER NOT NULL,
+    exchange_netflow REAL,
+    stablecoin_supply_ratio REAL,
+    active_addresses REAL,
+    transaction_count REAL,
+    PRIMARY KEY (symbol, open_time)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS factor_combo_ranking_cache (
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    total INTEGER NOT NULL,
+    search_config TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (symbol, duration)
+  )
+  """,
 )
 
 

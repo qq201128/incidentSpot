@@ -10,6 +10,7 @@ import pandas as pd
 
 from app.db.session import get_conn
 from app.services.enhanced_timeframes import add_online_timeframe_features
+from app.services.external_factor_data import ExternalFeatureFrames, add_external_factor_features
 from app.services.kline_features import build_feature_frame as _base_build_features
 
 # --------------------------------------------------------------------------- #
@@ -133,6 +134,7 @@ def build_enhanced_feature_frame(
     *,
     ob_df: pd.DataFrame | None = None,
     funding_df: pd.DataFrame | None = None,
+    external_frames: ExternalFeatureFrames | None = None,
     min_history: int = 240,
 ) -> tuple[pd.DataFrame, list[str]]:
     """
@@ -145,7 +147,7 @@ def build_enhanced_feature_frame(
     d = _prepare_ohlcv_frame(df_1m)
 
     # ---- 1. Base technical features (same as legacy kline_features) ----
-    base_df, _ = _base_build_features(d, min_history=min_history)
+    base_df, base_spec = _base_build_features(d, min_history=min_history)
     # base_df already contains OHLCV + engineered columns, shifted 1 step.
 
     # ---- 2. Online multi-timeframe features from 1m ----
@@ -154,10 +156,12 @@ def build_enhanced_feature_frame(
 
     base_df = _add_orderbook_features(base_df, ob_df)
     base_df = _add_funding_features(base_df, funding_df)
+    if external_frames is not None:
+        base_df = add_external_factor_features(base_df, external_frames)
 
-    # Drop rows that still have NaN only among the core feature columns
     feature_cols = [c for c in base_df.columns if c not in {"open_time", "y"}]
-    out = base_df.dropna(subset=feature_cols).reset_index(drop=True)
+    required_cols = [c for c in base_spec.columns if c in base_df.columns]
+    out = base_df.dropna(subset=required_cols).reset_index(drop=True)
     if len(out) < min_history:
         raise ValueError(f"insufficient rows after feature engineering: {len(out)} < {min_history}")
 

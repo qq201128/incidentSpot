@@ -1,0 +1,272 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  fetchFactorCombinationRanking,
+  fetchFactorCombinationSignals,
+  requestFactorCombinationRefresh,
+} from "../api/factorCombinations";
+import "./FactorCombinationPanel.css";
+
+const SIGNAL_LIMIT = 4;
+const REFRESH_RELOAD_DELAY_MS = 3000;
+const RANKING_PREVIEW_LIMIT = 16;
+const DURATION_LABELS = { "10m": "10m", "30m": "30m", "60m": "60m", "1d": "1d" };
+
+export default function FactorCombinationPanel({ symbol, duration }) {
+  const combo = useFactorCombinationData(symbol, duration);
+  return <ComboPanelView {...combo} duration={duration} />;
+}
+
+function useFactorCombinationData(symbol, duration) {
+  const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
+  const [rankingState, setRankingState] = useState({ items: [], status: "", updatedAt: null });
+  const [signalState, setSignalState] = useState({ items: [], status: "", missing: [] });
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async (signal) => {
+    if (!isValidSymbol(normalizedSymbol)) {
+      setInvalidStates(setRankingState, setSignalState);
+      return;
+    }
+    setRankingState((state) => ({ ...state, status: "加载多因子组合缓存…" }));
+    setSignalState((state) => ({ ...state, status: "刷新周期信号…" }));
+    await Promise.all([
+      loadRankingState(normalizedSymbol, duration, signal, setRankingState),
+      loadSignalState(normalizedSymbol, signal, setSignalState),
+    ]);
+  }, [duration, normalizedSymbol]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    void loadData(ac.signal);
+    return () => ac.abort();
+  }, [loadData]);
+
+  const refresh = useCallback(async (targetDuration) => {
+    if (!isValidSymbol(normalizedSymbol)) return setInvalidRanking(setRankingState);
+    setRefreshing(true);
+    try {
+      await requestFactorCombinationRefresh(normalizedSymbol, targetDuration);
+      setRankingState((state) => ({ ...state, status: refreshStatus(targetDuration) }));
+      window.setTimeout(() => void loadData(new AbortController().signal), REFRESH_RELOAD_DELAY_MS);
+    } catch (error) {
+      setRankingState((state) => ({ ...state, status: `刷新失败：${error.message}` }));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadData, normalizedSymbol]);
+
+  return {
+    symbol: normalizedSymbol,
+    rankingState,
+    signalState,
+    refreshing,
+    onRefreshCurrent: () => void refresh(duration), onRefreshAll: () => void refresh(undefined),
+  };
+}
+
+async function loadRankingState(symbol, duration, signal, setState) {
+  try {
+    const data = await fetchFactorCombinationRanking(symbol, duration, { signal });
+    if (signal.aborted) return;
+    const items = Array.isArray(data.ranking) ? data.ranking : [];
+    setState({ items, status: rankingStatus(data, symbol, duration), updatedAt: data.updatedAt });
+  } catch (error) {
+    if (isCanceled(error, signal)) return;
+    setState({ items: [], status: `组合排名失败：${error.message}`, updatedAt: null });
+  }
+}
+
+async function loadSignalState(symbol, signal, setState) {
+  try {
+    const data = await fetchFactorCombinationSignals(symbol, SIGNAL_LIMIT, { signal });
+    if (signal.aborted) return;
+    const items = Array.isArray(data.signals) ? data.signals : [];
+    const missing = Array.isArray(data.missingDurations) ? data.missingDurations : [];
+    setState({ items, missing, status: signalStatus(items, missing) });
+  } catch (error) {
+    if (isCanceled(error, signal)) return;
+    setState({ items: [], missing: [], status: `周期信号失败：${error.message}` });
+  }
+}
+
+function ComboPanelView(props) {
+  const signals = props.signalState.items;
+  return (
+    <section className="factor-combo-panel">
+      <ComboPanelHeader {...props} />
+      {signals.length ? <SignalGrid signals={signals} /> : null}
+      <ComboRankingTable ranking={props.rankingState.items} />
+    </section>
+  );
+}
+
+function ComboPanelHeader({
+  symbol,
+  duration,
+  rankingState,
+  signalState,
+  refreshing,
+  onRefreshCurrent,
+  onRefreshAll,
+}) {
+  return (
+    <div className="factor-combo-head">
+      <div>
+        <span className="section-kicker">多因子组合</span>
+        <h2>{symbol} · {DURATION_LABELS[duration] || duration}</h2>
+        <p>{rankingState.status}</p>
+        <p>{signalState.status}</p>
+      </div>
+      <div className="factor-combo-actions">
+        <button type="button" disabled={refreshing} onClick={onRefreshCurrent}>
+          当前周期
+        </button>
+        <button type="button" disabled={refreshing} onClick={onRefreshAll}>
+          全部周期
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SignalGrid({ signals }) {
+  return (
+    <div className="factor-combo-signals">
+      {signals.map((signal) => (
+        <SignalCard key={`${signal.duration}-${signal.factorName}`} signal={signal} />
+      ))}
+    </div>
+  );
+}
+
+function SignalCard({ signal }) {
+  return (
+    <article className={`factor-combo-signal ${directionClass(signal.direction)}`}>
+      <div className="factor-combo-signal-top">
+        <span>{signal.duration}</span>
+        <strong>{directionText(signal.direction)}</strong>
+      </div>
+      <h3 title={signal.factorDisplayName}>{signal.factorDisplayName || signal.factorName}</h3>
+      <p>{memberText(signal.members)}</p>
+      <div className="factor-combo-signal-metrics">
+        <Metric label="胜率" value={formatPct(signal.historicalWinRate, 1)} />
+        <Metric label="置信" value={formatPct(signal.confidence, 1)} />
+        <Metric label="分数" value={formatNum(signal.score, 4)} />
+        <Metric label="状态" value={signal.qualityPassed ? "跟踪中" : "等待"} />
+      </div>
+    </article>
+  );
+}
+
+function ComboRankingTable({ ranking }) {
+  return (
+    <div className="factor-combo-ranking">
+      <div className="factor-combo-ranking-title">
+        <h3>胜率最高组合</h3>
+        <span>{ranking.length} 项</span>
+      </div>
+      <div className="factor-combo-table-wrap">
+        <table className="factors-table factor-combo-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>组合因子</th>
+              <th>成员</th>
+              <th>胜率</th>
+              <th>贡献</th>
+              <th>夏普</th>
+              <th>IR</th>
+              <th>盈亏比</th>
+            </tr>
+          </thead>
+          <tbody>{ranking.slice(0, RANKING_PREVIEW_LIMIT).map(renderRankingRow)}</tbody>
+        </table>
+        {!ranking.length ? <p className="factor-combo-empty">暂无组合排名</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function renderRankingRow(row, index) {
+  return (
+    <tr key={row.factorName || index}>
+      <td>{index + 1}</td>
+      <td>
+        <strong className="factors-name-cn">{row.factorDisplayName || row.factorName}</strong>
+        <code className="factors-code">{row.factorName}</code>
+      </td>
+      <td>{memberText(row.members)}</td>
+      <td>{formatPct(row.winRate, 1)}</td>
+      <td>{formatPct(row.contribution, 1)}</td>
+      <td>{formatNum(row.sharpe, 2)}</td>
+      <td>{formatNum(row.ir, 4)}</td>
+      <td>{formatNum(row.profitFactor, 2)}</td>
+    </tr>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <b>{value}</b>
+    </span>
+  );
+}
+
+function rankingStatus(data, symbol, duration) {
+  if (data.source === "none") {
+    return `暂无组合排名缓存（${symbol} / ${duration}）`;
+  }
+  const updated = data.updatedAt ? ` · 更新 ${data.updatedAt}` : "";
+  return `组合排名：${data.total ?? 0} 项（${symbol} / ${duration}${updated}）`;
+}
+
+function signalStatus(items, missing) {
+  const suffix = missing.length ? ` · 缺少 ${missing.join(", ")}` : "";
+  return `周期信号：${items.length} 个${suffix}`;
+}
+
+function refreshStatus(duration) {
+  return duration ? `已排队重算 ${duration} 多因子组合` : "已排队重算全部周期多因子组合";
+}
+
+function setInvalidStates(setRankingState, setSignalState) {
+  setInvalidRanking(setRankingState);
+  setSignalState({ items: [], status: "请输入有效交易对", missing: [] });
+}
+
+function setInvalidRanking(setRankingState) {
+  setRankingState({ items: [], status: "请输入有效交易对", updatedAt: null });
+}
+
+function memberText(members) {
+  if (!Array.isArray(members) || !members.length) return "—";
+  return members.map((member) => member.displayName || member.name).join(" + ");
+}
+
+function directionText(direction) {
+  return direction === "down" ? "做空" : "做多";
+}
+
+function directionClass(direction) {
+  return direction === "down" ? "is-down" : "is-up";
+}
+
+function formatNum(value, digits) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Number(value).toFixed(digits);
+}
+
+function formatPct(value, digits) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function isValidSymbol(symbol) {
+  return symbol.length >= 6;
+}
+
+function isCanceled(error, signal) {
+  return signal.aborted || error?.code === "ERR_CANCELED" || error?.name === "CanceledError";
+}

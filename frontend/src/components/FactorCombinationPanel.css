@@ -1,0 +1,217 @@
+.factor-combo-panel {
+  display: grid;
+  gap: 14px;
+  padding: 4px 0 2px;
+}
+
+.factor-combo-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background: rgba(13, 18, 23, 0.72);
+}
+
+.factor-combo-head h2 {
+  margin: 2px 0 8px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.factor-combo-head p {
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.factor-combo-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.factor-combo-actions button {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.factor-combo-signals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.factor-combo-signal {
+  min-height: 172px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(20, 27, 32, 0.95), rgba(10, 15, 19, 0.96));
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.factor-combo-signal.is-up {
+  border-color: rgba(63, 211, 166, 0.42);
+}
+
+.factor-combo-signal.is-down {
+  border-color: rgba(255, 104, 104, 0.42);
+}
+
+.factor-combo-signal-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.factor-combo-signal-top span {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-combo-signal-top strong {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(120, 167, 255, 0.1);
+}
+
+.factor-combo-signal h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.factor-combo-signal p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.factor-combo-signal-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.factor-combo-signal-metrics span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.factor-combo-signal-metrics small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.factor-combo-signal-metrics b {
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.factor-combo-ranking {
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(13, 18, 23, 0.7);
+}
+
+.factor-combo-ranking-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.factor-combo-ranking-title h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.factor-combo-ranking-title span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.factor-combo-table-wrap {
+  max-height: min(38vh, 380px);
+  overflow: auto;
+}
+
+.factor-combo-table th:first-child,
+.factor-combo-table td:first-child {
+  width: 36px;
+  text-align: center;
+}
+
+.factor-combo-table td:nth-child(2) {
+  min-width: 240px;
+}
+
+.factor-combo-table td:nth-child(3) {
+  min-width: 220px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.factor-combo-empty {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(13, 18, 23, 0.55);
+}
+
+@media (max-width: 1180px) {
+  .factor-combo-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .factor-combo-head {
+    flex-direction: column;
+  }
+
+  .factor-combo-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .factor-combo-actions button {
+    flex: 1 1 120px;
+  }
+
+  .factor-combo-signals {
+    grid-template-columns: 1fr;
+  }
+}

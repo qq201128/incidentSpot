@@ -10,6 +10,7 @@ Metrics computed:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,14 +18,15 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from app.db.session import get_conn
+from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_performance_metrics import add_contribution_scores, compute_signal_metrics
 from app.services.factor_registry import (
-    FACTOR_BY_NAME,
+    FactorCategory,
     FactorDefinition,
+    factor_payload,
     get_factor,
     list_factors,
 )
-from app.services.kline_features import FEATURE_COLUMNS, build_feature_frame
 from app.services.rule_config import DURATION_TO_MINUTES, MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS
 
 BACKTEST_MIN_PERIODS = 100
@@ -47,6 +49,10 @@ class FactorBacktestResult:
     turnover: float | None
     t_stat: float | None
     p_value: float | None
+    sharpe: float | None
+    win_rate: float | None
+    max_drawdown: float | None
+    profit_factor: float | None
 
 
 def run_factor_backtest(
@@ -60,13 +66,25 @@ def run_factor_backtest(
     if factor_def is None:
         raise ValueError(f"unknown factor: {factor_name}")
 
-    klines = _load_klines(symbol)
-    feature_frame, _ = build_feature_frame(klines)
+    feature_frame = load_factor_frame(symbol)
+    return run_factor_backtest_on_frame(
+        factor_def,
+        feature_frame,
+        symbol=symbol,
+        duration=duration,
+    )
 
-    if factor_name not in feature_frame.columns:
-        raise ValueError(f"factor {factor_name} not found in feature frame")
 
-    result = _compute_factor_metrics(feature_frame, factor_name, symbol, duration)
+def run_factor_backtest_on_frame(
+    factor_def: FactorDefinition,
+    feature_frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+) -> dict[str, Any]:
+    if factor_def.name not in feature_frame.columns:
+        raise ValueError(f"factor {factor_def.name} not found in feature frame")
+    result = _compute_factor_metrics(feature_frame, factor_def, symbol, duration)
     return _result_to_dict(result, factor_def)
 
 
@@ -78,12 +96,10 @@ def run_factor_ranking(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
 
-    klines = _load_klines(symbol)
-    feature_frame, _ = build_feature_frame(klines)
+    feature_frame = load_factor_frame(symbol)
 
     factors = list_factors()
     if category:
-        from app.services.factor_registry import FactorCategory
         cat = FactorCategory(category)
         factors = [f for f in factors if f.category == cat]
 
@@ -91,45 +107,30 @@ def run_factor_ranking(
     for factor_def in factors:
         if factor_def.name not in feature_frame.columns:
             continue
-        try:
-            result = _compute_factor_metrics(feature_frame, factor_def.name, symbol, duration)
-            results.append(_result_to_dict(result, factor_def))
-        except Exception:
-            continue
+        result = run_factor_backtest_on_frame(
+            factor_def,
+            feature_frame,
+            symbol=symbol,
+            duration=duration,
+        )
+        results.append(result)
 
     results.sort(key=lambda x: abs(x.get("ir") or 0), reverse=True)
+    add_contribution_scores(results)
     return results
-
-
-def _load_klines(symbol: str) -> pd.DataFrame:
-    conn = get_conn()
-    rows = conn.execute(
-        """
-        SELECT open_time, open, high, low, close, volume
-        FROM klines
-        WHERE symbol = ? AND interval = '1m'
-        ORDER BY open_time ASC
-        """,
-        (symbol.upper(),),
-    ).fetchall()
-    conn.close()
-    if not rows:
-        raise ValueError(f"no 1m klines found for {symbol.upper()}")
-    frame = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "volume"])
-    for col in ("open", "high", "low", "close", "volume"):
-        frame[col] = pd.to_numeric(frame[col], errors="raise")
-    return frame
 
 
 def _compute_factor_metrics(
     frame: pd.DataFrame,
-    factor_name: str,
+    factor_def: FactorDefinition,
     symbol: str,
     duration: str,
 ) -> FactorBacktestResult:
+    factor_name = factor_def.name
     horizon = DURATION_TO_MINUTES.get(duration, 10)
     df = frame.copy()
     df["fwd_ret"] = df["close"].pct_change(horizon).shift(-horizon)
+    df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=[factor_name, "fwd_ret"])
 
     if len(df) < BACKTEST_MIN_PERIODS:
@@ -147,6 +148,10 @@ def _compute_factor_metrics(
             turnover=None,
             t_stat=None,
             p_value=None,
+            sharpe=None,
+            win_rate=None,
+            max_drawdown=None,
+            profit_factor=None,
         )
 
     ic_series = _compute_rolling_ic(df[factor_name], df["fwd_ret"])
@@ -161,6 +166,7 @@ def _compute_factor_metrics(
     long_short = quintile_returns[-1] - quintile_returns[0] if len(quintile_returns) == QUINTILE_COUNT else None
 
     turnover = _compute_turnover(df, factor_name)
+    sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor_def, horizon)
 
     return FactorBacktestResult(
         factor_name=factor_name,
@@ -176,31 +182,31 @@ def _compute_factor_metrics(
         turnover=turnover,
         t_stat=t_stat,
         p_value=p_value,
+        sharpe=sharpe,
+        win_rate=win_rate,
+        max_drawdown=max_drawdown,
+        profit_factor=profit_factor,
     )
 
 
 def _compute_rolling_ic(factor: pd.Series, fwd_ret: pd.Series) -> pd.Series:
-    def _rank_corr(sub: pd.DataFrame) -> float:
-        if len(sub) < 10:
-            return np.nan
-        corr, _ = stats.spearmanr(sub["factor"], sub["fwd_ret"])
-        return corr
-
-    df = pd.DataFrame({"factor": factor, "fwd_ret": fwd_ret})
-    ic_vals = df.rolling(IC_ROLLING_WINDOW).apply(
-        lambda x: _rank_corr(df.loc[x.index]), raw=False
-    )
-    # Simplified: compute per-period rank correlation
-    ic_list = []
-    for i in range(IC_ROLLING_WINDOW, len(df)):
-        sub = df.iloc[i - IC_ROLLING_WINDOW : i]
-        corr, _ = stats.spearmanr(sub["factor"], sub["fwd_ret"])
-        ic_list.append(corr)
-    return pd.Series(ic_list)
+    ranked = pd.DataFrame({
+        "factor": factor.rank(method="average"),
+        "fwd_ret": fwd_ret.rank(method="average"),
+    })
+    x = ranked["factor"]
+    y = ranked["fwd_ret"]
+    x_mean = x.rolling(IC_ROLLING_WINDOW).mean()
+    y_mean = y.rolling(IC_ROLLING_WINDOW).mean()
+    covariance = (x * y).rolling(IC_ROLLING_WINDOW).mean() - x_mean * y_mean
+    x_var = ((x * x).rolling(IC_ROLLING_WINDOW).mean() - x_mean * x_mean).clip(lower=0.0)
+    y_var = ((y * y).rolling(IC_ROLLING_WINDOW).mean() - y_mean * y_mean).clip(lower=0.0)
+    denominator = np.sqrt(x_var * y_var).replace(0.0, np.nan)
+    return (covariance / denominator).dropna()
 
 
 def _compute_ic_ttest(ic_series: pd.Series) -> tuple[float | None, float | None]:
-    clean = ic_series.dropna()
+    clean = ic_series.replace([np.inf, -np.inf], np.nan).dropna()
     if len(clean) < 2:
         return None, None
     t_stat, p_value = stats.ttest_1samp(clean, 0)
@@ -230,9 +236,11 @@ def _compute_turnover(df: pd.DataFrame, factor_name: str) -> float | None:
 def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) -> dict[str, Any]:
     return {
         "factorName": result.factor_name,
+        "factorDisplayName": factor_def.description,
         "symbol": result.symbol,
         "duration": result.duration,
         "category": factor_def.category.value,
+        "categoryName": factor_payload(factor_def)["categoryName"],
         "description": factor_def.description,
         "formula": factor_def.formula,
         "direction": factor_def.direction.value,
@@ -246,8 +254,14 @@ def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) 
         "turnover": _round_or_none(result.turnover, 4),
         "tStat": _round_or_none(result.t_stat, 4),
         "pValue": _round_or_none(result.p_value, 6),
+        "sharpe": _round_or_none(result.sharpe, 4),
+        "winRate": _round_or_none(result.win_rate, 4),
+        "maxDrawdown": _round_or_none(result.max_drawdown, 6),
+        "profitFactor": _round_or_none(result.profit_factor, 4),
     }
 
 
 def _round_or_none(value: float | None, decimals: int) -> float | None:
-    return round(value, decimals) if value is not None else None
+    if value is None or not math.isfinite(float(value)):
+        return None
+    return round(value, decimals)

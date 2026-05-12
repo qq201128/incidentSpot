@@ -42,6 +42,7 @@ const BASE_URL = SAME_ORIGIN_API
 const WS_BASE_URL = SAME_ORIGIN_API
   ? wsBaseFromBrowserOrigin()
   : import.meta.env.VITE_WS_BASE_URL?.trim() || httpOriginToWsOrigin(BASE_URL || DEFAULT_API_BASE);
+export const API_BASE_URL = BASE_URL;
 const ALLOWED_INTERVALS = new Set(["10m", "30m", "60m", "1d"]);
 
 function normalizeInterval(interval) {

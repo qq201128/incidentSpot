@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+from app.services.factor_learning_common import utc_now
+from app.services.factor_learning_loss import loss_memory
+from app.services.factor_learning_memory_store import FACTOR_LEARNING_VERSION
+from app.services.factor_learning_patterns import (
+    candidate_loss_columns,
+    factor_rows,
+    factor_weights,
+    filter_config,
+    forbidden_regions,
+    success_patterns,
+)
+
+
+def build_factor_learning_memory(
+    frame: pd.DataFrame,
+    ranking_report: dict[str, Any],
+    settled_predictions: list[dict[str, Any]],
+    *,
+    symbol: str,
+    duration: str,
+    settlement_sweep: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    rows = factor_rows(ranking_report)
+    loss_columns = candidate_loss_columns(rows, frame)
+    learned_losses = loss_memory(frame, settled_predictions, loss_columns)
+    return {
+        "version": FACTOR_LEARNING_VERSION,
+        "symbol": symbol.strip().upper(),
+        "duration": duration,
+        "updatedAt": utc_now(),
+        "source": _source_payload(ranking_report, settled_predictions, learned_losses, settlement_sweep),
+        "factorMining": {
+            "successPatterns": success_patterns(rows),
+            "forbiddenRegions": forbidden_regions(frame, rows),
+        },
+        "lossMemory": learned_losses,
+        "filters": filter_config(learned_losses),
+        "weights": factor_weights(rows, learned_losses["patterns"]),
+    }
+
+
+def _source_payload(
+    ranking_report: dict[str, Any],
+    settled_predictions: list[dict[str, Any]],
+    learned_losses: dict[str, Any],
+    settlement_sweep: dict[str, int] | None,
+) -> dict[str, Any]:
+    return {
+        "rankingTotal": int(ranking_report.get("total") or 0),
+        "baseFactorCount": int(ranking_report.get("baseFactorCount") or 0),
+        "settledPredictionCount": len(settled_predictions),
+        "lossPatternCount": len(learned_losses["patterns"]),
+        "lossMemoryStatus": learned_losses["status"],
+        "settlementSweep": settlement_sweep or {},
+    }

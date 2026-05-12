@@ -6,6 +6,7 @@ import {
   fetchFactorRanking,
   requestFactorRankingRefresh,
 } from "../api/client";
+import FactorCombinationPanel from "../components/FactorCombinationPanel";
 import "./FactorsPage.css";
 
 const DURATIONS = [
@@ -24,6 +25,15 @@ function directionLabel(v) {
 function formatNum(n, digits = 4) {
   if (n == null || Number.isNaN(Number(n))) return "—";
   return Number(n).toFixed(digits);
+}
+
+function formatPct(n, digits = 1) {
+  if (n == null || Number.isNaN(Number(n))) return "—";
+  return `${(Number(n) * 100).toFixed(digits)}%`;
+}
+
+function factorTitle(f) {
+  return f?.displayName || f?.factorDisplayName || f?.description || f?.name || "未命名因子";
 }
 
 export default function FactorsPage() {
@@ -179,7 +189,8 @@ export default function FactorsPage() {
     return factors.filter(
       (f) =>
         (f.name && f.name.toLowerCase().includes(q)) ||
-        (f.description && f.description.toLowerCase().includes(q)),
+        (f.description && f.description.toLowerCase().includes(q)) ||
+        (f.categoryName && f.categoryName.toLowerCase().includes(q)),
     );
   }, [factors, query]);
 
@@ -259,6 +270,8 @@ export default function FactorsPage() {
         <p className="factors-rank-hint">{rankStatus}</p>
       </section>
 
+      <FactorCombinationPanel symbol={symbol} duration={duration} />
+
       <div className="factors-grid">
         <section className="factors-list-panel card-surface">
           <div className="section-head factors-section-head">
@@ -301,7 +314,7 @@ export default function FactorsPage() {
             <table className="factors-table">
               <thead>
                 <tr>
-                  <th>名称</th>
+                  <th>中文因子</th>
                   <th>分类</th>
                   <th>方向</th>
                 </tr>
@@ -314,8 +327,8 @@ export default function FactorsPage() {
                     onClick={() => setSelectedName(f.name)}
                   >
                     <td>
+                      <strong className="factors-name-cn">{factorTitle(f)}</strong>
                       <code className="factors-code">{f.name}</code>
-                      <div className="factors-desc-preview">{f.description}</div>
                     </td>
                     <td>{f.categoryName || f.category}</td>
                     <td>{directionLabel(f.direction)}</td>
@@ -333,12 +346,18 @@ export default function FactorsPage() {
           <div className="section-head factors-section-head">
             <div>
               <span className="section-kicker">详情</span>
-              <h2>{selectedName ? selectedName : "请选择因子"}</h2>
+              <h2>{detail ? factorTitle(detail) : selectedName || "请选择因子"}</h2>
             </div>
           </div>
           {detailError ? <p className="factors-error">{detailError}</p> : null}
           {detail ? (
             <dl className="factors-dl">
+              <div>
+                <dt>英文/字段名</dt>
+                <dd>
+                  <code className="factors-code">{detail.name}</code>
+                </dd>
+              </div>
               <div>
                 <dt>说明</dt>
                 <dd>{detail.description}</dd>
@@ -403,6 +422,22 @@ export default function FactorsPage() {
                     <dd>{formatNum(backtest.longShortReturn, 6)}</dd>
                   </div>
                   <div>
+                    <dt>因子夏普</dt>
+                    <dd>{formatNum(backtest.sharpe, 4)}</dd>
+                  </div>
+                  <div>
+                    <dt>胜率</dt>
+                    <dd>{formatPct(backtest.winRate, 1)}</dd>
+                  </div>
+                  <div>
+                    <dt>最大回撤</dt>
+                    <dd>{formatPct(backtest.maxDrawdown, 2)}</dd>
+                  </div>
+                  <div>
+                    <dt>盈亏比</dt>
+                    <dd>{formatNum(backtest.profitFactor, 4)}</dd>
+                  </div>
+                  <div>
                     <dt>换手</dt>
                     <dd>{formatNum(backtest.turnover, 4)}</dd>
                   </div>
@@ -426,8 +461,12 @@ export default function FactorsPage() {
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>因子</th>
+                    <th>中文因子</th>
+                    <th>类别</th>
                     <th>IR</th>
+                    <th>贡献</th>
+                    <th>夏普</th>
+                    <th>胜率</th>
                     <th>IC 均值</th>
                     <th>多空</th>
                   </tr>
@@ -441,9 +480,14 @@ export default function FactorsPage() {
                     >
                       <td>{i + 1}</td>
                       <td>
+                        <strong className="factors-name-cn">{factorTitle(row)}</strong>
                         <code className="factors-code">{row.factorName}</code>
                       </td>
+                      <td>{row.categoryName || row.category}</td>
                       <td>{formatNum(row.ir, 4)}</td>
+                      <td>{formatPct(row.contribution, 1)}</td>
+                      <td>{formatNum(row.sharpe, 2)}</td>
+                      <td>{formatPct(row.winRate, 0)}</td>
                       <td>{formatNum(row.icMean, 4)}</td>
                       <td>{formatNum(row.longShortReturn, 4)}</td>
                     </tr>

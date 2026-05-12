@@ -45,6 +45,9 @@ FOUR_BAR_10M_RM_RULE_NAME = "four_bar_10m_reverse_martingale_v1"
 FIVE_BAR_10M_RM_STRATEGY_KEY = "five_bar_10m_reverse_martingale_v1"
 FIVE_BAR_10M_RM_RULE_NAME = "five_bar_10m_reverse_martingale_v1"
 
+FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
+FACTOR_COMBO_RULE_NAME = "factor_combo_cached_ranking_v1"
+
 # 三连/四连/五连 10m：自动下单用面板基础数量；仅在指数 n 连形态再现时下注，无 Recovery 补单。
 N_BAR_10M_RM_STRATEGY_KEYS: frozenset[str] = frozenset(
     {
@@ -108,6 +111,19 @@ STRATEGIES = (
         rule_names=None,
         tradable=False,
         disabled_reason="仅供规则回测 API",
+    ),
+    StrategyDefinition(
+        key=FACTOR_COMBO_STRATEGY_KEY,
+        name="多因子组合胜率榜",
+        description=(
+            "读取因子页缓存的最佳组合因子；每个结算周期独立使用该周期胜率最高的组合，"
+            "用当前组合分数给出多空方向，可在自动策略中按周期开启模拟或实盘。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="factor_combination_ranking",
+        rule_names=(FACTOR_COMBO_RULE_NAME,),
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
     ),
     StrategyDefinition(
         key=ORDERBOOK_NOTIONAL_STRATEGY_KEY,

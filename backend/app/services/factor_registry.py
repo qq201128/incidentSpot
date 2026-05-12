@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.services.factor_extensions import ADDITIONAL_FACTORS
+from app.services.factor_external_extensions import EXTERNAL_DATA_FACTORS
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 # 与规则 / 因子排名回测周期一致（特征多在 1m 序列上构造，此处表示「适用规则周期」）
@@ -48,6 +50,13 @@ class FactorCategory(str, Enum):
     MULTI_TIMEFRAME = "multi_timeframe"
     ORDERBOOK = "orderbook"
     FUNDING = "funding"
+    POSITIONING = "positioning"
+    TAKER_FLOW = "taker_flow"
+    SMC = "smc"
+    SENTIMENT = "sentiment"
+    STATISTIC = "statistic"
+    ONCHAIN = "onchain"
+    PERFORMANCE = "performance"
 
 
 class FactorDirection(str, Enum):
@@ -742,6 +751,18 @@ FUNDING_FACTORS = (
     ),
 )
 
+
+def _factor_from_payload(payload: dict[str, Any]) -> FactorDefinition:
+    data = dict(payload)
+    data["category"] = FactorCategory(str(data["category"]))
+    data["direction"] = FactorDirection(str(data.get("direction", FactorDirection.NEUTRAL)))
+    return FactorDefinition(**data)
+
+
+EXTENDED_KLINE_FACTORS = tuple(
+    _factor_from_payload(payload) for payload in (*ADDITIONAL_FACTORS, *EXTERNAL_DATA_FACTORS)
+)
+
 # =============================================================================
 # All Factors Combined
 # =============================================================================
@@ -752,12 +773,23 @@ ALL_FACTORS: tuple[FactorDefinition, ...] = (
     *MOMENTUM_FACTORS,
     *VOLUME_FACTORS,
     *STRUCTURE_FACTORS,
+    *EXTENDED_KLINE_FACTORS,
     *MULTI_TIMEFRAME_FACTORS,
     *ORDERBOOK_FACTORS,
     *FUNDING_FACTORS,
 )
 
-FACTOR_BY_NAME: dict[str, FactorDefinition] = {f.name: f for f in ALL_FACTORS}
+
+def _factor_index(factors: tuple[FactorDefinition, ...]) -> dict[str, FactorDefinition]:
+    indexed: dict[str, FactorDefinition] = {}
+    for factor in factors:
+        if factor.name in indexed:
+            raise ValueError(f"duplicate factor definition: {factor.name}")
+        indexed[factor.name] = factor
+    return indexed
+
+
+FACTOR_BY_NAME: dict[str, FactorDefinition] = _factor_index(ALL_FACTORS)
 
 
 def get_factor(name: str) -> FactorDefinition | None:
@@ -798,6 +830,13 @@ def _category_display_name(cat: FactorCategory) -> str:
         FactorCategory.MULTI_TIMEFRAME: "多时间框架因子",
         FactorCategory.ORDERBOOK: "订单簿因子",
         FactorCategory.FUNDING: "资金费率因子",
+        FactorCategory.POSITIONING: "持仓因子",
+        FactorCategory.TAKER_FLOW: "主动成交因子",
+        FactorCategory.SMC: "SMC因子",
+        FactorCategory.SENTIMENT: "情绪因子",
+        FactorCategory.STATISTIC: "统计因子",
+        FactorCategory.ONCHAIN: "链上因子",
+        FactorCategory.PERFORMANCE: "绩效因子",
     }
     return names.get(cat, cat.value)
 
@@ -808,6 +847,7 @@ def factor_payload(factor: FactorDefinition) -> dict[str, Any]:
         "name": factor.name,
         "category": factor.category.value,
         "categoryName": _category_display_name(factor.category),
+        "displayName": factor.description,
         "description": factor.description,
         "formula": factor.formula,
         "sourceFile": factor.source_file,

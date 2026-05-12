@@ -381,4 +381,3 @@ def kline_ws_stream_name(interval: str) -> str:
     if interval == "10m":
         return "kline_1m"
     return f"kline_{parse_interval(interval)}"
-
