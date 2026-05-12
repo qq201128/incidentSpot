@@ -177,3 +177,13 @@ CREATE TABLE IF NOT EXISTS auto_trade_strategies (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (strategy_key, duration)
 );
+
+-- Background-precomputed factor IR rankings (see factor_ranking_background)
+CREATE TABLE IF NOT EXISTS factor_ranking_cache (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (symbol, duration)
+);

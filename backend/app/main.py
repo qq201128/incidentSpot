@@ -17,6 +17,7 @@ from app.db.session import init_db
 from app.services.auto_predict_service import auto_predict_loop
 from app.services.auto_settlement_service import auto_settlement_loop
 from app.services.auto_trade_service import auto_trade_loop
+from app.services.factor_ranking_background import factor_ranking_refresh_loop
 from app.services.ws_service import proxy_index_kline_stream, proxy_kline_stream
 
 load_backend_env_file()
@@ -40,6 +41,8 @@ app.state.settlement_task = None
 app.state.settlement_stop_event = None
 app.state.predict_task = None
 app.state.predict_stop_event = None
+app.state.factor_ranking_task = None
+app.state.factor_ranking_stop_event = None
 ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
 
 app.add_middleware(
@@ -74,14 +77,23 @@ async def on_startup() -> None:
     app.state.trade_stop_event = trade_stop
     app.state.trade_task = asyncio.create_task(auto_trade_loop(trade_stop))
 
+    factor_ranking_stop = asyncio.Event()
+    app.state.factor_ranking_stop_event = factor_ranking_stop
+    app.state.factor_ranking_task = asyncio.create_task(factor_ranking_refresh_loop(factor_ranking_stop))
+
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    for attr in ("settlement_stop_event", "predict_stop_event", "trade_stop_event"):
+    for attr in (
+        "settlement_stop_event",
+        "predict_stop_event",
+        "trade_stop_event",
+        "factor_ranking_stop_event",
+    ):
         ev = getattr(app.state, attr, None)
         if ev:
             ev.set()
-    for attr in ("settlement_task", "predict_task", "trade_task"):
+    for attr in ("settlement_task", "predict_task", "trade_task", "factor_ranking_task"):
         task = getattr(app.state, attr, None)
         if task:
             await task

@@ -199,14 +199,25 @@ export async function fetchFactorBacktest(factorName, symbol, duration = "10m") 
   return data;
 }
 
-/** 全因子按 IR 排名（需本地有该交易对 1m K 线）。options.signal 可中止；默认 3 分钟超时避免界面永久「计算中」。 */
+/** 读取后台缓存的全因子 IR 排名（轻量）；无缓存时 ranking 为空。 */
 export async function fetchFactorRanking(symbol, duration = "10m", category, options = {}) {
   const params = { symbol, duration };
   if (category) params.category = category;
   const { data } = await axios.get(`${BASE_URL}/api/factors/ranking`, {
     params,
     signal: options.signal,
-    timeout: options.timeoutMs ?? 180_000,
+    timeout: options.timeoutMs ?? 30_000,
+  });
+  return data;
+}
+
+/** 排队后台重算排名并写入缓存（不阻塞完成）。 */
+export async function requestFactorRankingRefresh(symbol, duration) {
+  const params = { symbol };
+  if (duration) params.duration = duration;
+  const { data } = await axios.post(`${BASE_URL}/api/factors/ranking/refresh`, null, {
+    params,
+    timeout: 15_000,
   });
   return data;
 }

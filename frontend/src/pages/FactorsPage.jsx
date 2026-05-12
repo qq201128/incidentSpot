@@ -4,6 +4,7 @@ import {
   fetchFactorDetail,
   fetchFactorsList,
   fetchFactorRanking,
+  requestFactorRankingRefresh,
 } from "../api/client";
 import "./FactorsPage.css";
 
@@ -108,7 +109,7 @@ export default function FactorsPage() {
     if (rankingSeqRef.current !== seq) {
       return;
     }
-    setRankStatus("正在计算排名（全量因子较慢，请稍候）…");
+    setRankStatus("加载排名缓存…");
     setRanking([]);
     try {
       const data = await fetchFactorRanking(sym, duration, category || undefined, {
@@ -121,7 +122,19 @@ export default function FactorsPage() {
         return;
       }
       setRanking(Array.isArray(data.ranking) ? data.ranking : []);
-      setRankStatus(`排名：${data.total ?? 0} 个有效因子（${sym} / ${duration}）`);
+      const src = data.source === "cache" ? "后台缓存" : "无缓存";
+      const when = data.updatedAt ? ` · 更新 ${data.updatedAt}` : "";
+      const total = data.total ?? 0;
+      if (data.source === "none") {
+        const extra = Array.isArray(data.precomputedSymbols)
+          ? `预计算交易对：${data.precomputedSymbols.join(", ")}。`
+          : "";
+        setRankStatus(
+          `暂无该组合的排名缓存（${sym} / ${duration}）。${extra}可使用「请求后台刷新」或调整 FACTOR_RANKING_SYMBOLS。`,
+        );
+      } else {
+        setRankStatus(`排名：${total} 个因子（${sym} / ${duration} · ${src}${when}）`);
+      }
     } catch (e) {
       const aborted =
         e?.code === "ERR_CANCELED" ||
@@ -220,8 +233,27 @@ export default function FactorsPage() {
               ))}
             </select>
           </label>
-          <button type="button" className="factors-btn-secondary" onClick={() => loadRanking()}>
-            刷新排名
+          <button
+            type="button"
+            className="factors-btn-secondary"
+            onClick={async () => {
+              const sym = symbol.trim().toUpperCase();
+              if (sym.length < 6) {
+                setRankStatus("请输入有效交易对（如 BTCUSDT）");
+                return;
+              }
+              try {
+                setRankStatus("已排队后台重算，请稍候再点或等待自动加载…");
+                await requestFactorRankingRefresh(sym);
+                window.setTimeout(() => {
+                  void loadRankingRef.current();
+                }, 2500);
+              } catch (e) {
+                setRankStatus(`排队刷新失败：${e.message}`);
+              }
+            }}
+          >
+            请求后台刷新排名
           </button>
         </div>
         <p className="factors-rank-hint">{rankStatus}</p>
@@ -388,7 +420,7 @@ export default function FactorsPage() {
           ) : null}
 
           <div className="factors-ranking-block">
-            <h3 className="factors-subhead">按 IR 排序（当前筛选与交易对）</h3>
+            <h3 className="factors-subhead">按 IR 排序（后台缓存 · 当前筛选与交易对）</h3>
             <div className="factors-ranking-wrap">
               <table className="factors-table factors-ranking-table">
                 <thead>

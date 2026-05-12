@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+import logging
 
-from app.services.factor_backtest_service import run_factor_backtest, run_factor_ranking
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+
+from app.services.factor_backtest_service import run_factor_backtest
+from app.services.factor_ranking_background import refresh_symbol_rankings
+from app.services.factor_ranking_cache_service import (
+    factor_ranking_precomputed_symbols,
+    get_cached_ranking,
+)
 from app.services.factor_registry import (
+    factor_payload,
     get_factor,
     list_factor_categories,
     list_factor_payloads,
-    factor_payload,
 )
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 router = APIRouter(prefix="/api/factors", tags=["factors"])
+logger = logging.getLogger("uvicorn.error")
+
+
+def _filter_ranking_by_category(ranking: list[dict], category: str | None) -> list[dict]:
+    if not category:
+        return ranking
+    return [row for row in ranking if row.get("category") == category]
 
 
 @router.get("/list")
@@ -55,17 +70,65 @@ def factor_ranking(
     duration: str = Query("10m"),
     category: str | None = Query(None),
 ) -> dict:
-    try:
-        ranking = run_factor_ranking(symbol, duration, category)
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+
+    sym_u = symbol.upper()
+    precomputed = factor_ranking_precomputed_symbols()
+    cached = get_cached_ranking(sym_u, duration)
+
+    if cached is None:
         return {
-            "symbol": symbol.upper(),
+            "symbol": sym_u,
             "duration": duration,
             "category": category,
-            "ranking": ranking,
-            "total": len(ranking),
+            "ranking": [],
+            "total": 0,
+            "updatedAt": None,
+            "source": "none",
+            "precomputedSymbols": precomputed,
+            "hint": "排名由后台定时写入缓存；当前交易对/周期尚无数据。可将该交易对加入 FACTOR_RANKING_SYMBOLS 或使用 POST /ranking/refresh 排队重算。",
         }
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    full = list(cached["ranking"])
+    filtered = _filter_ranking_by_category(full, category)
+    filtered.sort(key=lambda x: abs(x.get("ir") or 0), reverse=True)
+
+    return {
+        "symbol": sym_u,
+        "duration": duration,
+        "category": category,
+        "ranking": filtered,
+        "total": len(filtered),
+        "updatedAt": cached["updatedAt"],
+        "source": "cache",
+        "precomputedSymbols": precomputed,
+    }
+
+
+def _background_refresh_rankings(symbol: str, duration: str | None) -> None:
+    try:
+        refresh_symbol_rankings(symbol, duration)
+    except Exception:
+        logger.exception("background factor ranking refresh failed: %s %s", symbol, duration)
+
+
+@router.post("/ranking/refresh")
+def factor_ranking_refresh(
+    background_tasks: BackgroundTasks,
+    symbol: str = Query(..., min_length=6),
+    duration: str | None = Query(None, description="omit to refresh all supported durations"),
+) -> dict:
+    if duration is not None and duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    sym_u = symbol.upper()
+    background_tasks.add_task(_background_refresh_rankings, sym_u, duration)
+    return {
+        "ok": True,
+        "symbol": sym_u,
+        "duration": duration,
+        "message": "已排队后台重算并写入缓存；完成后刷新页面或稍候再加载排名。",
+    }
 
 
 @router.get("/categories")

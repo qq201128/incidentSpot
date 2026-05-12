@@ -7,7 +7,7 @@ Each factor has:
 - description: human-readable explanation
 - formula: calculation description
 - source_file: where the factor is computed
-- timeframes: applicable timeframes (e.g., ["1m", "5m", "10m"])
+- timeframes: rule horizons used in UI/backtest (10m/30m/60m/1d); multi-TF rows also list feature bar intervals (e.g. 5m)
 - direction: "higher_better", "lower_better", or "neutral"
 """
 
@@ -16,6 +16,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+
+# 与规则 / 因子排名回测周期一致（特征多在 1m 序列上构造，此处表示「适用规则周期」）
+_RULE_UI_TIME_ORDER = ("10m", "30m", "60m", "1d")
+RULE_FACTOR_TIMEFRAMES: tuple[str, ...] = tuple(
+    d for d in _RULE_UI_TIME_ORDER if d in SUPPORTED_RULE_DURATIONS
+)
+
+
+def _timeframes_with_rule_align(*feature_bar_intervals: str) -> tuple[str, ...]:
+    """先列规则周期，再追加特征所用 K 线周期（去重）。"""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for x in (*RULE_FACTOR_TIMEFRAMES, *feature_bar_intervals):
+        if x in seen:
+            continue
+        seen.add(x)
+        ordered.append(x)
+    return tuple(ordered)
 
 
 class FactorCategory(str, Enum):
@@ -43,7 +63,7 @@ class FactorDefinition:
     description: str
     formula: str
     source_file: str = "kline_features.py"
-    timeframes: tuple[str, ...] = ("1m",)
+    timeframes: tuple[str, ...] = RULE_FACTOR_TIMEFRAMES
     direction: FactorDirection = FactorDirection.NEUTRAL
     parameters: dict[str, Any] = field(default_factory=dict)
 
@@ -528,7 +548,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="5分钟-5周期收益率",
         formula="close_5m.pct_change(5)",
         source_file="enhanced_timeframes.py",
-        timeframes=("5m",),
+        timeframes=_timeframes_with_rule_align("5m"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -537,7 +557,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="5分钟-12周期均线偏离",
         formula="close_5m / sma(12) - 1",
         source_file="enhanced_timeframes.py",
-        timeframes=("5m",),
+        timeframes=_timeframes_with_rule_align("5m"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -546,7 +566,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="5分钟-12周期波动率",
         formula="ret_5m.rolling(12).std()",
         source_file="enhanced_timeframes.py",
-        timeframes=("5m",),
+        timeframes=_timeframes_with_rule_align("5m"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -555,7 +575,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="5分钟-K线内位置",
         formula="(close - low) / (high - low)",
         source_file="enhanced_timeframes.py",
-        timeframes=("5m",),
+        timeframes=_timeframes_with_rule_align("5m"),
         direction=FactorDirection.NEUTRAL,
     ),
     # 15分钟时间框架
@@ -565,7 +585,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="15分钟-4周期收益率",
         formula="close_15m.pct_change(4)",
         source_file="enhanced_timeframes.py",
-        timeframes=("15m",),
+        timeframes=_timeframes_with_rule_align("15m"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -574,7 +594,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="15分钟-8周期均线偏离",
         formula="close_15m / sma(8) - 1",
         source_file="enhanced_timeframes.py",
-        timeframes=("15m",),
+        timeframes=_timeframes_with_rule_align("15m"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -583,7 +603,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="15分钟-8周期波动率",
         formula="ret_15m.rolling(8).std()",
         source_file="enhanced_timeframes.py",
-        timeframes=("15m",),
+        timeframes=_timeframes_with_rule_align("15m"),
         direction=FactorDirection.NEUTRAL,
     ),
     # 1小时时间框架
@@ -593,7 +613,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="1小时-4周期收益率",
         formula="close_1h.pct_change(4)",
         source_file="enhanced_timeframes.py",
-        timeframes=("1h",),
+        timeframes=_timeframes_with_rule_align("1h"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -602,7 +622,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="1小时-4周期波动率",
         formula="ret_1h.rolling(4).std()",
         source_file="enhanced_timeframes.py",
-        timeframes=("1h",),
+        timeframes=_timeframes_with_rule_align("1h"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -611,7 +631,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="1小时-12周期波动率",
         formula="ret_1h.rolling(12).std()",
         source_file="enhanced_timeframes.py",
-        timeframes=("1h",),
+        timeframes=_timeframes_with_rule_align("1h"),
         direction=FactorDirection.NEUTRAL,
     ),
     # 4小时时间框架
@@ -621,7 +641,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="4小时-3周期波动率",
         formula="ret_4h.rolling(3).std()",
         source_file="enhanced_timeframes.py",
-        timeframes=("4h",),
+        timeframes=_timeframes_with_rule_align("4h"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -630,7 +650,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="4小时-K线内位置",
         formula="(close - low_4h) / (high_4h - low_4h)",
         source_file="enhanced_timeframes.py",
-        timeframes=("4h",),
+        timeframes=_timeframes_with_rule_align("4h"),
         direction=FactorDirection.NEUTRAL,
     ),
     # 日线时间框架
@@ -640,7 +660,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="日线-K线内位置",
         formula="(close - low_1d) / (high_1d - low_1d)",
         source_file="enhanced_timeframes.py",
-        timeframes=("1d",),
+        timeframes=_timeframes_with_rule_align("1d"),
         direction=FactorDirection.NEUTRAL,
     ),
     FactorDefinition(
@@ -649,7 +669,7 @@ MULTI_TIMEFRAME_FACTORS = (
         description="日线-成交量占比",
         formula="volume / daily_volume",
         source_file="enhanced_timeframes.py",
-        timeframes=("1d",),
+        timeframes=_timeframes_with_rule_align("1d"),
         direction=FactorDirection.NEUTRAL,
     ),
 )
