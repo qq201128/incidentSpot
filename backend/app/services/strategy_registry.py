@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
-from app.services.rule_config import RULE_DURATION
 
 DEFAULT_STRATEGY_KEY = "orderbook_notional_40m"
 MANUAL_STRATEGY_KEY = "manual"
@@ -73,13 +72,6 @@ def is_continuous_orderbook_strategy(strategy_key: str | None) -> bool:
     if not strategy_key:
         return False
     return strategy_key in CONTINUOUS_ORDERBOOK_STRATEGY_KEYS
-
-
-def strategy_supports_prediction_duration(strategy_key: str, duration: str) -> bool:
-    """预测/规则信号是否与该结算周期兼容（例如三连指数 10m 反马丁仅实现 10m 桶）。"""
-    if strategy_key in N_BAR_10M_RM_STRATEGY_KEYS:
-        return duration == RULE_DURATION
-    return True
 
 
 @dataclass(frozen=True)

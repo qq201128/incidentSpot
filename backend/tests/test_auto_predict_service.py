@@ -136,16 +136,19 @@ def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
     assert allow_existing_flags == [True, False]
 
 
-def test_prediction_targets_skip_n_bar_strategies_on_non_10m_duration(monkeypatch) -> None:
+def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     mixed = [
         _settings(THREE_BAR_10M_RM_STRATEGY_KEY, duration="30m"),
         _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY, duration="10m"),
     ]
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
     targets = service._prediction_targets()
-    assert len(targets) == 1
-    assert targets[0].strategy_key == ORDERBOOK_NOTIONAL_STRATEGY_KEY
-    assert targets[0].duration == "10m"
+    assert len(targets) == 2
+    keys = {(t.strategy_key, t.duration) for t in targets}
+    assert keys == {
+        (THREE_BAR_10M_RM_STRATEGY_KEY, "30m"),
+        (ORDERBOOK_NOTIONAL_STRATEGY_KEY, "10m"),
+    }
 
 
 def test_next_predict_wait_polls_during_entry_window(monkeypatch) -> None:

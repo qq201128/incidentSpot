@@ -9,7 +9,8 @@ from app.services.blind_reverse_martingale_strategy import load_blind_rm_settlem
 from app.services.kline_timing import (
     RULE_INTERVAL_MS,
     align_to_rule_interval_bucket,
-    current_rule_entry_open_time,
+    align_to_rule_interval_bucket_for_duration,
+    current_rule_entry_open_time_for_duration,
     is_within_entry_grace,
 )
 from app.services.n_bar_rm_htf_vol_gate import (
@@ -17,7 +18,7 @@ from app.services.n_bar_rm_htf_vol_gate import (
     evaluate_volatility_spike_suppress,
     n_bar_rm_htf_vol_gate_enabled,
 )
-from app.services.rule_config import RULE_DURATION
+from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     FIVE_BAR_10M_RM_STRATEGY_KEY,
     FOUR_BAR_10M_RM_STRATEGY_KEY,
@@ -118,9 +119,9 @@ def predict_n_bar_10m_reverse_martingale_direction(
     entry_open_time: int | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
-    if duration != RULE_DURATION:
+    if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(
-            f"n-bar 10m reverse martingale supports only {RULE_DURATION}, got {duration}"
+            f"n-bar reverse martingale supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}"
         )
     if streak_length not in (3, 4, 5):
         raise ValueError(f"streak_length must be 3, 4, or 5, got {streak_length}")
@@ -131,9 +132,9 @@ def predict_n_bar_10m_reverse_martingale_direction(
 
     state = load_blind_rm_settlement_state(strategy.key, sym)
     if entry_open_time is None:
-        open_time = current_rule_entry_open_time(now_ms)
+        open_time = current_rule_entry_open_time_for_duration(duration, now_ms)
     else:
-        open_time = align_to_rule_interval_bucket(int(entry_open_time))
+        open_time = align_to_rule_interval_bucket_for_duration(int(entry_open_time), duration)
     entry_price = float(fetch_premium_index(sym).get("indexPrice") or 0)
     if entry_price <= 0:
         raise ValueError("latest index price unavailable")
@@ -153,7 +154,7 @@ def predict_n_bar_10m_reverse_martingale_direction(
     oldest_bar_open: int | None = None
     fresh_floor: int | None = None
 
-    # 仅当「前 n 根已收盘指数 10m」构成 n 连阴/阳时下注；对**当前新开**这根 10m 押与前 n 根趋势相反。
+    # 形态仍由「前 n 根已收盘指数 10m」判定；open_time / duration 与所选事件合约结算周期对齐（10m/30m/60m/1d 桶起点均在 10m 网格上）。
     # 连亏后不补单：下一笔仍须再次满足形态；且形态所含 K 须全部落在「上一笔已结算事件」对应 10m 桶之后（与猜赢后等待新鲜形态同理）。
     streak_raw, last_bars = streak_and_last_n_10m_rest(sym, open_time, streak_length)
     last_settled_ot = last_settled_event_boundary_ms(strategy.key, sym)
