@@ -19,6 +19,8 @@ from app.services.orderbook_notional_strategy import (
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_10M_RULE_NAME,
     ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_MG_51020_RULE_NAME,
+    ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME,
@@ -65,6 +67,10 @@ def test_notional_config_for_strategy_key_sets_10m_and_15m_thresholds() -> None:
     )
     assert (
         notional_config_for_strategy_key(ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY).difference_threshold
+        == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M
+    )
+    assert (
+        notional_config_for_strategy_key(ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY).difference_threshold
         == ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M
     )
     assert (
@@ -189,6 +195,30 @@ def test_predict_orderbook_notional_mg_5102045_registry() -> None:
 
     assert result["strategy_key"] == ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY
     assert result["trade_quality_gate"] == ORDERBOOK_NOTIONAL_MG_5102045_RULE_NAME
+
+
+def test_predict_orderbook_notional_15m_mg_51020_registry() -> None:
+    config = OrderbookNotionalConfig(
+        levels_per_side=TEST_LEVELS_PER_SIDE,
+        min_qty=TEST_MIN_QTY,
+        difference_threshold=TEST_THRESHOLD,
+    )
+    dependencies = OrderbookNotionalDependencies(
+        fetch_depth=_depth,
+        fetch_price=lambda symbol: {"symbol": symbol, "indexPrice": TEST_INDEX_PRICE},
+    )
+
+    result = predict_orderbook_notional_direction(
+        "btcusdt",
+        entry_open_time=ENTRY_OPEN_TIME,
+        now_ms=ENTRY_OPEN_TIME + WITHIN_ORDERBOOK_GRACE_MS,
+        result_strategy_key=ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
+        config=config,
+        dependencies=dependencies,
+    )
+
+    assert result["strategy_key"] == ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY
+    assert result["trade_quality_gate"] == ORDERBOOK_NOTIONAL_15M_MG_51020_RULE_NAME
 
 
 def test_predict_orderbook_notional_requires_entry_window_to_trade() -> None:

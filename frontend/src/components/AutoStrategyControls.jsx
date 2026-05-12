@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
 
-export default function AutoStrategyControls({ symbol, amount, liveTradingEnabled }) {
+export default function AutoStrategyControls({ symbol, amount }) {
   const [strategies, setStrategies] = useState([]);
   const strategiesRef = useRef([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +24,7 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
     return updateAutoTradeStrategy(slot.strategyKey, {
       strategyKey: slot.strategyKey,
       enabled,
-      liveTradingEnabled,
+      liveTradingEnabled: !!slot.liveTradingEnabled,
       symbol,
       duration: slot.duration,
       durationMinutes: slot.durationMinutes,
@@ -53,7 +53,7 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
     };
   }, []);
 
-  /** 交易对 / 数量 / 模拟开关变更时同步到已开启的周期槽位 */
+  /** 交易对或数量变更时同步到已开启的周期槽位（各槽位保留自身实盘开关） */
   useEffect(() => {
     if (!enabledKeys) return;
     const enabled = strategiesRef.current.filter((item) => item.enabled);
@@ -69,7 +69,38 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
     return () => {
       stopped = true;
     };
-  }, [amount, enabledKeys, liveTradingEnabled, symbol]);
+  }, [amount, enabledKeys, symbol]);
+
+  const toggleStrategyLive = useCallback(
+    async (group) => {
+      if (group.tradable === false) return;
+      const nextLive = !group.slots.some((s) => s.liveTradingEnabled);
+      const busyKey = `${group.strategyKey}:__live__`;
+      setUpdatingKey(busyKey);
+      setError("");
+      try {
+        const rows = await Promise.all(
+          group.slots.map((slot) =>
+            updateAutoTradeStrategy(slot.strategyKey, {
+              strategyKey: slot.strategyKey,
+              enabled: slot.enabled,
+              liveTradingEnabled: nextLive,
+              symbol,
+              duration: slot.duration,
+              durationMinutes: slot.durationMinutes,
+              qty: Number(amount),
+            }),
+          ),
+        );
+        _mergeStrategyRows(setStrategies, rows);
+      } catch (err) {
+        setError(_errorMessage(err, "更新策略实盘开关失败"));
+      } finally {
+        setUpdatingKey("");
+      }
+    },
+    [amount, symbol],
+  );
 
   const toggleSlot = useCallback(
     async (slot) => {
@@ -86,7 +117,7 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
         setUpdatingKey("");
       }
     },
-    [amount, liveTradingEnabled, symbol],
+    [amount, symbol],
   );
 
   if (loading) {
@@ -98,7 +129,24 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
       {groups.map((group) => (
         <div key={group.strategyKey} className="strategy-control-row">
           <div className="strategy-control-main">
-            <strong>{group.name || group.strategyKey}</strong>
+            <div className="strategy-control-head">
+              <div className="strategy-control-titles">
+                <strong>{group.name || group.strategyKey}</strong>
+              </div>
+              <button
+                type="button"
+                className={`strategy-live-mode-btn ${group.slots.some((s) => s.liveTradingEnabled) ? "live" : "sim"}`}
+                aria-pressed={group.slots.some((s) => s.liveTradingEnabled)}
+                disabled={updatingKey === `${group.strategyKey}:__live__` || group.tradable === false}
+                onClick={() => void toggleStrategyLive(group)}
+                title="该策略下所有结算周期共用此开关；仅对已点亮的周期自动下单。"
+              >
+                <span className="mode-dot" />
+                <span className="strategy-live-mode-label">
+                  {group.slots.some((s) => s.liveTradingEnabled) ? "实盘" : "模拟"}
+                </span>
+              </button>
+            </div>
             <span>{group.description}</span>
             <StrategyBacktestSummary summary={group.backtestSummary} />
             {group.tradable === false && (
@@ -113,7 +161,9 @@ export default function AutoStrategyControls({ symbol, amount, liveTradingEnable
                     type="button"
                     className={`chip ${slot.enabled ? "active" : ""}`}
                     disabled={
-                      updatingKey === `${slot.strategyKey}:${slot.duration}` || group.tradable === false
+                      updatingKey === `${slot.strategyKey}:${slot.duration}` ||
+                      group.tradable === false ||
+                      updatingKey === `${group.strategyKey}:__live__`
                     }
                     onClick={() => void toggleSlot(slot)}
                     title={slot.enabled ? "点击关闭该周期" : "点击开启该周期"}

@@ -13,6 +13,8 @@ export default function TradeControls({
   predictInfo,
   predictError,
   aiHistorySuccess,
+  liveTradingEnabled,
+  onLiveTradingChange,
   onAmountChange,
   onDurationChange,
   onPredictClick,
@@ -20,6 +22,22 @@ export default function TradeControls({
 }) {
   return (
     <div className="card trade-card">
+      <div className="trade-live-mode-block">
+        <button
+          type="button"
+          className={liveTradingEnabled ? "trade-mode-btn live" : "trade-mode-btn sim"}
+          aria-pressed={liveTradingEnabled}
+          onClick={() => onLiveTradingChange((value) => !value)}
+        >
+          <span className="mode-dot" />
+          <strong>{liveTradingEnabled ? "真实交易：开启" : "模拟交易：关闭"}</strong>
+        </button>
+        <p className="toggle-hint trade-mode-hint trade-live-mode-hint">
+          {liveTradingEnabled
+            ? "本页手动下单与「规则计算并下单」将调用 Binance 事件合约接口。"
+            : "本页仅创建本地事件与订单记录，不请求交易所下单。"}
+        </p>
+      </div>
       <div className="symbol-row">
         <strong>{symbol}</strong>
         <span>当前价 {Number(currentPrice || 0).toFixed(2)}</span>

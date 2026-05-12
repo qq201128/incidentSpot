@@ -9,6 +9,7 @@ from app.services.kline_timing import is_within_entry_grace
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_RULE_NAME,
@@ -61,10 +62,10 @@ DEFAULT_DEPENDENCIES = OrderbookNotionalDependencies()
 
 
 def notional_config_for_strategy_key(strategy_key: str) -> OrderbookNotionalConfig:
-    """差额阈值：8M 默认；10M / 15M 策略单独提高门槛。倍投策略仍与 8M 规则共用同一阈值。"""
+    """差额阈值：8M 默认；10M / 15M 策略单独提高门槛。8M 倍投与固定阶梯倍投(8M 档)仍用 8M 阈值。"""
     if strategy_key == ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY:
         return OrderbookNotionalConfig(difference_threshold=ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_10M)
-    if strategy_key == ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY:
+    if strategy_key in (ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY, ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY):
         return OrderbookNotionalConfig(difference_threshold=ORDERBOOK_NOTIONAL_DIFFERENCE_THRESHOLD_15M)
     return DEFAULT_CONFIG
 

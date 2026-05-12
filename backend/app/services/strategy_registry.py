@@ -22,6 +22,9 @@ ORDERBOOK_NOTIONAL_10M_RULE_NAME = "orderbook_notional_value_delta_10m"
 ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY = "orderbook_notional_15m"
 ORDERBOOK_NOTIONAL_15M_RULE_NAME = "orderbook_notional_value_delta_15m"
 
+ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY = "orderbook_notional_15m_mg_51020"
+ORDERBOOK_NOTIONAL_15M_MG_51020_RULE_NAME = "orderbook_notional_value_delta_15m_mg_51020"
+
 ORDERBOOK_TRADE_FLOW_STRATEGY_KEY = "orderbook_trade_flow_1k"
 ORDERBOOK_TRADE_FLOW_RULE_NAME = "orderbook_depth_trade_flow_v1"
 ORDERBOOK_TRADE_FLOW_ENTRY_GRACE_MS = KLINE_ENTRY_GRACE_MS
@@ -55,6 +58,7 @@ CONTINUOUS_ORDERBOOK_STRATEGY_KEYS: frozenset[str] = frozenset(
         ORDERBOOK_NOTIONAL_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
+        ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
         ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
         ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
@@ -167,6 +171,21 @@ STRATEGIES = (
         requires_vegas_confirmation=False,
         signal_source="kline_refresh_orderbook_notional_delta_15m",
         rule_names=(ORDERBOOK_NOTIONAL_15M_RULE_NAME,),
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+        entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
+    ),
+    StrategyDefinition(
+        key=ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
+        name="订单簿15M差额·倍投(5/10/20)",
+        description=(
+            "与「订单簿15M差额」同一套信号（千档名义差额>15M USDT 跟随大额方向）；"
+            "自动下单名义固定阶梯：首单 5 USDT，连亏后依次为 10 / 20 USDT；"
+            "连续亏损满 3 笔后下一笔回到 5 USDT。面板数量对该策略名义无影响。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="kline_refresh_orderbook_notional_delta_mg_51020_15m",
+        rule_names=(ORDERBOOK_NOTIONAL_15M_MG_51020_RULE_NAME,),
         requires_kline_features=False,
         uses_trade_policy_gates=False,
         entry_grace_ms=ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,

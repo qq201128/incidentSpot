@@ -4,6 +4,7 @@ export const STRATEGY_LABELS = {
   orderbook_notional_40m: "订单簿8M差额",
   orderbook_notional_10m: "订单簿10M差额",
   orderbook_notional_15m: "订单簿15M差额",
+  orderbook_notional_15m_mg_51020: "订单簿15M差额·倍投(5/10/20)",
   orderbook_notional_40m_mg: "订单簿8M差额·倍投",
   orderbook_notional_10m_mg_5102045: "订单簿10M差额·倍投",
   orderbook_trade_flow_1k: "挂单波动+成交流向",

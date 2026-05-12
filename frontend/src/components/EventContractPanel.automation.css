@@ -1,3 +1,53 @@
+.automation-intro {
+  margin: 0 0 10px;
+}
+
+.strategy-control-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strategy-control-titles {
+  min-width: 0;
+  flex: 1;
+}
+
+.strategy-live-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 167, 255, 0.36);
+  background: rgba(120, 167, 255, 0.1);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-live-mode-btn.live {
+  border-color: rgba(63, 211, 166, 0.52);
+  background: rgba(31, 185, 121, 0.14);
+}
+
+.strategy-live-mode-btn.live .mode-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(63, 211, 166, 0.14);
+}
+
+.strategy-live-mode-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.strategy-live-mode-label {
+  white-space: nowrap;
+}
+
 .automation-toggles .toggle-row {
   display: flex;
   align-items: flex-start;

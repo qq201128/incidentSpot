@@ -191,10 +191,8 @@ export default function EventContractPanel({
           <AutomationCard
             amount={amount}
             clearAllLoading={clearAllLoading}
-            liveTradingEnabled={liveTradingEnabled}
             onClearAllEvents={onClearAllEvents}
             onClearAllEventsClick={handleClearAllEventsClick}
-            setLiveTradingEnabled={setLiveTradingEnabled}
             symbol={symbol}
           />
         </div>
@@ -211,6 +209,8 @@ export default function EventContractPanel({
             predictInfo={predictInfo}
             predictError={predictError}
             aiHistorySuccess={aiHistorySuccess}
+            liveTradingEnabled={liveTradingEnabled}
+            onLiveTradingChange={setLiveTradingEnabled}
             onAmountChange={setAmount}
             onDurationChange={setDurationMinutes}
             onPredictClick={handlePredictClick}
@@ -236,32 +236,15 @@ function _initialPanelTab() {
   return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "trade";
 }
 
-function AutomationCard({
-  amount,
-  clearAllLoading,
-  liveTradingEnabled,
-  onClearAllEvents,
-  onClearAllEventsClick,
-  setLiveTradingEnabled,
-  symbol,
-}) {
+function AutomationCard({ amount, clearAllLoading, onClearAllEvents, onClearAllEventsClick, symbol }) {
   return (
     <div className="card automation-toggles">
-      <button
-        type="button"
-        className={liveTradingEnabled ? "trade-mode-btn live" : "trade-mode-btn sim"}
-        aria-pressed={liveTradingEnabled}
-        onClick={() => setLiveTradingEnabled((value) => !value)}
-      >
-        <span className="mode-dot" />
-        <strong>{liveTradingEnabled ? "真实交易：开启" : "模拟交易：关闭"}</strong>
-      </button>
-      <p className="toggle-hint trade-mode-hint">
-        {liveTradingEnabled ? "当前会调用 Binance 事件合约下单接口。" : "当前只创建本地事件与订单记录。"}
+      <p className="toggle-hint trade-mode-hint automation-intro">
+        每条策略右侧可单独切换「模拟 / 实盘」；同一策略下各结算周期共用该开关。仅对已点亮的周期自动下单；多策略可并行。
       </p>
-      <AutoStrategyControls symbol={symbol} amount={amount} liveTradingEnabled={liveTradingEnabled} />
+      <AutoStrategyControls symbol={symbol} amount={amount} />
       <p className="toggle-hint trade-mode-hint">
-        每条策略下可同时点亮多个结算周期；同一策略在不同周期上的持仓相互独立；多策略亦可并行。
+        同一策略在不同周期上的持仓相互独立。
       </p>
       <div className="clear-all-row">
         <button

@@ -11,6 +11,7 @@ from app.services.orderbook_trade_flow_strategy import (
 from app.services.strategy_registry import (
     BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY,
@@ -43,6 +44,7 @@ def test_is_continuous_orderbook_strategy_includes_trade_flow() -> None:
     assert is_continuous_orderbook_strategy(ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY)
     assert is_continuous_orderbook_strategy(ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY)
     assert is_continuous_orderbook_strategy(ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY)
+    assert is_continuous_orderbook_strategy(ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY)
     assert is_continuous_orderbook_strategy(ORDERBOOK_NOTIONAL_MG_STRATEGY_KEY)
     assert is_continuous_orderbook_strategy(ORDERBOOK_NOTIONAL_MG_5102045_STRATEGY_KEY)
     assert is_continuous_orderbook_strategy(BLIND_REVERSE_MARTINGALE_STRATEGY_KEY)

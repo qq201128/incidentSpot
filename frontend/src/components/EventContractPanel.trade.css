@@ -2,6 +2,15 @@
   gap: 12px;
 }
 
+.trade-live-mode-block {
+  display: grid;
+  gap: 6px;
+}
+
+.trade-live-mode-hint {
+  margin: 0;
+}
+
 /* --- Order book (USD-M depth; primary placement: App market column) --- */
 .orderbook-panel {
   display: grid;
