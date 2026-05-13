@@ -224,10 +224,179 @@
   },
   "llmAgent": {
     "agent": "siliconflow_kimi_factor_agent_v1",
-    "error": "SiliconFlow chat completion failed: HTTPSConnectionPool(host='api.siliconflow.cn', port=443): Read timed out. (read timeout=60)",
+    "completionId": "019e1f455d3e227fdc8503f9b8e72531",
+    "model": "Pro/moonshotai/Kimi-K2.6",
     "provider": "siliconflow",
-    "status": "failed",
-    "updatedAt": "2026-05-13T02:52:25.112286+00:00"
+    "review": {
+      "candidateFactorIdeas": [
+        {
+          "formulaHint": "Mul(FundingZ(20), Neg(Sign(Delta(close, 10))))",
+          "nameHint": "funding_momentum_divergence",
+          "operatorTrace": [
+            "FundingZ",
+            "Delta",
+            "Sign",
+            "Neg",
+            "Mul"
+          ],
+          "rationale": "扩展衍生品算子家族。当资金费率极端（多头拥挤）但短期动量仍向上时，可能预示反转。与现有成交量/波动率聚类低相关，利用 BTCUSDT 的永续合约资金费率特征。",
+          "requiredColumns": [
+            "close",
+            "funding_rate"
+          ],
+          "validationChecks": [
+            "check_correlation_with_ret_240_below_0.5",
+            "check_correlation_with_vol_cluster_below_0.5",
+            "check_funding_rate_data_filled"
+          ]
+        },
+        {
+          "formulaHint": "Mul(OFIRatio, Sign(Sub(close, EMA(close, 20))))",
+          "nameHint": "ofi_trend_resonance",
+          "operatorTrace": [
+            "OFIRatio",
+            "EMA",
+            "Sub",
+            "Sign",
+            "Mul"
+          ],
+          "rationale": "结合微观结构（未探索家族）与均线成功模式。使用 EMA 而非 SMA 以避开 sma 高相关禁区，引入订单流不平衡捕捉日内压力，与现有因子形成正交。",
+          "requiredColumns": [
+            "close",
+            "bid_qty",
+            "ask_qty",
+            "volume"
+          ],
+          "validationChecks": [
+            "check_correlation_with_ma_ratio_cluster_below_0.6",
+            "check_microstructure_data_availability",
+            "check_sign_stability"
+          ]
+        },
+        {
+          "formulaHint": "Div(CMF(20), Add(Std(ret_1, 20), 0.001))",
+          "nameHint": "vol_adjusted_cmf",
+          "operatorTrace": [
+            "CMF",
+            "Std",
+            "Add",
+            "Div"
+          ],
+          "rationale": "扩展 volume_price 家族（tf_1d_volume_share 成功）。通过波动率标准化 CMF，避免与现有 vol_ma 聚类直接相关（因为是比值而非原始波动率），捕捉资金流强度相对波动率的异常。",
+          "requiredColumns": [
+            "close",
+            "high",
+            "low",
+            "volume"
+          ],
+          "validationChecks": [
+            "check_correlation_with_dollar_volume_ma_20_below_0.6",
+            "check_denominator_not_zero",
+            "check_outlier_robustness"
+          ]
+        },
+        {
+          "formulaHint": "Acceleration(Div(Abs(Delta(close, 1)), TrueRange(high, low, close)), 10)",
+          "nameHint": "price_efficiency_acceleration",
+          "operatorTrace": [
+            "Acceleration",
+            "Div",
+            "Abs",
+            "Delta",
+            "TrueRange"
+          ],
+          "rationale": "直接扩展 efficiency_ratio_10 的成功模式（abs, diff, sum 等）。加入 Acceleration 算子捕捉效率比率的二阶变化，属于 difference 家族创新组合，衡量趋势加速或减速。",
+          "requiredColumns": [
+            "close",
+            "high",
+            "low"
+          ],
+          "validationChecks": [
+            "check_correlation_with_efficiency_ratio_10_below_0.8",
+            "check_window_sensitivity_10",
+            "check_divide_by_zero_guard"
+          ]
+        },
+        {
+          "formulaHint": "IfElse(Greater(Rsquare(close, 60), 0.3), Resi(close, 60), 0)",
+          "nameHint": "trend_residual_filter",
+          "operatorTrace": [
+            "IfElse",
+            "Greater",
+            "Rsquare",
+            "Resi"
+          ],
+          "rationale": "利用 regression 和 logical 家族（现有基础因子未覆盖）。仅在趋势显著（R²高）时采用残差，避免震荡市噪音。与现有均线因子互补而非替代，提供条件化 alpha。",
+          "requiredColumns": [
+            "close"
+          ],
+          "validationChecks": [
+            "check_correlation_with_ma_ratio_cluster_below_0.5",
+            "check_lookback_60_stationarity",
+            "check_r2_threshold_sensitivity"
+          ]
+        },
+        {
+          "formulaHint": "Sub(0.5, TsQuantile(TrueRange(high, low, close), 60))",
+          "nameHint": "vol_tsquantile_mean_reversion",
+          "operatorTrace": [
+            "Sub",
+            "TsQuantile",
+            "TrueRange"
+          ],
+          "rationale": "扩展 risk_shape 和 time_series 家族。利用 TrueRange 而非现有 vol 指标，通过 TsQuantile 定位当前波动率历史位置，赌极端波动率回归，与 bb_width_20 聚类保持差异。",
+          "requiredColumns": [
+            "high",
+            "low",
+            "close"
+          ],
+          "validationChecks": [
+            "check_correlation_with_bb_width_20_below_0.6",
+            "check_extreme_quantile_behavior",
+            "check_60_period_lookback"
+          ]
+        }
+      ],
+      "factorMiningPlan": ":{",
+      "forbiddenRegionsToAvoid": [
+        "correlation_cluster:ma_ratio_120 (avgAbsCorrelation=0.7853): 包含 ma_ratio_120, ma_ratio_240, ret_240; 避免新建长周期均线比率或长周期收益率因子",
+        "correlation_cluster:dollar_volume_ma_20 (avgAbsCorrelation=0.724): 包含 bb_width_20, dollar_volume_ma_20, range_ma_20, upside_vol_60, vol_ma_120/20/60; 避免新建原始波动率、成交量移动平均或范围指标",
+        "correlation_cluster:hl_range (avgAbsCorrelation=0.59): 包含 hl_range, range_ma_20; 避免新建高低点范围类因子",
+        "correlation_cluster:tf_1d_volume_share (avgAbsCorrelation=0.5338): 包含 ret_240, tf_1d_volume_share; 避免将长周期收益与日成交量份额简单组合"
+      ],
+      "operatorFamiliesUsed": [
+        "time_series (Mean, Std, Skew, TsRank, TsZScore, Delay, TsQuantile)",
+        "arithmetic (Abs, Div, Sub, Mul, Sign, Neg, Add)",
+        "difference (Delta, PctChange, Acceleration)",
+        "volume_price (CMF, VWAP)",
+        "risk_shape (TrueRange, ATR)",
+        "regression (Rsquare, Resi)",
+        "logical (IfElse, Greater)",
+        "derivatives (FundingZ)",
+        "microstructure (OFIRatio)"
+      ],
+      "successfulPatternsToExpand": [
+        "长周期动量/收益率 (pct_change on 240m+ windows): ret_240 显示长周期记忆有效，可探索其他长周期窗口或结合微观结构过滤",
+        "多时间框架成交量份额 (multi_timeframe volume share): tf_1d_volume_share 成功，可扩展到其他时间框架或结合资金流指标",
+        "价格效率/噪音比率 (abs+diff+shift+sum): efficiency_ratio_10 的成功模式表明价格路径效率有预测力，可加入加速度或波动率调整",
+        "趋势强度指标 (ADX): adx_14 成功，可探索其他趋势确认方式或结合回归 R²",
+        "高阶矩偏度 (skew): realized_skew_20 成功，可探索峰度或条件偏度"
+      ]
+    },
+    "status": "completed",
+    "usage": {
+      "completion_tokens": 6147,
+      "completion_tokens_details": {
+        "reasoning_tokens": 4831
+      },
+      "prompt_cache_hit_tokens": 4224,
+      "prompt_cache_miss_tokens": 37,
+      "prompt_tokens": 4261,
+      "prompt_tokens_details": {
+        "cached_tokens": 4224
+      },
+      "total_tokens": 10408
+    }
   },
   "lossMemory": {
     "lossCount": 2,
@@ -248,7 +417,7 @@
     }
   },
   "symbol": "BTCUSDT",
-  "updatedAt": "2026-05-13T02:51:24.478033+00:00",
+  "updatedAt": "2026-05-13T02:58:19.153510+00:00",
   "version": "factor_learning_v1",
   "weights": {
     "adx_14": 0.082446,
