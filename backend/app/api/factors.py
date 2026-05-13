@@ -41,6 +41,10 @@ def _filter_ranking_by_category(ranking: list[dict], category: str | None) -> li
     return [row for row in ranking if row.get("category") == category]
 
 
+def _ranking_sort_key(row: dict) -> tuple[float, float]:
+    return (float(row.get("factorScore") or 0.0), abs(float(row.get("ir") or 0.0)))
+
+
 @router.get("/list")
 def list_factors(
     category: str | None = Query(None, description="Filter by category"),
@@ -164,7 +168,7 @@ def factor_ranking(
 
     full = list(cached["ranking"])
     filtered = _filter_ranking_by_category(full, category)
-    filtered.sort(key=lambda x: abs(x.get("ir") or 0), reverse=True)
+    filtered.sort(key=_ranking_sort_key, reverse=True)
 
     return {
         "symbol": sym_u,

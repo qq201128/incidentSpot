@@ -63,6 +63,11 @@ STATISTIC_FEATURE_COLUMNS = (
 PERFORMANCE_FEATURE_COLUMNS = (
     "rolling_sharpe_60", "win_rate_60", "profit_factor_60",
 )
+TECHNICAL_INDICATOR_FEATURE_COLUMNS = (
+    "aroon_up_25", "aroon_down_25", "aroon_osc_25", "dmi_spread_14",
+    "keltner_width_20", "keltner_pos_20", "trix_15", "tsi_25_13",
+    "ultimate_osc_7_14_28",
+)
 
 FEATURE_COLUMNS = [
     *RETURN_FEATURE_COLUMNS,
@@ -74,4 +79,5 @@ FEATURE_COLUMNS = [
     *SMC_FEATURE_COLUMNS,
     *STATISTIC_FEATURE_COLUMNS,
     *PERFORMANCE_FEATURE_COLUMNS,
+    *TECHNICAL_INDICATOR_FEATURE_COLUMNS,
 ]

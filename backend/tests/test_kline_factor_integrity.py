@@ -22,10 +22,18 @@ def test_registered_kline_factors_are_shifted_feature_columns() -> None:
     registered = {
         factor.name
         for factor in list_factors()
-        if factor.source_file == "kline_features.py"
+        if factor.source_file in {"kline_features.py", "kline_technical_indicators.py"}
     }
     missing = sorted(registered - set(FEATURE_COLUMNS))
     assert not missing
+
+
+def test_technical_indicators_are_registered_and_computed() -> None:
+    expected = {"aroon_osc_25", "dmi_spread_14", "trix_15", "tsi_25_13"}
+    frame, _spec = build_feature_frame(_sample_ohlcv_frame(), min_history=1)
+    registered = {factor.name for factor in list_factors() if factor.source_file == "kline_technical_indicators.py"}
+    assert expected <= registered
+    assert expected <= set(frame.columns)
 
 
 def test_shifted_features_ignore_current_bar_mutation() -> None:

@@ -7,6 +7,7 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_key
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 
@@ -38,8 +39,14 @@ def build_combination_signal_watchlist(
         failures.extend(mined.failures)
         for rank, row in enumerate(_top_ranking_rows(cached, top_per_duration), start=1):
             try:
-                signal = build_live_signal_from_ranking(mined.frame, row, symbol=symbol, duration=duration)
-                signals.append({**signal, "comboRank": rank})
+                ranked_row = {**row, "comboRank": rank}
+                signal = build_live_signal_from_ranking(
+                    mined.frame,
+                    ranked_row,
+                    symbol=symbol,
+                    duration=duration,
+                )
+                signals.append(_simulation_signal(signal, rank))
             except Exception as exc:
                 failures.append(_signal_failure(row, duration, exc))
     return {
@@ -57,6 +64,15 @@ def _top_ranking_rows(cached: dict[str, Any], top_per_duration: int) -> list[dic
     if not isinstance(ranking, list) or not ranking:
         return []
     return [dict(row) for row in ranking[:top_per_duration]]
+
+
+def _simulation_signal(signal: dict[str, Any], rank: int) -> dict[str, Any]:
+    return {
+        **signal,
+        "comboRank": rank,
+        "simulationMode": "paper_live",
+        "simulationStrategyKey": factor_combo_simulation_strategy_key(rank),
+    }
 
 
 def _signal_failure(row: dict[str, Any], duration: str, exc: Exception) -> dict[str, Any]:

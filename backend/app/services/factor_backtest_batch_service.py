@@ -5,7 +5,7 @@ from typing import Any
 
 from app.services.factor_backtest_service import run_factor_backtest_on_frame
 from app.services.factor_frame_service import load_factor_frame
-from app.services.factor_performance_metrics import add_contribution_scores
+from app.services.factor_metric_enrichment import enrich_factor_results
 from app.services.factor_registry import FactorDefinition, factor_payload, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
@@ -33,7 +33,7 @@ def run_all_factor_backtests(
     context = _BacktestContext(frame=load_factor_frame(symbol), symbol=symbol.upper())
     factors = list_factors()
     results, failures = _backtest_factor_matrix(context, factors, durations)
-    add_contribution_scores(results, duration_scoped=True)
+    enrich_factor_results(results, duration_scoped=True)
     return {
         "symbol": symbol.upper(),
         "durations": list(durations),

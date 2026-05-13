@@ -7,7 +7,9 @@ import {
   requestFactorRankingRefresh,
 } from "../api/client";
 import FactorCombinationPanel from "../components/FactorCombinationPanel";
+import FactorDetailPanel from "../components/FactorDetailPanel";
 import FactorLearningPanel from "../components/FactorLearningPanel";
+import FactorListPanel from "../components/FactorListPanel";
 import "./FactorsPage.css";
 
 const DURATIONS = [
@@ -16,26 +18,6 @@ const DURATIONS = [
   { value: "60m", label: "60 分钟" },
   { value: "1d", label: "1 天" },
 ];
-
-function directionLabel(v) {
-  if (v === "higher_better") return "高优";
-  if (v === "lower_better") return "低优";
-  return "中性";
-}
-
-function formatNum(n, digits = 4) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return Number(n).toFixed(digits);
-}
-
-function formatPct(n, digits = 1) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return `${(Number(n) * 100).toFixed(digits)}%`;
-}
-
-function factorTitle(f) {
-  return f?.displayName || f?.factorDisplayName || f?.description || f?.name || "未命名因子";
-}
 
 export default function FactorsPage() {
   const [symbol, setSymbol] = useState("BTCUSDT");
@@ -275,231 +257,28 @@ export default function FactorsPage() {
       <FactorLearningPanel symbol={symbol} duration={duration} />
 
       <div className="factors-grid">
-        <section className="factors-list-panel card-surface">
-          <div className="section-head factors-section-head">
-            <div>
-              <span className="section-kicker">筛选</span>
-              <h2>因子列表</h2>
-            </div>
-            <span className="factors-count">{total} 项</span>
-          </div>
-          <div className="factors-chips" role="tablist" aria-label="因子分类">
-            <button
-              type="button"
-              className={`factors-chip${category === "" ? " factors-chip-active" : ""}`}
-              onClick={() => setCategory("")}
-            >
-              全部
-            </button>
-            {categories.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                className={`factors-chip${category === c.key ? " factors-chip-active" : ""}`}
-                onClick={() => setCategory(c.key)}
-                title={`${c.count ?? 0} 个`}
-              >
-                {c.name}
-                <span className="factors-chip-meta">{c.count ?? 0}</span>
-              </button>
-            ))}
-          </div>
-          <label className="factors-search">
-            搜索
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="名称或描述…"
-            />
-          </label>
-          <div className="factors-table-wrap">
-            <table className="factors-table">
-              <thead>
-                <tr>
-                  <th>中文因子</th>
-                  <th>分类</th>
-                  <th>方向</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFactors.map((f) => (
-                  <tr
-                    key={f.name}
-                    className={selectedName === f.name ? "factors-row-selected" : ""}
-                    onClick={() => setSelectedName(f.name)}
-                  >
-                    <td>
-                      <strong className="factors-name-cn">{factorTitle(f)}</strong>
-                      <code className="factors-code">{f.name}</code>
-                    </td>
-                    <td>{f.categoryName || f.category}</td>
-                    <td>{directionLabel(f.direction)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!filteredFactors.length ? (
-              <p className="factors-empty">无匹配因子</p>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="factors-detail-panel card-surface">
-          <div className="section-head factors-section-head">
-            <div>
-              <span className="section-kicker">详情</span>
-              <h2>{detail ? factorTitle(detail) : selectedName || "请选择因子"}</h2>
-            </div>
-          </div>
-          {detailError ? <p className="factors-error">{detailError}</p> : null}
-          {detail ? (
-            <dl className="factors-dl">
-              <div>
-                <dt>英文/字段名</dt>
-                <dd>
-                  <code className="factors-code">{detail.name}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>说明</dt>
-                <dd>{detail.description}</dd>
-              </div>
-              <div>
-                <dt>公式</dt>
-                <dd>
-                  <code className="factors-formula">{detail.formula}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>周期</dt>
-                <dd>{(detail.timeframes || []).join(", ") || "—"}</dd>
-              </div>
-              <div>
-                <dt>方向</dt>
-                <dd>{directionLabel(detail.direction)}</dd>
-              </div>
-              <div>
-                <dt>源码</dt>
-                <dd>
-                  <code className="factors-code">{detail.sourceFile}</code>
-                </dd>
-              </div>
-            </dl>
-          ) : null}
-          {!selectedName ? (
-            <p className="factors-placeholder">在左侧表格中点击一行查看定义与回测。</p>
-          ) : null}
-
-          {selectedName ? (
-            <div className="factors-backtest-block">
-              <h3 className="factors-subhead">单因子回测</h3>
-              <button type="button" disabled={backtestLoading} onClick={runBacktest}>
-                {backtestLoading ? "计算中…" : "运行回测"}
-              </button>
-              {backtestError ? <p className="factors-error">{backtestError}</p> : null}
-              {backtest ? (
-                <dl className="factors-metrics">
-                  <div>
-                    <dt>样本期数</dt>
-                    <dd>{backtest.totalPeriods}</dd>
-                  </div>
-                  <div>
-                    <dt>IC 均值</dt>
-                    <dd>{formatNum(backtest.icMean, 6)}</dd>
-                  </div>
-                  <div>
-                    <dt>IC 标准差</dt>
-                    <dd>{formatNum(backtest.icStd, 6)}</dd>
-                  </div>
-                  <div>
-                    <dt>IR</dt>
-                    <dd>{formatNum(backtest.ir, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>IC&gt;0 占比</dt>
-                    <dd>{formatNum(backtest.icPositiveRate, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>多空收益</dt>
-                    <dd>{formatNum(backtest.longShortReturn, 6)}</dd>
-                  </div>
-                  <div>
-                    <dt>因子夏普</dt>
-                    <dd>{formatNum(backtest.sharpe, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>胜率</dt>
-                    <dd>{formatPct(backtest.winRate, 1)}</dd>
-                  </div>
-                  <div>
-                    <dt>最大回撤</dt>
-                    <dd>{formatPct(backtest.maxDrawdown, 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>盈亏比</dt>
-                    <dd>{formatNum(backtest.profitFactor, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>换手</dt>
-                    <dd>{formatNum(backtest.turnover, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>t 统计量</dt>
-                    <dd>{formatNum(backtest.tStat, 4)}</dd>
-                  </div>
-                  <div>
-                    <dt>p 值</dt>
-                    <dd>{formatNum(backtest.pValue, 6)}</dd>
-                  </div>
-                </dl>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="factors-ranking-block">
-            <h3 className="factors-subhead">按 IR 排序（后台缓存 · 当前筛选与交易对）</h3>
-            <div className="factors-ranking-wrap">
-              <table className="factors-table factors-ranking-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>中文因子</th>
-                    <th>类别</th>
-                    <th>IR</th>
-                    <th>贡献</th>
-                    <th>夏普</th>
-                    <th>胜率</th>
-                    <th>IC 均值</th>
-                    <th>多空</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ranking.slice(0, 40).map((row, i) => (
-                    <tr
-                      key={row.factorName}
-                      className={selectedName === row.factorName ? "factors-row-selected" : ""}
-                      onClick={() => setSelectedName(row.factorName)}
-                    >
-                      <td>{i + 1}</td>
-                      <td>
-                        <strong className="factors-name-cn">{factorTitle(row)}</strong>
-                        <code className="factors-code">{row.factorName}</code>
-                      </td>
-                      <td>{row.categoryName || row.category}</td>
-                      <td>{formatNum(row.ir, 4)}</td>
-                      <td>{formatPct(row.contribution, 1)}</td>
-                      <td>{formatNum(row.sharpe, 2)}</td>
-                      <td>{formatPct(row.winRate, 0)}</td>
-                      <td>{formatNum(row.icMean, 4)}</td>
-                      <td>{formatNum(row.longShortReturn, 4)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!ranking.length ? <p className="factors-empty factors-ranking-empty">暂无排名数据</p> : null}
-            </div>
-          </div>
-        </section>
+        <FactorListPanel
+          categories={categories}
+          category={category}
+          factors={filteredFactors}
+          onCategoryChange={setCategory}
+          onQueryChange={setQuery}
+          onSelectFactor={setSelectedName}
+          query={query}
+          selectedName={selectedName}
+          total={total}
+        />
+        <FactorDetailPanel
+          backtest={backtest}
+          backtestError={backtestError}
+          backtestLoading={backtestLoading}
+          detail={detail}
+          detailError={detailError}
+          onRunBacktest={runBacktest}
+          onSelectFactor={setSelectedName}
+          ranking={ranking}
+          selectedName={selectedName}
+        />
       </div>
     </main>
   );

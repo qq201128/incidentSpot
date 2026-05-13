@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.services.kline_advanced_features import add_advanced_kline_features
 from app.services.kline_feature_definitions import ADX_PERIOD, BASE_WINDOWS, BOLLINGER_WINDOW, CCI_PERIOD, CHOP_PERIOD, CMF_PERIOD, EPSILON, FEATURE_COLUMNS, MFI_PERIOD, ROC_PERIOD, RSI_FAST_PERIOD, RSI_SLOW_PERIOD, SKEW_KURT_WINDOW, STOCH_PERIOD, STOCH_SIGNAL_PERIOD, VOL_OF_VOL_WINDOW, VOLUME_MEDIAN_WINDOWS, VOLUME_WINDOWS, ZSCORE_WINDOW
+from app.services.kline_technical_indicators import add_technical_indicator_features
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ def build_feature_frame(df, min_history: int = 240) -> tuple[object, FeatureSpec
     _add_volatility_features(d, np)
     _add_structure_features(d, np)
     d = add_advanced_kline_features(d)
+    d = add_technical_indicator_features(d)
 
     d[FEATURE_COLUMNS] = d[FEATURE_COLUMNS].shift(1)
     out = d.dropna().reset_index(drop=True)

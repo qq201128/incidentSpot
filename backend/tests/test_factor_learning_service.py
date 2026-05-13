@@ -34,6 +34,8 @@ def test_factor_learning_memory_records_loss_patterns_and_weights() -> None:
     assert memory["factorMining"]["successPatterns"]
     assert memory["factorMining"]["operatorLibrary"]["total"] >= 60
     assert memory["weights"]["factor_a"] > 0
+    assert memory["adaptiveLearning"]["algorithmCount"] >= 10
+    assert memory["adaptiveLearning"]["overallAccuracy"] == 0.5
     assert memory["minedFactorLibrary"] == {}
     assert memory["monitoring"] == {}
 

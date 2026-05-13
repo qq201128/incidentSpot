@@ -17,6 +17,7 @@ from app.services.factor_combination_signal_service import (
     LIVE_MIN_WIN_RATE,
     build_live_signal_from_ranking,
 )
+from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
 from app.services.factor_mined_candidates import MinedCandidateResult, MinedFrameResult
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
@@ -61,7 +62,7 @@ def empty_mined_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(combo_service, "build_mined_candidates", empty)
 
 
-def test_combination_ranking_returns_win_rate_sorted_rows(
+def test_combination_ranking_returns_score_sorted_rows(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
     synthetic_factors: list[FactorDefinition],
@@ -77,10 +78,13 @@ def test_combination_ranking_returns_win_rate_sorted_rows(
     assert report["symbol"] == "BTCUSDT"
     assert report["testedCombinationCount"] == 3
     assert len(ranking) == 3
-    assert ranking == sorted(ranking, key=lambda row: row["winRate"], reverse=True)
+    assert ranking == sorted(ranking, key=lambda row: row["factorScore"], reverse=True)
     assert ranking[0]["comboSize"] == 2
     assert len(ranking[0]["members"]) == 2
     assert ranking[0]["winRate"] is not None
+    assert ranking[0]["factorScore"] > 0
+    assert ranking[0]["avgAbsCorrelation"] is not None
+    assert report["baseFactors"][0]["factorScore"] > 0
 
 
 def test_live_signal_uses_cached_combo_members(
@@ -160,6 +164,8 @@ def test_signal_watchlist_returns_top_three_per_duration(
 
     assert [item["comboRank"] for item in payload["signals"]] == [1, 2, 3]
     assert [item["factorName"] for item in payload["signals"]] == ["combo_0", "combo_1", "combo_2"]
+    assert payload["signals"][1]["simulationStrategyKey"] == factor_combo_shadow_strategy_key(2)
+    assert payload["signals"][2]["simulationMode"] == "paper_live"
     assert payload["topPerDuration"] == 3
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.factor_technical_extensions import TECHNICAL_INDICATOR_FACTORS
+
 ADDITIONAL_FACTORS: tuple[dict[str, Any], ...] = (
     {
         "name": "log_ret_1",
@@ -228,3 +230,5 @@ ADDITIONAL_FACTORS: tuple[dict[str, Any], ...] = (
         "direction": "neutral",
     },
 )
+
+ADDITIONAL_FACTORS = (*ADDITIONAL_FACTORS, *TECHNICAL_INDICATOR_FACTORS)

@@ -19,7 +19,8 @@ import pandas as pd
 from scipy import stats
 
 from app.services.factor_frame_service import load_factor_frame
-from app.services.factor_performance_metrics import add_contribution_scores, compute_signal_metrics
+from app.services.factor_metric_enrichment import enrich_factor_results
+from app.services.factor_performance_metrics import compute_signal_metrics
 from app.services.factor_registry import (
     FactorCategory,
     FactorDefinition,
@@ -67,12 +68,14 @@ def run_factor_backtest(
         raise ValueError(f"unknown factor: {factor_name}")
 
     feature_frame = load_factor_frame(symbol)
-    return run_factor_backtest_on_frame(
+    result = run_factor_backtest_on_frame(
         factor_def,
         feature_frame,
         symbol=symbol,
         duration=duration,
     )
+    enrich_factor_results([result], frame=feature_frame)
+    return result
 
 
 def run_factor_backtest_on_frame(
@@ -115,8 +118,8 @@ def run_factor_ranking(
         )
         results.append(result)
 
-    results.sort(key=lambda x: abs(x.get("ir") or 0), reverse=True)
-    add_contribution_scores(results)
+    enrich_factor_results(results, frame=feature_frame)
+    results.sort(key=lambda x: x.get("factorScore") or 0.0, reverse=True)
     return results
 
 
@@ -128,7 +131,7 @@ def _compute_factor_metrics(
 ) -> FactorBacktestResult:
     factor_name = factor_def.name
     horizon = DURATION_TO_MINUTES.get(duration, 10)
-    df = frame.copy()
+    df = frame[[factor_name, "close"]].copy()
     df["fwd_ret"] = df["close"].pct_change(horizon).shift(-horizon)
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=[factor_name, "fwd_ret"])

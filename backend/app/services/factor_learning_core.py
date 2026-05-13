@@ -4,6 +4,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.services.factor_adaptive_learning import adaptive_learning_summary
 from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_loss import loss_memory
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_VERSION
@@ -33,6 +34,13 @@ def build_factor_learning_memory(
     rows = factor_rows(ranking_report)
     loss_columns = candidate_loss_columns(rows, frame)
     learned_losses = loss_memory(frame, settled_predictions, loss_columns)
+    adaptive_learning = adaptive_learning_summary(
+        rows,
+        settled_predictions,
+        duration=duration,
+        loss_patterns=learned_losses["patterns"],
+        monitoring_report=monitoring_report,
+    )
     return {
         "version": FACTOR_LEARNING_VERSION,
         "symbol": symbol.strip().upper(),
@@ -53,6 +61,7 @@ def build_factor_learning_memory(
         "lossMemory": learned_losses,
         "filters": filter_config(learned_losses),
         "weights": factor_weights(rows, learned_losses["patterns"]),
+        "adaptiveLearning": adaptive_learning,
         "minedFactorLibrary": mined_library or {},
         "monitoring": monitoring_report or {},
     }
