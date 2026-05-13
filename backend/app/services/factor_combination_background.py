@@ -14,12 +14,13 @@ from app.services.factor_combination_service import (
     run_factor_combination_ranking,
 )
 from app.services.factor_learning_service import refresh_factor_learning_memory
+from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
 DAILY_REFRESH_TZ = ZoneInfo("Asia/Shanghai")
-DAILY_REFRESH_AT = time(hour=0, minute=0)
+DAILY_REFRESH_AT = time(hour=0, minute=30)
 
 
 def refresh_combination_ranking_for_symbol_duration(
@@ -31,6 +32,14 @@ def refresh_combination_ranking_for_symbol_duration(
         raise ValueError(f"unsupported duration: {duration}")
     report = run_factor_combination_ranking(symbol.strip().upper(), duration, config)
     save_cached_combination_ranking(report)
+    promotion = upsert_good_combinations(report)
+    logger.info(
+        "mined factor library updated: %s %s promoted=%s total=%s",
+        promotion["symbol"],
+        promotion["duration"],
+        promotion["promoted"],
+        promotion["libraryTotal"],
+    )
     refresh_factor_learning_memory(
         symbol.strip().upper(),
         duration,
@@ -89,7 +98,7 @@ def seconds_until_next_daily_refresh(now: datetime | None = None) -> float:
 
 async def factor_combination_daily_refresh_loop(stop_event: asyncio.Event) -> None:
     logger.info(
-        "factor combo daily refresh: symbols=%s at=00:00 timezone=Asia/Shanghai",
+        "factor combo daily review: symbols=%s at=00:30 timezone=Asia/Shanghai",
         factor_ranking_precomputed_symbols(),
     )
     while not stop_event.is_set():

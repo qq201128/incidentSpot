@@ -15,7 +15,7 @@ export async function fetchFactorCombinationRanking(symbol, duration = "10m", op
 
 export async function fetchFactorCombinationSignals(symbol, limit, options = {}) {
   const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/signals`, {
-    params: { symbol, limit },
+    params: { symbol, limit, topPerDuration: options.topPerDuration },
     signal: options.signal,
     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });

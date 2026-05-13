@@ -6,6 +6,8 @@ from typing import Any
 
 from app.db.session import get_conn
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
+from app.services.factor_combo_monitor_service import factor_combo_monitor_report
+from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
 from app.services.factor_learning_common import utc_now
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_core import build_factor_learning_memory
@@ -18,9 +20,10 @@ from app.services.factor_learning_memory_store import (
     load_factor_learning_memory,
     save_factor_learning_memory,
 )
+from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.factor_mined_library import mined_factor_library_summary
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
-from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 
 def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | None:
@@ -39,15 +42,18 @@ def refresh_factor_learning_memory(
     sym = symbol.strip().upper()
     report = ranking_report or _cached_ranking_or_raise(sym, duration)
     settlement = settle_due_predictions(sym, duration)
-    frame = load_factor_frame(sym)
+    mined_frame = materialize_mined_factor_frame(load_factor_frame(sym), symbol=sym, duration=duration)
     predictions = _settled_factor_combo_predictions(sym, duration)
     memory = build_factor_learning_memory(
-        frame,
+        mined_frame.frame,
         report,
         predictions,
         symbol=sym,
         duration=duration,
         settlement_sweep=settlement,
+        mined_frame_failures=list(mined_frame.failures),
+        mined_library=mined_factor_library_summary(sym, duration),
+        monitoring_report=factor_combo_monitor_report(sym, duration),
     )
     if run_llm_agent:
         return _attach_agent_review_and_save(memory)
@@ -111,18 +117,20 @@ def _cached_ranking_or_raise(symbol: str, duration: str) -> dict[str, Any]:
 
 
 def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[str, Any]]:
+    strategy_keys = factor_combo_simulation_strategy_keys()
+    placeholders = ",".join("?" for _key in strategy_keys)
     conn = get_conn()
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT open_time, direction, confidence, trade_quality_score,
-                   actual_return, prediction_correct, high_winrate_rule
+                   actual_return, prediction_correct, high_winrate_rule, strategy_key
             FROM predictions
-            WHERE strategy_key = ? AND symbol = ? AND duration = ?
+            WHERE strategy_key IN ({placeholders}) AND symbol = ? AND duration = ?
               AND settled_at IS NOT NULL
             ORDER BY open_time
             """,
-            (FACTOR_COMBO_STRATEGY_KEY, symbol.upper(), duration),
+            (*strategy_keys, symbol.upper(), duration),
         ).fetchall()
     finally:
         conn.close()

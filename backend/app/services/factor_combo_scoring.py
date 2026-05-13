@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
+
+FACTOR_SCORE_CLIP = 4.0
+
+
+def combination_score(frame: pd.DataFrame, members: list[dict[str, Any]]) -> pd.Series:
+    scores = [_member_score(frame, member) for member in members]
+    stacked = pd.concat(scores, axis=1)
+    return stacked.mean(axis=1).replace([np.inf, -np.inf], np.nan)
+
+
+def oriented_zscore(series: pd.Series, orientation: int) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    mean = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).mean().shift(1)
+    std = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).std().shift(1)
+    zscore = (numeric - mean) / std.replace(0.0, np.nan)
+    return zscore.clip(-FACTOR_SCORE_CLIP, FACTOR_SCORE_CLIP) * int(orientation)
+
+
+def _member_score(frame: pd.DataFrame, member: dict[str, Any]) -> pd.Series:
+    name = str(member["name"])
+    if name not in frame.columns:
+        raise ValueError(f"combination score missing factor column: {name}")
+    return oriented_zscore(frame[name], int(member.get("orientation") or 1))

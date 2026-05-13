@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from app.services.factor_learning_common import (
+    SUCCESS_PROFIT_FACTOR_MIN,
+    SUCCESS_WIN_RATE_MIN,
+    edge_score,
+    finite,
+    round_metric,
+    utc_now,
+)
+from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+
+MINED_FACTOR_LIBRARY_VERSION = "mined_factor_library_v1"
+MINED_FACTOR_LIBRARY_PATH = FACTOR_LEARNING_DIR / "mined_factor_library.json"
+MINED_FACTOR_SOURCE = "factor_combo_ranking"
+SUMMARY_FACTOR_LIMIT = 12
+
+
+def load_mined_factor_library(path: Path | None = None) -> dict[str, Any]:
+    target = path or MINED_FACTOR_LIBRARY_PATH
+    if not target.exists():
+        return _empty_library()
+    with target.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"mined factor library is not an object: {target}")
+    return payload
+
+
+def mined_factor_rows_for_duration(symbol: str, duration: str) -> list[dict[str, Any]]:
+    rows = load_mined_factor_library().get("factors") or []
+    return [
+        deepcopy(row)
+        for row in rows
+        if _row_symbol(row) == symbol.strip().upper() and str(row.get("duration")) == duration
+    ]
+
+
+def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
+    rows = mined_factor_rows_for_duration(symbol, duration)
+    rows.sort(key=_library_score, reverse=True)
+    return {
+        "version": MINED_FACTOR_LIBRARY_VERSION,
+        "symbol": symbol.strip().upper(),
+        "duration": duration,
+        "total": len(rows),
+        "thresholds": _threshold_payload(),
+        "factors": rows[:SUMMARY_FACTOR_LIMIT],
+    }
+
+
+def upsert_good_combinations(report: dict[str, Any]) -> dict[str, Any]:
+    candidates = [_library_row(report, row) for row in report.get("ranking") or [] if _is_good_combo(row)]
+    candidates = [row for row in candidates if row is not None]
+    library = load_mined_factor_library()
+    if not candidates:
+        return _promotion_report(report, promoted=0, total=len(library.get("factors") or []))
+    merged = _merged_rows(library.get("factors") or [], candidates)
+    payload = {
+        "version": MINED_FACTOR_LIBRARY_VERSION,
+        "updatedAt": utc_now(),
+        "thresholds": _threshold_payload(),
+        "factors": merged,
+    }
+    _save_library(payload)
+    return _promotion_report(report, promoted=len(candidates), total=len(merged))
+
+
+def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None:
+    factor_name = str(row.get("factorName") or "")
+    members = row.get("members")
+    if not factor_name or not isinstance(members, list) or not members:
+        return None
+    now = utc_now()
+    return {
+        "symbol": str(report["symbol"]).strip().upper(),
+        "duration": str(report["duration"]),
+        "factorName": factor_name,
+        "factorDisplayName": str(row.get("factorDisplayName") or row.get("description") or factor_name),
+        "description": str(row.get("description") or row.get("factorDisplayName") or factor_name),
+        "formula": str(row.get("formula") or factor_name),
+        "method": str(row.get("method") or ""),
+        "category": "performance",
+        "source": MINED_FACTOR_SOURCE,
+        "members": [_member_payload(member) for member in members],
+        "metrics": _metric_payload(row),
+        "score": _row_score(row),
+        "firstSeenAt": now,
+        "lastSeenAt": now,
+        "promotionCount": 1,
+    }
+
+
+def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key = {_row_key(row): deepcopy(row) for row in existing}
+    for row in candidates:
+        key = _row_key(row)
+        previous = by_key.get(key)
+        if previous is not None:
+            row["firstSeenAt"] = previous.get("firstSeenAt") or row["firstSeenAt"]
+            row["promotionCount"] = int(previous.get("promotionCount") or 0) + 1
+        by_key[key] = row
+    rows = list(by_key.values())
+    rows.sort(key=_library_score, reverse=True)
+    return rows
+
+
+def _is_good_combo(row: dict[str, Any]) -> bool:
+    win_rate = finite(row.get("winRate"))
+    profit_factor = finite(row.get("profitFactor"))
+    return (
+        win_rate is not None
+        and profit_factor is not None
+        and win_rate >= SUCCESS_WIN_RATE_MIN
+        and profit_factor >= SUCCESS_PROFIT_FACTOR_MIN
+    )
+
+
+def _member_payload(member: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": str(member["name"]),
+        "displayName": str(member.get("displayName") or member["name"]),
+        "category": str(member.get("category") or "unknown"),
+        "orientation": int(member.get("orientation") or 1),
+    }
+
+
+def _metric_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "winRate": finite(row.get("winRate")),
+        "profitFactor": finite(row.get("profitFactor")),
+        "sharpe": finite(row.get("sharpe")),
+        "ir": finite(row.get("ir")),
+        "totalPeriods": int(row.get("totalPeriods") or 0),
+        "contribution": finite(row.get("contribution")),
+    }
+
+
+def _promotion_report(report: dict[str, Any], *, promoted: int, total: int) -> dict[str, Any]:
+    return {
+        "symbol": str(report.get("symbol") or "").strip().upper(),
+        "duration": str(report.get("duration") or ""),
+        "promoted": promoted,
+        "libraryTotal": total,
+        "thresholds": _threshold_payload(),
+    }
+
+
+def _threshold_payload() -> dict[str, float]:
+    return {
+        "minWinRate": SUCCESS_WIN_RATE_MIN,
+        "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
+    }
+
+
+def _empty_library() -> dict[str, Any]:
+    return {
+        "version": MINED_FACTOR_LIBRARY_VERSION,
+        "thresholds": _threshold_payload(),
+        "factors": [],
+    }
+
+
+def _save_library(payload: dict[str, Any]) -> None:
+    MINED_FACTOR_LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with MINED_FACTOR_LIBRARY_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (_row_symbol(row), str(row.get("duration")), str(row.get("factorName")))
+
+
+def _row_symbol(row: dict[str, Any]) -> str:
+    return str(row.get("symbol") or "").strip().upper()
+
+
+def _library_score(row: dict[str, Any]) -> float:
+    metrics = row.get("metrics") or row
+    return _row_score(metrics)
+
+
+def _row_score(row: dict[str, Any]) -> float:
+    return round_metric(edge_score(row), 6)

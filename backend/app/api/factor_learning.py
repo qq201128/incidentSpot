@@ -10,6 +10,7 @@ from app.services.factor_learning_service import (
     run_factor_learning_llm_agent,
     refresh_factor_learning_memory,
 )
+from app.services.factor_mined_library import mined_factor_library_summary
 from app.services.factor_operator_library import factor_operator_payload
 
 router = APIRouter(prefix="/api/factor-learning", tags=["factor-learning"])
@@ -93,3 +94,11 @@ def _background_factor_learning_agent_review(symbol: str, duration: str) -> None
 @router.get("/operators")
 def factor_learning_operators() -> dict:
     return factor_operator_payload()
+
+
+@router.get("/mined-library")
+def factor_learning_mined_library(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+) -> dict:
+    return mined_factor_library_summary(symbol.upper(), duration)

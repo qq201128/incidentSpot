@@ -3,11 +3,9 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
-from app.services.factor_combination_service import FACTOR_SCORE_CLIP
+from app.services.factor_combo_scoring import oriented_zscore
 from app.services.factor_learning_memory_store import load_factor_learning_memory
 
 SCORE_DECIMALS = 6
@@ -139,7 +137,7 @@ def _member_score_at(frame: pd.DataFrame, index: Any, member: dict[str, Any]) ->
     name = str(member["name"])
     if name not in frame.columns:
         return None
-    values = _oriented_zscore(frame[name], int(member.get("orientation") or 1))
+    values = oriented_zscore(frame[name], int(member.get("orientation") or 1))
     if index not in values.index:
         return None
     score = _finite_float(values.at[index])
@@ -192,14 +190,6 @@ def _filter_passed(
 def _required_confirmations(config: dict[str, Any], member_count: int) -> int:
     configured = int(config.get("minConfirmations") or 1)
     return max(1, min(configured, member_count))
-
-
-def _oriented_zscore(series: pd.Series, orientation: int) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce")
-    mean = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).mean().shift(1)
-    std = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).std().shift(1)
-    zscore = (numeric - mean) / std.replace(0.0, np.nan)
-    return zscore.clip(-FACTOR_SCORE_CLIP, FACTOR_SCORE_CLIP) * int(orientation)
 
 
 def _quality_score(confidence: float, filter_passed: bool) -> float:

@@ -7,6 +7,11 @@ from app.db.session import get_conn
 from app.services.auto_trade_service import get_auto_trade_settings, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.binance_service import fetch_klines
+from app.services.factor_combo_simulation_keys import (
+    FACTOR_COMBO_SHADOW_RANKS,
+    factor_combo_shadow_strategy_key,
+)
+from app.services.factor_combo_strategy import predict_factor_combo_rank_direction
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.kline_timing import (
     MS_PER_MINUTE,
@@ -24,6 +29,7 @@ from app.services.prediction_cache_service import (
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
+    FACTOR_COMBO_STRATEGY_KEY,
     is_continuous_orderbook_strategy,
     strategy_entry_grace_ms,
     strategy_supports_duration,
@@ -107,6 +113,7 @@ async def _run_prediction(
     if not await _save_prediction(result, write_lock, allow_existing=allow_existing):
         return
     await _broadcast(prediction_response(result))
+    await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
     logger.info(
         "predict: %s %s entry=%s -> %s (conf=%.4f quality=%.4f qualityPassed=%s)",
         settings.symbol,
@@ -117,6 +124,26 @@ async def _run_prediction(
         result["trade_quality_score"],
         result["trade_quality_passed"],
     )
+
+
+async def _save_factor_combo_shadow_predictions(
+    settings: AutoTradeSettings,
+    entry_open_time: int,
+    write_lock: asyncio.Lock,
+) -> None:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+        return
+    for rank in FACTOR_COMBO_SHADOW_RANKS:
+        result = await asyncio.to_thread(
+            predict_factor_combo_rank_direction,
+            settings.symbol,
+            settings.duration,
+            combo_rank=rank,
+            result_strategy_key=factor_combo_shadow_strategy_key(rank),
+            entry_open_time=entry_open_time,
+            entry_grace_ms=strategy_entry_grace_ms(settings.strategy_key),
+        )
+        await _save_prediction(result, write_lock)
 
 
 async def _save_prediction(

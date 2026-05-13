@@ -5,11 +5,12 @@ from itertools import combinations
 from math import isfinite
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
+from app.services.factor_combo_scoring import combination_score
 from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_mined_candidates import build_mined_candidates
 from app.services.factor_performance_metrics import add_contribution_scores
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection, factor_payload, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
@@ -21,7 +22,6 @@ DEFAULT_RESULT_LIMIT = 200
 MIN_COMBO_SIZE = 2
 DEFAULT_MAX_COMBO_SIZE = 3
 DEFAULT_COMBO_SIZES = (MIN_COMBO_SIZE, DEFAULT_MAX_COMBO_SIZE)
-FACTOR_SCORE_CLIP = 4.0
 
 
 @dataclass(frozen=True)
@@ -66,15 +66,14 @@ def run_factor_combination_ranking_on_frame(
     cfg = _validated_config(config)
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    base, base_failures = _base_candidates(frame, symbol.upper(), duration)
+    mined = build_mined_candidates(frame, symbol=symbol.upper(), duration=duration)
+    base, base_failures = _base_candidates(mined.frame, symbol.upper(), duration)
+    base.extend(_mined_base_candidates(mined.candidates))
     selected = sorted(base, key=_base_rank_key, reverse=True)[: cfg.base_factor_limit]
-    ranking, tested_count, combo_failures = _rank_combinations(frame, selected, symbol.upper(), duration, cfg)
+    ranking, tested_count, combo_failures = _rank_combinations(mined.frame, selected, symbol.upper(), duration, cfg)
     add_contribution_scores(ranking)
-    return _ranking_report(symbol, duration, cfg, selected, ranking, tested_count, base_failures + combo_failures)
-
-
-def combination_score(frame: pd.DataFrame, members: list[dict[str, Any]]) -> pd.Series:
-    return _combo_score(frame, members)
+    failures = [*base_failures, *mined.failures, *combo_failures]
+    return _ranking_report(symbol, duration, cfg, selected, ranking, tested_count, failures, mined.source_count)
 
 
 def _base_candidates(
@@ -138,26 +137,8 @@ def _combo_backtest_frame(
     out = frame[["close"]].copy()
     if "open_time" in frame.columns:
         out["open_time"] = frame["open_time"]
-    out[combo_name] = _combo_score(frame, _member_payloads(members))
+    out[combo_name] = combination_score(frame, _member_payloads(members))
     return out
-
-
-def _combo_score(frame: pd.DataFrame, members: list[dict[str, Any]]) -> pd.Series:
-    scores = []
-    for member in members:
-        name = str(member["name"])
-        orientation = int(member["orientation"])
-        scores.append(_oriented_zscore(frame[name], orientation))
-    stacked = pd.concat(scores, axis=1)
-    return stacked.mean(axis=1).replace([np.inf, -np.inf], np.nan)
-
-
-def _oriented_zscore(series: pd.Series, orientation: int) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce")
-    mean = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).mean().shift(1)
-    std = numeric.expanding(min_periods=BACKTEST_MIN_PERIODS).std().shift(1)
-    zscore = (numeric - mean) / std.replace(0.0, np.nan)
-    return zscore.clip(-FACTOR_SCORE_CLIP, FACTOR_SCORE_CLIP) * int(orientation)
 
 
 def _combination_definition(
@@ -204,6 +185,10 @@ def _member_payloads(members: tuple[_BaseCandidate, ...]) -> list[dict[str, Any]
     ]
 
 
+def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:
+    return [_BaseCandidate(item.factor, item.metrics, item.orientation) for item in candidates]
+
+
 def _ranking_report(
     symbol: str,
     duration: str,
@@ -212,6 +197,7 @@ def _ranking_report(
     ranking: list[dict[str, Any]],
     tested_count: int,
     failures: list[dict[str, Any]],
+    mined_source_count: int,
 ) -> dict[str, Any]:
     return {
         "symbol": symbol.upper(),
@@ -221,6 +207,8 @@ def _ranking_report(
         "searchConfig": _config_payload(config),
         "baseFactors": [_base_payload(item) for item in selected],
         "baseFactorCount": len(selected),
+        "minedFactorSourceCount": mined_source_count,
+        "minedFactorUsedCount": _mined_factor_count(selected),
         "testedCombinationCount": tested_count,
         "failureCount": len(failures),
         "failures": failures[:50],
@@ -235,6 +223,10 @@ def _base_payload(candidate: _BaseCandidate) -> dict[str, Any]:
         "singleIr": candidate.metrics.get("ir"),
         "singleSharpe": candidate.metrics.get("sharpe"),
     }
+
+
+def _mined_factor_count(selected: list[_BaseCandidate]) -> int:
+    return sum(1 for item in selected if item.factor.source_file == "mined_factor_library.json")
 
 
 def _factor_orientation(factor: FactorDefinition, metrics: dict[str, Any]) -> int:

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from app.services import factor_combination_background as combo_background
+from app.services import factor_combination_live_service as combo_live
 from app.services import factor_combination_service as combo_service
 from app.services import factor_learning_signal_filter
 from app.services import rule_signal_service
@@ -16,6 +17,7 @@ from app.services.factor_combination_signal_service import (
     LIVE_MIN_WIN_RATE,
     build_live_signal_from_ranking,
 )
+from app.services.factor_mined_candidates import MinedCandidateResult, MinedFrameResult
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
@@ -49,6 +51,14 @@ def synthetic_factors() -> list[FactorDefinition]:
         _factor("factor_b", "平滑收益动量", FactorDirection.HIGHER_BETTER),
         _factor("factor_c", "反向收益动量", FactorDirection.LOWER_BETTER),
     ]
+
+
+@pytest.fixture(autouse=True)
+def empty_mined_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    def empty(frame: pd.DataFrame, *, symbol: str, duration: str) -> MinedCandidateResult:
+        return MinedCandidateResult(frame, (), 0, ())
+
+    monkeypatch.setattr(combo_service, "build_mined_candidates", empty)
 
 
 def test_combination_ranking_returns_win_rate_sorted_rows(
@@ -128,6 +138,31 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
 
 
+def test_signal_watchlist_returns_top_three_per_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    rows = [{"factorName": f"combo_{idx}"} for idx in range(4)]
+    monkeypatch.setattr(combo_live, "load_factor_frame", lambda _symbol: synthetic_frame)
+    monkeypatch.setattr(
+        combo_live,
+        "get_cached_combination_ranking",
+        lambda _symbol, dur: {"ranking": rows} if dur == "10m" else None,
+    )
+    monkeypatch.setattr(
+        combo_live,
+        "materialize_mined_factor_frame",
+        lambda frame, **_kwargs: MinedFrameResult(frame, 0, ()),
+    )
+    monkeypatch.setattr(combo_live, "build_live_signal_from_ranking", _fake_live_signal)
+
+    payload = combo_live.build_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
+
+    assert [item["comboRank"] for item in payload["signals"]] == [1, 2, 3]
+    assert [item["factorName"] for item in payload["signals"]] == ["combo_0", "combo_1", "combo_2"]
+    assert payload["topPerDuration"] == 3
+
+
 def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = {}
 
@@ -148,12 +183,12 @@ def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatc
     assert captured["entry_grace_ms"] > 0
 
 
-def test_daily_refresh_seconds_targets_next_midnight() -> None:
+def test_daily_refresh_seconds_targets_next_0030() -> None:
     tz = combo_background.DAILY_REFRESH_TZ
-    before_midnight = datetime(2026, 5, 13, 23, 59, tzinfo=tz)
-    exactly_midnight = datetime(2026, 5, 13, 0, 0, tzinfo=tz)
-    assert combo_background.seconds_until_next_daily_refresh(before_midnight) == SECONDS_PER_MINUTE
-    assert combo_background.seconds_until_next_daily_refresh(exactly_midnight) == SECONDS_PER_DAY
+    before_review = datetime(2026, 5, 13, 0, 29, tzinfo=tz)
+    exactly_review = datetime(2026, 5, 13, 0, 30, tzinfo=tz)
+    assert combo_background.seconds_until_next_daily_refresh(before_review) == SECONDS_PER_MINUTE
+    assert combo_background.seconds_until_next_daily_refresh(exactly_review) == SECONDS_PER_DAY
 
 
 def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +200,15 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
 
     def fake_save(report: dict) -> None:
         calls.append(("save", report["symbol"], report["duration"], None))
+
+    def fake_upsert(report: dict) -> dict:
+        calls.append(("promote", report["symbol"], report["duration"], None))
+        return {
+            "symbol": report["symbol"],
+            "duration": report["duration"],
+            "promoted": 0,
+            "libraryTotal": 0,
+        }
 
     def fake_learning(
         symbol: str,
@@ -178,14 +222,29 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
+    monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "refresh_factor_learning_memory", fake_learning)
     combo_background.refresh_symbol_combination_rankings("btcusdt")
     run_durations = [item[2] for item in calls if item[0] == "run"]
     save_durations = [item[2] for item in calls if item[0] == "save"]
+    promote_durations = [item[2] for item in calls if item[0] == "promote"]
     learn_durations = [item[2] for item in calls if item[0] == "learn"]
     assert run_durations == ["10m", "30m", "60m", "1d"]
     assert save_durations == run_durations
+    assert promote_durations == run_durations
     assert learn_durations == run_durations
+
+
+def _fake_live_signal(_frame: pd.DataFrame, row: dict, *, symbol: str, duration: str) -> dict:
+    return {
+        "symbol": symbol,
+        "duration": duration,
+        "factorName": row["factorName"],
+        "factorDisplayName": row["factorName"],
+        "members": [],
+        "direction": "up",
+        "qualityPassed": True,
+    }
 
 
 def _factor(name: str, description: str, direction: FactorDirection) -> FactorDefinition:

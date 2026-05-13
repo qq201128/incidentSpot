@@ -42,8 +42,21 @@
 }
 
 .factor-combo-signals {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+
+.factor-combo-signal-column {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
@@ -200,12 +213,6 @@
   background: rgba(13, 18, 23, 0.55);
 }
 
-@media (max-width: 1180px) {
-  .factor-combo-signals {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 720px) {
   .factor-combo-head {
     flex-direction: column;
@@ -221,6 +228,13 @@
   }
 
   .factor-combo-signals {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    overflow-x: visible;
+  }
+
+  .factor-combo-signal-column {
+    flex: none;
+    min-width: 0;
+    width: 100%;
   }
 }

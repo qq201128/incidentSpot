@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from app.services import factor_learning_service
+from app.services import factor_mined_library
 from app.services.factor_learning_core import build_factor_learning_memory
 from app.services.factor_learning_signal_filter import apply_factor_learning_memory
 
@@ -33,6 +34,8 @@ def test_factor_learning_memory_records_loss_patterns_and_weights() -> None:
     assert memory["factorMining"]["successPatterns"]
     assert memory["factorMining"]["operatorLibrary"]["total"] >= 60
     assert memory["weights"]["factor_a"] > 0
+    assert memory["minedFactorLibrary"] == {}
+    assert memory["monitoring"] == {}
 
 
 def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
@@ -52,6 +55,22 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["factorLearning"]["filterPassed"] is False
     assert result["factorLearning"]["lossPatternMatches"]
     assert result["qualityPassed"] is False
+
+
+def test_good_combo_is_promoted_to_mined_factor_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / "mined-library-test.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    monkeypatch.setattr(factor_mined_library, "MINED_FACTOR_LIBRARY_PATH", target)
+    try:
+        promotion = factor_mined_library.upsert_good_combinations(_ranking_report())
+        rows = factor_mined_library.mined_factor_rows_for_duration("BTCUSDT", "10m")
+    finally:
+        target.unlink(missing_ok=True)
+
+    assert promotion["promoted"] == 1
+    assert rows[0]["factorDisplayName"] == "组合：A + B"
+    assert rows[0]["metrics"]["winRate"] == 0.63
 
 
 def test_factor_learning_agent_failure_is_written_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,7 +157,10 @@ def _ranking_report() -> dict:
         ],
         "ranking": [{
             "factorName": "combo__factor_a__factor_b",
+            "factorDisplayName": "组合：A + B",
             "winRate": 0.63,
+            "profitFactor": 1.12,
+            "totalPeriods": ROWS,
             "members": [
                 {"name": "factor_a", "category": "return", "orientation": 1, "singleWinRate": 0.62},
                 {"name": "factor_b", "category": "return", "orientation": 1, "singleWinRate": 0.58},

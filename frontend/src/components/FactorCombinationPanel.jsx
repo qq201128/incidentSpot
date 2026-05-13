@@ -7,10 +7,13 @@ import {
 import FactorComboPositionsPanel from "./FactorComboPositionsPanel";
 import "./FactorCombinationPanel.css";
 
-const SIGNAL_LIMIT = 4;
+const TOP_PER_DURATION = 3;
+const SIGNAL_LIMIT = 12;
 const REFRESH_RELOAD_DELAY_MS = 3000;
 const RANKING_PREVIEW_LIMIT = 16;
 const DURATION_LABELS = { "10m": "10m", "30m": "30m", "60m": "60m", "1d": "1d" };
+/** Column order when showing one timeframe per column */
+const DURATION_COLUMN_ORDER = ["10m", "30m", "60m", "1d"];
 
 export default function FactorCombinationPanel({ symbol, duration }) {
   const combo = useFactorCombinationData(symbol, duration);
@@ -20,7 +23,7 @@ export default function FactorCombinationPanel({ symbol, duration }) {
 function useFactorCombinationData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [rankingState, setRankingState] = useState({ items: [], status: "", updatedAt: null });
-  const [signalState, setSignalState] = useState({ items: [], status: "", missing: [] });
+  const [signalState, setSignalState] = useState({ items: [], status: "", missing: [], failures: [] });
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async (signal) => {
@@ -79,14 +82,19 @@ async function loadRankingState(symbol, duration, signal, setState) {
 
 async function loadSignalState(symbol, signal, setState) {
   try {
-    const data = await fetchFactorCombinationSignals(symbol, SIGNAL_LIMIT, { signal });
+    const data = await fetchFactorCombinationSignals(
+      symbol,
+      SIGNAL_LIMIT,
+      { signal, topPerDuration: TOP_PER_DURATION },
+    );
     if (signal.aborted) return;
     const items = Array.isArray(data.signals) ? data.signals : [];
     const missing = Array.isArray(data.missingDurations) ? data.missingDurations : [];
-    setState({ items, missing, status: signalStatus(items, missing) });
+    const failures = Array.isArray(data.signalFailures) ? data.signalFailures : [];
+    setState({ items, missing, failures, status: signalStatus(items, missing, failures) });
   } catch (error) {
     if (isCanceled(error, signal)) return;
-    setState({ items: [], missing: [], status: `周期信号失败：${error.message}` });
+    setState({ items: [], missing: [], failures: [], status: `周期信号失败：${error.message}` });
   }
 }
 
@@ -145,16 +153,41 @@ function ComboPanelHeader({
   );
 }
 
+function groupSignalsIntoDurationColumns(signals) {
+  const byDuration = new Map();
+  for (const signal of signals) {
+    const d = signal.duration || "—";
+    if (!byDuration.has(d)) byDuration.set(d, []);
+    byDuration.get(d).push(signal);
+  }
+  for (const list of byDuration.values()) {
+    list.sort((a, b) => (a.comboRank ?? 0) - (b.comboRank ?? 0));
+  }
+  const ordered = DURATION_COLUMN_ORDER.filter((d) => byDuration.has(d));
+  const rest = [...byDuration.keys()]
+    .filter((d) => !DURATION_COLUMN_ORDER.includes(d))
+    .sort((a, b) => String(a).localeCompare(String(b)));
+  return [...ordered, ...rest].map((duration) => ({
+    duration,
+    signals: byDuration.get(duration),
+  }));
+}
+
 function SignalGrid({ onSelect, selectedKey, signals }) {
+  const columns = useMemo(() => groupSignalsIntoDurationColumns(signals), [signals]);
   return (
     <div className="factor-combo-signals">
-      {signals.map((signal) => (
-        <SignalCard
-          key={signalKey(signal)}
-          onSelect={onSelect}
-          selected={selectedKey === signalKey(signal)}
-          signal={signal}
-        />
+      {columns.map(({ duration, signals: columnSignals }) => (
+        <div key={duration} className="factor-combo-signal-column" aria-label={`${DURATION_LABELS[duration] || duration} 周期`}>
+          {columnSignals.map((signal) => (
+            <SignalCard
+              key={signalKey(signal)}
+              onSelect={onSelect}
+              selected={selectedKey === signalKey(signal)}
+              signal={signal}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );
@@ -168,7 +201,7 @@ function SignalCard({ onSelect, selected, signal }) {
       onClick={() => onSelect(signal)}
     >
       <div className="factor-combo-signal-top">
-        <span>{signal.duration}</span>
+        <span>{signal.duration} · Top{signal.comboRank || "—"}</span>
         <strong>{directionText(signal.direction)}</strong>
       </div>
       <h3 title={signal.factorDisplayName}>{signal.factorDisplayName || signal.factorName}</h3>
@@ -177,7 +210,7 @@ function SignalCard({ onSelect, selected, signal }) {
         <Metric label="胜率" value={formatPct(signal.historicalWinRate, 1)} />
         <Metric label="盈亏比" value={formatNum(signal.historicalProfitFactor, 2)} />
         <Metric label="置信" value={formatPct(signal.confidence, 1)} />
-        <Metric label="状态" value={signal.qualityPassed ? "模拟候选" : "未达标"} />
+        <Metric label="模拟" value={signal.qualityPassed ? "候选" : "阻断"} />
       </div>
     </button>
   );
@@ -247,9 +280,10 @@ function rankingStatus(data, symbol, duration) {
   return `组合排名：${data.total ?? 0} 项（${symbol} / ${duration}${updated}）`;
 }
 
-function signalStatus(items, missing) {
+function signalStatus(items, missing, failures) {
   const suffix = missing.length ? ` · 缺少 ${missing.join(", ")}` : "";
-  return `周期信号：${items.length} 个${suffix}`;
+  const failed = failures.length ? ` · 失败 ${failures.length}` : "";
+  return `周期 Top${TOP_PER_DURATION} 模拟：${items.length} 个${suffix}${failed}`;
 }
 
 function refreshStatus(duration) {
@@ -258,7 +292,7 @@ function refreshStatus(duration) {
 
 function setInvalidStates(setRankingState, setSignalState) {
   setInvalidRanking(setRankingState);
-  setSignalState({ items: [], status: "请输入有效交易对", missing: [] });
+  setSignalState({ items: [], status: "请输入有效交易对", missing: [], failures: [] });
 }
 
 function setInvalidRanking(setRankingState) {
@@ -279,7 +313,7 @@ function directionClass(direction) {
 }
 
 function signalKey(signal) {
-  return `${signal.duration}-${signal.factorName || ""}`;
+  return `${signal.duration}-${signal.comboRank || 0}-${signal.factorName || ""}`;
 }
 function formatNum(value, digits) {
   if (value == null || Number.isNaN(Number(value))) return "—";

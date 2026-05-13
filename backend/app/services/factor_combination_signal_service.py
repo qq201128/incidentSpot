@@ -7,7 +7,8 @@ from typing import Any
 import pandas as pd
 
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
-from app.services.factor_combination_service import COMBINATION_METHOD, combination_score
+from app.services.factor_combo_scoring import combination_score
+from app.services.factor_combination_service import COMBINATION_METHOD
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
 from app.services.factor_learning_signal_filter import enrich_signal_with_factor_learning
 from app.services.kline_timing import is_within_entry_grace
@@ -89,6 +90,7 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "duration": ctx.duration,
         "factorName": ctx.row.get("factorName"),
         "factorDisplayName": ctx.row.get("factorDisplayName"),
+        "comboRank": ctx.row.get("comboRank"),
         "members": _row_members(ctx.row),
         "direction": ctx.direction,
         "probabilityUp": round(probability_up, PROBABILITY_DECIMALS),

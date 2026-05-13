@@ -5,6 +5,7 @@ from typing import Any
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, FACTOR_COMBO_RULE_NAME
 
@@ -16,14 +17,37 @@ def predict_factor_combo_direction(
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
 ) -> dict[str, Any]:
+    return predict_factor_combo_rank_direction(
+        symbol,
+        duration,
+        combo_rank=1,
+        result_strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+        entry_open_time=entry_open_time,
+        entry_grace_ms=entry_grace_ms,
+    )
+
+
+def predict_factor_combo_rank_direction(
+    symbol: str,
+    duration: str = RULE_DURATION,
+    *,
+    combo_rank: int,
+    result_strategy_key: str,
+    entry_open_time: int | None = None,
+    entry_grace_ms: int | None = None,
+) -> dict[str, Any]:
     if duration not in SUPPORTED_RULE_DURATIONS:
         supported = sorted(SUPPORTED_RULE_DURATIONS)
         raise ValueError(f"factor combo strategy supports only {supported}, got {duration}")
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
-    top = _top_combo(cached)
-    frame = load_factor_frame(symbol)
+    top = _ranked_combo(cached, combo_rank)
+    frame = materialize_mined_factor_frame(
+        load_factor_frame(symbol),
+        symbol=symbol,
+        duration=duration,
+    ).frame
     signal = build_live_signal_from_ranking(
         frame,
         top,
@@ -32,21 +56,27 @@ def predict_factor_combo_direction(
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,
     )
-    return _prediction_payload(signal, entry_open_time)
+    return _prediction_payload(signal, entry_open_time, result_strategy_key)
 
 
-def _top_combo(cached: dict[str, Any]) -> dict[str, Any]:
+def _ranked_combo(cached: dict[str, Any], combo_rank: int) -> dict[str, Any]:
     ranking = cached.get("ranking")
     if not isinstance(ranking, list) or not ranking:
         raise ValueError("cached combination ranking is empty")
-    return dict(ranking[0])
+    if combo_rank <= 0 or combo_rank > len(ranking):
+        raise ValueError(f"cached combination ranking has no Top{combo_rank}")
+    return {**dict(ranking[combo_rank - 1]), "comboRank": combo_rank}
 
 
-def _prediction_payload(signal: dict[str, Any], entry_open_time: int | None) -> dict[str, Any]:
+def _prediction_payload(
+    signal: dict[str, Any],
+    entry_open_time: int | None,
+    strategy_key: str,
+) -> dict[str, Any]:
     open_time = int(entry_open_time if entry_open_time is not None else signal["sourceOpenTime"])
     return {
         "symbol": signal["symbol"],
-        "strategy_key": FACTOR_COMBO_STRATEGY_KEY,
+        "strategy_key": strategy_key,
         "duration": signal["duration"],
         "open_time": open_time,
         "entry_price": float(signal["entryPrice"]),
@@ -76,6 +106,7 @@ def _rule_reasons(signal: dict[str, Any]) -> list[str]:
     reasons = [
         f"rule={FACTOR_COMBO_RULE_NAME}",
         f"combo={signal['factorName']}",
+        f"combo_rank={signal.get('comboRank') or 1}",
         f"members={member_names}",
         f"method={signal['method']}",
         f"historical_win_rate={signal['historicalWinRate']}",

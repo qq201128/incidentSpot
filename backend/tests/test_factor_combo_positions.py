@@ -2,15 +2,25 @@ from __future__ import annotations
 
 import sqlite3
 
+from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
 from app.services.factor_combo_position_service import factor_combo_positions_payload
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 
-def test_factor_combo_positions_returns_current_and_history() -> None:
+def test_factor_combo_positions_filters_to_selected_combo() -> None:
     conn = _conn()
-    _insert_event(conn, 1, "10m", "OPEN", "combo__a__b", None)
-    _insert_event(conn, 2, "10m", "SETTLED", "combo__old", 4.0)
-    _insert_event(conn, 3, "30m", "OPEN", "combo__a__b", None)
+    _insert_event(
+        conn, event_id=1, duration="10m", status="OPEN", rule="combo__a__b", pnl=None
+    )
+    _insert_event(
+        conn, event_id=2, duration="10m", status="SETTLED", rule="combo__old", pnl=4.0
+    )
+    _insert_event(
+        conn, event_id=3, duration="30m", status="OPEN", rule="combo__a__b", pnl=None
+    )
+    _insert_event(
+        conn, event_id=4, duration="10m", status="SETTLED", rule="combo__a__b", pnl=2.5
+    )
 
     payload = factor_combo_positions_payload(
         conn,
@@ -22,10 +32,33 @@ def test_factor_combo_positions_returns_current_and_history() -> None:
     assert payload["total"] == 2
     assert payload["openCount"] == 1
     assert payload["settledCount"] == 1
-    assert payload["currentFactorCount"] == 1
-    assert payload["totalPnl"] == 4.0
-    assert [event["id"] for event in payload["events"]] == [2, 1]
-    assert payload["events"][0]["aiHighWinrateRule"] == "combo__old"
+    assert payload["currentFactorCount"] == 2
+    assert payload["totalPnl"] == 2.5
+    assert [event["id"] for event in payload["events"]] == [4, 1]
+    assert {event["aiHighWinrateRule"] for event in payload["events"]} == {"combo__a__b"}
+
+
+def test_factor_combo_positions_reads_shadow_strategy_keys() -> None:
+    conn = _conn()
+    _insert_event(
+        conn,
+        event_id=1,
+        duration="10m",
+        status="OPEN",
+        rule="combo__top_2",
+        pnl=None,
+        strategy_key=factor_combo_shadow_strategy_key(2),
+    )
+
+    payload = factor_combo_positions_payload(
+        conn,
+        symbol="BTCUSDT",
+        duration="10m",
+        factor_name="combo__top_2",
+    )
+
+    assert payload["total"] == 1
+    assert payload["events"][0]["strategyKey"] == factor_combo_shadow_strategy_key(2)
 
 
 def _conn() -> sqlite3.Connection:
@@ -78,11 +111,13 @@ def _conn() -> sqlite3.Connection:
 
 def _insert_event(
     conn: sqlite3.Connection,
+    *,
     event_id: int,
     duration: str,
     status: str,
     rule: str,
     pnl: float | None,
+    strategy_key: str = FACTOR_COMBO_STRATEGY_KEY,
 ) -> None:
     conn.execute(
         """
@@ -92,7 +127,7 @@ def _insert_event(
           NULL, NULL, NULL, NULL, 0.6, 'up', NULL, 0.6, 1, NULL, ?, NULL, NULL
         )
         """,
-        (event_id, FACTOR_COMBO_STRATEGY_KEY, duration, status, rule),
+        (event_id, strategy_key, duration, status, rule),
     )
     conn.execute(
         """

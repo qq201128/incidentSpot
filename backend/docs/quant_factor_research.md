@@ -53,8 +53,10 @@
 项目内新增的因子学习层借鉴 FactorMiner 的“成功模式 + 禁区”思想，但落地时只读取本项目真实回测、组合排名和已结算预测：
 
 - 因子挖掘记忆：从多因子组合缓存中提炼高胜率、高盈亏比、高夏普或高 IR 的类别/算子模式，并用 Spearman 相关性记录冗余因子邻域。
+- 挖掘因子库：组合刷新会把同时满足胜率与盈亏比阈值的好组合写入 `backend/models/factor_learning/mined_factor_library.json`，下一次组合搜索会把这些已验证组合重新作为候选因子参与排序。
 - 亏损模式记忆：自动结算到期预测后，把真实亏损交易与入场时因子截面重新对齐，学习“亏损中位数明显偏高/偏低且亏损率抬升”的特征阈值。
 - 多重过滤：实时组合信号先过历史胜率和入场窗口，再检查成员确认数和亏损特征命中数；命中亏损模式会显式阻断，不静默降级。
-- 自动权重：每次刷新组合排名后按真实指标重算成员权重，并对已进入亏损模式的成员降权，记忆写入 `backend/models/factor_learning/`。
+- 自动权重：每天北京时间 00:30 刷新前一日组合排名与复盘记忆，按真实指标重算成员权重，并对已进入亏损模式的成员降权，记忆写入 `backend/models/factor_learning/`。
+- 监控诊断：因子学习记忆会记录多因子组合实盘模拟的结算样本、预测成功率、候选成功率、连续亏损和对应解决方案。
 - 运算符库：`factor_operator_library.py` 维护 60+ 个挖掘算子，覆盖算术、时序统计、截面、差分、相关、平滑、回归、逻辑条件、风险形态、量价、微观结构和衍生品状态。页面通过 `/api/factor-learning/operators` 展示，Agent prompt 也使用同一份结构化库。
 - 联网 LLM Agent：刷新因子学习时会调用 SiliconFlow Chat Completions，默认模型 `Pro/moonshotai/Kimi-K2.6`。`.env` 需要配置 `SILICONFLOW_API_KEY`；可选覆盖 `SILICONFLOW_MODEL`、`SILICONFLOW_CHAT_COMPLETIONS_URL` 和 `SILICONFLOW_TIMEOUT_SECONDS`（默认 180 秒）。Agent 输出只作为候选研究计划写入 `llmAgent.review`，不会伪造成已验证因子。

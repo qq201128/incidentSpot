@@ -31,7 +31,8 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 router = APIRouter(prefix="/api/factors", tags=["factors"])
 logger = logging.getLogger("uvicorn.error")
 DEFAULT_COMBO_SIZE_QUERY = "2,3"
-DEFAULT_COMBO_SIGNAL_LIMIT = 4
+DEFAULT_COMBO_TOP_PER_DURATION = 3
+DEFAULT_COMBO_SIGNAL_LIMIT = 12
 
 
 def _filter_ranking_by_category(ranking: list[dict], category: str | None) -> list[dict]:
@@ -101,9 +102,14 @@ def factor_combination_ranking(
 def factor_combination_signals(
     symbol: str = Query(..., min_length=6),
     limit: int = Query(DEFAULT_COMBO_SIGNAL_LIMIT, gt=0),
+    top_per_duration: int = Query(DEFAULT_COMBO_TOP_PER_DURATION, alias="topPerDuration", gt=0),
 ) -> dict:
     try:
-        return build_combination_signal_watchlist(symbol.upper(), limit=limit)
+        return build_combination_signal_watchlist(
+            symbol.upper(),
+            limit=limit,
+            top_per_duration=top_per_duration,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

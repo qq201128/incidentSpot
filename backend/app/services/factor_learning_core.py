@@ -26,6 +26,9 @@ def build_factor_learning_memory(
     symbol: str,
     duration: str,
     settlement_sweep: dict[str, int] | None = None,
+    mined_frame_failures: list[dict[str, Any]] | None = None,
+    mined_library: dict[str, Any] | None = None,
+    monitoring_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = factor_rows(ranking_report)
     loss_columns = candidate_loss_columns(rows, frame)
@@ -35,7 +38,13 @@ def build_factor_learning_memory(
         "symbol": symbol.strip().upper(),
         "duration": duration,
         "updatedAt": utc_now(),
-        "source": _source_payload(ranking_report, settled_predictions, learned_losses, settlement_sweep),
+        "source": _source_payload(
+            ranking_report,
+            settled_predictions,
+            learned_losses,
+            settlement_sweep,
+            mined_frame_failures,
+        ),
         "factorMining": {
             "operatorLibrary": factor_operator_summary(),
             "successPatterns": success_patterns(rows),
@@ -44,6 +53,8 @@ def build_factor_learning_memory(
         "lossMemory": learned_losses,
         "filters": filter_config(learned_losses),
         "weights": factor_weights(rows, learned_losses["patterns"]),
+        "minedFactorLibrary": mined_library or {},
+        "monitoring": monitoring_report or {},
     }
 
 
@@ -52,12 +63,17 @@ def _source_payload(
     settled_predictions: list[dict[str, Any]],
     learned_losses: dict[str, Any],
     settlement_sweep: dict[str, int] | None,
+    mined_frame_failures: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     return {
         "rankingTotal": int(ranking_report.get("total") or 0),
         "baseFactorCount": int(ranking_report.get("baseFactorCount") or 0),
+        "minedFactorSourceCount": int(ranking_report.get("minedFactorSourceCount") or 0),
+        "minedFactorUsedCount": int(ranking_report.get("minedFactorUsedCount") or 0),
         "settledPredictionCount": len(settled_predictions),
         "lossPatternCount": len(learned_losses["patterns"]),
         "lossMemoryStatus": learned_losses["status"],
         "settlementSweep": settlement_sweep or {},
+        "minedFrameFailureCount": len(mined_frame_failures or []),
+        "minedFrameFailures": (mined_frame_failures or [])[:20],
     }

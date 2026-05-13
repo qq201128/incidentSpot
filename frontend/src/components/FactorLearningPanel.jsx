@@ -4,6 +4,16 @@ import {
   fetchFactorLearningOperators,
   requestFactorLearningRefresh,
 } from "../api/factorLearning";
+import {
+  categoryLabel,
+  columnLabels,
+  factorLabel,
+  learningPatternLabel,
+  operatorLabel,
+  operatorTraceLabel,
+} from "../utils/factorLearningLabels";
+import FactorLearningMetricsHelp from "./FactorLearningMetricsHelp";
+import FactorLearningStatusBoxes from "./FactorLearningStatusBoxes";
 import "./FactorLearningPanel.css";
 
 const TOP_WEIGHT_LIMIT = 10;
@@ -64,8 +74,10 @@ export default function FactorLearningPanel({ symbol, duration }) {
         onRefreshAgent={() => void refresh(true)}
         onRefreshLocal={() => void refresh(false)}
       />
+      <FactorLearningMetricsHelp />
       <CandidateIdeas memory={memoryState.data} />
       <LearningMemoryGrid memory={memoryState.data} />
+      <FactorLearningStatusBoxes memory={memoryState.data} />
       <OperatorLibrary operators={operatorState.data?.operators || []} />
     </section>
   );
@@ -104,8 +116,16 @@ function LearningHeader(props) {
         <p>{props.operatorState.status}</p>
       </div>
       <div className="factor-learning-actions">
-        <Metric label="结算样本" value={source.settledPredictionCount ?? "—"} />
-        <Metric label="亏损模式" value={source.lossPatternCount ?? "—"} />
+        <Metric
+          label="结算样本"
+          title="已结算、并参与亏损模式学习的预测条数。"
+          value={source.settledPredictionCount ?? "—"}
+        />
+        <Metric
+          label="亏损模式"
+          title="当前识别出的亏损特征模式数量。"
+          value={source.lossPatternCount ?? "—"}
+        />
         <button type="button" disabled={props.refreshing} onClick={props.onRefreshLocal}>
           本地复盘
         </button>
@@ -120,7 +140,10 @@ function LearningHeader(props) {
 function CandidateIdeas({ memory }) {
   const ideas = candidateIdeas(memory);
   return (
-    <div className="factor-learning-section">
+    <div
+      className="factor-learning-section"
+      title="Agent 或规划给出的下一步可挖因子设想（公式提示、理由、所需列与校验项）。"
+    >
       <div className="factor-learning-title">
         <h3>候选挖掘因子</h3>
         <span>{ideas.length} 项</span>
@@ -129,12 +152,12 @@ function CandidateIdeas({ memory }) {
         {ideas.map((idea, index) => (
           <article key={`${idea.nameHint || "idea"}-${index}`} className="factor-learning-candidate">
             <div className="factor-learning-candidate-top">
-              <strong>{idea.nameHint || `candidate_${index + 1}`}</strong>
-              <span>{operatorTrace(idea).join(" · ") || "operator_trace_empty"}</span>
+              <strong>{candidateIdeaTitle(idea, index)}</strong>
+              <span>{operatorTraceLabel(idea.operatorTrace).join(" · ") || "无算子链"}</span>
             </div>
             <code>{idea.formulaHint || "—"}</code>
-            <p>{idea.rationale || "—"}</p>
-            <TagList items={idea.requiredColumns} empty="无列要求" />
+            <p>{idea.rationaleZh || idea.rationale || "—"}</p>
+            <TagList items={columnLabels(idea.requiredColumns)} empty="无列要求" />
             <TagList items={idea.validationChecks} empty="无验证项" muted />
           </article>
         ))}
@@ -147,17 +170,38 @@ function CandidateIdeas({ memory }) {
 function LearningMemoryGrid({ memory }) {
   return (
     <div className="factor-learning-grid">
-      <PatternBox title="成功模式" items={successPatterns(memory)} valueKey="label" metaKey="support" />
-      <PatternBox title="禁区" items={forbiddenRegions(memory)} valueKey="region" metaKey="avgAbsCorrelation" />
-      <PatternBox title="亏损特征" items={lossPatterns(memory)} valueKey="feature" metaKey="lossRate" />
-      <WeightsBox weights={memory?.weights || {}} />
+      <PatternBox
+        title="成功模式"
+        sectionHint="历史表现达标的因子按因子族/算子归类。右侧整数为支持度（落入该类的因子个数，非百分比）。"
+        items={successPatterns(memory)}
+        valueKey="label"
+        metaKey="support"
+      />
+      <PatternBox
+        title="禁区"
+        sectionHint="高相关因子簇；右侧为簇内平均绝对 Spearman 相关系数（越高越冗余）。"
+        items={forbiddenRegions(memory)}
+        valueKey="region"
+        metaKey="avgAbsCorrelation"
+      />
+      <PatternBox
+        title="亏损特征"
+        sectionHint="与亏损显著相关的因子方向/阈值。右侧为命中该规则时的亏损占比。"
+        items={lossPatterns(memory)}
+        valueKey="feature"
+        metaKey="lossRate"
+      />
+      <WeightsBox
+        weights={memory?.weights || {}}
+        sectionHint="组合打分相对权重（约 100%）；命中亏损特征的因子会被降权。列表最多 10 条。"
+      />
     </div>
   );
 }
 
-function PatternBox({ title, items, valueKey, metaKey }) {
+function PatternBox({ title, sectionHint, items, valueKey, metaKey }) {
   return (
-    <section className="factor-learning-box">
+    <section className="factor-learning-box" title={sectionHint}>
       <div className="factor-learning-title compact">
         <h3>{title}</h3>
         <span>{items.length}</span>
@@ -165,7 +209,7 @@ function PatternBox({ title, items, valueKey, metaKey }) {
       <ul>
         {items.slice(0, 8).map((item, index) => (
           <li key={`${title}-${index}`}>
-            <strong>{item[valueKey] || item.pattern || "—"}</strong>
+            <strong>{learningPatternLabel(item, valueKey)}</strong>
             <span>{metaLabel(metaKey, item[metaKey])}</span>
           </li>
         ))}
@@ -175,12 +219,12 @@ function PatternBox({ title, items, valueKey, metaKey }) {
   );
 }
 
-function WeightsBox({ weights }) {
+function WeightsBox({ weights, sectionHint }) {
   const rows = Object.entries(weights)
     .sort((a, b) => Number(b[1]) - Number(a[1]))
     .slice(0, TOP_WEIGHT_LIMIT);
   return (
-    <section className="factor-learning-box">
+    <section className="factor-learning-box" title={sectionHint}>
       <div className="factor-learning-title compact">
         <h3>自动权重</h3>
         <span>{Object.keys(weights).length}</span>
@@ -188,7 +232,7 @@ function WeightsBox({ weights }) {
       <ul>
         {rows.map(([name, value]) => (
           <li key={name}>
-            <strong>{name}</strong>
+            <strong>{factorLabel(name)}</strong>
             <span>{formatPct(value, 1)}</span>
           </li>
         ))}
@@ -201,7 +245,10 @@ function WeightsBox({ weights }) {
 function OperatorLibrary({ operators }) {
   const grouped = groupOperators(operators);
   return (
-    <div className="factor-learning-operators">
+    <div
+      className="factor-learning-operators"
+      title="按因子族分组的算子（对行情列做变换）。悬停单个标签可查看签名与用途。"
+    >
       <div className="factor-learning-title">
         <h3>运算符库</h3>
         <span>{operators.length} 个</span>
@@ -209,11 +256,11 @@ function OperatorLibrary({ operators }) {
       <div className="factor-learning-operator-grid">
         {grouped.slice(0, OPERATOR_PREVIEW_LIMIT).map(([category, items]) => (
           <section key={category} className="factor-learning-operator-family">
-            <h4>{category}</h4>
+            <h4>{categoryLabel(category)}</h4>
             <div>
               {items.map((item) => (
                 <span key={item.name} title={`${item.signature} · ${item.purpose}`}>
-                  {item.name}
+                  {operatorLabel(item.name)}
                 </span>
               ))}
             </div>
@@ -224,9 +271,9 @@ function OperatorLibrary({ operators }) {
   );
 }
 
-function Metric({ label, value }) {
+function Metric({ label, value, title: hint }) {
   return (
-    <span className="factor-learning-metric">
+    <span className="factor-learning-metric" title={hint}>
       <small>{label}</small>
       <b>{value}</b>
     </span>
@@ -246,6 +293,12 @@ function candidateIdeas(memory) {
   return memory?.llmAgent?.review?.factorMiningPlan?.candidateFactorIdeas || [];
 }
 
+function candidateIdeaTitle(idea, index) {
+  if (idea.displayNameZh) return idea.displayNameZh;
+  if (idea.nameHint) return factorLabel(idea.nameHint);
+  return `候选因子 ${index + 1}`;
+}
+
 function successPatterns(memory) {
   return memory?.factorMining?.successPatterns || [];
 }
@@ -256,10 +309,6 @@ function forbiddenRegions(memory) {
 
 function lossPatterns(memory) {
   return memory?.lossMemory?.patterns || [];
-}
-
-function operatorTrace(idea) {
-  return Array.isArray(idea.operatorTrace) ? idea.operatorTrace.filter(Boolean) : [];
 }
 
 function groupOperators(operators) {

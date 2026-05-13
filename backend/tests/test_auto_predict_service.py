@@ -6,9 +6,11 @@ import pytest
 
 from app.services import auto_predict_service as service
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
 from app.services.kline_timing import N_BAR_10M_RM_ENTRY_GRACE_MS
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
+    FACTOR_COMBO_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_ENTRY_GRACE_MS,
     ORDERBOOK_NOTIONAL_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
@@ -134,6 +136,39 @@ def test_orderbook_prediction_allows_existing_attempt_rows(monkeypatch) -> None:
     asyncio.run(run_prediction(THREE_BAR_10M_RM_STRATEGY_KEY))
 
     assert allow_existing_flags == [True, False]
+
+
+def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
+    saved = []
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    def predict_rule_direction(symbol: str, duration: str, **kwargs) -> dict:
+        return _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration)
+
+    def predict_factor_combo_rank_direction(symbol: str, duration: str, **kwargs) -> dict:
+        return _prediction(kwargs["result_strategy_key"], symbol=symbol, duration=duration)
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "predict_rule_direction", predict_rule_direction)
+    monkeypatch.setattr(service, "predict_factor_combo_rank_direction", predict_factor_combo_rank_direction)
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "prediction_response", lambda result: result)
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+
+    asyncio.run(service._run_prediction(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock()))
+
+    assert saved == [
+        (FACTOR_COMBO_STRATEGY_KEY, False),
+        (factor_combo_shadow_strategy_key(2), False),
+        (factor_combo_shadow_strategy_key(3), False),
+    ]
 
 
 def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
