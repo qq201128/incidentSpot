@@ -23,6 +23,8 @@ from app.services.factor_learning_memory_store import (
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.factor_mined_library import mined_factor_library_summary
 from app.services.forward_validation_service import settle_due_predictions
+from app.services.lstm_config import lstm_shadow_strategy_key
+from app.services.lstm_shadow_learning import lstm_shadow_learning_summary
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 
@@ -54,6 +56,7 @@ def refresh_factor_learning_memory(
         mined_frame_failures=list(mined_frame.failures),
         mined_library=mined_factor_library_summary(sym, duration),
         monitoring_report=factor_combo_monitor_report(sym, duration),
+        lstm_shadow=lstm_shadow_learning_summary(sym, duration),
     )
     if run_llm_agent:
         return _attach_agent_review_and_save(memory)
@@ -117,7 +120,7 @@ def _cached_ranking_or_raise(symbol: str, duration: str) -> dict[str, Any]:
 
 
 def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[str, Any]]:
-    strategy_keys = factor_combo_simulation_strategy_keys()
+    strategy_keys = (*factor_combo_simulation_strategy_keys(), lstm_shadow_strategy_key(duration))
     placeholders = ",".join("?" for _key in strategy_keys)
     conn = get_conn()
     try:

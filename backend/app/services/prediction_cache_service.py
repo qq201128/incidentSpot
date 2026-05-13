@@ -11,9 +11,10 @@ INSERT_PREDICTION_SQL = """INSERT INTO predictions(
   strategy_key, symbol, duration, open_time, direction, probability_up, confidence,
   certainty_label, trade_quality_score, trade_quality_passed, trade_quality_gate,
   high_winrate_gate, high_winrate_rule, high_winrate_gate_passed,
-  high_winrate_gate_value, high_winrate_gate_min, entry_price, created_at
+  high_winrate_gate_value, high_winrate_gate_min, entry_price, expected_return,
+  model_version, feature_window, model_duration, model_trained_at, created_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
 
 def save_prediction(result: dict, *, allow_existing: bool = False) -> bool:
@@ -117,7 +118,8 @@ def get_latest_prediction(
           trade_quality_score, trade_quality_passed, trade_quality_gate,
           high_winrate_gate, high_winrate_rule, high_winrate_gate_passed,
           high_winrate_gate_value, high_winrate_gate_min, entry_price, exit_price,
-          actual_return, prediction_correct, settled_at, created_at
+          actual_return, prediction_correct, settled_at, expected_return,
+          model_version, feature_window, model_duration, model_trained_at, created_at
         FROM predictions
         WHERE strategy_key = ? AND symbol = ? AND duration = ?
         ORDER BY id DESC
@@ -157,6 +159,11 @@ def prediction_response(result: dict) -> dict:
         "exitPrice": result.get("exit_price"),
         "actualReturn": result.get("actual_return"),
         "predictionCorrect": _as_bool(result.get("prediction_correct")),
+        "expectedReturn": result.get("expected_return"),
+        "modelVersion": result.get("model_version"),
+        "featureWindow": result.get("feature_window"),
+        "modelDuration": result.get("model_duration"),
+        "modelTrainedAt": result.get("model_trained_at"),
         "settledAt": result.get("settled_at"),
         "generatedAt": generated_at,
         "ageMs": max(now_ms - generated_ms, 0),
@@ -177,7 +184,9 @@ def _prediction_values(result: dict) -> tuple:
         int(bool(result.get("trade_quality_passed"))), result.get("trade_quality_gate"),
         result.get("high_winrate_gate"), result.get("high_winrate_rule"),
         int(bool(result.get("high_winrate_gate_passed"))), result.get("high_winrate_gate_value"),
-        result.get("high_winrate_gate_min"), result.get("entry_price"), _utc_now_iso(),
+        result.get("high_winrate_gate_min"), result.get("entry_price"), result.get("expected_return"),
+        result.get("model_version"), result.get("feature_window"), result.get("model_duration"),
+        result.get("model_trained_at"), _utc_now_iso(),
     )
 
 

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.lstm_config import (
+    LSTM_RULE_NAME,
+    is_lstm_shadow_strategy,
+    lstm_strategy_duration,
+)
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
@@ -306,7 +311,26 @@ def strategy_definition(strategy_key: str | None) -> StrategyDefinition:
     for strategy in STRATEGIES:
         if strategy.key == key:
             return strategy
+    if is_lstm_shadow_strategy(key):
+        return _lstm_shadow_strategy_definition(key)
     raise ValueError(f"unsupported strategy: {key}")
+
+
+def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
+    duration = lstm_strategy_duration(strategy_key)
+    return StrategyDefinition(
+        key=strategy_key,
+        name=f"LSTM影子策略·{duration}",
+        description="LSTM 候选算法仅写入模拟预测和结算学习记忆，不允许自动真实下单。",
+        requires_vegas_confirmation=False,
+        signal_source="factor_lstm_shadow",
+        rule_names=(LSTM_RULE_NAME,),
+        tradable=False,
+        disabled_reason="LSTM 默认只作为影子策略参与模拟实盘，不开放真实下单。",
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+        supported_durations=frozenset({duration}),
+    )
 
 
 def strategy_payloads() -> list[dict]:

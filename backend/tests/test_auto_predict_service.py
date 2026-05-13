@@ -161,6 +161,7 @@ def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
     monkeypatch.setattr(service, "prediction_response", lambda result: result)
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+    monkeypatch.setattr(service, "is_lstm_shadow_ready", lambda *_args: False)
 
     asyncio.run(service._run_prediction(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock()))
 

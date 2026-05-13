@@ -30,6 +30,7 @@ def build_factor_learning_memory(
     mined_frame_failures: list[dict[str, Any]] | None = None,
     mined_library: dict[str, Any] | None = None,
     monitoring_report: dict[str, Any] | None = None,
+    lstm_shadow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = factor_rows(ranking_report)
     loss_columns = candidate_loss_columns(rows, frame)
@@ -40,6 +41,7 @@ def build_factor_learning_memory(
         duration=duration,
         loss_patterns=learned_losses["patterns"],
         monitoring_report=monitoring_report,
+        lstm_shadow=lstm_shadow,
     )
     return {
         "version": FACTOR_LEARNING_VERSION,
@@ -62,6 +64,7 @@ def build_factor_learning_memory(
         "filters": filter_config(learned_losses),
         "weights": factor_weights(rows, learned_losses["patterns"]),
         "adaptiveLearning": adaptive_learning,
+        "lstmShadow": lstm_shadow or {},
         "minedFactorLibrary": mined_library or {},
         "monitoring": monitoring_report or {},
     }

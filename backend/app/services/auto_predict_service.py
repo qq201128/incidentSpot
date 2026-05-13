@@ -34,6 +34,10 @@ from app.services.strategy_registry import (
     strategy_entry_grace_ms,
     strategy_supports_duration,
 )
+from app.services.lstm_prediction_service import (
+    is_lstm_shadow_ready,
+    predict_lstm_shadow_prediction,
+)
 
 logger = logging.getLogger("uvicorn.error")
 _SUBSCRIBERS: dict[tuple[str, str, str], set] = {}
@@ -114,6 +118,7 @@ async def _run_prediction(
         return
     await _broadcast(prediction_response(result))
     await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
+    await _save_lstm_shadow_prediction(settings, entry_open_time, write_lock)
     logger.info(
         "predict: %s %s entry=%s -> %s (conf=%.4f quality=%.4f qualityPassed=%s)",
         settings.symbol,
@@ -144,6 +149,26 @@ async def _save_factor_combo_shadow_predictions(
             entry_grace_ms=strategy_entry_grace_ms(settings.strategy_key),
         )
         await _save_prediction(result, write_lock)
+
+
+async def _save_lstm_shadow_prediction(
+    settings: AutoTradeSettings,
+    entry_open_time: int,
+    write_lock: asyncio.Lock,
+) -> None:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+        return
+    ready = await asyncio.to_thread(is_lstm_shadow_ready, settings.symbol, settings.duration)
+    if not ready:
+        logger.info("predict: LSTM shadow not ready for %s %s", settings.symbol, settings.duration)
+        return
+    result = await asyncio.to_thread(
+        predict_lstm_shadow_prediction,
+        settings.symbol,
+        settings.duration,
+        entry_open_time=entry_open_time,
+    )
+    await _save_prediction(result, write_lock)
 
 
 async def _save_prediction(

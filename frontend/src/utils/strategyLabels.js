@@ -17,5 +17,8 @@ export const STRATEGY_LABELS = {
 };
 
 export function strategyLabel(key) {
+  if (key?.startsWith("factor_lstm_shadow_")) {
+    return `LSTM影子策略·${key.replace("factor_lstm_shadow_", "")}`;
+  }
   return STRATEGY_LABELS[key] || key || STRATEGY_LABELS.manual;
 }

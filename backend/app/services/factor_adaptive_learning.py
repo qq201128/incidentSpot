@@ -50,9 +50,10 @@ def adaptive_learning_summary(
     duration: str,
     loss_patterns: list[dict[str, Any]],
     monitoring_report: dict[str, Any] | None,
+    lstm_shadow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metrics = _learning_metrics(rows, settled_predictions, loss_patterns, monitoring_report)
-    algorithms = _algorithm_payloads(metrics, duration)
+    algorithms = _algorithm_payloads(metrics, duration, lstm_shadow)
     active = [item for item in algorithms if item["status"] == "active"]
     return {
         "status": _summary_status(metrics),
@@ -84,8 +85,12 @@ def _learning_metrics(
     }
 
 
-def _algorithm_payloads(metrics: dict[str, Any], duration: str) -> list[dict[str, Any]]:
-    scored = [_algorithm_score(profile, metrics, duration) for profile in ALGORITHM_PROFILES]
+def _algorithm_payloads(
+    metrics: dict[str, Any],
+    duration: str,
+    lstm_shadow: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    scored = [_algorithm_score(profile, metrics, duration, lstm_shadow) for profile in ALGORITHM_PROFILES]
     active_total = sum(item["rawScore"] for item in scored if item["status"] == "active")
     return [_normalized_algorithm(item, active_total) for item in scored]
 
@@ -94,7 +99,10 @@ def _algorithm_score(
     profile: AlgorithmProfile,
     metrics: dict[str, Any],
     duration: str,
+    lstm_shadow: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    if profile.key == "lstm" and lstm_shadow:
+        return _lstm_algorithm_score(profile, lstm_shadow, duration)
     sample_ratio = min(metrics["sampleCount"] / profile.sample_floor, 1.0)
     active = metrics["sampleCount"] >= max(MIN_ACTIVE_SAMPLES, profile.sample_floor // 2)
     raw = _raw_score(profile, metrics, duration, sample_ratio) if active else 0.0
@@ -104,6 +112,28 @@ def _algorithm_score(
         "family": profile.family,
         "sampleFloor": profile.sample_floor,
         "status": "active" if active else "waiting_for_samples",
+        "rawScore": raw,
+    }
+
+
+def _lstm_algorithm_score(
+    profile: AlgorithmProfile,
+    lstm_shadow: dict[str, Any],
+    duration: str,
+) -> dict[str, Any]:
+    sample_count = int(lstm_shadow.get("sampleCount") or 0)
+    win_rate = lstm_shadow.get("winRate")
+    sample_ratio = min(sample_count / profile.sample_floor, 1.0)
+    active = sample_count >= max(MIN_ACTIVE_SAMPLES, profile.sample_floor // 2)
+    accuracy = float(win_rate) if win_rate is not None else 0.5
+    duration_bias = profile.duration_bias.get(duration, DEFAULT_DURATION_WEIGHTS.get(duration, UNKNOWN_DURATION_WEIGHT))
+    raw = (SAMPLE_WEIGHT * sample_ratio + ACCURACY_WEIGHT * accuracy) * duration_bias if active else 0.0
+    return {
+        "key": profile.key,
+        "label": profile.label,
+        "family": profile.family,
+        "sampleFloor": profile.sample_floor,
+        "status": "active" if active else "waiting_for_lstm_shadow_samples",
         "rawScore": raw,
     }
 

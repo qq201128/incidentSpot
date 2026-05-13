@@ -77,6 +77,89 @@
   font-size: 13px;
 }
 
+.factor-lstm-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(236, 187, 73, 0.26);
+  border-radius: 8px;
+  background: rgba(17, 18, 12, 0.74);
+}
+
+.factor-lstm-card.is-trained {
+  border-color: rgba(63, 211, 166, 0.38);
+}
+
+.factor-lstm-card.is-failed {
+  border-color: rgba(255, 110, 110, 0.42);
+}
+
+.factor-lstm-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.factor-lstm-card-head h4 {
+  margin: 2px 0 6px;
+  font-size: 17px;
+}
+
+.factor-lstm-card-head p,
+.factor-lstm-card-head span {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.factor-lstm-card-head > span {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(236, 187, 73, 0.16);
+  color: #ecbb49;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.factor-lstm-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.factor-lstm-grid .factor-adaptive-metric {
+  padding: 10px;
+  background: rgba(7, 10, 18, 0.54);
+}
+
+.factor-lstm-grid .factor-adaptive-metric b {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.factor-lstm-compare {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.factor-lstm-compare span {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(7, 10, 18, 0.52);
+}
+
+.factor-lstm-compare small {
+  color: var(--muted);
+}
+
+.factor-lstm-compare b {
+  color: #ecbb49;
+}
+
 .factor-adaptive-algorithms {
   display: grid;
   gap: 10px;
@@ -140,5 +223,14 @@
 
   .factor-adaptive-row b {
     text-align: left;
+  }
+
+  .factor-lstm-card-head {
+    flex-direction: column;
+  }
+
+  .factor-lstm-grid,
+  .factor-lstm-compare {
+    grid-template-columns: 1fr;
   }
 }

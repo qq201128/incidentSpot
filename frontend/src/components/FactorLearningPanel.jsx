@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchFactorLearningMemory,
   fetchFactorLearningOperators,
+  fetchLstmStatus,
   requestFactorLearningRefresh,
 } from "../api/factorLearning";
 import FactorAdaptiveLearningPanel from "./FactorAdaptiveLearningPanel";
@@ -18,6 +19,7 @@ export default function FactorLearningPanel({ symbol, duration }) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [memoryState, setMemoryState] = useState({ data: null, status: "" });
   const [operatorState, setOperatorState] = useState({ data: null, status: "" });
+  const [lstmState, setLstmState] = useState({ data: null, status: "" });
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async (signal) => {
@@ -29,6 +31,7 @@ export default function FactorLearningPanel({ symbol, duration }) {
     await Promise.all([
       loadMemory({ duration, setState: setMemoryState, signal, symbol: normalizedSymbol }),
       loadOperators(signal, setOperatorState),
+      loadLstmStatus({ duration, setState: setLstmState, signal, symbol: normalizedSymbol }),
     ]);
   }, [duration, normalizedSymbol]);
 
@@ -68,7 +71,11 @@ export default function FactorLearningPanel({ symbol, duration }) {
         onRefreshAgent={() => void refresh(true)}
         onRefreshLocal={() => void refresh(false)}
       />
-      <FactorAdaptiveLearningPanel learning={memoryState.data?.adaptiveLearning} />
+      <FactorAdaptiveLearningPanel
+        learning={memoryState.data?.adaptiveLearning}
+        lstm={lstmState.data || memoryState.data?.lstmShadow}
+        lstmStatus={lstmState.status}
+      />
       <FactorLearningMetricsHelp />
       <FactorLearningCandidateIdeas memory={memoryState.data} />
       <FactorLearningMemoryGrid memory={memoryState.data} />
@@ -96,6 +103,16 @@ async function loadOperators(signal, setState) {
   } catch (error) {
     if (isCanceled(error, signal)) return;
     setState({ data: null, status: `算子库失败：${error.message}` });
+  }
+}
+
+async function loadLstmStatus({ symbol, duration, signal, setState }) {
+  try {
+    const data = await fetchLstmStatus(symbol, duration, { signal });
+    if (!signal.aborted) setState({ data, status: lstmStatusText(data) });
+  } catch (error) {
+    if (isCanceled(error, signal)) return;
+    setState({ data: null, status: `LSTM状态失败：${error.message}` });
   }
 }
 
@@ -140,6 +157,12 @@ function memoryStatus(data) {
   const agent = status === "pending" ? " · 联网挖掘已排队"
     : status === "failed" ? ` · 联网挖掘失败：${failed}` : data?.llmAgent?.review ? " · 已联网挖掘" : "";
   return `记忆已加载${agent}${updated}`;
+}
+
+function lstmStatusText(data) {
+  const label = data?.status || "untrained";
+  const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
+  return `LSTM：${label}${version}`;
 }
 
 function isValidSymbol(value) {

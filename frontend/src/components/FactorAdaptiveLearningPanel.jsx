@@ -1,6 +1,6 @@
 import "./FactorAdaptiveLearningPanel.css";
 
-export default function FactorAdaptiveLearningPanel({ learning }) {
+export default function FactorAdaptiveLearningPanel({ learning, lstm, lstmStatus }) {
   const algorithms = Array.isArray(learning?.algorithms) ? learning.algorithms : [];
   const activeCount = learning?.activeAlgorithmCount ?? 0;
   return (
@@ -19,6 +19,8 @@ export default function FactorAdaptiveLearningPanel({ learning }) {
         <Metric label="学习样本" value={learning?.sampleCount ?? "—"} />
       </div>
 
+      <LstmShadowCard lstm={lstm} statusText={lstmStatus} />
+
       <div className="factor-adaptive-insight">
         <strong>智能学习洞察：</strong>
         <span>{learning?.insight?.bestAlgorithm ? `最佳算法：${learning.insight.bestAlgorithm}` : "暂无最佳算法"}</span>
@@ -33,6 +35,46 @@ export default function FactorAdaptiveLearningPanel({ learning }) {
         {!algorithms.length ? <p className="factor-learning-empty small">暂无算法评分</p> : null}
       </div>
     </section>
+  );
+}
+
+function LstmShadowCard({ lstm, statusText }) {
+  const shadow = lstm?.shadow || lstm || {};
+  return (
+    <div className={`factor-lstm-card ${statusClass(shadow.status)}`}>
+      <div className="factor-lstm-card-head">
+        <div>
+          <span className="section-kicker">LSTM 影子策略</span>
+          <h4>{lstmStatusLabel(shadow.status)}</h4>
+          <p>{statusText || shadow.reason || "等待模型训练状态。"}</p>
+        </div>
+        <span>{shadow.strategyKey || "factor_lstm_shadow"}</span>
+      </div>
+      <div className="factor-lstm-grid">
+        <Metric label="模型版本" value={shortVersion(shadow.modelVersion)} />
+        <Metric label="最近训练" value={formatDate(shadow.trainedAt)} />
+        <Metric label="训练样本" value={shadow.sampleCounts?.train ?? "—"} />
+        <Metric label="测试准确率" value={formatPct(shadow.testAccuracy, 1)} />
+        <Metric label="模拟胜率" value={formatPct(shadow.winRate, 1)} strong />
+        <Metric label="最近胜率" value={formatPct(shadow.recentWinRate, 1)} />
+      </div>
+      <LstmComparison rows={shadow.comparison} />
+    </div>
+  );
+}
+
+function LstmComparison({ rows }) {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) return null;
+  return (
+    <div className="factor-lstm-compare">
+      {items.map((row) => (
+        <span key={row.strategyKey}>
+          <small>{compareLabel(row.strategyKey)}</small>
+          <b>{formatPct(row.winRate, 1)}</b>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -65,6 +107,25 @@ function statusLabel(status) {
   return "未初始化";
 }
 
+function lstmStatusLabel(status) {
+  if (status === "training") return "训练中";
+  if (status === "trained") return "已训练";
+  if (status === "insufficient_samples") return "样本不足";
+  if (status === "failed") return "训练失败";
+  return "未训练";
+}
+
+function statusClass(status) {
+  return status === "trained" ? "is-trained" : status === "failed" ? "is-failed" : "";
+}
+
+function compareLabel(strategyKey) {
+  if (strategyKey?.includes("top2")) return "Top2";
+  if (strategyKey?.includes("top3")) return "Top3";
+  if (strategyKey?.startsWith("factor_lstm_shadow")) return "LSTM";
+  return "Top1";
+}
+
 function durationText(learning) {
   const first = learning?.durationPreference?.[0];
   if (!first) return "";
@@ -74,4 +135,16 @@ function durationText(learning) {
 function formatPct(value, digits) {
   if (value == null || Number.isNaN(Number(value))) return "—";
   return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
+}
+
+function shortVersion(value) {
+  if (!value) return "—";
+  return String(value).replace(/^lstm_/, "").slice(0, 24);
 }
