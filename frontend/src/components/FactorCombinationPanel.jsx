@@ -4,6 +4,7 @@ import {
   fetchFactorCombinationSignals,
   requestFactorCombinationRefresh,
 } from "../api/factorCombinations";
+import FactorComboPositionsPanel from "./FactorComboPositionsPanel";
 import "./FactorCombinationPanel.css";
 
 const SIGNAL_LIMIT = 4;
@@ -91,10 +92,25 @@ async function loadSignalState(symbol, signal, setState) {
 
 function ComboPanelView(props) {
   const signals = props.signalState.items;
+  const [selectedKey, setSelectedKey] = useState("");
+  const selectedSignal = useMemo(
+    () => signals.find((signal) => signalKey(signal) === selectedKey) || null,
+    [selectedKey, signals],
+  );
+  useEffect(() => {
+    if (selectedKey && !selectedSignal) setSelectedKey("");
+  }, [selectedKey, selectedSignal]);
   return (
     <section className="factor-combo-panel">
       <ComboPanelHeader {...props} />
-      {signals.length ? <SignalGrid signals={signals} /> : null}
+      {signals.length ? (
+        <SignalGrid
+          onSelect={(signal) => setSelectedKey(signalKey(signal))}
+          selectedKey={selectedKey}
+          signals={signals}
+        />
+      ) : null}
+      {selectedSignal ? <FactorComboPositionsPanel signal={selectedSignal} symbol={props.symbol} /> : null}
       <ComboRankingTable ranking={props.rankingState.items} />
     </section>
   );
@@ -129,19 +145,28 @@ function ComboPanelHeader({
   );
 }
 
-function SignalGrid({ signals }) {
+function SignalGrid({ onSelect, selectedKey, signals }) {
   return (
     <div className="factor-combo-signals">
       {signals.map((signal) => (
-        <SignalCard key={`${signal.duration}-${signal.factorName}`} signal={signal} />
+        <SignalCard
+          key={signalKey(signal)}
+          onSelect={onSelect}
+          selected={selectedKey === signalKey(signal)}
+          signal={signal}
+        />
       ))}
     </div>
   );
 }
 
-function SignalCard({ signal }) {
+function SignalCard({ onSelect, selected, signal }) {
   return (
-    <article className={`factor-combo-signal ${directionClass(signal.direction)}`}>
+    <button
+      type="button"
+      className={`factor-combo-signal ${directionClass(signal.direction)}${selected ? " is-selected" : ""}`}
+      onClick={() => onSelect(signal)}
+    >
       <div className="factor-combo-signal-top">
         <span>{signal.duration}</span>
         <strong>{directionText(signal.direction)}</strong>
@@ -150,11 +175,11 @@ function SignalCard({ signal }) {
       <p>{memberText(signal.members)}</p>
       <div className="factor-combo-signal-metrics">
         <Metric label="胜率" value={formatPct(signal.historicalWinRate, 1)} />
+        <Metric label="盈亏比" value={formatNum(signal.historicalProfitFactor, 2)} />
         <Metric label="置信" value={formatPct(signal.confidence, 1)} />
-        <Metric label="分数" value={formatNum(signal.score, 4)} />
-        <Metric label="状态" value={signal.qualityPassed ? "跟踪中" : "等待"} />
+        <Metric label="状态" value={signal.qualityPassed ? "模拟候选" : "未达标"} />
       </div>
-    </article>
+    </button>
   );
 }
 
@@ -253,6 +278,9 @@ function directionClass(direction) {
   return direction === "down" ? "is-down" : "is-up";
 }
 
+function signalKey(signal) {
+  return `${signal.duration}-${signal.factorName || ""}`;
+}
 function formatNum(value, digits) {
   if (value == null || Number.isNaN(Number(value))) return "—";
   return Number(value).toFixed(digits);

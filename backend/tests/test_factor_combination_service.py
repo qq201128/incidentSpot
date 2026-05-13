@@ -8,9 +8,14 @@ import pytest
 
 from app.services import factor_combination_background as combo_background
 from app.services import factor_combination_service as combo_service
+from app.services import factor_learning_signal_filter
 from app.services import rule_signal_service
 from app.services.factor_combination_service import CombinationSearchConfig
-from app.services.factor_combination_signal_service import build_live_signal_from_ranking
+from app.services.factor_combination_signal_service import (
+    LIVE_MIN_PROFIT_FACTOR,
+    LIVE_MIN_WIN_RATE,
+    build_live_signal_from_ranking,
+)
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
@@ -74,6 +79,7 @@ def test_live_signal_uses_cached_combo_members(
     synthetic_factors: list[FactorDefinition],
 ) -> None:
     monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
     report = combo_service.run_factor_combination_ranking_on_frame(
         synthetic_frame,
         symbol="BTCUSDT",
@@ -90,6 +96,36 @@ def test_live_signal_uses_cached_combo_members(
     assert 0.0 <= signal["probabilityUp"] <= 1.0
     assert signal["entryPrice"] == pytest.approx(float(synthetic_frame["close"].iloc[-1]))
     assert signal["source"] == "factor_combination_ranking"
+
+
+def test_live_signal_requires_profitable_combo_for_sim_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
+    )
+    row = dict(report["ranking"][0], winRate=0.70, profitFactor=1.20, totalPeriods=ROWS)
+    passed = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
+    blocked = build_live_signal_from_ranking(
+        synthetic_frame,
+        {**row, "profitFactor": 1.0},
+        symbol="BTCUSDT",
+        duration="10m",
+    )
+
+    assert passed["qualityPassed"] is True
+    assert passed["qualityGateReason"] == "passed"
+    assert blocked["qualityPassed"] is False
+    assert blocked["qualityGateReason"] == "profit_factor_below_min"
+    assert blocked["qualityMinWinRate"] == LIVE_MIN_WIN_RATE
+    assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
 
 
 def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatch) -> None:

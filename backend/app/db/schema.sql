@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS events (
   ai_quality_score REAL,
   ai_quality_passed INTEGER,
   ai_high_winrate_gate TEXT,
+  ai_high_winrate_rule TEXT,
   ai_high_winrate_passed INTEGER,
   ai_high_winrate_value REAL
 );

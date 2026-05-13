@@ -15,6 +15,7 @@ from app.services.factor_learning_patterns import (
     forbidden_regions,
     success_patterns,
 )
+from app.services.factor_operator_library import factor_operator_summary
 
 
 def build_factor_learning_memory(
@@ -36,6 +37,7 @@ def build_factor_learning_memory(
         "updatedAt": utc_now(),
         "source": _source_payload(ranking_report, settled_predictions, learned_losses, settlement_sweep),
         "factorMining": {
+            "operatorLibrary": factor_operator_summary(),
             "successPatterns": success_patterns(rows),
             "forbiddenRegions": forbidden_regions(frame, rows),
         },

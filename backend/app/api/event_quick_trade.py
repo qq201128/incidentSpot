@@ -119,9 +119,9 @@ def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
           strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
           start_time, end_time, status,
           ai_probability_up, ai_predicted_direction, ai_quality_score, ai_quality_passed,
-          ai_high_winrate_gate, ai_high_winrate_passed, ai_high_winrate_value
+          ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             ctx.strategy_key,
@@ -138,6 +138,7 @@ def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
             ctx.payload.event.aiQualityScore,
             int(bool(ctx.payload.event.aiQualityPassed)) if ctx.payload.event.aiQualityPassed is not None else None,
             ctx.payload.event.aiHighWinrateGate,
+            ctx.payload.event.aiHighWinrateRule,
             (
                 int(bool(ctx.payload.event.aiHighWinratePassed))
                 if ctx.payload.event.aiHighWinratePassed is not None

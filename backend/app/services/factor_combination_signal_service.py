@@ -1,17 +1,40 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
 import pandas as pd
 
+from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_combination_service import COMBINATION_METHOD, combination_score
+from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
 from app.services.factor_learning_signal_filter import enrich_signal_with_factor_learning
 from app.services.kline_timing import is_within_entry_grace
 
-LIVE_MIN_WIN_RATE = 0.5
+LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
+LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
+LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
+
+
+@dataclass(frozen=True)
+class _EntryWindow:
+    open_time: int | None
+    grace_ms: int | None
+
+
+@dataclass(frozen=True)
+class _SignalContext:
+    row: dict[str, Any]
+    symbol: str
+    duration: str
+    score: float
+    index: Any
+    direction: str
+    confidence: float
+    quality: dict[str, Any]
 
 
 def build_live_signal_from_ranking(
@@ -26,8 +49,20 @@ def build_live_signal_from_ranking(
     score, index = _latest_combo_score(frame, row)
     direction = "up" if score >= 0 else "down"
     confidence = _live_confidence(row)
-    quality_passed = _quality_passed(confidence, entry_open_time, entry_grace_ms)
-    payload = _live_signal_payload(row, symbol, duration, score, index, direction, confidence, quality_passed)
+    window = _EntryWindow(entry_open_time, entry_grace_ms)
+    quality = _quality_gate(row, confidence, window)
+    payload = _live_signal_payload(
+        _SignalContext(
+            row=row,
+            symbol=symbol,
+            duration=duration,
+            score=score,
+            index=index,
+            direction=direction,
+            confidence=confidence,
+            quality=quality,
+        )
+    )
     priced = {
         **payload,
         "entryPrice": _frame_value(frame, index, "close"),
@@ -47,47 +82,77 @@ def _latest_combo_score(frame: pd.DataFrame, row: dict[str, Any]) -> tuple[float
     return float(scores.iloc[-1]), scores.index[-1]
 
 
-def _live_signal_payload(
-    row: dict[str, Any],
-    symbol: str,
-    duration: str,
-    score: float,
-    index: Any,
-    direction: str,
-    confidence: float,
-    quality_passed: bool,
-) -> dict[str, Any]:
-    probability_up = confidence if direction == "up" else 1.0 - confidence
+def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
+    probability_up = ctx.confidence if ctx.direction == "up" else 1.0 - ctx.confidence
     return {
-        "symbol": symbol.upper(),
-        "duration": duration,
-        "factorName": row.get("factorName"),
-        "factorDisplayName": row.get("factorDisplayName"),
-        "members": _row_members(row),
-        "direction": direction,
+        "symbol": ctx.symbol.upper(),
+        "duration": ctx.duration,
+        "factorName": ctx.row.get("factorName"),
+        "factorDisplayName": ctx.row.get("factorDisplayName"),
+        "members": _row_members(ctx.row),
+        "direction": ctx.direction,
         "probabilityUp": round(probability_up, PROBABILITY_DECIMALS),
-        "confidence": round(confidence, PROBABILITY_DECIMALS),
-        "score": round(score, SCORE_DECIMALS),
+        "confidence": round(ctx.confidence, PROBABILITY_DECIMALS),
+        "score": round(ctx.score, SCORE_DECIMALS),
         "source": "factor_combination_ranking",
-        "method": row.get("method") or COMBINATION_METHOD,
-        "historicalWinRate": row.get("winRate"),
-        "historicalSharpe": row.get("sharpe"),
-        "qualityPassed": quality_passed,
+        "method": ctx.row.get("method") or COMBINATION_METHOD,
+        "historicalWinRate": ctx.row.get("winRate"),
+        "historicalProfitFactor": ctx.row.get("profitFactor"),
+        "historicalSharpe": ctx.row.get("sharpe"),
+        "historicalIr": ctx.row.get("ir"),
+        "historicalTotalPeriods": ctx.row.get("totalPeriods"),
+        "qualityPassed": ctx.quality["passed"],
+        "qualityMetricsPassed": ctx.quality["metricsPassed"],
+        "qualityEntryWindowPassed": ctx.quality["entryWindowPassed"],
+        "qualityGateReason": ctx.quality["reason"],
         "qualityMinWinRate": LIVE_MIN_WIN_RATE,
-        "frameIndex": str(index),
+        "qualityMinProfitFactor": LIVE_MIN_PROFIT_FACTOR,
+        "qualityMinPeriods": LIVE_MIN_TOTAL_PERIODS,
+        "frameIndex": str(ctx.index),
     }
 
 
-def _quality_passed(
-    confidence: float,
-    entry_open_time: int | None,
-    entry_grace_ms: int | None,
-) -> bool:
+def _quality_gate(row: dict[str, Any], confidence: float, window: _EntryWindow) -> dict[str, Any]:
+    metric_reason = _quality_metric_reason(row, confidence)
+    entry_passed = _entry_window_passed(window)
+    metrics_passed = metric_reason == "passed"
+    passed = metrics_passed and entry_passed is not False
+    return {
+        "passed": passed,
+        "metricsPassed": metrics_passed,
+        "entryWindowPassed": entry_passed,
+        "reason": _quality_reason(metric_reason, entry_passed),
+    }
+
+
+def _quality_metric_reason(row: dict[str, Any], confidence: float) -> str:
     if confidence < LIVE_MIN_WIN_RATE:
-        return False
-    if entry_open_time is None or entry_grace_ms is None:
-        return True
-    return is_within_entry_grace(int(entry_open_time), grace_ms=int(entry_grace_ms))
+        return "win_rate_below_min"
+    profit_factor = _finite_float(row.get("profitFactor"))
+    if profit_factor is None:
+        return "profit_factor_missing"
+    if profit_factor < LIVE_MIN_PROFIT_FACTOR:
+        return "profit_factor_below_min"
+    total_periods = _finite_float(row.get("totalPeriods"))
+    if total_periods is None:
+        return "total_periods_missing"
+    if total_periods < LIVE_MIN_TOTAL_PERIODS:
+        return "total_periods_below_min"
+    return "passed"
+
+
+def _entry_window_passed(window: _EntryWindow) -> bool | None:
+    if window.open_time is None or window.grace_ms is None:
+        return None
+    return is_within_entry_grace(int(window.open_time), grace_ms=int(window.grace_ms))
+
+
+def _quality_reason(metric_reason: str, entry_passed: bool | None) -> str:
+    if metric_reason != "passed":
+        return metric_reason
+    if entry_passed is False:
+        return "entry_window_closed"
+    return "passed"
 
 
 def _row_members(row: dict[str, Any]) -> list[dict[str, Any]]:

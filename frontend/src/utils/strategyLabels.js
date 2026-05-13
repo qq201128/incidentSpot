@@ -13,6 +13,7 @@ export const STRATEGY_LABELS = {
   three_bar_10m_reverse_martingale_v1: "三连10m反向·不倍投",
   four_bar_10m_reverse_martingale_v1: "四连10m反向·不倍投",
   five_bar_10m_reverse_martingale_v1: "五连10m反向·不倍投",
+  factor_combo_ranker_v1: "多因子组合胜率榜",
 };
 
 export function strategyLabel(key) {

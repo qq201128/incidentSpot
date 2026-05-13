@@ -5,6 +5,7 @@ import json
 import pytest
 
 from app.services.factor_learning_llm_agent import attach_llm_agent_review
+from app.services.factor_operator_library import factor_operator_payload
 from app.services.siliconflow_chat_client import (
     DEFAULT_SILICONFLOW_MODEL,
     SiliconFlowChatClient,
@@ -53,7 +54,16 @@ def test_factor_agent_attaches_json_review() -> None:
     assert updated["llmAgent"]["review"]["notes"] == ["keep_loss_memory_explicit"]
     assert client.payload["response_format"] == {"type": "json_object"}
     assert "factor_a" in client.payload["messages"][1]["content"]
+    assert "operator_library" in client.payload["messages"][1]["content"]
     assert "llmAgent" not in memory
+
+
+def test_factor_operator_library_exposes_many_categories() -> None:
+    payload = factor_operator_payload()
+    categories = {item["key"] for item in payload["categories"]}
+
+    assert payload["total"] >= 60
+    assert {"time_series", "regression", "logical", "microstructure"} <= categories
 
 
 class FakeClient:

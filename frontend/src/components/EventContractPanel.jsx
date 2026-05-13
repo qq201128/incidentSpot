@@ -308,6 +308,7 @@ function ruleEventPayload(input, sideUp, probForSide) {
     aiQualityScore: input.result.tradeQualityScore,
     aiQualityPassed: input.result.tradeQualityPassed,
     aiHighWinrateGate: input.result.highWinrateGate,
+    aiHighWinrateRule: input.result.highWinrateRule,
     aiHighWinratePassed: input.result.highWinrateGatePassed,
     aiHighWinrateValue: input.result.highWinrateGateValue,
   };

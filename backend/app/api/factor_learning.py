@@ -7,6 +7,7 @@ from app.services.factor_learning_service import (
     run_factor_learning_llm_agent,
     refresh_factor_learning_memory,
 )
+from app.services.factor_operator_library import factor_operator_payload
 
 router = APIRouter(prefix="/api/factor-learning", tags=["factor-learning"])
 
@@ -55,3 +56,8 @@ def factor_learning_agent_review(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/operators")
+def factor_learning_operators() -> dict:
+    return factor_operator_payload()

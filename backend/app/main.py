@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auto_trade import router as auto_trade_router
 from app.api.events import router as events_router
 from app.api.factor_learning import router as factor_learning_router
+from app.api.factor_combo_positions import router as factor_combo_positions_router
 from app.api.factors import router as factors_router
 from app.api.market import router as market_router
 from app.api.rules import router as rules_router
@@ -63,6 +64,7 @@ app.include_router(stream_router)
 app.include_router(auto_trade_router)
 app.include_router(rules_router)
 app.include_router(factors_router)
+app.include_router(factor_combo_positions_router)
 app.include_router(factor_learning_router)
 
 

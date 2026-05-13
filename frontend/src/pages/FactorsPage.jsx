@@ -7,6 +7,7 @@ import {
   requestFactorRankingRefresh,
 } from "../api/client";
 import FactorCombinationPanel from "../components/FactorCombinationPanel";
+import FactorLearningPanel from "../components/FactorLearningPanel";
 import "./FactorsPage.css";
 
 const DURATIONS = [
@@ -271,6 +272,7 @@ export default function FactorsPage() {
       </section>
 
       <FactorCombinationPanel symbol={symbol} duration={duration} />
+      <FactorLearningPanel symbol={symbol} duration={duration} />
 
       <div className="factors-grid">
         <section className="factors-list-panel card-surface">

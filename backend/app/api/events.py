@@ -11,23 +11,14 @@ from app.api.event_quick_trade import (
     create_quick_trade_record,
     quick_trade_strategy_key,
 )
+from app.api.event_martingale_qty import adjust_quick_trade_qty_for_martingale
 from app.api.event_response import event_response
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
-from app.services.blind_reverse_martingale_strategy import (
-    blind_rm_order_qty_usdt,
-    load_blind_rm_settlement_state,
-)
 from app.services.settlement_service import settle_event
 from app.services.strategy_registry import (
-    BLIND_REVERSE_MARTINGALE_STRATEGY_KEY,
     MANUAL_STRATEGY_KEY,
     strategy_definition,
-)
-
-# 与 auto_trade 一致：仅「随意首单·反向倍投」用面板数量为「基础档」，实际名义按连亏套用 10→20→45（或大于基础的第一档）。
-_QUICK_TRADE_MARTINGALE_QTY_KEYS: frozenset[str] = frozenset(
-    {BLIND_REVERSE_MARTINGALE_STRATEGY_KEY}
 )
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -46,6 +37,7 @@ class EventCreate(BaseModel):
     aiQualityScore: float | None = None
     aiQualityPassed: bool | None = None
     aiHighWinrateGate: str | None = None
+    aiHighWinrateRule: str | None = None
     aiHighWinratePassed: bool | None = None
     aiHighWinrateValue: float | None = None
 
@@ -149,9 +141,9 @@ def create_event(payload: EventCreate) -> dict:
           strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
           start_time, end_time, status,
           ai_probability_up, ai_predicted_direction, ai_quality_score, ai_quality_passed,
-          ai_high_winrate_gate, ai_high_winrate_passed, ai_high_winrate_value
+          ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             strategy_key,
@@ -168,6 +160,7 @@ def create_event(payload: EventCreate) -> dict:
             payload.aiQualityScore,
             int(bool(payload.aiQualityPassed)) if payload.aiQualityPassed is not None else None,
             payload.aiHighWinrateGate,
+            payload.aiHighWinrateRule,
             int(bool(payload.aiHighWinratePassed)) if payload.aiHighWinratePassed is not None else None,
             payload.aiHighWinrateValue,
         ),
@@ -196,7 +189,7 @@ def create_quick_trade(payload: QuickTradeCreate) -> dict:
     )
     symbol = payload.event.symbol.upper()
     entry_price = _entry_price_from_payload(payload.event)
-    payload = _adjust_quick_trade_qty_for_martingale(payload, strategy_key, symbol)
+    payload = adjust_quick_trade_qty_for_martingale(payload, strategy_key, symbol)
     return create_quick_trade_record(
         QuickTradeContext(
             payload=payload,
@@ -209,29 +202,6 @@ def create_quick_trade(payload: QuickTradeCreate) -> dict:
             entry_price=entry_price,
             live_trading_enabled=payload.liveTradingEnabled,
         )
-    )
-
-
-def _adjust_quick_trade_qty_for_martingale(
-    payload: QuickTradeCreate, strategy_key: str, symbol: str
-) -> QuickTradeCreate:
-    if strategy_key not in _QUICK_TRADE_MARTINGALE_QTY_KEYS:
-        return payload
-    base = float(payload.order.qty)
-    state = load_blind_rm_settlement_state(strategy_key, symbol.upper())
-    qty = blind_rm_order_qty_usdt(base, state)
-    if abs(qty - base) < 1e-9:
-        return payload
-    order = payload.order
-    new_order = (
-        order.model_copy(update={"qty": qty})
-        if hasattr(order, "model_copy")
-        else order.copy(update={"qty": qty})
-    )
-    return (
-        payload.model_copy(update={"order": new_order})
-        if hasattr(payload, "model_copy")
-        else payload.copy(update={"order": new_order})
     )
 
 

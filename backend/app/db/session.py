@@ -35,6 +35,7 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE predictions ADD COLUMN prediction_correct INTEGER",
   "ALTER TABLE predictions ADD COLUMN settled_at TEXT",
   "ALTER TABLE events ADD COLUMN ai_high_winrate_gate TEXT",
+  "ALTER TABLE events ADD COLUMN ai_high_winrate_rule TEXT",
   "ALTER TABLE events ADD COLUMN ai_high_winrate_passed INTEGER",
   "ALTER TABLE events ADD COLUMN ai_high_winrate_value REAL",
   "ALTER TABLE orders ADD COLUMN external_order_id TEXT",
@@ -192,21 +193,28 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   ).fetchone()
 
   from app.services.strategy_registry import strategy_payloads
+  from app.services.auto_trade_default_slots import (
+    default_slot_flags,
+    enable_default_simulation_strategy_slots,
+  )
 
   ts = datetime.now(timezone.utc).isoformat()
-  for payload in strategy_payloads():
+  payloads = strategy_payloads()
+  for payload in payloads:
     key = str(payload["key"])
     for dur in _AUTO_TRADE_SLOT_DURATIONS:
       dm = _DURATION_MINUTES[dur]
+      enabled, live = default_slot_flags(key)
       conn.execute(
         """
         INSERT OR IGNORE INTO auto_trade_strategies(
           strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
         )
-        VALUES(?, ?, 0, 0, 'BTCUSDT', ?, 5, ?)
+        VALUES(?, ?, ?, ?, 'BTCUSDT', ?, 5, ?)
         """,
-        (key, dur, dm, ts),
+        (key, dur, enabled, live, dm, ts),
       )
+  enable_default_simulation_strategy_slots(conn, _AUTO_TRADE_SLOT_DURATIONS, _DURATION_MINUTES, ts)
   if default_exists is None:
     _copy_legacy_auto_trade_settings(conn)
 

@@ -22,6 +22,15 @@ export async function fetchFactorCombinationSignals(symbol, limit, options = {})
   return data;
 }
 
+export async function fetchFactorCombinationPositions(symbol, duration, factorName, options = {}) {
+  const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/positions`, {
+    params: { symbol, duration, factorName, limit: options.limit ?? 80 },
+    signal: options.signal,
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
+  return data;
+}
+
 export async function requestFactorCombinationRefresh(symbol, duration, config = {}) {
   const params = { symbol, ..._configParams(config) };
   if (duration) {

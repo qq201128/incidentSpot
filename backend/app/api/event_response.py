@@ -71,6 +71,7 @@ def _event_ai_fields(row) -> dict:
         "aiQualityScore": row["ai_quality_score"],
         "aiQualityPassed": row["ai_quality_passed"],
         "aiHighWinrateGate": row["ai_high_winrate_gate"],
+        "aiHighWinrateRule": row["ai_high_winrate_rule"],
         "aiHighWinratePassed": row["ai_high_winrate_passed"],
         "aiHighWinrateValue": row["ai_high_winrate_value"],
     }

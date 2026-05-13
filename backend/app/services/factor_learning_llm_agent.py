@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 from typing import Any, Protocol
 
+from app.services.factor_operator_library import factor_operator_prompt_payload
 from app.services.siliconflow_chat_client import SiliconFlowChatClient
 
 AGENT_NAME = "siliconflow_kimi_factor_agent_v1"
@@ -62,6 +63,7 @@ def _user_prompt(memory: dict[str, Any]) -> str:
         {
             "task": "review_factor_learning_memory_and_plan_next_factor_mining",
             "required_schema": _required_schema(),
+            "operator_library": factor_operator_prompt_payload(),
             "memory": _compact_memory(memory),
         },
         ensure_ascii=False,
@@ -73,10 +75,12 @@ def _required_schema() -> dict[str, Any]:
         "factorMiningPlan": {
             "successfulPatternsToExpand": ["string"],
             "forbiddenRegionsToAvoid": ["string"],
+            "operatorFamiliesUsed": ["string"],
             "candidateFactorIdeas": [
                 {
                     "nameHint": "string",
                     "formulaHint": "string",
+                    "operatorTrace": ["string"],
                     "rationale": "string",
                     "requiredColumns": ["string"],
                     "validationChecks": ["string"],

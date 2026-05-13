@@ -81,6 +81,7 @@ def _build_quick_trade_payload(
             aiQualityScore=prediction.get("trade_quality_score"),
             aiQualityPassed=_as_bool(prediction.get("trade_quality_passed")),
             aiHighWinrateGate=prediction.get("high_winrate_gate"),
+            aiHighWinrateRule=prediction.get("high_winrate_rule"),
             aiHighWinratePassed=_as_bool(prediction.get("high_winrate_gate_passed")),
             aiHighWinrateValue=prediction.get("high_winrate_gate_value"),
         ),

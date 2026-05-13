@@ -41,6 +41,7 @@ class AutoTradeEventPayload:
     aiQualityScore: float | None
     aiQualityPassed: bool | None
     aiHighWinrateGate: str | None
+    aiHighWinrateRule: str | None
     aiHighWinratePassed: bool | None
     aiHighWinrateValue: float | None
 

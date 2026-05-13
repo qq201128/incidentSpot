@@ -62,6 +62,7 @@ def _prediction_payload(signal: dict[str, Any], entry_open_time: int | None) -> 
         "high_winrate_gate_passed": None,
         "high_winrate_gate_value": signal["historicalWinRate"],
         "high_winrate_gate_min": signal["qualityMinWinRate"],
+        "quality_gate_reason": signal["qualityGateReason"],
         "signal_source": signal["source"],
         "rule_score": signal["score"],
         "rule_reasons": _rule_reasons(signal),
@@ -78,7 +79,11 @@ def _rule_reasons(signal: dict[str, Any]) -> list[str]:
         f"members={member_names}",
         f"method={signal['method']}",
         f"historical_win_rate={signal['historicalWinRate']}",
+        f"historical_profit_factor={signal['historicalProfitFactor']}",
         f"score={signal['score']}",
+        f"quality_gate={signal['qualityGateReason']}",
+        f"quality_min_win_rate={signal['qualityMinWinRate']}",
+        f"quality_min_profit_factor={signal['qualityMinProfitFactor']}",
     ]
     learning = signal.get("factorLearning")
     if isinstance(learning, dict):

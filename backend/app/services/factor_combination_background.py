@@ -6,6 +6,8 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.services.factor_backtest_batch_service import BACKTEST_DURATION_ORDER
+from app.db.session import get_conn
+from app.services.auto_trade_default_slots import enable_default_simulation_strategy_slots
 from app.services.factor_combination_cache_service import save_cached_combination_ranking
 from app.services.factor_combination_service import (
     CombinationSearchConfig,
@@ -13,7 +15,7 @@ from app.services.factor_combination_service import (
 )
 from app.services.factor_learning_service import refresh_factor_learning_memory
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
-from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
 DAILY_REFRESH_TZ = ZoneInfo("Asia/Shanghai")
@@ -52,12 +54,28 @@ def refresh_symbol_combination_rankings(
 def refresh_all_configured_combination_rankings(
     config: CombinationSearchConfig | None = None,
 ) -> None:
+    _sync_default_simulation_slots()
     for symbol in factor_ranking_precomputed_symbols():
         try:
             refresh_symbol_combination_rankings(symbol, None, config)
             logger.info("factor combo ranking cache updated: %s (all durations)", symbol)
         except Exception:
             logger.exception("factor combo ranking cache failed: %s", symbol)
+    _sync_default_simulation_slots()
+
+
+def _sync_default_simulation_slots() -> None:
+    conn = get_conn()
+    try:
+        enable_default_simulation_strategy_slots(
+            conn,
+            _refresh_durations(),
+            DURATION_TO_MINUTES,
+            datetime.now(DAILY_REFRESH_TZ).isoformat(),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def seconds_until_next_daily_refresh(now: datetime | None = None) -> float:

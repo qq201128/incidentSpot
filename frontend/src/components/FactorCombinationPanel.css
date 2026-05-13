@@ -48,6 +48,9 @@
 }
 
 .factor-combo-signal {
+  text-align: left;
+  color: inherit;
+  font: inherit;
   min-height: 172px;
   padding: 13px 14px;
   border: 1px solid var(--line);
@@ -56,6 +59,7 @@
   display: grid;
   gap: 10px;
   align-content: start;
+  cursor: pointer;
 }
 
 .factor-combo-signal.is-up {
@@ -64,6 +68,11 @@
 
 .factor-combo-signal.is-down {
   border-color: rgba(255, 104, 104, 0.42);
+}
+
+.factor-combo-signal.is-selected {
+  outline: 2px solid rgba(243, 212, 138, 0.52);
+  outline-offset: 2px;
 }
 
 .factor-combo-signal-top {

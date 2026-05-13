@@ -27,6 +27,7 @@ def test_factor_learning_memory_records_loss_patterns_and_weights() -> None:
     assert memory["lossMemory"]["status"] == "learned"
     assert any(pattern["feature"] == "factor_a" for pattern in loss_patterns)
     assert memory["factorMining"]["successPatterns"]
+    assert memory["factorMining"]["operatorLibrary"]["total"] >= 60
     assert memory["weights"]["factor_a"] > 0
 
 
