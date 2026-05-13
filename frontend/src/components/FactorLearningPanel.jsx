@@ -8,6 +8,7 @@ import "./FactorLearningPanel.css";
 
 const TOP_WEIGHT_LIMIT = 10;
 const OPERATOR_PREVIEW_LIMIT = 64;
+const AGENT_RELOAD_DELAY_MS = 5000;
 
 export default function FactorLearningPanel({ symbol, duration }) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -43,12 +44,15 @@ export default function FactorLearningPanel({ symbol, duration }) {
     try {
       const data = await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
       setMemoryState({ data, status: memoryStatus(data) });
+      if (data.agentQueued) {
+        window.setTimeout(() => void loadData(new AbortController().signal), AGENT_RELOAD_DELAY_MS);
+      }
     } catch (error) {
       setMemoryState((state) => ({ ...state, status: `刷新失败：${error.message}` }));
     } finally {
       setRefreshing(false);
     }
-  }, [duration, normalizedSymbol]);
+  }, [duration, loadData, normalizedSymbol]);
 
   return (
     <section className="factor-learning-panel">
@@ -274,7 +278,10 @@ function metaLabel(key, value) {
 
 function memoryStatus(data) {
   const updated = data?.updatedAt ? ` · 更新 ${data.updatedAt}` : "";
-  const agent = data?.llmAgent?.review ? " · 已联网挖掘" : "";
+  const status = data?.llmAgent?.status;
+  const failed = data?.llmAgent?.error || "查看后台日志";
+  const agent = status === "pending" ? " · 联网挖掘已排队"
+    : status === "failed" ? ` · 联网挖掘失败：${failed}` : data?.llmAgent?.review ? " · 已联网挖掘" : "";
   return `记忆已加载${agent}${updated}`;
 }
 

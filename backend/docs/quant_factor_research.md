@@ -57,4 +57,4 @@
 - 多重过滤：实时组合信号先过历史胜率和入场窗口，再检查成员确认数和亏损特征命中数；命中亏损模式会显式阻断，不静默降级。
 - 自动权重：每次刷新组合排名后按真实指标重算成员权重，并对已进入亏损模式的成员降权，记忆写入 `backend/models/factor_learning/`。
 - 运算符库：`factor_operator_library.py` 维护 60+ 个挖掘算子，覆盖算术、时序统计、截面、差分、相关、平滑、回归、逻辑条件、风险形态、量价、微观结构和衍生品状态。页面通过 `/api/factor-learning/operators` 展示，Agent prompt 也使用同一份结构化库。
-- 联网 LLM Agent：刷新因子学习时会调用 SiliconFlow Chat Completions，默认模型 `Pro/moonshotai/Kimi-K2.6`。`.env` 需要配置 `SILICONFLOW_API_KEY`；可选覆盖 `SILICONFLOW_MODEL` 和 `SILICONFLOW_CHAT_COMPLETIONS_URL`。Agent 输出只作为候选研究计划写入 `llmAgent.review`，不会伪造成已验证因子。
+- 联网 LLM Agent：刷新因子学习时会调用 SiliconFlow Chat Completions，默认模型 `Pro/moonshotai/Kimi-K2.6`。`.env` 需要配置 `SILICONFLOW_API_KEY`；可选覆盖 `SILICONFLOW_MODEL`、`SILICONFLOW_CHAT_COMPLETIONS_URL` 和 `SILICONFLOW_TIMEOUT_SECONDS`（默认 180 秒）。Agent 输出只作为候选研究计划写入 `llmAgent.review`，不会伪造成已验证因子。

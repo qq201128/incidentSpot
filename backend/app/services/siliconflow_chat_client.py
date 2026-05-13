@@ -9,7 +9,8 @@ from requests import RequestException
 
 DEFAULT_SILICONFLOW_MODEL = "Pro/moonshotai/Kimi-K2.6"
 DEFAULT_CHAT_COMPLETIONS_URL = "https://api.siliconflow.cn/v1/chat/completions"
-DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_TIMEOUT_SECONDS = 180
+TIMEOUT_ENV_NAME = "SILICONFLOW_TIMEOUT_SECONDS"
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,25 @@ def siliconflow_config_from_env() -> SiliconFlowConfig:
         raise RuntimeError("missing SILICONFLOW_API_KEY in environment or .env")
     model = os.getenv("SILICONFLOW_MODEL", DEFAULT_SILICONFLOW_MODEL).strip()
     url = os.getenv("SILICONFLOW_CHAT_COMPLETIONS_URL", DEFAULT_CHAT_COMPLETIONS_URL).strip()
-    return SiliconFlowConfig(api_key=api_key, model=model, url=url)
+    return SiliconFlowConfig(
+        api_key=api_key,
+        model=model,
+        url=url,
+        timeout_seconds=_timeout_seconds_from_env(),
+    )
+
+
+def _timeout_seconds_from_env() -> int:
+    raw_value = os.getenv(TIMEOUT_ENV_NAME, "").strip()
+    if not raw_value:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        timeout_seconds = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{TIMEOUT_ENV_NAME} must be a positive integer") from exc
+    if timeout_seconds <= 0:
+        raise RuntimeError(f"{TIMEOUT_ENV_NAME} must be a positive integer")
+    return timeout_seconds
 
 
 def _headers(api_key: str) -> dict[str, str]:

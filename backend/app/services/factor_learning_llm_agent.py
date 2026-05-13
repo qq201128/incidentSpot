@@ -8,6 +8,7 @@ from app.services.factor_operator_library import factor_operator_prompt_payload
 from app.services.siliconflow_chat_client import SiliconFlowChatClient
 
 AGENT_NAME = "siliconflow_kimi_factor_agent_v1"
+AGENT_PROVIDER = "siliconflow"
 AGENT_TEMPERATURE = 0.2
 AGENT_MAX_TOKENS = 2400
 
@@ -29,7 +30,8 @@ def attach_llm_agent_review(
     updated = deepcopy(memory)
     updated["llmAgent"] = {
         "agent": AGENT_NAME,
-        "provider": "siliconflow",
+        "provider": AGENT_PROVIDER,
+        "status": "completed",
         "model": active_client.model,
         "completionId": completion.get("id"),
         "usage": completion.get("usage") or {},

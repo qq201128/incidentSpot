@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import pytest
 
+from app.services import factor_learning_service
 from app.services.factor_learning_core import build_factor_learning_memory
 from app.services.factor_learning_signal_filter import apply_factor_learning_memory
 
@@ -48,6 +52,45 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["factorLearning"]["filterPassed"] is False
     assert result["factorLearning"]["lossPatternMatches"]
     assert result["qualityPassed"] is False
+
+
+def test_factor_learning_agent_failure_is_written_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = []
+    memory = {"symbol": "BTCUSDT", "duration": "10m", "updatedAt": "before"}
+
+    def fake_attach(_memory: dict) -> dict:
+        raise RuntimeError("Kimi request failed")
+
+    monkeypatch.setattr(factor_learning_service, "load_factor_learning_memory", lambda *_args: memory)
+    monkeypatch.setattr(factor_learning_service, "attach_llm_agent_review", fake_attach)
+    monkeypatch.setattr(
+        factor_learning_service,
+        "save_factor_learning_memory",
+        lambda payload: saved.append(payload) or Path("memory.json"),
+    )
+
+    with pytest.raises(RuntimeError, match="Kimi request failed"):
+        factor_learning_service.run_factor_learning_llm_agent("BTCUSDT", "10m")
+
+    assert saved[0]["llmAgent"]["status"] == "failed"
+    assert saved[0]["llmAgent"]["error"] == "Kimi request failed"
+    assert "llmAgent" not in memory
+
+
+def test_pending_agent_status_does_not_persist_response_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = []
+    memory = {"symbol": "BTCUSDT", "duration": "10m", "memoryPath": "response-only.json"}
+    monkeypatch.setattr(
+        factor_learning_service,
+        "save_factor_learning_memory",
+        lambda payload: saved.append(payload) or Path("memory.json"),
+    )
+
+    payload = factor_learning_service.mark_factor_learning_agent_pending(memory)
+
+    assert saved[0]["llmAgent"]["status"] == "pending"
+    assert "memoryPath" not in saved[0]
+    assert payload["memoryPath"] == "memory.json"
 
 
 def _learning_frame() -> pd.DataFrame:

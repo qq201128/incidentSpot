@@ -7,6 +7,7 @@ import pytest
 from app.services.factor_learning_llm_agent import attach_llm_agent_review
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.siliconflow_chat_client import (
+    DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_SILICONFLOW_MODEL,
     SiliconFlowChatClient,
     siliconflow_config_from_env,
@@ -17,6 +18,23 @@ def test_siliconflow_config_requires_api_key(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
 
     with pytest.raises(RuntimeError, match="SILICONFLOW_API_KEY"):
+        siliconflow_config_from_env()
+
+
+def test_siliconflow_config_reads_timeout_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-test")
+    monkeypatch.setenv("SILICONFLOW_TIMEOUT_SECONDS", "240")
+
+    config = siliconflow_config_from_env()
+
+    assert config.timeout_seconds == 240
+
+
+def test_siliconflow_config_rejects_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-test")
+    monkeypatch.setenv("SILICONFLOW_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(RuntimeError, match="SILICONFLOW_TIMEOUT_SECONDS"):
         siliconflow_config_from_env()
 
 
@@ -35,6 +53,7 @@ def test_siliconflow_client_sends_bearer_request(monkeypatch: pytest.MonkeyPatch
         return Response()
 
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-test")
+    monkeypatch.delenv("SILICONFLOW_TIMEOUT_SECONDS", raising=False)
     monkeypatch.setattr("app.services.siliconflow_chat_client.requests.post", fake_post)
 
     client = SiliconFlowChatClient()
@@ -42,6 +61,7 @@ def test_siliconflow_client_sends_bearer_request(monkeypatch: pytest.MonkeyPatch
 
     assert calls[0]["json"]["model"] == DEFAULT_SILICONFLOW_MODEL
     assert calls[0]["headers"]["Authorization"] == "Bearer sk-test"
+    assert calls[0]["timeout"] == DEFAULT_TIMEOUT_SECONDS
 
 
 def test_factor_agent_attaches_json_review() -> None:

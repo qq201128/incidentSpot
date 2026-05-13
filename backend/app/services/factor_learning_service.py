@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from app.db.session import get_conn
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
+from app.services.factor_learning_common import utc_now
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_core import build_factor_learning_memory
-from app.services.factor_learning_llm_agent import attach_llm_agent_review
+from app.services.factor_learning_llm_agent import (
+    AGENT_NAME,
+    AGENT_PROVIDER,
+    attach_llm_agent_review,
+)
 from app.services.factor_learning_memory_store import (
     load_factor_learning_memory,
     save_factor_learning_memory,
@@ -44,9 +50,12 @@ def refresh_factor_learning_memory(
         settlement_sweep=settlement,
     )
     if run_llm_agent:
-        memory = attach_llm_agent_review(memory)
-    path = save_factor_learning_memory(memory)
-    return {**memory, "memoryPath": _path_payload(path)}
+        return _attach_agent_review_and_save(memory)
+    return _save_memory_payload(memory)
+
+
+def mark_factor_learning_agent_pending(memory: dict[str, Any]) -> dict[str, Any]:
+    return _save_factor_learning_agent_status(memory, "pending")
 
 
 def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
@@ -54,9 +63,44 @@ def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
     memory = load_factor_learning_memory(symbol, duration)
     if memory is None:
         raise ValueError(f"factor learning memory not found for {symbol.upper()} {duration}")
-    updated = attach_llm_agent_review(memory)
-    path = save_factor_learning_memory(updated)
-    return {**updated, "memoryPath": _path_payload(path)}
+    return _attach_agent_review_and_save(memory)
+
+
+def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _save_memory_payload(attach_llm_agent_review(memory))
+    except Exception as exc:
+        _save_factor_learning_agent_status(memory, "failed", str(exc))
+        raise
+
+
+def _save_factor_learning_agent_status(
+    memory: dict[str, Any],
+    status: str,
+    error: str | None = None,
+) -> dict[str, Any]:
+    updated = deepcopy(memory)
+    updated["llmAgent"] = _agent_status_payload(status, error)
+    return _save_memory_payload(updated)
+
+
+def _agent_status_payload(status: str, error: str | None) -> dict[str, Any]:
+    payload = {
+        "agent": AGENT_NAME,
+        "provider": AGENT_PROVIDER,
+        "status": status,
+        "updatedAt": utc_now(),
+    }
+    if error:
+        payload["error"] = error
+    return payload
+
+
+def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(memory)
+    payload.pop("memoryPath", None)
+    path = save_factor_learning_memory(payload)
+    return {**payload, "memoryPath": _path_payload(path)}
 
 
 def _cached_ranking_or_raise(symbol: str, duration: str) -> dict[str, Any]:

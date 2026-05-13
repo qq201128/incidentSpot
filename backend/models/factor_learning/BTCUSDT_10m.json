@@ -1,0 +1,271 @@
+{
+  "duration": "10m",
+  "factorMining": {
+    "forbiddenRegions": [
+      {
+        "avgAbsCorrelation": 0.7853,
+        "members": [
+          "ma_ratio_120",
+          "ma_ratio_240",
+          "ret_240"
+        ],
+        "reason": "redundant_factor_neighborhood",
+        "region": "correlation_cluster:ma_ratio_120",
+        "support": 3
+      },
+      {
+        "avgAbsCorrelation": 0.724,
+        "members": [
+          "bb_width_20",
+          "dollar_volume_ma_20",
+          "range_ma_20",
+          "upside_vol_60",
+          "vol_ma_120",
+          "vol_ma_20",
+          "vol_ma_60"
+        ],
+        "reason": "redundant_factor_neighborhood",
+        "region": "correlation_cluster:dollar_volume_ma_20",
+        "support": 7
+      },
+      {
+        "avgAbsCorrelation": 0.59,
+        "members": [
+          "hl_range",
+          "range_ma_20"
+        ],
+        "reason": "redundant_factor_neighborhood",
+        "region": "correlation_cluster:hl_range",
+        "support": 2
+      },
+      {
+        "avgAbsCorrelation": 0.5338,
+        "members": [
+          "ret_240",
+          "tf_1d_volume_share"
+        ],
+        "reason": "redundant_factor_neighborhood",
+        "region": "correlation_cluster:tf_1d_volume_share",
+        "support": 2
+      }
+    ],
+    "operatorLibrary": {
+      "categories": [
+        {
+          "count": 10,
+          "key": "arithmetic"
+        },
+        {
+          "count": 4,
+          "key": "correlation"
+        },
+        {
+          "count": 4,
+          "key": "cross_section"
+        },
+        {
+          "count": 3,
+          "key": "derivatives"
+        },
+        {
+          "count": 4,
+          "key": "difference"
+        },
+        {
+          "count": 7,
+          "key": "logical"
+        },
+        {
+          "count": 4,
+          "key": "microstructure"
+        },
+        {
+          "count": 4,
+          "key": "regression"
+        },
+        {
+          "count": 4,
+          "key": "risk_shape"
+        },
+        {
+          "count": 4,
+          "key": "smoothing"
+        },
+        {
+          "count": 15,
+          "key": "time_series"
+        },
+        {
+          "count": 6,
+          "key": "volume_price"
+        }
+      ],
+      "total": 69,
+      "version": "factor_operator_library_v1"
+    },
+    "successPatterns": [
+      {
+        "factors": [
+          "ret_240"
+        ],
+        "label": "operator=pct_change",
+        "pattern": "operator:pct_change",
+        "score": 1.7478,
+        "support": 1
+      },
+      {
+        "factors": [
+          "tf_1d_volume_share"
+        ],
+        "label": "category=multi_timeframe",
+        "pattern": "category:multi_timeframe",
+        "score": 1.5312,
+        "support": 1
+      },
+      {
+        "factors": [
+          "tf_1d_volume_share"
+        ],
+        "label": "operator=daily_volume",
+        "pattern": "operator:daily_volume",
+        "score": 1.5312,
+        "support": 1
+      },
+      {
+        "factors": [
+          "adx_14"
+        ],
+        "label": "operator=ADX",
+        "pattern": "operator:ADX",
+        "score": 1.4559,
+        "support": 1
+      },
+      {
+        "factors": [
+          "ma_ratio_120",
+          "ma_ratio_240"
+        ],
+        "label": "category=moving_average",
+        "pattern": "category:moving_average",
+        "score": 1.3197,
+        "support": 2
+      },
+      {
+        "factors": [
+          "efficiency_ratio_10"
+        ],
+        "label": "category=momentum",
+        "pattern": "category:momentum",
+        "score": 1.3192,
+        "support": 1
+      },
+      {
+        "factors": [
+          "efficiency_ratio_10"
+        ],
+        "label": "operator=abs",
+        "pattern": "operator:abs",
+        "score": 1.3192,
+        "support": 1
+      },
+      {
+        "factors": [
+          "efficiency_ratio_10"
+        ],
+        "label": "operator=diff",
+        "pattern": "operator:diff",
+        "score": 1.3192,
+        "support": 1
+      },
+      {
+        "factors": [
+          "efficiency_ratio_10"
+        ],
+        "label": "operator=shift",
+        "pattern": "operator:shift",
+        "score": 1.3192,
+        "support": 1
+      },
+      {
+        "factors": [
+          "efficiency_ratio_10"
+        ],
+        "label": "operator=sum",
+        "pattern": "operator:sum",
+        "score": 1.3192,
+        "support": 1
+      },
+      {
+        "factors": [
+          "realized_skew_20"
+        ],
+        "label": "operator=skew",
+        "pattern": "operator:skew",
+        "score": 1.2103,
+        "support": 1
+      },
+      {
+        "factors": [
+          "ma_ratio_120",
+          "ma_ratio_240",
+          "bb_width_20"
+        ],
+        "label": "operator=sma",
+        "pattern": "operator:sma",
+        "score": 1.1823,
+        "support": 3
+      }
+    ]
+  },
+  "filters": {
+    "lossPatternMaxMatches": null,
+    "minConfirmations": 2,
+    "minHistoricalWinRate": 0.5
+  },
+  "llmAgent": {
+    "agent": "siliconflow_kimi_factor_agent_v1",
+    "error": "SiliconFlow chat completion failed: HTTPSConnectionPool(host='api.siliconflow.cn', port=443): Read timed out. (read timeout=60)",
+    "provider": "siliconflow",
+    "status": "failed",
+    "updatedAt": "2026-05-13T02:52:25.112286+00:00"
+  },
+  "lossMemory": {
+    "lossCount": 2,
+    "patterns": [],
+    "sampleCount": 2,
+    "status": "insufficient_loss_or_win_samples"
+  },
+  "source": {
+    "baseFactorCount": 16,
+    "lossMemoryStatus": "insufficient_loss_or_win_samples",
+    "lossPatternCount": 0,
+    "rankingTotal": 200,
+    "settledPredictionCount": 3,
+    "settlementSweep": {
+      "checked": 0,
+      "pendingData": 0,
+      "settled": 0
+    }
+  },
+  "symbol": "BTCUSDT",
+  "updatedAt": "2026-05-13T02:51:24.478033+00:00",
+  "version": "factor_learning_v1",
+  "weights": {
+    "adx_14": 0.082446,
+    "bb_width_20": 0.0514,
+    "dollar_volume_ma_20": 0.050521,
+    "efficiency_ratio_10": 0.074703,
+    "hl_range": 0.017988,
+    "ma_ratio_120": 0.067626,
+    "ma_ratio_240": 0.081839,
+    "range_ma_20": 0.049754,
+    "realized_skew_20": 0.068535,
+    "ret_240": 0.098973,
+    "tf_1d_volume_share": 0.086709,
+    "upside_vol_60": 0.034297,
+    "vol_ma_120": 0.070951,
+    "vol_ma_20": 0.048957,
+    "vol_ma_60": 0.06871,
+    "vol_median_ratio_20": 0.046593
+  }
+}
