@@ -257,6 +257,23 @@
   background: rgba(13, 18, 23, 0.55);
 }
 
+.factor-learning-candidate-empty {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 7px;
+}
+
+.factor-learning-candidate-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.factor-learning-candidate-empty span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 1180px) {
   .factor-learning-candidates,
   .factor-learning-grid,

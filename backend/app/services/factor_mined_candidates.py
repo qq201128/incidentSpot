@@ -5,6 +5,11 @@ from typing import Any
 
 import pandas as pd
 
+from app.services.agent_mined_factor_library import (
+    AGENT_FACTOR_SOURCE_FILE,
+    build_agent_mined_candidates_from_frame,
+    materialize_agent_factor_frame,
+)
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_mined_library import mined_factor_rows_for_duration
@@ -41,10 +46,12 @@ def materialize_mined_factor_frame(
     symbol: str,
     duration: str,
 ) -> MinedFrameResult:
+    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    frame = agent.frame
     rows = mined_factor_rows_for_duration(symbol, duration)
     if not rows:
-        return MinedFrameResult(frame, 0, ())
-    failures: list[dict[str, Any]] = []
+        return MinedFrameResult(frame, agent.source_count, agent.failures)
+    failures: list[dict[str, Any]] = list(agent.failures)
     pending: dict[str, pd.Series] = {}
     materialized = {str(column) for column in frame.columns}
     by_name = {str(row.get("factorName")): row for row in rows}
@@ -54,7 +61,7 @@ def materialize_mined_factor_frame(
         except Exception as exc:
             failures.append(_failure(row, "materialize_mined_factor", exc))
     working = _frame_with_pending_columns(frame, pending)
-    return MinedFrameResult(working, len(rows), tuple(failures))
+    return MinedFrameResult(working, len(rows) + agent.source_count, tuple(failures))
 
 
 def build_mined_candidates(
@@ -75,6 +82,7 @@ def build_mined_candidates(
                 candidates.append(candidate)
         except Exception as exc:
             failures.append(_failure(row, "backtest_mined_factor", exc))
+    candidates.extend(build_agent_mined_candidates_from_frame(materialized.frame, symbol=symbol, duration=duration))
     return MinedCandidateResult(
         materialized.frame,
         tuple(candidates),
@@ -165,6 +173,10 @@ def _factor_definition(row: dict[str, Any], duration: str) -> FactorDefinition:
         direction=FactorDirection.HIGHER_BETTER,
         parameters={"members": [member["name"] for member in _members(row)]},
     )
+
+
+def is_mined_factor_source(source_file: str) -> bool:
+    return source_file in {MINED_FACTOR_SOURCE_FILE, AGENT_FACTOR_SOURCE_FILE}
 
 
 def _members(row: dict[str, Any]) -> list[dict[str, Any]]:

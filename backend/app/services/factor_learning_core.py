@@ -29,6 +29,7 @@ def build_factor_learning_memory(
     settlement_sweep: dict[str, int] | None = None,
     mined_frame_failures: list[dict[str, Any]] | None = None,
     mined_library: dict[str, Any] | None = None,
+    agent_mined_library: dict[str, Any] | None = None,
     monitoring_report: dict[str, Any] | None = None,
     lstm_shadow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -66,6 +67,7 @@ def build_factor_learning_memory(
         "adaptiveLearning": adaptive_learning,
         "lstmShadow": lstm_shadow or {},
         "minedFactorLibrary": mined_library or {},
+        "agentMinedFactorLibrary": agent_mined_library or {},
         "monitoring": monitoring_report or {},
     }
 

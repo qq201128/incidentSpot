@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
+from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_registry import factor_payload
 
@@ -35,6 +36,7 @@ def build_combination_ranking_report(payload: CombinationRankingReportPayload) -
         "baseFactorCount": len(payload.selected),
         "minedFactorSourceCount": payload.mined_source_count,
         "minedFactorUsedCount": mined_factor_count(payload.selected),
+        "agentMinedFactorUsedCount": agent_mined_factor_count(payload.selected),
         "testedCombinationCount": payload.tested_count,
         "failureCount": len(payload.failures),
         "failures": payload.failures[:REPORT_FAILURE_LIMIT],
@@ -84,6 +86,10 @@ def base_payload(candidate: Any) -> dict[str, Any]:
 
 def mined_factor_count(selected: list[Any]) -> int:
     return sum(1 for item in selected if item.factor.source_file == MINED_FACTOR_SOURCE_FILE)
+
+
+def agent_mined_factor_count(selected: list[Any]) -> int:
+    return sum(1 for item in selected if item.factor.source_file == AGENT_FACTOR_SOURCE_FILE)
 
 
 def config_payload(config: Any) -> dict[str, Any]:

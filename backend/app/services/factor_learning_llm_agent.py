@@ -71,6 +71,7 @@ def _system_prompt() -> str:
     return (
         "你是量化因子挖掘 LLM Agent。你必须只输出 JSON 对象。"
         "不要编造已验证结果，不要声称真实回测通过；只能基于输入记忆提出候选研究方向。"
+        "不要再次提出 doNotSuggestFactorNames 中已经入库的单因子。"
         "重点学习 FactorMiner 思路：成功模式、禁区、亏损模式、多重过滤、自动权重。"
         "所有给交易员看的因子名称、理由、风控建议必须使用中文。"
     )
@@ -131,6 +132,8 @@ def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
         "filters": memory.get("filters") or {},
         "weights": _top_weights(memory.get("weights") or {}),
         "minedFactorLibrary": memory.get("minedFactorLibrary") or {},
+        "agentMinedFactorLibrary": memory.get("agentMinedFactorLibrary") or {},
+        "doNotSuggestFactorNames": _factor_names(memory.get("agentMinedFactorLibrary") or {}),
         "monitoring": memory.get("monitoring") or {},
     }
 
@@ -138,6 +141,10 @@ def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
 def _top_weights(weights: dict[str, Any]) -> dict[str, Any]:
     pairs = sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)
     return dict(pairs[:20])
+
+
+def _factor_names(library: dict[str, Any]) -> list[str]:
+    return [str(row.get("factorName")) for row in library.get("factors") or [] if row.get("factorName")]
 
 
 def _review_from_completion(completion: dict[str, Any]) -> dict[str, Any]:

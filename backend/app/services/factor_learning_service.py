@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.agent_mined_factor_library import (
+    agent_mined_factor_library_summary,
+    process_agent_factor_candidates,
+)
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_monitor_service import factor_combo_monitor_report
 from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
@@ -55,6 +59,7 @@ def refresh_factor_learning_memory(
         settlement_sweep=settlement,
         mined_frame_failures=list(mined_frame.failures),
         mined_library=mined_factor_library_summary(sym, duration),
+        agent_mined_library=agent_mined_factor_library_summary(sym, duration),
         monitoring_report=factor_combo_monitor_report(sym, duration),
         lstm_shadow=lstm_shadow_learning_summary(sym, duration),
     )
@@ -77,7 +82,10 @@ def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
 
 def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:
     try:
-        return _save_memory_payload(attach_llm_agent_review(memory))
+        reviewed = attach_llm_agent_review(memory)
+        frame = load_factor_frame(str(reviewed["symbol"]))
+        promoted = process_agent_factor_candidates(reviewed, frame)
+        return _save_memory_payload(promoted)
     except Exception as exc:
         _save_factor_learning_agent_status(memory, "failed", str(exc))
         raise

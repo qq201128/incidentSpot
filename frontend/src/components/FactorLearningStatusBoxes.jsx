@@ -8,6 +8,7 @@ const SOLUTION_PREVIEW_LIMIT = 4;
 export default function FactorLearningStatusBoxes({ memory, refreshing = false, onRefreshLocal }) {
   return (
     <div className="factor-learning-grid factor-learning-status-grid">
+      <AgentLibraryBox library={memory?.agentMinedFactorLibrary || {}} />
       <LibraryBox library={memory?.minedFactorLibrary || {}} />
       <MonitorBox monitoring={memory?.monitoring || {}} />
       <IssueBox monitoring={memory?.monitoring || {}} />
@@ -20,14 +21,14 @@ export default function FactorLearningStatusBoxes({ memory, refreshing = false, 
   );
 }
 
-function LibraryBox({ library }) {
+function AgentLibraryBox({ library }) {
   const rows = Array.isArray(library.factors) ? library.factors.slice(0, LIBRARY_PREVIEW_LIMIT) : [];
   return (
     <section
       className="factor-learning-box"
-      title="已写入挖掘因子库的因子。列表右侧为因子在库中的历史胜率。"
+      title="联网Agent提出的单因子候选，经过公式物化和单因子回测达标后写入。"
     >
-      <BoxTitle title="挖掘因子库" count={library.total ?? 0} />
+      <BoxTitle title="Agent单因子库" count={library.total ?? 0} />
       <ul>
         {rows.map((factor) => (
           <li key={factor.factorName}>
@@ -36,7 +37,28 @@ function LibraryBox({ library }) {
           </li>
         ))}
       </ul>
-      {!rows.length ? <p className="factor-learning-empty small">暂无入库因子</p> : null}
+      {!rows.length ? <p className="factor-learning-empty small">暂无入库单因子</p> : null}
+    </section>
+  );
+}
+
+function LibraryBox({ library }) {
+  const rows = Array.isArray(library.factors) ? library.factors.slice(0, LIBRARY_PREVIEW_LIMIT) : [];
+  return (
+    <section
+      className="factor-learning-box"
+      title="已通过组合排名筛选并回灌的组合。列表右侧为该组合的历史胜率。"
+    >
+      <BoxTitle title="组合回灌库" count={library.total ?? 0} />
+      <ul>
+        {rows.map((factor) => (
+          <li key={factor.factorName}>
+            <strong>{factor.factorDisplayName || factorLabel(factor.factorName)}</strong>
+            <span>{formatPct(factor.metrics?.winRate, 1)}</span>
+          </li>
+        ))}
+      </ul>
+      {!rows.length ? <p className="factor-learning-empty small">暂无入库组合</p> : null}
     </section>
   );
 }
