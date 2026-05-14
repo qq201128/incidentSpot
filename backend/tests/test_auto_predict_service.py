@@ -272,6 +272,35 @@ def test_lstm_strategy_prediction_saves_own_simulation_row(monkeypatch) -> None:
     assert saved == [(lstm_key, False)]
 
 
+def test_unready_lstm_strategy_is_not_due(monkeypatch) -> None:
+    calls = []
+    lstm_key = lstm_shadow_strategy_key("10m")
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "is_within_entry_grace", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service,
+        "lstm_model_status",
+        lambda *_args: {
+            "shadowPredictionReady": False,
+            "shadowPredictionBlockedReason": "validation_gate_missing",
+        },
+    )
+
+    def prediction_exists(**kwargs) -> bool:
+        calls.append(kwargs["strategy_key"])
+        return False
+
+    monkeypatch.setattr(service, "prediction_exists", prediction_exists)
+
+    assert not service._should_predict_entry(_settings(lstm_key))
+    assert calls == [lstm_key]
+
+
 def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     mixed = [
         _settings(THREE_BAR_10M_RM_STRATEGY_KEY, duration="30m"),

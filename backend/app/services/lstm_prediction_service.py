@@ -29,7 +29,14 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
     artifacts_ready = required_artifacts_exist(paths)
     torch_status = torch_availability()
     torch_available = bool(torch_status["available"])
-    ready_reason = _shadow_prediction_ready_reason(status, artifacts_ready, snapshot, torch_available)
+    ready_reason = _shadow_prediction_ready_reason(
+        status,
+        version,
+        report,
+        artifacts_ready,
+        snapshot,
+        torch_available,
+    )
     return {
         **status,
         "strategyKey": lstm_shadow_strategy_key(duration),
@@ -74,6 +81,7 @@ def predict_lstm_signal(
     features = require_json(paths.features, "features")
     scaler = require_json(paths.scaler, "scaler")
     version = require_json(paths.version, "version")
+    report = require_json(paths.report, "training report")
     status = require_json(paths.status, "status")
     window, meta = build_live_feature_window(
         sym,
@@ -85,7 +93,15 @@ def predict_lstm_signal(
     )
     scaled = apply_standardizer(window, scaler)
     probability_up = float((backend or TorchLstmBackend()).predict(paths.model, scaled)[0])
-    return _signal_payload(sym, duration, probability_up, meta, features, version, status)
+    return _signal_payload(
+        sym,
+        duration,
+        probability_up,
+        meta,
+        features,
+        _prediction_version_payload(version, report),
+        status,
+    )
 
 
 def predict_lstm_shadow_prediction(
@@ -111,6 +127,11 @@ def _assert_predictable(
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {reason}")
     if not required_artifacts_exist(paths):
         raise ValueError(f"LSTM model artifacts are incomplete for {symbol} {duration}: {paths.root}")
+    version = read_json(paths.version) or {}
+    report = read_json(paths.report) or {}
+    validation_reason = lstm_validation_block_reason(status, version, report)
+    if validation_reason != "passed":
+        raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {validation_reason}")
     snapshot = combo_snapshot_status(symbol, duration, artifact_root=artifact_root)
     if not snapshot["matches"]:
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {snapshot['reason']}")
@@ -194,6 +215,60 @@ def _selected_confidence_threshold(version: dict[str, Any]) -> float:
     return float(threshold)
 
 
+def _prediction_version_payload(version: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    gate = _validation_gate_payload(version, report)
+    threshold = _validation_threshold(version, report, gate)
+    return {
+        **report,
+        **version,
+        "modelVersion": version.get("modelVersion") or report.get("modelVersion"),
+        "trainedAt": version.get("trainedAt") or report.get("trainedAt"),
+        "returnStats": version.get("returnStats") or report.get("returnStats") or {},
+        "validationGate": gate,
+        "selectedConfidenceThreshold": threshold,
+    }
+
+
+def lstm_validation_block_reason(
+    status: dict[str, Any],
+    version: dict[str, Any],
+    report: dict[str, Any],
+) -> str:
+    if status.get("status") != "trained":
+        return status.get("reason") or f"model_status_{status.get('status') or 'unknown'}"
+    gate = _validation_gate_payload(version, report)
+    if not gate:
+        return "validation_gate_missing"
+    if gate.get("status") != "passed":
+        return str(gate.get("reason") or "validation_gate_failed")
+    threshold = _validation_threshold(version, report, gate)
+    if threshold is None:
+        return "validation_confidence_threshold_missing"
+    return "passed"
+
+
+def _validation_gate_payload(version: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    gate = version.get("validationGate")
+    if isinstance(gate, dict):
+        return gate
+    gate = report.get("validationGate")
+    return gate if isinstance(gate, dict) else {}
+
+
+def _validation_threshold(
+    version: dict[str, Any],
+    report: dict[str, Any],
+    gate: dict[str, Any],
+) -> Any:
+    threshold = version.get("selectedConfidenceThreshold")
+    if threshold is not None:
+        return threshold
+    threshold = report.get("selectedConfidenceThreshold")
+    if threshold is not None:
+        return threshold
+    return gate.get("minConfidence")
+
+
 def _untrained_status(symbol: str, duration: str) -> dict[str, Any]:
     return {
         "status": "untrained",
@@ -206,6 +281,8 @@ def _untrained_status(symbol: str, duration: str) -> dict[str, Any]:
 
 def _shadow_prediction_ready_reason(
     status: dict[str, Any],
+    version: dict[str, Any],
+    report: dict[str, Any],
     artifacts_ready: bool,
     snapshot: dict[str, Any],
     torch_available: bool,
@@ -216,7 +293,9 @@ def _shadow_prediction_ready_reason(
         return status.get("reason") or f"model_status_{status.get('status') or 'unknown'}"
     if not artifacts_ready:
         return "artifacts_incomplete"
+    validation_reason = lstm_validation_block_reason(status, version, report)
+    if validation_reason != "passed":
+        return validation_reason
     if not snapshot["matches"]:
         return str(snapshot["reason"])
     return "passed"
-

@@ -102,6 +102,29 @@ def test_sync_lstm_model_skips_when_combo_snapshot_matches() -> None:
     assert result["status"] == LSTM_SYNC_UP_TO_DATE
 
 
+def test_sync_lstm_model_retrains_when_validation_gate_missing() -> None:
+    artifact_root = _runtime_path("sync-missing-gate")
+    snapshot = _snapshot("combo_current", "factor_a")
+    _write_trained_artifacts(artifact_root, snapshot, include_validation_gate=False)
+    calls = []
+
+    def trainer(config: LstmTrainingConfig) -> dict[str, Any]:
+        calls.append(config)
+        return {"modelVersion": "lstm_new"}
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=_ranking("combo_current", "factor_a"),
+        artifact_root=artifact_root,
+        trainer=trainer,
+    )
+
+    assert result["status"] == LSTM_SYNC_TRAINED
+    assert result["modelVersion"] == "lstm_new"
+    assert len(calls) == 1
+
+
 def test_factor_combo_refresh_syncs_lstm_before_learning(monkeypatch) -> None:
     calls = []
 
@@ -135,15 +158,38 @@ def test_factor_combo_refresh_syncs_lstm_before_learning(monkeypatch) -> None:
     assert [call[0] for call in calls] == ["run", "save", "promote", "sync", "learn"]
 
 
-def _write_trained_artifacts(root: Path, combo_snapshot: list[dict[str, Any]]) -> None:
+def _write_trained_artifacts(
+    root: Path,
+    combo_snapshot: list[dict[str, Any]],
+    *,
+    include_validation_gate: bool = True,
+) -> None:
     paths = artifact_paths("BTCUSDT", "10m", root)
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.model.write_bytes(b"fake")
     write_json(paths.features, {"columns": ["x"], "featureWindow": 4, "comboSnapshot": combo_snapshot})
     write_json(paths.scaler, {"mean": [0.0], "std": [1.0]})
-    write_json(paths.version, {"modelVersion": "lstm_old", "trainedAt": "2026-05-13T00:00:00+00:00"})
+    version = {"modelVersion": "lstm_old", "trainedAt": "2026-05-13T00:00:00+00:00"}
+    report = {"status": "trained", "modelVersion": "lstm_old"}
+    if include_validation_gate:
+        validation_gate = _passed_validation_gate()
+        version["validationGate"] = validation_gate
+        version["selectedConfidenceThreshold"] = validation_gate["minConfidence"]
+        report["validationGate"] = validation_gate
+        report["selectedConfidenceThreshold"] = validation_gate["minConfidence"]
+    write_json(paths.version, version)
     write_json(paths.status, {"status": "trained", "symbol": "BTCUSDT", "duration": "10m"})
-    write_json(paths.report, {"status": "trained", "modelVersion": "lstm_old"})
+    write_json(paths.report, report)
+
+
+def _passed_validation_gate() -> dict[str, Any]:
+    return {
+        "status": "passed",
+        "minConfidence": 0.6,
+        "winRate": 0.7,
+        "profitFactor": 1.2,
+        "avgReturn": 0.01,
+    }
 
 
 def _ranking(factor_name: str, member_name: str) -> dict[str, Any]:

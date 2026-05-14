@@ -6,6 +6,7 @@ from typing import Any, Callable
 from app.services.lstm_artifacts import artifact_paths, read_json, required_artifacts_exist
 from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import LstmTrainingConfig
+from app.services.lstm_prediction_service import lstm_validation_block_reason
 from app.services.lstm_training_service import train_lstm_model
 
 LSTM_SYNC_UP_TO_DATE = "up_to_date"
@@ -42,13 +43,20 @@ def _trained_artifacts_match(
 ) -> bool:
     paths = artifact_paths(symbol, duration, artifact_root)
     status = read_json(paths.status) or {}
+    version = read_json(paths.version) or {}
+    report = read_json(paths.report) or {}
     snapshot = combo_snapshot_status(
         symbol,
         duration,
         ranking_report=ranking_report,
         artifact_root=artifact_root,
     )
-    return status.get("status") == "trained" and required_artifacts_exist(paths) and snapshot["matches"]
+    return (
+        status.get("status") == "trained"
+        and required_artifacts_exist(paths)
+        and lstm_validation_block_reason(status, version, report) == "passed"
+        and snapshot["matches"]
+    )
 
 
 def _train(

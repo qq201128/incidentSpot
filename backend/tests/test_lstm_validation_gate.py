@@ -36,6 +36,44 @@ def test_validation_failed_status_blocks_prediction(monkeypatch) -> None:
         )
 
 
+def test_trained_artifacts_missing_validation_gate_block_prediction(monkeypatch) -> None:
+    artifact_root = _runtime_path("missing-gate")
+    _write_legacy_trained_artifacts(artifact_root)
+    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
+
+    status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
+
+    assert status["status"] == "trained"
+    assert status["comboSnapshotMatches"] is True
+    assert status["shadowPredictionReady"] is False
+    assert status["shadowPredictionBlockedReason"] == "validation_gate_missing"
+    with pytest.raises(ValueError, match="validation_gate_missing"):
+        lstm_prediction_service.predict_lstm_signal(
+            "BTCUSDT",
+            "10m",
+            artifact_root=artifact_root,
+            backend=_PredictOnlyBackend(),
+        )
+
+
+def test_predict_lstm_signal_reads_validation_gate_from_report(monkeypatch) -> None:
+    artifact_root = _runtime_path("report-gate")
+    _write_report_gate_artifacts(artifact_root)
+    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
+
+    signal = lstm_prediction_service.predict_lstm_signal(
+        "BTCUSDT",
+        "10m",
+        artifact_root=artifact_root,
+        backend=_PredictOnlyBackend(),
+    )
+
+    assert signal["selectedConfidenceThreshold"] == pytest.approx(0.6)
+    assert signal["validationGatePassed"] is True
+
+
 def test_train_lstm_model_marks_validation_failed_when_no_threshold_passes() -> None:
     report = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
@@ -120,6 +158,56 @@ def _write_validation_failed_artifacts(root: Path) -> None:
         "reason": "no_validation_confidence_threshold_met",
     })
     _write_json(model_dir / "training_report.json", {})
+
+
+def _write_legacy_trained_artifacts(root: Path) -> None:
+    model_dir = root / "BTCUSDT" / "10m"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "model.pt").write_bytes(b"fake")
+    _write_json(model_dir / "features.json", {
+        "columns": ["x"],
+        "featureWindow": 4,
+        "comboSnapshot": _combo_snapshot(),
+    })
+    _write_json(model_dir / "scaler.json", {"mean": [0.0], "std": [1.0]})
+    _write_json(model_dir / "model_version.json", {
+        "modelVersion": "lstm_legacy",
+        "trainedAt": "2026-05-13T00:00:00+00:00",
+        "returnStats": {"upMean": 0.01, "downMean": -0.01},
+    })
+    _write_json(model_dir / "status.json", {
+        "status": "trained",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+    })
+    _write_json(model_dir / "training_report.json", {"status": "trained"})
+
+
+def _write_report_gate_artifacts(root: Path) -> None:
+    model_dir = root / "BTCUSDT" / "10m"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "model.pt").write_bytes(b"fake")
+    _write_json(model_dir / "features.json", {
+        "columns": ["x"],
+        "featureWindow": 4,
+        "comboSnapshot": _combo_snapshot(),
+    })
+    _write_json(model_dir / "scaler.json", {"mean": [0.0], "std": [1.0]})
+    _write_json(model_dir / "model_version.json", {
+        "modelVersion": "lstm_report_gate",
+        "trainedAt": "2026-05-13T00:00:00+00:00",
+        "returnStats": {"upMean": 0.01, "downMean": -0.01},
+    })
+    _write_json(model_dir / "status.json", {
+        "status": "trained",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+    })
+    _write_json(model_dir / "training_report.json", {
+        "status": "trained",
+        "validationGate": {"status": "passed", "minConfidence": 0.6},
+        "selectedConfidenceThreshold": 0.6,
+    })
 
 
 def _write_json(path: Path, payload: dict) -> None:

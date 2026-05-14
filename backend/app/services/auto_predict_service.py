@@ -20,7 +20,7 @@ from app.services.kline_timing import (
     seconds_until_next_rule_entry_for_duration,
     utc_now_ms,
 )
-from app.services.lstm_config import lstm_shadow_strategy_key
+from app.services.lstm_config import is_lstm_shadow_strategy, lstm_shadow_strategy_key
 from app.services.prediction_cache_service import (
     prediction_exists,
     prediction_passed_exists,
@@ -170,17 +170,7 @@ async def _save_lstm_shadow_prediction(
         return
     status = await asyncio.to_thread(lstm_model_status, settings.symbol, settings.duration)
     if not status.get("shadowPredictionReady"):
-        logger.info(
-            "predict: LSTM shadow skipped for %s %s reason=%s torch=%s torchError=%s status=%s artifacts=%s combo=%s",
-            settings.symbol,
-            settings.duration,
-            status.get("shadowPredictionBlockedReason"),
-            status.get("torchAvailable"),
-            (status.get("torchStatus") or {}).get("error"),
-            status.get("status"),
-            status.get("artifactsReady"),
-            status.get("comboSnapshotReason"),
-        )
+        _log_lstm_shadow_skip(settings, status, role="sidecar")
         return
     result = await asyncio.to_thread(
         predict_lstm_shadow_prediction,
@@ -247,6 +237,8 @@ def _should_predict_entry(settings: AutoTradeSettings) -> bool:
         grace_ms=strategy_entry_grace_ms(settings.strategy_key),
     ):
         return False
+    if is_lstm_shadow_strategy(settings.strategy_key):
+        return _ready_lstm_strategy_due(settings, bucket)
     if is_continuous_orderbook_strategy(settings.strategy_key):
         return not prediction_passed_exists(
             strategy_key=settings.strategy_key,
@@ -293,6 +285,41 @@ def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
         return False
     status = lstm_model_status(settings.symbol, settings.duration)
     return bool(status.get("shadowPredictionReady"))
+
+
+def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    if prediction_exists(
+        strategy_key=settings.strategy_key,
+        symbol=settings.symbol,
+        duration=settings.duration,
+        open_time=bucket,
+    ):
+        return False
+    status = lstm_model_status(settings.symbol, settings.duration)
+    if status.get("shadowPredictionReady"):
+        return True
+    _log_lstm_shadow_skip(settings, status, role="primary")
+    return False
+
+
+def _log_lstm_shadow_skip(
+    settings: AutoTradeSettings,
+    status: dict,
+    *,
+    role: str,
+) -> None:
+    logger.info(
+        "predict: LSTM shadow skipped role=%s for %s %s reason=%s torch=%s torchError=%s status=%s artifacts=%s combo=%s",
+        role,
+        settings.symbol,
+        settings.duration,
+        status.get("shadowPredictionBlockedReason"),
+        status.get("torchAvailable"),
+        (status.get("torchStatus") or {}).get("error"),
+        status.get("status"),
+        status.get("artifactsReady"),
+        status.get("comboSnapshotReason"),
+    )
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
