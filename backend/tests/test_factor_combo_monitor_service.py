@@ -28,7 +28,9 @@ def test_monitor_reads_all_top_three_simulation_strategy_keys(monkeypatch) -> No
     assert captured[0][1][:3] == factor_combo_simulation_strategy_keys()
     assert report["status"] == "warning"
     assert report["metrics"]["predictionSuccessRate"] == 0.0
-    assert report["solutions"]
+    assert report["solutions"][0]["text"]
+    assert report["solutions"][0]["action"] == "refresh_learning"
+    assert report["solutions"][0]["requiresConfirmation"] is True
 
 
 def _loss_row(index: int) -> dict:

@@ -20,6 +20,7 @@ from app.services.kline_timing import (
     seconds_until_next_rule_entry_for_duration,
     utc_now_ms,
 )
+from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.prediction_cache_service import (
     prediction_exists,
     prediction_passed_exists,
@@ -35,7 +36,7 @@ from app.services.strategy_registry import (
     strategy_supports_duration,
 )
 from app.services.lstm_prediction_service import (
-    is_lstm_shadow_ready,
+    lstm_model_status,
     predict_lstm_shadow_prediction,
 )
 
@@ -115,10 +116,10 @@ async def _run_prediction(
     )
     allow_existing = is_continuous_orderbook_strategy(settings.strategy_key)
     if not await _save_prediction(result, write_lock, allow_existing=allow_existing):
+        await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
         return
     await _broadcast(prediction_response(result))
-    await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
-    await _save_lstm_shadow_prediction(settings, entry_open_time, write_lock)
+    await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
     logger.info(
         "predict: %s %s entry=%s -> %s (conf=%.4f quality=%.4f qualityPassed=%s)",
         settings.symbol,
@@ -129,6 +130,15 @@ async def _run_prediction(
         result["trade_quality_score"],
         result["trade_quality_passed"],
     )
+
+
+async def _save_factor_combo_sidecar_predictions(
+    settings: AutoTradeSettings,
+    entry_open_time: int,
+    write_lock: asyncio.Lock,
+) -> None:
+    await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
+    await _save_lstm_shadow_prediction(settings, entry_open_time, write_lock)
 
 
 async def _save_factor_combo_shadow_predictions(
@@ -158,9 +168,19 @@ async def _save_lstm_shadow_prediction(
 ) -> None:
     if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return
-    ready = await asyncio.to_thread(is_lstm_shadow_ready, settings.symbol, settings.duration)
-    if not ready:
-        logger.info("predict: LSTM shadow not ready for %s %s", settings.symbol, settings.duration)
+    status = await asyncio.to_thread(lstm_model_status, settings.symbol, settings.duration)
+    if not status.get("shadowPredictionReady"):
+        logger.info(
+            "predict: LSTM shadow skipped for %s %s reason=%s torch=%s torchError=%s status=%s artifacts=%s combo=%s",
+            settings.symbol,
+            settings.duration,
+            status.get("shadowPredictionBlockedReason"),
+            status.get("torchAvailable"),
+            (status.get("torchStatus") or {}).get("error"),
+            status.get("status"),
+            status.get("artifactsReady"),
+            status.get("comboSnapshotReason"),
+        )
         return
     result = await asyncio.to_thread(
         predict_lstm_shadow_prediction,
@@ -241,7 +261,38 @@ def _should_predict_entry(settings: AutoTradeSettings) -> bool:
             duration=settings.duration,
             open_time=bucket,
         )
+        or _factor_combo_sidecar_due(settings, bucket)
     )
+
+
+def _factor_combo_sidecar_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+        return False
+    return _factor_combo_shadow_due(settings, bucket) or _ready_lstm_shadow_due(settings, bucket)
+
+
+def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    for rank in FACTOR_COMBO_SHADOW_RANKS:
+        if not prediction_exists(
+            strategy_key=factor_combo_shadow_strategy_key(rank),
+            symbol=settings.symbol,
+            duration=settings.duration,
+            open_time=bucket,
+        ):
+            return True
+    return False
+
+
+def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    if prediction_exists(
+        strategy_key=lstm_shadow_strategy_key(settings.duration),
+        symbol=settings.symbol,
+        duration=settings.duration,
+        open_time=bucket,
+    ):
+        return False
+    status = lstm_model_status(settings.symbol, settings.duration)
+    return bool(status.get("shadowPredictionReady"))
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:

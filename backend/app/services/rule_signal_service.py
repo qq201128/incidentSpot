@@ -4,6 +4,7 @@ from typing import Any
 
 from app.services.blind_reverse_martingale_strategy import predict_blind_reverse_martingale_direction
 from app.services.factor_combo_strategy import predict_factor_combo_direction
+from app.services.lstm_prediction_service import predict_lstm_shadow_prediction
 from app.services.orderbook_notional_strategy import predict_orderbook_notional_direction
 from app.services.orderbook_trade_flow_strategy import predict_orderbook_trade_flow_direction
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
@@ -27,6 +28,7 @@ from app.services.strategy_registry import (
     ORDERBOOK_TRADE_FLOW_INVERT_MG_STRATEGY_KEY,
     ORDERBOOK_TRADE_FLOW_STRATEGY_KEY,
     THREE_BAR_10M_RM_STRATEGY_KEY,
+    is_lstm_shadow_strategy,
     strategy_definition,
 )
 
@@ -52,6 +54,9 @@ def predict_rule_direction(
         raise ValueError(f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}, got {duration}")
     symbol = symbol.upper()
     strategy = strategy_definition(strategy_key)
+    if duration not in strategy.supported_durations:
+        supported = ", ".join(sorted(strategy.supported_durations))
+        raise ValueError(f"strategy {strategy.key} supports only {supported}, got {duration}")
     return _predict_strategy(
         strategy.key,
         symbol,
@@ -69,7 +74,7 @@ def _predict_strategy(
     entry_open_time: int | None,
     entry_grace_ms: int,
 ) -> dict[str, Any]:
-    for resolver in (_predict_factor_combo, _predict_orderbook, _predict_n_bar):
+    for resolver in (_predict_lstm, _predict_factor_combo, _predict_orderbook, _predict_n_bar):
         result = resolver(
             strategy_key,
             symbol=symbol,
@@ -80,6 +85,20 @@ def _predict_strategy(
         if result is not None:
             return result
     raise ValueError(f"unsupported strategy for live prediction: {strategy_key}")
+
+
+def _predict_lstm(
+    strategy_key: str,
+    *,
+    symbol: str,
+    duration: str,
+    entry_open_time: int | None,
+    entry_grace_ms: int,
+) -> dict[str, Any] | None:
+    del entry_grace_ms
+    if not is_lstm_shadow_strategy(strategy_key):
+        return None
+    return predict_lstm_shadow_prediction(symbol, duration, entry_open_time=entry_open_time)
 
 
 def _predict_factor_combo(

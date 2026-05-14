@@ -9,8 +9,10 @@ import pandas as pd
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_combination_service import COMBINATION_METHOD
+from app.services.factor_duration_alignment import live_duration_entry_index
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
 from app.services.factor_learning_signal_filter import enrich_signal_with_factor_learning
+from app.services.factor_signal_timing import FactorSignalTiming, combination_kline_close_timing
 from app.services.kline_timing import is_within_entry_grace
 
 LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
@@ -36,6 +38,7 @@ class _SignalContext:
     direction: str
     confidence: float
     quality: dict[str, Any]
+    timing: FactorSignalTiming
 
 
 def build_live_signal_from_ranking(
@@ -47,11 +50,17 @@ def build_live_signal_from_ranking(
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
 ) -> dict[str, Any]:
-    score, index = _latest_combo_score(frame, row)
+    score, index = _combo_score_at_duration_entry(
+        frame,
+        row,
+        duration=duration,
+        entry_open_time=entry_open_time,
+    )
     direction = "up" if score >= 0 else "down"
     confidence = _live_confidence(row)
     window = _EntryWindow(entry_open_time, entry_grace_ms)
-    quality = _quality_gate(row, confidence, window)
+    timing = combination_kline_close_timing(row, symbol=symbol, duration=duration)
+    quality = _quality_gate(row, confidence, window, timing=timing)
     payload = _live_signal_payload(
         _SignalContext(
             row=row,
@@ -62,6 +71,7 @@ def build_live_signal_from_ranking(
             direction=direction,
             confidence=confidence,
             quality=quality,
+            timing=timing,
         )
     )
     priced = {
@@ -72,15 +82,21 @@ def build_live_signal_from_ranking(
     return enrich_signal_with_factor_learning(priced, frame, index, symbol=symbol, duration=duration)
 
 
-def _latest_combo_score(frame: pd.DataFrame, row: dict[str, Any]) -> tuple[float, Any]:
+def _combo_score_at_duration_entry(
+    frame: pd.DataFrame,
+    row: dict[str, Any],
+    *,
+    duration: str,
+    entry_open_time: int | None,
+) -> tuple[float, Any]:
     members = _row_members(row)
-    missing = [member["name"] for member in members if member["name"] not in frame.columns]
-    if missing:
-        raise ValueError(f"combination signal missing factors: {', '.join(missing)}")
-    scores = combination_score(frame, members).dropna()
-    if scores.empty:
-        raise ValueError(f"combination signal has no finite score: {row.get('factorName')}")
-    return float(scores.iloc[-1]), scores.index[-1]
+    _require_member_columns(frame, members)
+    index = live_duration_entry_index(frame, duration, entry_open_time)
+    scores = combination_score(frame, members)
+    score = _finite_float(_series_value_at(scores, index))
+    if score is None:
+        raise ValueError(f"combination signal has no finite score at {duration} entry: {row.get('factorName')}")
+    return score, index
 
 
 def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
@@ -106,6 +122,11 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityPassed": ctx.quality["passed"],
         "qualityMetricsPassed": ctx.quality["metricsPassed"],
         "qualityEntryWindowPassed": ctx.quality["entryWindowPassed"],
+        "factorTimingMode": ctx.timing.mode,
+        "factorTimingPassed": ctx.quality["factorTimingPassed"],
+        "factorTimingReason": ctx.timing.reason,
+        "factorTimingEligibleMembers": list(ctx.timing.eligible_members),
+        "factorTimingBlockedMembers": list(ctx.timing.blocked_members),
         "qualityGateReason": ctx.quality["reason"],
         "qualityMinWinRate": LIVE_MIN_WIN_RATE,
         "qualityMinProfitFactor": LIVE_MIN_PROFIT_FACTOR,
@@ -114,16 +135,23 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
     }
 
 
-def _quality_gate(row: dict[str, Any], confidence: float, window: _EntryWindow) -> dict[str, Any]:
+def _quality_gate(
+    row: dict[str, Any],
+    confidence: float,
+    window: _EntryWindow,
+    *,
+    timing: FactorSignalTiming,
+) -> dict[str, Any]:
     metric_reason = _quality_metric_reason(row, confidence)
     entry_passed = _entry_window_passed(window)
     metrics_passed = metric_reason == "passed"
-    passed = metrics_passed and entry_passed is not False
+    passed = metrics_passed and entry_passed is not False and timing.passed
     return {
         "passed": passed,
         "metricsPassed": metrics_passed,
         "entryWindowPassed": entry_passed,
-        "reason": _quality_reason(metric_reason, entry_passed),
+        "factorTimingPassed": timing.passed,
+        "reason": _quality_reason(metric_reason, entry_passed, timing),
     }
 
 
@@ -149,9 +177,15 @@ def _entry_window_passed(window: _EntryWindow) -> bool | None:
     return is_within_entry_grace(int(window.open_time), grace_ms=int(window.grace_ms))
 
 
-def _quality_reason(metric_reason: str, entry_passed: bool | None) -> str:
+def _quality_reason(
+    metric_reason: str,
+    entry_passed: bool | None,
+    timing: FactorSignalTiming,
+) -> str:
     if metric_reason != "passed":
         return metric_reason
+    if not timing.passed:
+        return timing.reason
     if entry_passed is False:
         return "entry_window_closed"
     return "passed"
@@ -162,6 +196,19 @@ def _row_members(row: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(members, list) or not members:
         raise ValueError(f"combination row missing members: {row.get('factorName')}")
     return [dict(member) for member in members]
+
+
+def _require_member_columns(frame: pd.DataFrame, members: list[dict[str, Any]]) -> None:
+    missing = [member["name"] for member in members if member["name"] not in frame.columns]
+    if missing:
+        raise ValueError(f"combination signal missing factors: {', '.join(missing)}")
+
+
+def _series_value_at(series: pd.Series, index: Any) -> Any:
+    value = series.loc[index]
+    if isinstance(value, pd.Series):
+        return value.iloc[-1]
+    return value
 
 
 def _live_confidence(row: dict[str, Any]) -> float:

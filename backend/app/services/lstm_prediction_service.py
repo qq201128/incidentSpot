@@ -12,9 +12,10 @@ from app.services.lstm_artifacts import (
     require_json,
     required_artifacts_exist,
 )
+from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import LSTM_RULE_NAME, lstm_shadow_strategy_key
 from app.services.lstm_feature_builder import build_live_feature_window
-from app.services.lstm_torch_backend import TorchLstmBackend
+from app.services.lstm_torch_backend import TorchLstmBackend, torch_availability
 from app.services.lstm_validation import apply_standardizer
 
 
@@ -24,6 +25,11 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
     status = _normalized_status(read_json(paths.status) or _untrained_status(sym, duration))
     report = read_json(paths.report) or {}
     version = read_json(paths.version) or {}
+    snapshot = combo_snapshot_status(sym, duration, artifact_root=artifact_root)
+    artifacts_ready = required_artifacts_exist(paths)
+    torch_status = torch_availability()
+    torch_available = bool(torch_status["available"])
+    ready_reason = _shadow_prediction_ready_reason(status, artifacts_ready, snapshot, torch_available)
     return {
         **status,
         "strategyKey": lstm_shadow_strategy_key(duration),
@@ -32,8 +38,15 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "sampleCounts": report.get("sampleCounts") or {},
         "testAccuracy": (report.get("test") or {}).get("accuracy"),
         "testWinRate": (report.get("test") or {}).get("winRate"),
-        "artifactsReady": required_artifacts_exist(paths),
-        "shadowPredictionReady": _shadow_prediction_ready(status, paths),
+        "artifactsReady": artifacts_ready,
+        "torchAvailable": torch_available,
+        "torchStatus": torch_status,
+        "comboSnapshotMatches": snapshot["matches"],
+        "comboSnapshotReason": snapshot["reason"],
+        "comboSnapshotCurrent": snapshot["current"],
+        "comboSnapshotTrained": snapshot["trained"],
+        "shadowPredictionReady": ready_reason == "passed",
+        "shadowPredictionBlockedReason": ready_reason,
     }
 
 
@@ -52,7 +65,7 @@ def predict_lstm_signal(
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
     paths = artifact_paths(sym, duration, artifact_root)
-    _assert_predictable(sym, duration, paths)
+    _assert_predictable(sym, duration, paths, artifact_root=artifact_root)
     features = require_json(paths.features, "features")
     scaler = require_json(paths.scaler, "scaler")
     version = require_json(paths.version, "version")
@@ -80,13 +93,22 @@ def predict_lstm_shadow_prediction(
     return _prediction_payload(signal)
 
 
-def _assert_predictable(symbol: str, duration: str, paths) -> None:
+def _assert_predictable(
+    symbol: str,
+    duration: str,
+    paths,
+    *,
+    artifact_root: Path | None = None,
+) -> None:
     status = _normalized_status(read_json(paths.status) or _untrained_status(symbol, duration))
     if status["status"] != "trained":
         reason = status.get("reason") or "model is not trained"
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {reason}")
     if not required_artifacts_exist(paths):
         raise ValueError(f"LSTM model artifacts are incomplete for {symbol} {duration}: {paths.root}")
+    snapshot = combo_snapshot_status(symbol, duration, artifact_root=artifact_root)
+    if not snapshot["matches"]:
+        raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {snapshot['reason']}")
 
 
 def _signal_payload(
@@ -163,8 +185,21 @@ def _untrained_status(symbol: str, duration: str) -> dict[str, Any]:
     }
 
 
-def _shadow_prediction_ready(status: dict[str, Any], paths) -> bool:
-    return status.get("status") == "trained" and required_artifacts_exist(paths)
+def _shadow_prediction_ready_reason(
+    status: dict[str, Any],
+    artifacts_ready: bool,
+    snapshot: dict[str, Any],
+    torch_available: bool,
+) -> str:
+    if not torch_available:
+        return "torch_unavailable"
+    if status.get("status") != "trained":
+        return status.get("reason") or f"model_status_{status.get('status') or 'unknown'}"
+    if not artifacts_ready:
+        return "artifacts_incomplete"
+    if not snapshot["matches"]:
+        return str(snapshot["reason"])
+    return "passed"
 
 
 def _normalized_status(status: dict[str, Any]) -> dict[str, Any]:

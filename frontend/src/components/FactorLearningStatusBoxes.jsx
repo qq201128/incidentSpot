@@ -1,16 +1,21 @@
 import { factorLabel } from "../utils/factorLearningLabels";
+import "./FactorLearningStatusBoxes.css";
 
 const LIBRARY_PREVIEW_LIMIT = 6;
 const ISSUE_PREVIEW_LIMIT = 4;
 const SOLUTION_PREVIEW_LIMIT = 4;
 
-export default function FactorLearningStatusBoxes({ memory }) {
+export default function FactorLearningStatusBoxes({ memory, refreshing = false, onRefreshLocal }) {
   return (
     <div className="factor-learning-grid factor-learning-status-grid">
       <LibraryBox library={memory?.minedFactorLibrary || {}} />
       <MonitorBox monitoring={memory?.monitoring || {}} />
       <IssueBox monitoring={memory?.monitoring || {}} />
-      <SolutionBox monitoring={memory?.monitoring || {}} />
+      <SolutionBox
+        monitoring={memory?.monitoring || {}}
+        refreshing={refreshing}
+        onRefreshLocal={onRefreshLocal}
+      />
     </div>
   );
 }
@@ -88,22 +93,80 @@ function IssueBox({ monitoring }) {
   );
 }
 
-function SolutionBox({ monitoring }) {
-  const rows = Array.isArray(monitoring.solutions) ? monitoring.solutions.slice(0, SOLUTION_PREVIEW_LIMIT) : [];
+function SolutionBox({ monitoring, refreshing, onRefreshLocal }) {
+  const rows = Array.isArray(monitoring.solutions)
+    ? monitoring.solutions.slice(0, SOLUTION_PREVIEW_LIMIT).map(normalizeSolution)
+    : [];
   return (
-    <section className="factor-learning-box" title="与告警关联的处理建议；「执行」为操作提示，不会自动执行。">
+    <section className="factor-learning-box" title="与告警关联的处理建议；会改变候选逻辑的项目需人工确认。">
       <BoxTitle title="解决方案" count={rows.length} />
       <ul>
-        {rows.map((text) => (
-          <li key={text}>
-            <strong>{text}</strong>
-            <span>执行</span>
+        {rows.map((solution) => (
+          <li className="factor-learning-solution-row" key={solution.key}>
+            <strong>{solution.text}</strong>
+            <SolutionControl
+              solution={solution}
+              refreshing={refreshing}
+              onRefreshLocal={onRefreshLocal}
+            />
           </li>
         ))}
       </ul>
       {!rows.length ? <p className="factor-learning-empty small">暂无处理项</p> : null}
     </section>
   );
+}
+
+function SolutionControl({ solution, refreshing, onRefreshLocal }) {
+  if (solution.action === "refresh_learning") {
+    return (
+      <button
+        className="factor-learning-solution-button"
+        type="button"
+        disabled={refreshing}
+        onClick={() => runSolutionAction(solution, onRefreshLocal)}
+      >
+        {refreshing ? "执行中" : solution.actionLabel}
+      </button>
+    );
+  }
+  return <span className="factor-learning-solution-badge">{solution.actionLabel}</span>;
+}
+
+function runSolutionAction(solution, onRefreshLocal) {
+  if (solution.requiresConfirmation && !window.confirm(solution.text)) return;
+  if (solution.action === "refresh_learning") onRefreshLocal?.();
+}
+
+function normalizeSolution(solution) {
+  if (typeof solution === "string") {
+    const inferred = legacySolutionAction(solution);
+    return {
+      key: solution,
+      text: solution,
+      action: inferred.action,
+      actionLabel: inferred.actionLabel,
+      requiresConfirmation: inferred.requiresConfirmation,
+    };
+  }
+  return {
+    key: solution.key || solution.text,
+    text: solution.text || "",
+    action: solution.action || null,
+    actionLabel: solution.actionLabel || (solution.action ? "执行" : "需人工确认"),
+    requiresConfirmation: Boolean(solution.requiresConfirmation),
+  };
+}
+
+function legacySolutionAction(text) {
+  if (text.includes("本地复盘")) {
+    return {
+      action: "refresh_learning",
+      actionLabel: "本地复盘",
+      requiresConfirmation: true,
+    };
+  }
+  return { action: null, actionLabel: "需人工确认", requiresConfirmation: false };
 }
 
 function MetricRow({ label, value, hint }) {

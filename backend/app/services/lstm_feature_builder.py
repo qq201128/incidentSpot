@@ -11,6 +11,7 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.lstm_combo_snapshot import assert_combo_snapshot_matches, combo_snapshot_from_ranking
 from app.services.lstm_config import LstmTrainingConfig
 
 MS_PER_MINUTE = 60_000
@@ -55,7 +56,7 @@ def build_lstm_training_dataset(
         columns,
         config.feature_window,
         config.min_samples,
-        combo_snapshot=_combo_snapshot(ranking),
+        combo_snapshot=combo_snapshot_from_ranking(ranking),
     )
 
 
@@ -69,7 +70,7 @@ def build_live_feature_window(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     frame = _load_enriched_factor_frame_symbol(symbol, duration)
     ranking = _ranking_or_raise(symbol, duration, get_cached_combination_ranking)
-    _assert_combo_snapshot(ranking, combo_snapshot)
+    _assert_combo_snapshot_matches(ranking, combo_snapshot)
     featured = add_factor_combo_features(frame, ranking)
     sampled = duration_feature_frame(featured, duration, entry_open_time)
     _assert_columns(sampled, feature_columns)
@@ -178,6 +179,16 @@ def _ranking_or_raise(
     return ranking
 
 
+def _assert_combo_snapshot_matches(
+    ranking: dict[str, Any],
+    combo_snapshot: list[dict[str, Any]] | None,
+) -> None:
+    try:
+        assert_combo_snapshot_matches(ranking, combo_snapshot)
+    except ValueError as exc:
+        raise LstmDataError(str(exc)) from exc
+
+
 def _add_combo_rank_features(frame: pd.DataFrame, row: dict[str, Any], rank: int) -> pd.DataFrame:
     out = frame.copy()
     score = combination_score(out, _members(row))
@@ -247,27 +258,3 @@ def _assert_columns(frame: pd.DataFrame, columns: list[str]) -> None:
     missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise LstmDataError(f"LSTM feature columns missing: {', '.join(missing[:12])}")
-
-
-def _combo_snapshot(ranking_report: dict[str, Any]) -> list[dict[str, Any]]:
-    ranking = ranking_report.get("ranking") or []
-    return [_combo_row_snapshot(dict(row), rank) for rank, row in enumerate(ranking[:3], start=1)]
-
-
-def _combo_row_snapshot(row: dict[str, Any], rank: int) -> dict[str, Any]:
-    return {
-        "rank": rank,
-        "factorName": row.get("factorName"),
-        "members": [member.get("name") for member in _members(row)],
-    }
-
-
-def _assert_combo_snapshot(
-    ranking_report: dict[str, Any],
-    expected: list[dict[str, Any]] | None,
-) -> None:
-    if not expected:
-        return
-    current = _combo_snapshot(ranking_report)
-    if current != expected:
-        raise LstmDataError("current factor combo Top1/Top2/Top3 differs from LSTM training snapshot")

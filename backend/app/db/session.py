@@ -207,7 +207,7 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   payloads = strategy_payloads()
   for payload in payloads:
     key = str(payload["key"])
-    for dur in _AUTO_TRADE_SLOT_DURATIONS:
+    for dur in _payload_durations(payload):
       dm = _DURATION_MINUTES[dur]
       enabled, live = default_slot_flags(key)
       conn.execute(
@@ -274,6 +274,11 @@ def _copy_legacy_auto_trade_settings(conn: sqlite3.Connection) -> None:
       AND duration = (SELECT duration FROM auto_trade_settings WHERE id = 1)
     """
   )
+
+
+def _payload_durations(payload: dict) -> tuple[str, ...]:
+  supported = set(payload.get("supportedDurations") or _AUTO_TRADE_SLOT_DURATIONS)
+  return tuple(duration for duration in _AUTO_TRADE_SLOT_DURATIONS if duration in supported)
 
 
 def _ensure_ai_event_columns(conn: sqlite3.Connection) -> None:

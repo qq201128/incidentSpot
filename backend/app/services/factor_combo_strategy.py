@@ -113,6 +113,9 @@ def _rule_reasons(signal: dict[str, Any]) -> list[str]:
         f"historical_profit_factor={signal['historicalProfitFactor']}",
         f"score={signal['score']}",
         f"quality_gate={signal['qualityGateReason']}",
+        f"factor_timing={signal.get('factorTimingReason')}",
+        f"factor_timing_passed={signal.get('factorTimingPassed')}",
+        f"factor_timing_blocked={','.join(signal.get('factorTimingBlockedMembers') or [])}",
         f"quality_min_win_rate={signal['qualityMinWinRate']}",
         f"quality_min_profit_factor={signal['qualityMinProfitFactor']}",
     ]

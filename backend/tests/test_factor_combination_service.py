@@ -22,7 +22,7 @@ from app.services.factor_mined_candidates import MinedCandidateResult, MinedFram
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
-ROWS = 260
+ROWS = 1300
 HORIZON = 10
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_DAY = 86_400
@@ -142,6 +142,59 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
 
 
+def test_live_signal_uses_completed_duration_entry_row(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
+    )
+    entry_open_time = 180 * 60_000
+    source_open_time = entry_open_time - 60_000
+    signal = build_live_signal_from_ranking(
+        synthetic_frame,
+        report["ranking"][0],
+        symbol="BTCUSDT",
+        duration="10m",
+        entry_open_time=entry_open_time,
+    )
+    source_index = synthetic_frame.index[synthetic_frame["open_time"] == source_open_time][-1]
+
+    assert signal["sourceOpenTime"] == source_open_time
+    assert signal["entryPrice"] == pytest.approx(float(synthetic_frame.at[source_index, "close"]))
+    assert signal["frameIndex"] == str(source_index)
+
+
+def test_live_signal_blocks_non_kline_close_members(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = synthetic_frame.assign(orderbook_imbalance=np.linspace(-1.0, 1.0, ROWS))
+    row = {
+        "factorName": "combo__orderbook_imbalance",
+        "factorDisplayName": "组合：订单簿不平衡",
+        "members": [{"name": "orderbook_imbalance", "category": "orderbook", "orientation": 1}],
+        "method": "test",
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": ROWS,
+    }
+
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["qualityPassed"] is False
+    assert signal["qualityGateReason"] == "factor_timing_not_kline_close"
+    assert signal["factorTimingPassed"] is False
+    assert signal["factorTimingBlockedMembers"] == ["orderbook_imbalance"]
+
+
 def test_signal_watchlist_returns_top_three_per_duration(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
@@ -216,6 +269,10 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
             "libraryTotal": 0,
         }
 
+    def fake_sync(symbol: str, duration: str, *, ranking_report: dict) -> dict:
+        calls.append(("sync", symbol, duration, ranking_report["duration"]))
+        return {"status": "up_to_date"}
+
     def fake_learning(
         symbol: str,
         duration: str,
@@ -229,15 +286,18 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
+    monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)
     monkeypatch.setattr(combo_background, "refresh_factor_learning_memory", fake_learning)
     combo_background.refresh_symbol_combination_rankings("btcusdt")
     run_durations = [item[2] for item in calls if item[0] == "run"]
     save_durations = [item[2] for item in calls if item[0] == "save"]
     promote_durations = [item[2] for item in calls if item[0] == "promote"]
+    sync_durations = [item[2] for item in calls if item[0] == "sync"]
     learn_durations = [item[2] for item in calls if item[0] == "learn"]
     assert run_durations == ["10m", "30m", "60m", "1d"]
     assert save_durations == run_durations
     assert promote_durations == run_durations
+    assert sync_durations == run_durations
     assert learn_durations == run_durations
 
 

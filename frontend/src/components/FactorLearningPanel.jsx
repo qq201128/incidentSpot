@@ -79,7 +79,11 @@ export default function FactorLearningPanel({ symbol, duration }) {
       <FactorLearningMetricsHelp />
       <FactorLearningCandidateIdeas memory={memoryState.data} />
       <FactorLearningMemoryGrid memory={memoryState.data} />
-      <FactorLearningStatusBoxes memory={memoryState.data} />
+      <FactorLearningStatusBoxes
+        memory={memoryState.data}
+        refreshing={refreshing}
+        onRefreshLocal={() => void refresh(false)}
+      />
       <FactorLearningOperatorLibrary operators={operatorState.data?.operators || []} />
     </section>
   );
@@ -162,7 +166,21 @@ function memoryStatus(data) {
 function lstmStatusText(data) {
   const label = data?.status || "untrained";
   const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
-  return `LSTM：${label}${version}`;
+  const ready = data?.shadowPredictionReady ? " · 可模拟下单" : ` · 阻断：${lstmBlockedReasonLabel(data?.shadowPredictionBlockedReason)}`;
+  return `LSTM：${label}${version}${ready}`;
+}
+
+function lstmBlockedReasonLabel(reason) {
+  const labels = {
+    torch_unavailable: "Torch不可用",
+    artifacts_incomplete: "模型文件不完整",
+    trained_combo_snapshot_missing: "训练组合快照缺失",
+    trained_combo_snapshot_incomplete: "训练组合不足Top3",
+    current_combo_snapshot_missing: "当前组合排名缺失",
+    current_combo_snapshot_incomplete: "当前组合不足Top3",
+    combo_snapshot_mismatch: "组合排名已变化",
+  };
+  return labels[reason] || reason || "未知原因";
 }
 
 function isValidSymbol(value) {

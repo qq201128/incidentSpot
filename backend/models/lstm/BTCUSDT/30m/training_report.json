@@ -1,0 +1,95 @@
+{
+  "duration": "30m",
+  "featureWindow": 64,
+  "horizonMinutes": 30,
+  "losses": {
+    "trainLoss": 0.08281590001036723,
+    "valLoss": 0.6779949069023132
+  },
+  "modelVersion": "lstm_BTCUSDT_30m_w64_20260514014540",
+  "outOfSample": {
+    "test": {
+      "accuracy": 0.5550122249388753,
+      "avgReturn": -0.001067985431291163,
+      "confusionMatrix": {
+        "fn": 28,
+        "fp": 154,
+        "tn": 37,
+        "tp": 190
+      },
+      "maxDrawdown": 0.4809660315513611,
+      "precision": 0.5523255813953488,
+      "profitFactor": 0.42727863788604736,
+      "recall": 0.8715596330275229,
+      "sampleCount": 409,
+      "sharpe": -6.44753360748291,
+      "winRate": 0.4254278728606357
+    },
+    "validation": {
+      "accuracy": 0.5651105651105651,
+      "avgReturn": -0.000725506863091141,
+      "confusionMatrix": {
+        "fn": 63,
+        "fp": 114,
+        "tn": 122,
+        "tp": 108
+      },
+      "maxDrawdown": 0.38138753175735474,
+      "precision": 0.4864864864864865,
+      "profitFactor": 0.4997894763946533,
+      "recall": 0.631578947368421,
+      "sampleCount": 407,
+      "sharpe": -5.160397529602051,
+      "winRate": 0.4103194103194103
+    }
+  },
+  "returnStats": {
+    "downMean": -0.0019177229842171073,
+    "mean": -0.00011405834811739624,
+    "upMean": 0.0017724554054439068
+  },
+  "ruleName": "lstm_shadow_signal_v1",
+  "sampleCounts": {
+    "test": 409,
+    "train": 1901,
+    "validation": 407
+  },
+  "splitPolicy": "chronological_train_validation_test_no_shuffle",
+  "status": "trained",
+  "symbol": "BTCUSDT",
+  "test": {
+    "accuracy": 0.5550122249388753,
+    "avgReturn": -0.001067985431291163,
+    "confusionMatrix": {
+      "fn": 28,
+      "fp": 154,
+      "tn": 37,
+      "tp": 190
+    },
+    "maxDrawdown": 0.4809660315513611,
+    "precision": 0.5523255813953488,
+    "profitFactor": 0.42727863788604736,
+    "recall": 0.8715596330275229,
+    "sampleCount": 409,
+    "sharpe": -6.44753360748291,
+    "winRate": 0.4254278728606357
+  },
+  "trainedAt": "2026-05-14T01:45:40.748588+00:00",
+  "validation": {
+    "accuracy": 0.5651105651105651,
+    "avgReturn": -0.000725506863091141,
+    "confusionMatrix": {
+      "fn": 63,
+      "fp": 114,
+      "tn": 122,
+      "tp": 108
+    },
+    "maxDrawdown": 0.38138753175735474,
+    "precision": 0.4864864864864865,
+    "profitFactor": 0.4997894763946533,
+    "recall": 0.631578947368421,
+    "sampleCount": 407,
+    "sharpe": -5.160397529602051,
+    "winRate": 0.4103194103194103
+  }
+}

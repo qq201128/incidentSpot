@@ -51,6 +51,9 @@ function LstmShadowCard({ lstm, statusText }) {
         <span>{shadow.strategyKey || "factor_lstm_shadow"}</span>
       </div>
       <div className="factor-lstm-grid">
+        <Metric label="预测状态" value={readinessLabel(shadow)} strong={shadow.shadowPredictionReady} />
+        <Metric label="阻断原因" value={blockedReasonLabel(shadow.shadowPredictionBlockedReason)} />
+        <Metric label="Torch" value={shadow.torchAvailable ? "可用" : "不可用"} />
         <Metric label="模型版本" value={shortVersion(shadow.modelVersion)} />
         <Metric label="最近训练" value={formatDate(shadow.trainedAt)} />
         <Metric label="训练样本" value={shadow.sampleCounts?.train ?? "—"} />
@@ -113,6 +116,26 @@ function lstmStatusLabel(status) {
   if (status === "insufficient_samples") return "样本不足";
   if (status === "failed") return "训练失败";
   return "未训练";
+}
+
+function readinessLabel(shadow) {
+  if (shadow.shadowPredictionReady) return "可模拟下单";
+  if (!shadow.status || shadow.status === "untrained") return "未就绪";
+  return "已阻断";
+}
+
+function blockedReasonLabel(reason) {
+  const labels = {
+    passed: "—",
+    torch_unavailable: "Torch不可用",
+    artifacts_incomplete: "模型文件不完整",
+    trained_combo_snapshot_missing: "训练组合快照缺失",
+    trained_combo_snapshot_incomplete: "训练组合不足Top3",
+    current_combo_snapshot_missing: "当前组合排名缺失",
+    current_combo_snapshot_incomplete: "当前组合不足Top3",
+    combo_snapshot_mismatch: "组合排名已变化",
+  };
+  return labels[reason] || reason || "—";
 }
 
 function statusClass(status) {

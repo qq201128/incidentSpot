@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from app.services.factor_duration_alignment import backtest_duration_frame
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_metric_enrichment import enrich_factor_results
 from app.services.factor_performance_metrics import compute_signal_metrics
@@ -28,7 +29,7 @@ from app.services.factor_registry import (
     get_factor,
     list_factors,
 )
-from app.services.rule_config import DURATION_TO_MINUTES, MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
 
 BACKTEST_MIN_PERIODS = 100
 QUINTILE_COUNT = 5
@@ -130,9 +131,8 @@ def _compute_factor_metrics(
     duration: str,
 ) -> FactorBacktestResult:
     factor_name = factor_def.name
-    horizon = DURATION_TO_MINUTES.get(duration, 10)
-    df = frame[[factor_name, "close"]].copy()
-    df["fwd_ret"] = df["close"].pct_change(horizon).shift(-horizon)
+    horizon = horizon_minutes_for_duration(duration)
+    df = backtest_duration_frame(frame, factor_name, duration)
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=[factor_name, "fwd_ret"])
 

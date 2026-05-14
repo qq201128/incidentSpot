@@ -130,11 +130,11 @@ def _latest_consecutive_losses(rows: list[dict[str, Any]]) -> int:
     return count
 
 
-def _solutions(issues: list[dict[str, Any]]) -> list[str]:
+def _solutions(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
     keys = []
     for issue in issues:
         keys.extend(issue.get("solutionKeys") or [])
-    return [_solution_text(key) for key in dict.fromkeys(keys)]
+    return [_solution_payload(key) for key in dict.fromkeys(keys)]
 
 
 def _threshold_payload() -> dict[str, float | int]:
@@ -174,3 +174,23 @@ def _solution_text(key: str) -> str:
         "inspect_latest_combo": "检查最近亏损组合的成员、方向和盈亏比，优先淘汰重复命中的组合。",
     }
     return texts[key]
+
+
+def _solution_payload(key: str) -> dict[str, Any]:
+    if key == "refresh_learning":
+        return {
+            "key": key,
+            "text": _solution_text(key),
+            "action": "refresh_learning",
+            "actionLabel": "本地复盘",
+            "requiresConfirmation": True,
+            "status": "ready",
+        }
+    return {
+        "key": key,
+        "text": _solution_text(key),
+        "action": None,
+        "actionLabel": "需人工确认",
+        "requiresConfirmation": False,
+        "status": "manual_review",
+    }

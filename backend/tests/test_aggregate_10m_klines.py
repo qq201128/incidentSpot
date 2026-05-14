@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.binance_service import (
     _aggregate_1m_klines,
     _trim_leading_aggregate_if_first_bucket_incomplete,
+    _trim_trailing_aggregate_if_last_bucket_incomplete,
 )
 
 TEN_MS = 10 * 60 * 1000
@@ -55,3 +56,46 @@ def test_no_trim_when_series_starts_at_bucket_open() -> None:
     trimmed = _trim_leading_aggregate_if_first_bucket_incomplete(rows, agg, TEN_MS)
     assert trimmed == agg
     assert len(trimmed) == 1
+
+
+def test_trim_when_last_bucket_is_missing_closing_minutes() -> None:
+    base = _aligned_10m_open(1_720_000_000_000)
+    full = [_bar(base + i * ONE_M_MS, 100, 101, 99, 100.5) for i in range(10)]
+    partial = [_bar(base + TEN_MS + i * ONE_M_MS, 200, 201, 199, 200.5) for i in range(3)]
+    rows = full + partial
+    agg = _aggregate_1m_klines(rows, TEN_MS)
+    trimmed = _trim_trailing_aggregate_if_last_bucket_incomplete(
+        rows,
+        agg,
+        TEN_MS,
+        now_ms=base + TEN_MS * 2,
+    )
+    assert len(trimmed) == 1
+    assert trimmed[0]["openTime"] == base
+
+
+def test_trim_when_last_one_minute_is_not_closed_yet() -> None:
+    base = _aligned_10m_open(1_720_000_000_000)
+    rows = [_bar(base + i * ONE_M_MS, 100, 101, 99, 100.5) for i in range(10)]
+    agg = _aggregate_1m_klines(rows, TEN_MS)
+    trimmed = _trim_trailing_aggregate_if_last_bucket_incomplete(
+        rows,
+        agg,
+        TEN_MS,
+        now_ms=rows[-1]["closeTime"],
+    )
+    assert trimmed == []
+
+
+def test_no_trim_when_last_bucket_is_complete_and_closed() -> None:
+    base = _aligned_10m_open(1_720_000_000_000)
+    rows = [_bar(base + i * ONE_M_MS, 100 + i, 101 + i, 99 + i, 100.5 + i) for i in range(20)]
+    agg = _aggregate_1m_klines(rows, TEN_MS)
+    trimmed = _trim_trailing_aggregate_if_last_bucket_incomplete(
+        rows,
+        agg,
+        TEN_MS,
+        now_ms=rows[-1]["closeTime"] + ONE_M_MS,
+    )
+    assert trimmed == agg
+    assert len(trimmed) == 2

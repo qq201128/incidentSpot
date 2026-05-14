@@ -126,6 +126,22 @@ def _model_class(nn):
     return SequenceClassifier
 
 
+def is_torch_available() -> bool:
+    return bool(torch_availability()["available"])
+
+
+def torch_availability() -> dict[str, Any]:
+    try:
+        import torch
+    except ImportError as exc:
+        return {"available": False, "error": str(exc)}
+    return {
+        "available": True,
+        "version": getattr(torch, "__version__", None),
+        "modulePath": getattr(torch, "__file__", None),
+    }
+
+
 def _torch_modules():
     try:
         import torch

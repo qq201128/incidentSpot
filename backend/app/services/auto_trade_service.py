@@ -16,6 +16,7 @@ from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     N_BAR_10M_RM_STRATEGY_KEYS,
+    is_lstm_shadow_strategy,
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
@@ -56,7 +57,7 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
         result: list[AutoTradeSettings] = []
         for payload in strategy_payloads():
             key = str(payload["key"])
-            for dur in AUTO_TRADE_SLOT_DURATIONS:
+            for dur in _payload_durations(payload):
                 row = by_pair.get((key, dur))
                 if row is not None:
                     result.append(_settings_from_row(row))
@@ -251,6 +252,8 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
     strategy = strategy_definition(settings.strategy_key)
     if settings.enabled and not strategy.tradable:
         raise ValueError(strategy.disabled_reason or f"strategy is not tradable: {strategy.key}")
+    if is_lstm_shadow_strategy(strategy.key) and settings.live_trading_enabled:
+        raise ValueError("LSTM shadow strategy supports simulation only; live trading must stay disabled")
     symbol = settings.symbol.strip().upper()
     if len(symbol) < 6:
         raise ValueError("symbol must contain at least 6 characters")
@@ -346,6 +349,11 @@ def _strategy_payload(settings: AutoTradeSettings) -> dict[str, Any]:
         "entryGraceMs": strategy.entry_grace_ms,
         "supportedDurations": sorted(strategy.supported_durations),
     }
+
+
+def _payload_durations(payload: dict[str, Any]) -> list[str]:
+    durations = payload.get("supportedDurations") or AUTO_TRADE_SLOT_DURATIONS
+    return [duration for duration in AUTO_TRADE_SLOT_DURATIONS if duration in set(durations)]
 
 
 def _row_strategy_key(row: Any) -> str:

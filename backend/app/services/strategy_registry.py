@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from app.services.lstm_config import (
     LSTM_RULE_NAME,
     is_lstm_shadow_strategy,
+    lstm_shadow_strategy_key,
     lstm_strategy_duration,
 )
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS, N_BAR_10M_RM_ENTRY_GRACE_MS
-from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 DEFAULT_STRATEGY_KEY = "orderbook_notional_40m"
 MANUAL_STRATEGY_KEY = "manual"
@@ -52,6 +53,7 @@ FIVE_BAR_10M_RM_RULE_NAME = "five_bar_10m_reverse_martingale_v1"
 
 FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
 FACTOR_COMBO_RULE_NAME = "factor_combo_cached_ranking_v1"
+LSTM_SHADOW_DURATIONS = tuple(DURATION_TO_MINUTES)
 
 # 三连/四连/五连 10m：自动下单用面板基础数量；仅在指数 n 连形态再现时下注，无 Recovery 补单。
 N_BAR_10M_RM_STRATEGY_KEYS: frozenset[str] = frozenset(
@@ -320,13 +322,12 @@ def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
     duration = lstm_strategy_duration(strategy_key)
     return StrategyDefinition(
         key=strategy_key,
-        name=f"LSTM影子策略·{duration}",
-        description="LSTM 候选算法仅写入模拟预测和结算学习记忆，不允许自动真实下单。",
+        name=f"LSTM模拟实盘·{duration}",
+        description="LSTM 候选算法可开启模拟实盘下单，真实下单仍由后端禁止。",
         requires_vegas_confirmation=False,
         signal_source="factor_lstm_shadow",
         rule_names=(LSTM_RULE_NAME,),
-        tradable=False,
-        disabled_reason="LSTM 默认只作为影子策略参与模拟实盘，不开放真实下单。",
+        tradable=True,
         requires_kline_features=True,
         uses_trade_policy_gates=False,
         supported_durations=frozenset({duration}),
@@ -335,27 +336,39 @@ def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
 
 def strategy_payloads() -> list[dict]:
     return [
-        {
-            "key": strategy.key,
-            "name": strategy.name,
-            "description": strategy.description,
-            "requiresVegasConfirmation": strategy.requires_vegas_confirmation,
-            "requiresHighWinrateGate": strategy.requires_high_winrate_gate,
-            "requiresTradeQualityGate": strategy.requires_trade_quality_gate,
-            "signalSource": strategy.signal_source,
-            "ruleNames": strategy.rule_names,
-            "tradable": strategy.tradable,
-            "disabledReason": strategy.disabled_reason,
-            "backtestSummary": strategy.backtest_summary,
-            "minDailyTrades": strategy.min_daily_trades,
-            "requiresKlineFeatures": strategy.requires_kline_features,
-            "usesTradePolicyGates": strategy.uses_trade_policy_gates,
-            "entryGraceMs": strategy.entry_grace_ms,
-            "supportedDurations": sorted(strategy.supported_durations),
-        }
-        for strategy in STRATEGIES
-        if strategy.tradable
+        _strategy_payload(strategy)
+        for strategy in _tradable_strategy_definitions()
     ]
+
+
+def _tradable_strategy_definitions() -> tuple[StrategyDefinition, ...]:
+    static = tuple(strategy for strategy in STRATEGIES if strategy.tradable)
+    lstm = tuple(
+        _lstm_shadow_strategy_definition(lstm_shadow_strategy_key(duration))
+        for duration in LSTM_SHADOW_DURATIONS
+    )
+    return (*static, *lstm)
+
+
+def _strategy_payload(strategy: StrategyDefinition) -> dict:
+    return {
+        "key": strategy.key,
+        "name": strategy.name,
+        "description": strategy.description,
+        "requiresVegasConfirmation": strategy.requires_vegas_confirmation,
+        "requiresHighWinrateGate": strategy.requires_high_winrate_gate,
+        "requiresTradeQualityGate": strategy.requires_trade_quality_gate,
+        "signalSource": strategy.signal_source,
+        "ruleNames": strategy.rule_names,
+        "tradable": strategy.tradable,
+        "disabledReason": strategy.disabled_reason,
+        "backtestSummary": strategy.backtest_summary,
+        "minDailyTrades": strategy.min_daily_trades,
+        "requiresKlineFeatures": strategy.requires_kline_features,
+        "usesTradePolicyGates": strategy.uses_trade_policy_gates,
+        "entryGraceMs": strategy.entry_grace_ms,
+        "supportedDurations": sorted(strategy.supported_durations),
+    }
 
 
 def strategy_requires_kline_features(strategy_key: str | None) -> bool:

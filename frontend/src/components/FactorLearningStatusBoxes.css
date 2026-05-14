@@ -1,0 +1,33 @@
+.factor-learning-solution-row {
+  align-items: start;
+}
+
+.factor-learning-solution-button {
+  min-width: 72px;
+  height: 28px;
+  border: 1px solid rgba(232, 191, 99, 0.6);
+  border-radius: 6px;
+  background: rgba(232, 191, 99, 0.12);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-learning-solution-button:disabled {
+  cursor: progress;
+  opacity: 0.58;
+}
+
+.factor-learning-solution-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(120, 167, 255, 0.26);
+  border-radius: 6px;
+  background: rgba(120, 167, 255, 0.07);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}

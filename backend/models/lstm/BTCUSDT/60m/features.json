@@ -221,54 +221,6 @@
     "funding_z_20",
     "fear_greed_value",
     "fear_greed_chg_1",
-    "combo__adx_14__ret_autocorr_20__profit_factor_60",
-    "combo__adx_14__ret_autocorr_20",
-    "combo__adx_14__ret_autocorr_20__rolling_sharpe_60",
-    "combo__ret_autocorr_20__rolling_sharpe_60__sma_slope_60",
-    "combo__ret_autocorr_20__ret_60__rolling_sharpe_60",
-    "combo__ret_autocorr_20__profit_factor_60__sma_slope_60",
-    "combo__ret_autocorr_20__profit_factor_60__tf_15m_ma_ratio_8",
-    "combo__ret_autocorr_20__rolling_sharpe_60__macd_signal",
-    "combo__ret_autocorr_20__rolling_sharpe_60__tf_15m_ma_ratio_8",
-    "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8",
-    "combo__adx_14__profit_factor_60__macd_signal",
-    "combo__ret_autocorr_20__profit_factor_60__ma_ratio_60",
-    "combo__profit_factor_60__rolling_sharpe_60",
-    "combo__ret_autocorr_20__ret_60__profit_factor_60",
-    "combo__adx_14__profit_factor_60__trix_15",
-    "combo__ret_autocorr_20__profit_factor_60__trix_15",
-    "combo__ret_autocorr_20__profit_factor_60__rolling_sharpe_60",
-    "combo__ret_autocorr_20__rolling_sharpe_60__trix_15",
-    "combo__adx_14__rolling_sharpe_60",
-    "combo__ret_autocorr_20__ma_ratio_120__rolling_sharpe_60",
-    "combo__ret_autocorr_20__profit_factor_60__macd_signal",
-    "combo__ret_autocorr_20__rolling_sharpe_60__ma_ratio_60",
-    "combo__adx_14__rolling_sharpe_60__tf_15m_ma_ratio_8",
-    "combo__ret_autocorr_20__profit_factor_60",
-    "combo__adx_14__profit_factor_60",
-    "combo__adx_14__ma_ratio_120__profit_factor_60",
-    "combo__adx_14__rolling_sharpe_60__trix_15",
-    "combo__ret_autocorr_20__rolling_sharpe_60",
-    "combo__adx_14__rolling_sharpe_60__sma_slope_60",
-    "combo__adx_14__ret_60__profit_factor_60",
-    "combo__adx_14__rolling_sharpe_60__macd_signal",
-    "combo__adx_14__rolling_sharpe_60__tf_1h_ret_4",
-    "combo__adx_14__ret_60__rolling_sharpe_60",
-    "combo__ret_60__profit_factor_60__rolling_sharpe_60",
-    "combo__adx_14__profit_factor_60__tf_1h_ret_4",
-    "combo__adx_14__profit_factor_60__sma_slope_60",
-    "combo__adx_14__rolling_sharpe_60__ma_ratio_60",
-    "combo__adx_14__ret_autocorr_20__trix_15",
-    "combo__adx_14__profit_factor_60__ma_ratio_60",
-    "combo__adx_14__ret_autocorr_20__ma_ratio_120",
-    "combo__adx_14__ret_autocorr_20__macd_signal",
-    "combo__adx_14__ret_autocorr_20__tf_15m_ma_ratio_8",
-    "combo__adx_14__ret_autocorr_20__ret_120",
-    "combo__adx_14__ret_autocorr_20__ret_60",
-    "combo__adx_14__ma_ratio_120__rolling_sharpe_60",
-    "combo__adx_14__ret_autocorr_20__tf_1h_ret_4",
-    "combo__adx_14__ret_autocorr_20__ma_ratio_60",
-    "combo__adx_14__ret_autocorr_20__sma_slope_60",
     "combo_top1_score",
     "combo_top1_rolling_win_rate",
     "combo_top1_rolling_sharpe",
@@ -281,34 +233,35 @@
   ],
   "comboSnapshot": [
     {
-      "factorName": "combo__adx_14__ret_autocorr_20",
+      "factorName": "combo__tf_1d_volume_share__profit_factor_60__vol_ma_60",
       "members": [
-        "adx_14",
-        "ret_autocorr_20"
+        "tf_1d_volume_share",
+        "profit_factor_60",
+        "vol_ma_60"
       ],
       "rank": 1
     },
     {
-      "factorName": "combo__adx_14__ret_autocorr_20__profit_factor_60",
+      "factorName": "combo__tf_1d_volume_share__vol_ma_120__adx_14",
       "members": [
-        "adx_14",
-        "ret_autocorr_20",
-        "profit_factor_60"
+        "tf_1d_volume_share",
+        "vol_ma_120",
+        "adx_14"
       ],
       "rank": 2
     },
     {
-      "factorName": "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8",
+      "factorName": "combo__tf_1d_volume_share__profit_factor_60__vol_ma_120",
       "members": [
-        "adx_14",
+        "tf_1d_volume_share",
         "profit_factor_60",
-        "tf_15m_ma_ratio_8"
+        "vol_ma_120"
       ],
       "rank": 3
     }
   ],
-  "count": 278,
-  "duration": "10m",
+  "count": 230,
+  "duration": "60m",
   "featureWindow": 64,
   "symbol": "BTCUSDT"
 }

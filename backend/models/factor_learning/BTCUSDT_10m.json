@@ -1,42 +1,168 @@
 {
+  "adaptiveLearning": {
+    "activeAlgorithmCount": 10,
+    "algorithmCount": 11,
+    "algorithms": [
+      {
+        "family": "sequence",
+        "key": "lstm",
+        "label": "LSTM",
+        "rawScore": 0.0,
+        "sampleFloor": 30,
+        "score": 0.0,
+        "status": "waiting_for_lstm_shadow_samples",
+        "weight": 0.0
+      },
+      {
+        "family": "sequence",
+        "key": "gru",
+        "label": "GRU",
+        "rawScore": 0.722144,
+        "sampleFloor": 24,
+        "score": 0.7221,
+        "status": "active",
+        "weight": 0.1042
+      },
+      {
+        "family": "pattern",
+        "key": "cnn",
+        "label": "CNN",
+        "rawScore": 0.69325824,
+        "sampleFloor": 20,
+        "score": 0.6933,
+        "status": "active",
+        "weight": 0.1
+      },
+      {
+        "family": "attention",
+        "key": "transformer",
+        "label": "Transformer",
+        "rawScore": 0.69325824,
+        "sampleFloor": 40,
+        "score": 0.6933,
+        "status": "active",
+        "weight": 0.1
+      },
+      {
+        "family": "tree",
+        "key": "random_forest",
+        "label": "随机森林",
+        "rawScore": 0.67881536,
+        "sampleFloor": 10,
+        "score": 0.6788,
+        "status": "active",
+        "weight": 0.0979
+      },
+      {
+        "family": "tree",
+        "key": "xgboost",
+        "label": "XGBoost",
+        "rawScore": 0.69325824,
+        "sampleFloor": 14,
+        "score": 0.6933,
+        "status": "active",
+        "weight": 0.1
+      },
+      {
+        "family": "margin",
+        "key": "svm",
+        "label": "SVM",
+        "rawScore": 0.6499296,
+        "sampleFloor": 16,
+        "score": 0.6499,
+        "status": "active",
+        "weight": 0.0938
+      },
+      {
+        "family": "policy",
+        "key": "reinforcement",
+        "label": "强化学习策略",
+        "rawScore": 0.69325824,
+        "sampleFloor": 35,
+        "score": 0.6933,
+        "status": "active",
+        "weight": 0.1
+      },
+      {
+        "family": "probabilistic",
+        "key": "bayesian",
+        "label": "贝叶斯",
+        "rawScore": 0.722144,
+        "sampleFloor": 8,
+        "score": 0.7221,
+        "status": "active",
+        "weight": 0.1042
+      },
+      {
+        "family": "neighbor",
+        "key": "knn",
+        "label": "KNN",
+        "rawScore": 0.66437248,
+        "sampleFloor": 8,
+        "score": 0.6644,
+        "status": "active",
+        "weight": 0.0958
+      },
+      {
+        "family": "ensemble",
+        "key": "ensemble",
+        "label": "综合",
+        "rawScore": 0.722144,
+        "sampleFloor": 5,
+        "score": 0.7221,
+        "status": "active",
+        "weight": 0.1042
+      }
+    ],
+    "durationPreference": [
+      {
+        "duration": "10m",
+        "sampleCount": 357,
+        "score": 0.6961
+      }
+    ],
+    "insight": {
+      "bestAlgorithm": "GRU",
+      "message": "10m 当前样本准确率 13.2%，优先使用 GRU。"
+    },
+    "overallAccuracy": 0.1317,
+    "sampleCount": 357,
+    "status": "warning"
+  },
   "duration": "10m",
   "factorMining": {
     "forbiddenRegions": [
       {
-        "avgAbsCorrelation": 0.7624,
+        "avgAbsCorrelation": 0.7588,
         "members": [
           "ma_ratio_120",
           "ma_ratio_240",
-          "ret_240"
+          "ma_ratio_60",
+          "macd_signal",
+          "profit_factor_60",
+          "ret_120",
+          "ret_60",
+          "rolling_sharpe_60",
+          "sma_slope_60",
+          "tf_15m_ma_ratio_8"
+        ],
+        "reason": "redundant_factor_neighborhood",
+        "region": "correlation_cluster:ret_60",
+        "support": 13
+      },
+      {
+        "avgAbsCorrelation": 0.7527,
+        "members": [
+          "ma_ratio_120",
+          "ma_ratio_240",
+          "ret_120",
+          "ret_240",
+          "tf_1d_intrabar_pos",
+          "tf_1h_ret_4"
         ],
         "reason": "redundant_factor_neighborhood",
         "region": "correlation_cluster:ret_240",
-        "support": 3
-      },
-      {
-        "avgAbsCorrelation": 0.7169,
-        "members": [
-          "bb_width_20",
-          "dollar_volume_ma_20",
-          "range_ma_20",
-          "upside_vol_60",
-          "vol_ma_120",
-          "vol_ma_20",
-          "vol_ma_60"
-        ],
-        "reason": "redundant_factor_neighborhood",
-        "region": "correlation_cluster:dollar_volume_ma_20",
-        "support": 7
-      },
-      {
-        "avgAbsCorrelation": 0.5034,
-        "members": [
-          "hl_range",
-          "vol_median_ratio_20"
-        ],
-        "reason": "redundant_factor_neighborhood",
-        "region": "correlation_cluster:vol_median_ratio_20",
-        "support": 2
+        "support": 6
       }
     ],
     "operatorLibrary": {
@@ -96,29 +222,38 @@
     "successPatterns": [
       {
         "factors": [
-          "ret_240"
+          "ret_autocorr_20"
         ],
-        "label": "operator=pct_change",
-        "pattern": "operator:pct_change",
-        "score": 1.7478,
+        "label": "category=statistic",
+        "pattern": "category:statistic",
+        "score": 3.4535,
         "support": 1
       },
       {
         "factors": [
-          "tf_1d_volume_share"
+          "ret_autocorr_20"
         ],
-        "label": "category=multi_timeframe",
-        "pattern": "category:multi_timeframe",
-        "score": 1.5312,
+        "label": "operator=corr",
+        "pattern": "operator:corr",
+        "score": 3.4535,
         "support": 1
       },
       {
         "factors": [
-          "tf_1d_volume_share"
+          "ret_autocorr_20"
         ],
-        "label": "operator=daily_volume",
-        "pattern": "operator:daily_volume",
-        "score": 1.5312,
+        "label": "operator=shift",
+        "pattern": "operator:shift",
+        "score": 3.4535,
+        "support": 1
+      },
+      {
+        "factors": [
+          "adx_14"
+        ],
+        "label": "category=volatility",
+        "pattern": "category:volatility",
+        "score": 3.256,
         "support": 1
       },
       {
@@ -127,83 +262,78 @@
         ],
         "label": "operator=ADX",
         "pattern": "operator:ADX",
-        "score": 1.4559,
+        "score": 3.256,
         "support": 1
       },
       {
         "factors": [
+          "ret_autocorr_20",
+          "profit_factor_60",
+          "rolling_sharpe_60"
+        ],
+        "label": "operator=ret_1",
+        "pattern": "operator:ret_1",
+        "score": 2.3663,
+        "support": 3
+      },
+      {
+        "factors": [
+          "ret_240",
+          "ret_60",
+          "ret_120"
+        ],
+        "label": "category=return",
+        "pattern": "category:return",
+        "score": 1.95,
+        "support": 3
+      },
+      {
+        "factors": [
+          "ma_ratio_240",
           "ma_ratio_120",
-          "ma_ratio_240"
+          "ma_ratio_60",
+          "sma_slope_60"
         ],
         "label": "category=moving_average",
         "pattern": "category:moving_average",
-        "score": 1.3197,
-        "support": 2
+        "score": 1.9032,
+        "support": 4
       },
       {
         "factors": [
-          "efficiency_ratio_10"
-        ],
-        "label": "category=momentum",
-        "pattern": "category:momentum",
-        "score": 1.3192,
-        "support": 1
-      },
-      {
-        "factors": [
-          "efficiency_ratio_10"
+          "profit_factor_60"
         ],
         "label": "operator=abs",
         "pattern": "operator:abs",
-        "score": 1.3192,
+        "score": 1.823,
         "support": 1
       },
       {
         "factors": [
-          "efficiency_ratio_10"
+          "profit_factor_60"
         ],
-        "label": "operator=diff",
-        "pattern": "operator:diff",
-        "score": 1.3192,
+        "label": "operator=max",
+        "pattern": "operator:max",
+        "score": 1.823,
         "support": 1
       },
       {
         "factors": [
-          "efficiency_ratio_10"
+          "profit_factor_60"
         ],
-        "label": "operator=shift",
-        "pattern": "operator:shift",
-        "score": 1.3192,
+        "label": "operator=min",
+        "pattern": "operator:min",
+        "score": 1.823,
         "support": 1
       },
       {
         "factors": [
-          "efficiency_ratio_10"
+          "profit_factor_60"
         ],
         "label": "operator=sum",
         "pattern": "operator:sum",
-        "score": 1.3192,
+        "score": 1.823,
         "support": 1
-      },
-      {
-        "factors": [
-          "realized_skew_20"
-        ],
-        "label": "operator=skew",
-        "pattern": "operator:skew",
-        "score": 1.2103,
-        "support": 1
-      },
-      {
-        "factors": [
-          "ma_ratio_120",
-          "ma_ratio_240",
-          "bb_width_20"
-        ],
-        "label": "operator=sma",
-        "pattern": "operator:sma",
-        "score": 1.1823,
-        "support": 3
       }
     ]
   },
@@ -213,20 +343,680 @@
     "minHistoricalWinRate": 0.5
   },
   "lossMemory": {
-    "lossCount": 33,
+    "lossCount": 268,
     "patterns": [],
-    "sampleCount": 33,
-    "status": "insufficient_loss_or_win_samples"
+    "sampleCount": 310,
+    "status": "no_separable_loss_pattern"
+  },
+  "lstmShadow": {
+    "artifactsReady": true,
+    "avgReturn": 0.0013216403572605681,
+    "byDuration": [
+      {
+        "avgReturn": 0.0013216403572605681,
+        "duration": "10m",
+        "recentWinRate": 1.0,
+        "sampleCount": 1,
+        "winRate": 1.0
+      },
+      {
+        "avgReturn": null,
+        "duration": "1d",
+        "recentWinRate": null,
+        "sampleCount": 0,
+        "winRate": null
+      },
+      {
+        "avgReturn": null,
+        "duration": "30m",
+        "recentWinRate": null,
+        "sampleCount": 0,
+        "winRate": null
+      },
+      {
+        "avgReturn": null,
+        "duration": "60m",
+        "recentWinRate": null,
+        "sampleCount": 0,
+        "winRate": null
+      }
+    ],
+    "comboSnapshotCurrent": [
+      {
+        "factorName": "combo__adx_14__ret_autocorr_20",
+        "members": [
+          "adx_14",
+          "ret_autocorr_20"
+        ],
+        "rank": 1
+      },
+      {
+        "factorName": "combo__adx_14__ret_autocorr_20__profit_factor_60",
+        "members": [
+          "adx_14",
+          "ret_autocorr_20",
+          "profit_factor_60"
+        ],
+        "rank": 2
+      },
+      {
+        "factorName": "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8",
+        "members": [
+          "adx_14",
+          "profit_factor_60",
+          "tf_15m_ma_ratio_8"
+        ],
+        "rank": 3
+      }
+    ],
+    "comboSnapshotMatches": true,
+    "comboSnapshotReason": "passed",
+    "comboSnapshotTrained": [
+      {
+        "factorName": "combo__adx_14__ret_autocorr_20",
+        "members": [
+          "adx_14",
+          "ret_autocorr_20"
+        ],
+        "rank": 1
+      },
+      {
+        "factorName": "combo__adx_14__ret_autocorr_20__profit_factor_60",
+        "members": [
+          "adx_14",
+          "ret_autocorr_20",
+          "profit_factor_60"
+        ],
+        "rank": 2
+      },
+      {
+        "factorName": "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8",
+        "members": [
+          "adx_14",
+          "profit_factor_60",
+          "tf_15m_ma_ratio_8"
+        ],
+        "rank": 3
+      }
+    ],
+    "comparison": [
+      {
+        "avgReturn": -0.0012441742493545943,
+        "recentWinRate": 0.1,
+        "sampleCount": 140,
+        "strategyKey": "factor_combo_ranker_v1",
+        "winRate": 0.10714285714285714
+      },
+      {
+        "avgReturn": -0.0012633819436273337,
+        "recentWinRate": 0.1,
+        "sampleCount": 108,
+        "strategyKey": "factor_combo_ranker_v1_top2",
+        "winRate": 0.14814814814814814
+      },
+      {
+        "avgReturn": -0.001263600345123919,
+        "recentWinRate": 0.1,
+        "sampleCount": 108,
+        "strategyKey": "factor_combo_ranker_v1_top3",
+        "winRate": 0.1388888888888889
+      },
+      {
+        "avgReturn": 0.0013216403572605681,
+        "recentWinRate": 1.0,
+        "sampleCount": 1,
+        "strategyKey": "factor_lstm_shadow_10m",
+        "winRate": 1.0
+      }
+    ],
+    "duration": "10m",
+    "featureWindow": 64,
+    "lossPatterns": [],
+    "modelVersion": "lstm_BTCUSDT_10m_w64_20260513172400",
+    "recentWinRate": 1.0,
+    "sampleCount": 1,
+    "sampleCounts": {
+      "test": 367,
+      "train": 1706,
+      "validation": 365
+    },
+    "shadowPredictionBlockedReason": "passed",
+    "shadowPredictionReady": true,
+    "status": "trained",
+    "strategyKey": "factor_lstm_shadow_10m",
+    "symbol": "BTCUSDT",
+    "testAccuracy": 0.5885558583106267,
+    "testWinRate": 0.32697547683923706,
+    "torchAvailable": true,
+    "torchStatus": {
+      "available": true,
+      "modulePath": "D:\\Python312\\Lib\\site-packages\\torch\\__init__.py",
+      "version": "2.5.1+cpu"
+    },
+    "trainedAt": "2026-05-13T17:24:00.833876+00:00",
+    "updatedAt": "2026-05-13T17:24:00.838875+00:00",
+    "winRate": 1.0
   },
   "minedFactorLibrary": {
     "duration": "10m",
-    "factors": [],
+    "factors": [
+      {
+        "category": "performance",
+        "description": "组合：ADX趋势强度（14周期） + 20周期收益自相关 + 60周期盈亏比",
+        "duration": "10m",
+        "factorDisplayName": "组合：ADX趋势强度（14周期） + 20周期收益自相关 + 60周期盈亏比",
+        "factorName": "combo__adx_14__ret_autocorr_20__profit_factor_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(adx_14, ret_autocorr_20, profit_factor_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "volatility",
+            "displayName": "ADX趋势强度（14周期）",
+            "name": "adx_14",
+            "orientation": 1
+          },
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000343,
+          "ir": 0.1935,
+          "profitFactor": 1.8404,
+          "sharpe": 50.7053,
+          "totalPeriods": 363,
+          "winRate": 0.597
+        },
+        "promotionCount": 1,
+        "score": 3.783015,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：ADX趋势强度（14周期） + 20周期收益自相关",
+        "duration": "10m",
+        "factorDisplayName": "组合：ADX趋势强度（14周期） + 20周期收益自相关",
+        "factorName": "combo__adx_14__ret_autocorr_20",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(adx_14, ret_autocorr_20)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "volatility",
+            "displayName": "ADX趋势强度（14周期）",
+            "name": "adx_14",
+            "orientation": 1
+          },
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000877,
+          "ir": 0.495,
+          "profitFactor": 1.69,
+          "sharpe": 43.6929,
+          "totalPeriods": 363,
+          "winRate": 0.597
+        },
+        "promotionCount": 1,
+        "score": 3.312145,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：ADX趋势强度（14周期） + 20周期收益自相关 + 60周期滚动夏普",
+        "duration": "10m",
+        "factorDisplayName": "组合：ADX趋势强度（14周期） + 20周期收益自相关 + 60周期滚动夏普",
+        "factorName": "combo__adx_14__ret_autocorr_20__rolling_sharpe_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(adx_14, ret_autocorr_20, rolling_sharpe_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "volatility",
+            "displayName": "ADX趋势强度（14周期）",
+            "name": "adx_14",
+            "orientation": 1
+          },
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期滚动夏普",
+            "name": "rolling_sharpe_60",
+            "orientation": 1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000223,
+          "ir": 0.1257,
+          "profitFactor": 1.6498,
+          "sharpe": 41.7028,
+          "totalPeriods": 363,
+          "winRate": 0.5817
+        },
+        "promotionCount": 1,
+        "score": 3.07431,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期滚动夏普 + 60周期均线斜率",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期滚动夏普 + 60周期均线斜率",
+        "factorName": "combo__ret_autocorr_20__rolling_sharpe_60__sma_slope_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, rolling_sharpe_60, sma_slope_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期滚动夏普",
+            "name": "rolling_sharpe_60",
+            "orientation": 1
+          },
+          {
+            "category": "moving_average",
+            "displayName": "60周期均线斜率",
+            "name": "sma_slope_60",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000536,
+          "ir": 0.3025,
+          "profitFactor": 1.633,
+          "sharpe": 40.858,
+          "totalPeriods": 363,
+          "winRate": 0.5703
+        },
+        "promotionCount": 1,
+        "score": 2.98735,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期收益率 + 60周期滚动夏普",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期收益率 + 60周期滚动夏普",
+        "factorName": "combo__ret_autocorr_20__ret_60__rolling_sharpe_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, ret_60, rolling_sharpe_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "return",
+            "displayName": "60周期收益率",
+            "name": "ret_60",
+            "orientation": -1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期滚动夏普",
+            "name": "rolling_sharpe_60",
+            "orientation": 1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000579,
+          "ir": 0.3265,
+          "profitFactor": 1.6087,
+          "sharpe": 39.6187,
+          "totalPeriods": 363,
+          "winRate": 0.5627
+        },
+        "promotionCount": 1,
+        "score": 2.873085,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期盈亏比 + 60周期均线斜率",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期盈亏比 + 60周期均线斜率",
+        "factorName": "combo__ret_autocorr_20__profit_factor_60__sma_slope_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, profit_factor_60, sma_slope_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          },
+          {
+            "category": "moving_average",
+            "displayName": "60周期均线斜率",
+            "name": "sma_slope_60",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000627,
+          "ir": 0.3535,
+          "profitFactor": 1.5599,
+          "sharpe": 37.0692,
+          "totalPeriods": 363,
+          "winRate": 0.5627
+        },
+        "promotionCount": 1,
+        "score": 2.69951,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期盈亏比 + 15分钟-8周期均线偏离",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期盈亏比 + 15分钟-8周期均线偏离",
+        "factorName": "combo__ret_autocorr_20__profit_factor_60__tf_15m_ma_ratio_8",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, profit_factor_60, tf_15m_ma_ratio_8)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          },
+          {
+            "category": "multi_timeframe",
+            "displayName": "15分钟-8周期均线偏离",
+            "name": "tf_15m_ma_ratio_8",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000731,
+          "ir": 0.4122,
+          "profitFactor": 1.5343,
+          "sharpe": 35.7027,
+          "totalPeriods": 363,
+          "winRate": 0.5817
+        },
+        "promotionCount": 1,
+        "score": 2.687455,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期滚动夏普 + MACD信号线",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期滚动夏普 + MACD信号线",
+        "factorName": "combo__ret_autocorr_20__rolling_sharpe_60__macd_signal",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, rolling_sharpe_60, macd_signal)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期滚动夏普",
+            "name": "rolling_sharpe_60",
+            "orientation": 1
+          },
+          {
+            "category": "momentum",
+            "displayName": "MACD信号线",
+            "name": "macd_signal",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000258,
+          "ir": 0.1455,
+          "profitFactor": 1.5238,
+          "sharpe": 35.1326,
+          "totalPeriods": 363,
+          "winRate": 0.5665
+        },
+        "promotionCount": 1,
+        "score": 2.56098,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期滚动夏普 + 15分钟-8周期均线偏离",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期滚动夏普 + 15分钟-8周期均线偏离",
+        "factorName": "combo__ret_autocorr_20__rolling_sharpe_60__tf_15m_ma_ratio_8",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, rolling_sharpe_60, tf_15m_ma_ratio_8)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期滚动夏普",
+            "name": "rolling_sharpe_60",
+            "orientation": 1
+          },
+          {
+            "category": "multi_timeframe",
+            "displayName": "15分钟-8周期均线偏离",
+            "name": "tf_15m_ma_ratio_8",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000676,
+          "ir": 0.3814,
+          "profitFactor": 1.5082,
+          "sharpe": 34.2777,
+          "totalPeriods": 363,
+          "winRate": 0.5741
+        },
+        "promotionCount": 1,
+        "score": 2.556625,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：ADX趋势强度（14周期） + 60周期盈亏比 + 15分钟-8周期均线偏离",
+        "duration": "10m",
+        "factorDisplayName": "组合：ADX趋势强度（14周期） + 60周期盈亏比 + 15分钟-8周期均线偏离",
+        "factorName": "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(adx_14, profit_factor_60, tf_15m_ma_ratio_8)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "volatility",
+            "displayName": "ADX趋势强度（14周期）",
+            "name": "adx_14",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          },
+          {
+            "category": "multi_timeframe",
+            "displayName": "15分钟-8周期均线偏离",
+            "name": "tf_15m_ma_ratio_8",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.001224,
+          "ir": 0.6904,
+          "profitFactor": 1.4499,
+          "sharpe": 31.0073,
+          "totalPeriods": 363,
+          "winRate": 0.6198
+        },
+        "promotionCount": 1,
+        "score": 2.548505,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：ADX趋势强度（14周期） + 60周期盈亏比 + MACD信号线",
+        "duration": "10m",
+        "factorDisplayName": "组合：ADX趋势强度（14周期） + 60周期盈亏比 + MACD信号线",
+        "factorName": "combo__adx_14__profit_factor_60__macd_signal",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(adx_14, profit_factor_60, macd_signal)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "volatility",
+            "displayName": "ADX趋势强度（14周期）",
+            "name": "adx_14",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          },
+          {
+            "category": "momentum",
+            "displayName": "MACD信号线",
+            "name": "macd_signal",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000859,
+          "ir": 0.4844,
+          "profitFactor": 1.4503,
+          "sharpe": 31.0312,
+          "totalPeriods": 363,
+          "winRate": 0.6046
+        },
+        "promotionCount": 1,
+        "score": 2.4687,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "category": "performance",
+        "description": "组合：20周期收益自相关 + 60周期盈亏比 + 60周期均线偏离",
+        "duration": "10m",
+        "factorDisplayName": "组合：20周期收益自相关 + 60周期盈亏比 + 60周期均线偏离",
+        "factorName": "combo__ret_autocorr_20__profit_factor_60__ma_ratio_60",
+        "firstSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "formula": "expanding_oriented_zscore_mean_v1(ret_autocorr_20, profit_factor_60, ma_ratio_60)",
+        "lastSeenAt": "2026-05-13T16:30:22.613647+00:00",
+        "members": [
+          {
+            "category": "statistic",
+            "displayName": "20周期收益自相关",
+            "name": "ret_autocorr_20",
+            "orientation": 1
+          },
+          {
+            "category": "performance",
+            "displayName": "60周期盈亏比",
+            "name": "profit_factor_60",
+            "orientation": 1
+          },
+          {
+            "category": "moving_average",
+            "displayName": "60周期均线偏离",
+            "name": "ma_ratio_60",
+            "orientation": -1
+          }
+        ],
+        "method": "expanding_oriented_zscore_mean_v1",
+        "metrics": {
+          "contribution": 0.000348,
+          "ir": 0.1963,
+          "profitFactor": 1.4821,
+          "sharpe": 32.8271,
+          "totalPeriods": 363,
+          "winRate": 0.5665
+        },
+        "promotionCount": 1,
+        "score": 2.409085,
+        "source": "factor_combo_ranking",
+        "symbol": "BTCUSDT"
+      }
+    ],
     "symbol": "BTCUSDT",
     "thresholds": {
       "minProfitFactor": 1.05,
       "minWinRate": 0.52
     },
-    "total": 0,
+    "total": 48,
     "version": "mined_factor_library_v1"
   },
   "monitoring": {
@@ -240,7 +1030,7 @@
           "refresh_learning",
           "tighten_promotions"
         ],
-        "value": 0.0488
+        "value": 0.125
       },
       {
         "code": "quality_passed_success_rate_low",
@@ -250,14 +1040,14 @@
           "raise_confirmations",
           "downweight_loss_features"
         ],
-        "value": 0.0488
+        "value": 0.142
       },
       {
         "code": "recent_loss_streak",
         "latestRules": [
-          "combo__adx_14__vol_ma_120__vol_ma_60",
-          "combo__vol_ma_120__range_ma_20__bb_width_20",
-          "combo__adx_14__vol_ma_120"
+          "combo__adx_14__ret_autocorr_20",
+          "combo__adx_14__ret_autocorr_20__profit_factor_60",
+          "combo__adx_14__profit_factor_60__tf_15m_ma_ratio_8"
         ],
         "message": "最近连续亏损，需要复核当前组合与亏损特征",
         "severity": "high",
@@ -269,20 +1059,62 @@
       }
     ],
     "metrics": {
-      "latestConsecutiveLosses": 23,
-      "predictionSuccessRate": 0.0488,
-      "qualityPassRate": 1.0,
-      "qualityPassedCount": 41,
-      "qualityPassedSuccessRate": 0.0488,
-      "sampleCount": 41
+      "latestConsecutiveLosses": 3,
+      "predictionSuccessRate": 0.125,
+      "qualityPassRate": 0.845,
+      "qualityPassedCount": 169,
+      "qualityPassedSuccessRate": 0.142,
+      "sampleCount": 200
     },
     "solutions": [
-      "重新执行本地复盘，结算到期预测并刷新亏损模式记忆。",
-      "仅把同时满足胜率和盈亏比阈值的组合写入挖掘因子库。",
-      "提高成员方向确认数，让单一成员反向时不进入模拟候选。",
-      "对命中亏损特征的成员降权，下一次组合打分时显式避开。",
-      "把最近连续亏损对应的特征阈值加入硬过滤观察区。",
-      "检查最近亏损组合的成员、方向和盈亏比，优先淘汰重复命中的组合。"
+      {
+        "action": "refresh_learning",
+        "actionLabel": "本地复盘",
+        "key": "refresh_learning",
+        "requiresConfirmation": true,
+        "status": "ready",
+        "text": "重新执行本地复盘，结算到期预测并刷新亏损模式记忆。"
+      },
+      {
+        "action": null,
+        "actionLabel": "需人工确认",
+        "key": "tighten_promotions",
+        "requiresConfirmation": false,
+        "status": "manual_review",
+        "text": "仅把同时满足胜率和盈亏比阈值的组合写入挖掘因子库。"
+      },
+      {
+        "action": null,
+        "actionLabel": "需人工确认",
+        "key": "raise_confirmations",
+        "requiresConfirmation": false,
+        "status": "manual_review",
+        "text": "提高成员方向确认数，让单一成员反向时不进入模拟候选。"
+      },
+      {
+        "action": null,
+        "actionLabel": "需人工确认",
+        "key": "downweight_loss_features",
+        "requiresConfirmation": false,
+        "status": "manual_review",
+        "text": "对命中亏损特征的成员降权，下一次组合打分时显式避开。"
+      },
+      {
+        "action": null,
+        "actionLabel": "需人工确认",
+        "key": "block_recent_loss_patterns",
+        "requiresConfirmation": false,
+        "status": "manual_review",
+        "text": "把最近连续亏损对应的特征阈值加入硬过滤观察区。"
+      },
+      {
+        "action": null,
+        "actionLabel": "需人工确认",
+        "key": "inspect_latest_combo",
+        "requiresConfirmation": false,
+        "status": "manual_review",
+        "text": "检查最近亏损组合的成员、方向和盈亏比，优先淘汰重复命中的组合。"
+      }
     ],
     "status": "warning",
     "strategyKey": "factor_combo_ranker_v1",
@@ -293,18 +1125,18 @@
       "lowSuccessRate": 0.45,
       "minSampleCount": 10
     },
-    "updatedAt": "2026-05-13T08:16:30.301072+00:00"
+    "updatedAt": "2026-05-14T02:34:15.126022+00:00"
   },
   "source": {
     "baseFactorCount": 16,
-    "lossMemoryStatus": "insufficient_loss_or_win_samples",
+    "lossMemoryStatus": "no_separable_loss_pattern",
     "lossPatternCount": 0,
     "minedFactorSourceCount": 0,
     "minedFactorUsedCount": 0,
     "minedFrameFailureCount": 0,
     "minedFrameFailures": [],
     "rankingTotal": 200,
-    "settledPredictionCount": 41,
+    "settledPredictionCount": 357,
     "settlementSweep": {
       "checked": 0,
       "pendingData": 0,
@@ -312,24 +1144,24 @@
     }
   },
   "symbol": "BTCUSDT",
-  "updatedAt": "2026-05-13T08:16:30.309071+00:00",
+  "updatedAt": "2026-05-14T02:34:15.211156+00:00",
   "version": "factor_learning_v1",
   "weights": {
-    "adx_14": 0.082446,
-    "bb_width_20": 0.0514,
-    "dollar_volume_ma_20": 0.050521,
-    "efficiency_ratio_10": 0.074703,
-    "hl_range": 0.017988,
-    "ma_ratio_120": 0.067626,
-    "ma_ratio_240": 0.081839,
-    "range_ma_20": 0.049754,
-    "realized_skew_20": 0.068535,
-    "ret_240": 0.098973,
-    "tf_1d_volume_share": 0.086709,
-    "upside_vol_60": 0.034297,
-    "vol_ma_120": 0.070951,
-    "vol_ma_20": 0.048957,
-    "vol_ma_60": 0.06871,
-    "vol_median_ratio_20": 0.046593
+    "adx_14": 0.104019,
+    "ma_ratio_120": 0.074308,
+    "ma_ratio_240": 0.051463,
+    "ma_ratio_60": 0.065594,
+    "macd_signal": 0.057921,
+    "profit_factor_60": 0.058238,
+    "ret_120": 0.057392,
+    "ret_240": 0.069021,
+    "ret_60": 0.060479,
+    "ret_autocorr_20": 0.110327,
+    "rolling_sharpe_60": 0.058218,
+    "sma_slope_60": 0.05184,
+    "tf_15m_ma_ratio_8": 0.046681,
+    "tf_1d_intrabar_pos": 0.040325,
+    "tf_1h_ret_4": 0.044333,
+    "trix_15": 0.049839
   }
 }

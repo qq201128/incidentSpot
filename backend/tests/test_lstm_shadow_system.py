@@ -9,8 +9,11 @@ import pandas as pd
 import pytest
 
 from app.services import auto_predict_service
+from app.services import rule_signal_service
+from app.services import lstm_combo_snapshot
 from app.services import lstm_prediction_service
 from app.services import lstm_shadow_learning
+from app.services import auto_trade_service
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
 from app.services.lstm_config import LstmTrainingConfig, lstm_shadow_strategy_key
@@ -18,7 +21,7 @@ from app.services.lstm_feature_builder import LstmDataset, duration_labeled_fram
 from app.services.lstm_prediction_service import predict_lstm_signal
 from app.services.lstm_training_service import train_lstm_model
 from app.services.rule_config import DURATION_TO_MINUTES
-from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
+from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_definition, strategy_payloads
 
 ENTRY_OPEN_TIME = 1778121600000
 
@@ -72,6 +75,7 @@ def test_predict_lstm_signal_missing_model_raises() -> None:
 def test_legacy_validation_failed_status_is_treated_as_trained(monkeypatch) -> None:
     artifact_root = _runtime_path("legacy-status")
     _write_legacy_validation_artifacts(artifact_root)
+    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
     monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
 
     signal = lstm_prediction_service.predict_lstm_signal(
@@ -112,7 +116,7 @@ def test_auto_predict_saves_lstm_shadow_after_factor_combo(monkeypatch) -> None:
         saved.append(result["strategy_key"])
         return True
 
-    monkeypatch.setattr(auto_predict_service, "is_lstm_shadow_ready", lambda *_args: True)
+    monkeypatch.setattr(auto_predict_service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
     monkeypatch.setattr(auto_predict_service, "predict_lstm_shadow_prediction", _lstm_prediction)
     monkeypatch.setattr(auto_predict_service, "_save_prediction", save_prediction)
 
@@ -125,6 +129,46 @@ def test_auto_predict_saves_lstm_shadow_after_factor_combo(monkeypatch) -> None:
     ))
 
     assert saved == [lstm_shadow_strategy_key("10m")]
+
+
+def test_lstm_shadow_strategy_is_visible_for_simulation() -> None:
+    key = lstm_shadow_strategy_key("10m")
+    payloads = {payload["key"]: payload for payload in strategy_payloads()}
+    strategy = strategy_definition(key)
+
+    assert key in payloads
+    assert strategy.tradable is True
+    assert strategy.signal_source == "factor_lstm_shadow"
+    assert payloads[key]["supportedDurations"] == ["10m"]
+
+
+def test_rule_signal_routes_lstm_shadow_prediction(monkeypatch) -> None:
+    key = lstm_shadow_strategy_key("10m")
+    captured = {}
+
+    def predict_lstm(symbol: str, duration: str, **kwargs) -> dict:
+        captured.update({"symbol": symbol, "duration": duration, **kwargs})
+        return {"strategy_key": key}
+
+    monkeypatch.setattr(rule_signal_service, "predict_lstm_shadow_prediction", predict_lstm)
+
+    result = rule_signal_service.predict_rule_direction(
+        "btcusdt",
+        "10m",
+        entry_open_time=ENTRY_OPEN_TIME,
+        strategy_key=key,
+    )
+
+    assert result["strategy_key"] == key
+    assert captured["symbol"] == "BTCUSDT"
+    assert captured["entry_open_time"] == ENTRY_OPEN_TIME
+
+
+def test_lstm_shadow_live_trading_is_rejected() -> None:
+    settings = _settings(lstm_shadow_strategy_key("10m"), live_trading_enabled=True)
+
+    with pytest.raises(ValueError, match="simulation only"):
+        auto_trade_service._validated_settings(settings)
 
 
 class _FakeBackend:
@@ -154,7 +198,22 @@ def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
 
 
 def _combo_snapshot() -> list[dict]:
-    return [{"rank": 1, "factorName": "combo_a", "members": ["factor_a"]}]
+    return [
+        {"rank": 1, "factorName": "combo_a", "members": ["factor_a"]},
+        {"rank": 2, "factorName": "combo_b", "members": ["factor_b"]},
+        {"rank": 3, "factorName": "combo_c", "members": ["factor_c"]},
+    ]
+
+
+def _combo_ranking() -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "ranking": [
+            {"factorName": row["factorName"], "members": [{"name": name} for name in row["members"]]}
+            for row in _combo_snapshot()
+        ],
+    }
 
 
 def _create_prediction_db(path: Path) -> None:
@@ -186,7 +245,7 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _settings(strategy_key: str) -> AutoTradeSettings:
+def _settings(strategy_key: str, *, live_trading_enabled: bool = False) -> AutoTradeSettings:
     return AutoTradeSettings(
         strategy_key=strategy_key,
         enabled=True,
@@ -194,7 +253,7 @@ def _settings(strategy_key: str) -> AutoTradeSettings:
         duration="10m",
         duration_minutes=DURATION_TO_MINUTES["10m"],
         qty=5.0,
-        live_trading_enabled=False,
+        live_trading_enabled=live_trading_enabled,
     )
 
 
@@ -210,7 +269,11 @@ def _write_legacy_validation_artifacts(root: Path) -> None:
     model_dir = root / "BTCUSDT" / "10m"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "model.pt").write_bytes(b"fake")
-    _write_json(model_dir / "features.json", {"columns": ["x"], "featureWindow": 4})
+    _write_json(model_dir / "features.json", {
+        "columns": ["x"],
+        "featureWindow": 4,
+        "comboSnapshot": _combo_snapshot(),
+    })
     _write_json(model_dir / "scaler.json", {"mean": [0.0], "std": [1.0]})
     _write_json(model_dir / "model_version.json", {
         "modelVersion": "lstm_test",

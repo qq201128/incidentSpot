@@ -16,6 +16,7 @@ from app.services.factor_combination_service import (
 from app.services.factor_learning_service import refresh_factor_learning_memory
 from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
+from app.services.lstm_combo_sync_service import sync_lstm_model_to_combo_ranking
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
@@ -40,12 +41,27 @@ def refresh_combination_ranking_for_symbol_duration(
         promotion["promoted"],
         promotion["libraryTotal"],
     )
+    _sync_lstm_shadow_model(symbol.strip().upper(), duration, report)
     refresh_factor_learning_memory(
         symbol.strip().upper(),
         duration,
         ranking_report=report,
         run_llm_agent=True,
     )
+
+
+def _sync_lstm_shadow_model(symbol: str, duration: str, report: dict) -> None:
+    try:
+        sync = sync_lstm_model_to_combo_ranking(symbol, duration, ranking_report=report)
+        logger.info(
+            "lstm combo sync: %s %s status=%s model=%s",
+            symbol,
+            duration,
+            sync["status"],
+            sync.get("modelVersion"),
+        )
+    except Exception:
+        logger.exception("lstm combo sync failed after ranking update: %s %s", symbol, duration)
 
 
 def refresh_symbol_combination_rankings(

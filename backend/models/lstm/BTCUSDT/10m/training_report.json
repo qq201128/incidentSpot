@@ -3,93 +3,93 @@
   "featureWindow": 64,
   "horizonMinutes": 10,
   "losses": {
-    "trainLoss": 0.6917866468429565,
-    "valLoss": 0.6773309111595154
+    "trainLoss": 0.17198412727426599,
+    "valLoss": 0.7047876715660095
   },
-  "modelVersion": "lstm_BTCUSDT_10m_w64_20260513142935",
+  "modelVersion": "lstm_BTCUSDT_10m_w64_20260513172400",
   "outOfSample": {
     "test": {
-      "accuracy": 0.5213675213675214,
-      "avgReturn": -0.00060013507027179,
+      "accuracy": 0.5885558583106267,
+      "avgReturn": -0.0006190093117766082,
       "confusionMatrix": {
-        "fn": 112,
-        "fp": 56,
-        "tn": 147,
-        "tp": 36
+        "fn": 69,
+        "fp": 82,
+        "tn": 127,
+        "tp": 89
       },
-      "maxDrawdown": 0.25947192311286926,
-      "precision": 0.391304347826087,
-      "profitFactor": 0.4051288366317749,
-      "recall": 0.24324324324324326,
-      "sampleCount": 351,
-      "sharpe": -6.544672202771039,
-      "winRate": 0.3190883190883191
+      "maxDrawdown": 0.23907515406608582,
+      "precision": 0.52046783625731,
+      "profitFactor": 0.44659996032714844,
+      "recall": 0.5632911392405063,
+      "sampleCount": 367,
+      "sharpe": -5.7732663542006595,
+      "winRate": 0.32697547683923706
     },
     "validation": {
-      "accuracy": 0.5828571428571429,
-      "avgReturn": -0.0008438819786533713,
+      "accuracy": 0.5150684931506849,
+      "avgReturn": -0.0010270518250763416,
       "confusionMatrix": {
-        "fn": 85,
-        "fp": 61,
-        "tn": 84,
-        "tp": 120
+        "fn": 119,
+        "fp": 58,
+        "tn": 117,
+        "tp": 71
       },
-      "maxDrawdown": 0.29508841037750244,
-      "precision": 0.6629834254143646,
-      "profitFactor": 0.11705497652292252,
-      "recall": 0.5853658536585366,
-      "sampleCount": 350,
-      "sharpe": -15.126742545997361,
-      "winRate": 0.1657142857142857
+      "maxDrawdown": 0.37385547161102295,
+      "precision": 0.5503875968992248,
+      "profitFactor": 0.06461697816848755,
+      "recall": 0.3736842105263158,
+      "sampleCount": 365,
+      "sharpe": -18.577327683262197,
+      "winRate": 0.1589041095890411
     }
   },
   "returnStats": {
-    "downMean": -0.0010033197468146682,
-    "mean": -3.666384509415366e-05,
-    "upMean": 0.0009492249810136855
+    "downMean": -0.0010636419756338,
+    "mean": -6.0765836678911e-05,
+    "upMean": 0.0009670988074503839
   },
   "ruleName": "lstm_shadow_signal_v1",
   "sampleCounts": {
-    "test": 351,
-    "train": 1634,
-    "validation": 350
+    "test": 367,
+    "train": 1706,
+    "validation": 365
   },
   "splitPolicy": "chronological_train_validation_test_no_shuffle",
   "status": "trained",
   "symbol": "BTCUSDT",
   "test": {
-    "accuracy": 0.5213675213675214,
-    "avgReturn": -0.00060013507027179,
+    "accuracy": 0.5885558583106267,
+    "avgReturn": -0.0006190093117766082,
     "confusionMatrix": {
-      "fn": 112,
-      "fp": 56,
-      "tn": 147,
-      "tp": 36
+      "fn": 69,
+      "fp": 82,
+      "tn": 127,
+      "tp": 89
     },
-    "maxDrawdown": 0.25947192311286926,
-    "precision": 0.391304347826087,
-    "profitFactor": 0.4051288366317749,
-    "recall": 0.24324324324324326,
-    "sampleCount": 351,
-    "sharpe": -6.544672202771039,
-    "winRate": 0.3190883190883191
+    "maxDrawdown": 0.23907515406608582,
+    "precision": 0.52046783625731,
+    "profitFactor": 0.44659996032714844,
+    "recall": 0.5632911392405063,
+    "sampleCount": 367,
+    "sharpe": -5.7732663542006595,
+    "winRate": 0.32697547683923706
   },
-  "trainedAt": "2026-05-13T14:29:35.320996+00:00",
+  "trainedAt": "2026-05-13T17:24:00.833876+00:00",
   "validation": {
-    "accuracy": 0.5828571428571429,
-    "avgReturn": -0.0008438819786533713,
+    "accuracy": 0.5150684931506849,
+    "avgReturn": -0.0010270518250763416,
     "confusionMatrix": {
-      "fn": 85,
-      "fp": 61,
-      "tn": 84,
-      "tp": 120
+      "fn": 119,
+      "fp": 58,
+      "tn": 117,
+      "tp": 71
     },
-    "maxDrawdown": 0.29508841037750244,
-    "precision": 0.6629834254143646,
-    "profitFactor": 0.11705497652292252,
-    "recall": 0.5853658536585366,
-    "sampleCount": 350,
-    "sharpe": -15.126742545997361,
-    "winRate": 0.1657142857142857
+    "maxDrawdown": 0.37385547161102295,
+    "precision": 0.5503875968992248,
+    "profitFactor": 0.06461697816848755,
+    "recall": 0.3736842105263158,
+    "sampleCount": 365,
+    "sharpe": -18.577327683262197,
+    "winRate": 0.1589041095890411
   }
 }
