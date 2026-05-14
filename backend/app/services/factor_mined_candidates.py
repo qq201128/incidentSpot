@@ -44,15 +44,16 @@ def materialize_mined_factor_frame(
     rows = mined_factor_rows_for_duration(symbol, duration)
     if not rows:
         return MinedFrameResult(frame, 0, ())
-    working = frame.copy()
     failures: list[dict[str, Any]] = []
-    materialized = {str(column) for column in working.columns}
+    pending: dict[str, pd.Series] = {}
+    materialized = {str(column) for column in frame.columns}
     by_name = {str(row.get("factorName")): row for row in rows}
     for row in rows:
         try:
-            _ensure_materialized(working, row, by_name, materialized, set())
+            _ensure_materialized(frame, pending, row, by_name, materialized, set())
         except Exception as exc:
             failures.append(_failure(row, "materialize_mined_factor", exc))
+    working = _frame_with_pending_columns(frame, pending)
     return MinedFrameResult(working, len(rows), tuple(failures))
 
 
@@ -84,6 +85,7 @@ def build_mined_candidates(
 
 def _ensure_materialized(
     frame: pd.DataFrame,
+    pending: dict[str, pd.Series],
     row: dict[str, Any],
     by_name: dict[str, dict[str, Any]],
     materialized: set[str],
@@ -95,18 +97,50 @@ def _ensure_materialized(
     if name in visiting:
         raise ValueError(f"cycle in mined factor library: {name}")
     visiting.add(name)
-    members = _members(row)
-    for member in members:
-        member_name = str(member["name"])
-        if member_name in materialized:
-            continue
-        dependency = by_name.get(member_name)
-        if dependency is None:
-            raise ValueError(f"mined factor missing member column: {member_name}")
-        _ensure_materialized(frame, dependency, by_name, materialized, visiting)
-    frame[name] = combination_score(frame, members)
-    materialized.add(name)
-    visiting.remove(name)
+    try:
+        members = _members(row)
+        for member in members:
+            _ensure_member_materialized(frame, pending, member, by_name, materialized, visiting)
+        pending[name] = combination_score(_score_frame(frame, pending, members), members)
+        materialized.add(name)
+    finally:
+        visiting.remove(name)
+
+
+def _ensure_member_materialized(
+    frame: pd.DataFrame,
+    pending: dict[str, pd.Series],
+    member: dict[str, Any],
+    by_name: dict[str, dict[str, Any]],
+    materialized: set[str],
+    visiting: set[str],
+) -> None:
+    member_name = str(member["name"])
+    if member_name in materialized:
+        return
+    dependency = by_name.get(member_name)
+    if dependency is None:
+        raise ValueError(f"mined factor missing member column: {member_name}")
+    _ensure_materialized(frame, pending, dependency, by_name, materialized, visiting)
+
+
+def _score_frame(
+    frame: pd.DataFrame,
+    pending: dict[str, pd.Series],
+    members: list[dict[str, Any]],
+) -> pd.DataFrame:
+    pending_names = [str(member["name"]) for member in members if str(member["name"]) in pending]
+    if not pending_names:
+        return frame
+    pending_frame = pd.DataFrame({name: pending[name] for name in pending_names}, index=frame.index)
+    return pd.concat([frame, pending_frame], axis=1, copy=False)
+
+
+def _frame_with_pending_columns(frame: pd.DataFrame, pending: dict[str, pd.Series]) -> pd.DataFrame:
+    if not pending:
+        return frame
+    pending_frame = pd.DataFrame(pending, index=frame.index)
+    return pd.concat([frame, pending_frame], axis=1, copy=False)
 
 
 def _candidate_from_row(

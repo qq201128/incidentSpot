@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ import pytest
 
 from app.services import factor_learning_service
 from app.services import factor_mined_library
+from app.services import factor_mined_candidates
 from app.services.factor_learning_core import build_factor_learning_memory
 from app.services.factor_learning_signal_filter import apply_factor_learning_memory
 
@@ -73,6 +75,34 @@ def test_good_combo_is_promoted_to_mined_factor_library(monkeypatch: pytest.Monk
     assert promotion["promoted"] == 1
     assert rows[0]["factorDisplayName"] == "组合：A + B"
     assert rows[0]["metrics"]["winRate"] == 0.63
+
+
+def test_mined_factor_materialization_batches_dependent_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [
+        _mined_row("combo_a_b", ["factor_a", "factor_b"]),
+        _mined_row("combo_nested", ["combo_a_b", "factor_c"]),
+    ]
+    monkeypatch.setattr(
+        factor_mined_candidates,
+        "mined_factor_rows_for_duration",
+        lambda *_args: rows,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        result = factor_mined_candidates.materialize_mined_factor_frame(
+            _learning_frame(),
+            symbol="BTCUSDT",
+            duration="10m",
+        )
+
+    assert not [item for item in caught if item.category is pd.errors.PerformanceWarning]
+    assert result.failures == ()
+    assert {"combo_a_b", "combo_nested"} <= set(result.frame.columns)
+    expected = factor_mined_candidates.combination_score(
+        result.frame,
+        [{"name": "combo_a_b", "orientation": 1}, {"name": "factor_c", "orientation": 1}],
+    )
+    pd.testing.assert_series_equal(result.frame["combo_nested"], expected, check_names=False)
 
 
 def test_factor_learning_agent_failure_is_written_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,6 +211,16 @@ def _base_factor(name: str, category: str, win_rate: float, ir: float, sharpe: f
         "ir": ir,
         "sharpe": sharpe,
         "profitFactor": 1.10,
+    }
+
+
+def _mined_row(name: str, members: list[str]) -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "factorName": name,
+        "factorDisplayName": name,
+        "members": [{"name": member, "orientation": 1} for member in members],
     }
 
 
