@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from app.services.forward_validation_service import ROUNDTRIP_COST_RATE
 EPSILON = 1e-12
+CONFIDENCE_THRESHOLDS = (0.55, 0.60, 0.65, 0.70)
 
 
 @dataclass(frozen=True)
@@ -79,8 +79,25 @@ def binary_classification_metrics(
         "maxDrawdown": max_drawdown(directional),
         "sharpe": sharpe_ratio(directional),
         "avgReturn": _mean_or_none(directional),
+        "confidenceThresholds": confidence_threshold_metrics(
+            probability_up,
+            future_returns,
+        ),
         "confusionMatrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
     }
+
+
+def confidence_threshold_metrics(
+    probability_up: np.ndarray,
+    future_returns: np.ndarray,
+) -> list[dict[str, Any]]:
+    pred_up = probability_up >= 0.5
+    confidence = np.maximum(probability_up, 1.0 - probability_up)
+    directional = _directional_returns(pred_up, future_returns)
+    return [
+        _confidence_threshold_payload(threshold, directional[confidence >= threshold])
+        for threshold in CONFIDENCE_THRESHOLDS
+    ]
 
 
 def profit_factor(returns: np.ndarray) -> float | None:
@@ -110,8 +127,17 @@ def sharpe_ratio(returns: np.ndarray) -> float | None:
 
 
 def _directional_returns(pred_up: np.ndarray, future_returns: np.ndarray) -> np.ndarray:
-    signed = np.where(pred_up, future_returns, -future_returns)
-    return signed - ROUNDTRIP_COST_RATE
+    return np.where(pred_up, future_returns, -future_returns)
+
+
+def _confidence_threshold_payload(threshold: float, returns: np.ndarray) -> dict[str, Any]:
+    return {
+        "minConfidence": float(threshold),
+        "sampleCount": int(len(returns)),
+        "winRate": _ratio(int((returns > 0).sum()), len(returns)),
+        "avgReturn": _mean_or_none(returns),
+        "profitFactor": None if len(returns) == 0 else profit_factor(returns),
+    }
 
 
 def _assert_split_sizes(total: int, train_end: int, val_end: int) -> None:

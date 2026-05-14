@@ -19,6 +19,10 @@ from app.services.lstm_validation import (
 )
 
 DatasetBuilder = Callable[[LstmTrainingConfig], LstmDataset]
+TRADE_GATE_THRESHOLDS = (0.60, 0.65, 0.70)
+MIN_VALIDATION_WIN_RATE = 0.5
+MIN_VALIDATION_PROFIT_FACTOR = 1.0
+MIN_VALIDATION_AVG_RETURN = 0.0
 
 
 def train_lstm_model(
@@ -77,9 +81,11 @@ def _training_report(
     test_prob = backend.predict(model_path, split.test_x)
     val_metrics = binary_classification_metrics(split.val_y, val_prob, split.val_returns)
     test_metrics = binary_classification_metrics(split.test_y, test_prob, split.test_returns)
+    validation_gate = _validation_gate(val_metrics)
     version = _model_version(cfg)
+    status = "trained" if validation_gate["status"] == "passed" else "validation_failed"
     return _finite_payload({
-        "status": "trained",
+        "status": status,
         "modelVersion": version,
         "ruleName": LSTM_RULE_NAME,
         "symbol": cfg.symbol,
@@ -91,6 +97,9 @@ def _training_report(
         "validation": val_metrics,
         "test": test_metrics,
         "outOfSample": {"validation": val_metrics, "test": test_metrics},
+        "validationGate": validation_gate,
+        "selectedConfidenceThreshold": validation_gate.get("minConfidence"),
+        "validationFailureReason": _validation_failure_reason(validation_gate),
         "losses": losses,
         "returnStats": _return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
@@ -102,7 +111,7 @@ def _write_training_artifacts(paths, cfg, dataset: LstmDataset, scaler: dict, re
     write_json(paths.features, _feature_payload(cfg, dataset))
     write_json(paths.version, _version_payload(report))
     write_json(paths.report, report)
-    write_json(paths.status, _status_payload(report["status"], cfg))
+    write_json(paths.status, _status_payload(report["status"], cfg, report.get("validationFailureReason")))
 
 
 def _scaled_split(split, scaler: dict[str, Any]):
@@ -145,6 +154,8 @@ def _version_payload(report: dict[str, Any]) -> dict[str, Any]:
         "modelVersion": report["modelVersion"],
         "trainedAt": report["trainedAt"],
         "returnStats": report["returnStats"],
+        "validationGate": report.get("validationGate"),
+        "selectedConfidenceThreshold": report.get("selectedConfidenceThreshold"),
     }
 
 
@@ -169,6 +180,49 @@ def _return_stats(returns: np.ndarray) -> dict[str, float]:
         "upMean": _mean(up),
         "downMean": _mean(down),
     }
+
+
+def _validation_gate(metrics: dict[str, Any]) -> dict[str, Any]:
+    criteria = _validation_gate_criteria()
+    candidates = [
+        row for row in metrics.get("confidenceThresholds", [])
+        if float(row.get("minConfidence") or 0.0) in TRADE_GATE_THRESHOLDS
+    ]
+    for row in candidates:
+        if _threshold_passes(row):
+            return {"status": "passed", "criteria": criteria, **row}
+    return {
+        "status": "failed",
+        "reason": "no_validation_confidence_threshold_met",
+        "criteria": criteria,
+        "candidates": candidates,
+    }
+
+
+def _threshold_passes(row: dict[str, Any]) -> bool:
+    return (
+        row.get("winRate") is not None
+        and float(row["winRate"]) > MIN_VALIDATION_WIN_RATE
+        and row.get("profitFactor") is not None
+        and float(row["profitFactor"]) > MIN_VALIDATION_PROFIT_FACTOR
+        and row.get("avgReturn") is not None
+        and float(row["avgReturn"]) > MIN_VALIDATION_AVG_RETURN
+    )
+
+
+def _validation_gate_criteria() -> dict[str, Any]:
+    return {
+        "thresholds": list(TRADE_GATE_THRESHOLDS),
+        "minWinRateExclusive": MIN_VALIDATION_WIN_RATE,
+        "minProfitFactorExclusive": MIN_VALIDATION_PROFIT_FACTOR,
+        "minAvgReturnExclusive": MIN_VALIDATION_AVG_RETURN,
+    }
+
+
+def _validation_failure_reason(validation_gate: dict[str, Any]) -> str | None:
+    if validation_gate["status"] == "passed":
+        return None
+    return str(validation_gate["reason"])
 
 
 def _model_version(cfg: LstmTrainingConfig) -> str:

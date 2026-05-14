@@ -10,8 +10,6 @@ import pytest
 
 from app.services import auto_predict_service
 from app.services import rule_signal_service
-from app.services import lstm_combo_snapshot
-from app.services import lstm_prediction_service
 from app.services import lstm_shadow_learning
 from app.services import auto_trade_service
 from app.services.auto_trade_types import AutoTradeSettings
@@ -65,30 +63,13 @@ def test_train_lstm_model_writes_separate_artifacts() -> None:
     assert (model_dir / "scaler.json").exists()
     assert (model_dir / "features.json").exists()
     assert (model_dir / "model_version.json").exists()
+    assert report["validationGate"]["status"] == "passed"
+    assert report["selectedConfidenceThreshold"] == pytest.approx(0.6)
 
 
 def test_predict_lstm_signal_missing_model_raises() -> None:
     with pytest.raises(ValueError, match="not ready"):
         predict_lstm_signal("BTCUSDT", "10m", artifact_root=_runtime_path("missing"))
-
-
-def test_legacy_validation_failed_status_is_treated_as_trained(monkeypatch) -> None:
-    artifact_root = _runtime_path("legacy-status")
-    _write_legacy_validation_artifacts(artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
-    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
-
-    signal = lstm_prediction_service.predict_lstm_signal(
-        "BTCUSDT",
-        "10m",
-        artifact_root=artifact_root,
-        backend=_PredictOnlyBackend(),
-    )
-    prediction = lstm_prediction_service.predict_lstm_shadow_prediction.__globals__["_prediction_payload"](signal)
-
-    assert signal["modelStatus"] == "trained"
-    assert prediction["trade_quality_passed"] is True
-    assert prediction["high_winrate_gate_passed"] is True
 
 
 def test_lstm_shadow_learning_counts_lstm_and_top_comparison(monkeypatch) -> None:
@@ -181,11 +162,6 @@ class _FakeBackend:
         return np.where(x[:, -1, 0] > 0, 0.8, 0.2).astype(np.float32)
 
 
-class _PredictOnlyBackend:
-    def predict(self, _model_path, x):
-        return np.asarray([0.7], dtype=np.float32)
-
-
 def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
     sample_count = 60
     y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
@@ -259,29 +235,6 @@ def _settings(strategy_key: str, *, live_trading_enabled: bool = False) -> AutoT
 
 def _lstm_prediction(*_args, **_kwargs) -> dict:
     return {"strategy_key": lstm_shadow_strategy_key("10m")}
-
-
-def _live_window(*_args, **_kwargs):
-    return np.ones((1, 4, 1), dtype=np.float32), {"entryOpenTime": ENTRY_OPEN_TIME, "entryPrice": 100.0}
-
-
-def _write_legacy_validation_artifacts(root: Path) -> None:
-    model_dir = root / "BTCUSDT" / "10m"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    (model_dir / "model.pt").write_bytes(b"fake")
-    _write_json(model_dir / "features.json", {
-        "columns": ["x"],
-        "featureWindow": 4,
-        "comboSnapshot": _combo_snapshot(),
-    })
-    _write_json(model_dir / "scaler.json", {"mean": [0.0], "std": [1.0]})
-    _write_json(model_dir / "model_version.json", {
-        "modelVersion": "lstm_test",
-        "trainedAt": "2026-05-13T00:00:00+00:00",
-        "returnStats": {"upMean": 0.01, "downMean": -0.01},
-    })
-    _write_json(model_dir / "status.json", {"status": "validation_failed", "symbol": "BTCUSDT", "duration": "10m"})
-    _write_json(model_dir / "training_report.json", {})
 
 
 def _write_json(path: Path, payload: dict) -> None:

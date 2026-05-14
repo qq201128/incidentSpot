@@ -40,7 +40,10 @@ def build_feature_frame(df, min_history: int = 240) -> tuple[object, FeatureSpec
     d = add_technical_indicator_features(d)
 
     d[FEATURE_COLUMNS] = d[FEATURE_COLUMNS].shift(1)
-    out = d.dropna().reset_index(drop=True)
+    # Forward-fill so rows after OHLCV gaps (or short NaN tails on indicators like CMF) are not
+    # dropped entirely; live factor alignment needs the latest completed open_time in-frame.
+    d[FEATURE_COLUMNS] = d[FEATURE_COLUMNS].ffill()
+    out = d.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
     if len(out) < min_history:
         raise ValueError("insufficient candles for feature generation")
 

@@ -22,7 +22,7 @@ from app.services.lstm_validation import apply_standardizer
 def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None = None) -> dict[str, Any]:
     sym = symbol.strip().upper()
     paths = artifact_paths(sym, duration, artifact_root)
-    status = _normalized_status(read_json(paths.status) or _untrained_status(sym, duration))
+    status = read_json(paths.status) or _untrained_status(sym, duration)
     report = read_json(paths.report) or {}
     version = read_json(paths.version) or {}
     snapshot = combo_snapshot_status(sym, duration, artifact_root=artifact_root)
@@ -38,6 +38,11 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "sampleCounts": report.get("sampleCounts") or {},
         "testAccuracy": (report.get("test") or {}).get("accuracy"),
         "testWinRate": (report.get("test") or {}).get("winRate"),
+        "validationGate": version.get("validationGate") or report.get("validationGate"),
+        "selectedConfidenceThreshold": (
+            version.get("selectedConfidenceThreshold")
+            or report.get("selectedConfidenceThreshold")
+        ),
         "artifactsReady": artifacts_ready,
         "torchAvailable": torch_available,
         "torchStatus": torch_status,
@@ -69,7 +74,7 @@ def predict_lstm_signal(
     features = require_json(paths.features, "features")
     scaler = require_json(paths.scaler, "scaler")
     version = require_json(paths.version, "version")
-    status = _normalized_status(require_json(paths.status, "status"))
+    status = require_json(paths.status, "status")
     window, meta = build_live_feature_window(
         sym,
         duration,
@@ -100,7 +105,7 @@ def _assert_predictable(
     *,
     artifact_root: Path | None = None,
 ) -> None:
-    status = _normalized_status(read_json(paths.status) or _untrained_status(symbol, duration))
+    status = read_json(paths.status) or _untrained_status(symbol, duration)
     if status["status"] != "trained":
         reason = status.get("reason") or "model is not trained"
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {reason}")
@@ -123,12 +128,16 @@ def _signal_payload(
     prob = max(0.0, min(probability_up, 1.0))
     direction = "up" if prob >= 0.5 else "down"
     confidence = prob if direction == "up" else 1.0 - prob
+    min_confidence = _selected_confidence_threshold(version)
+    gate_passed = confidence >= min_confidence
     return {
         "symbol": symbol,
         "strategyKey": lstm_shadow_strategy_key(duration),
         "direction": direction,
         "probabilityUp": round(prob, 6),
         "confidence": round(confidence, 6),
+        "selectedConfidenceThreshold": min_confidence,
+        "validationGatePassed": gate_passed,
         "expectedReturn": _expected_return(prob, version),
         "modelVersion": version["modelVersion"],
         "featureWindow": int(features["featureWindow"]),
@@ -153,13 +162,13 @@ def _prediction_payload(signal: dict[str, Any]) -> dict[str, Any]:
         "confidence": signal["confidence"],
         "certainty_label": "LSTM_SHADOW_SIGNAL",
         "trade_quality_score": signal["confidence"],
-        "trade_quality_passed": True,
+        "trade_quality_passed": signal["validationGatePassed"],
         "trade_quality_gate": LSTM_RULE_NAME,
         "high_winrate_gate": LSTM_RULE_NAME,
         "high_winrate_rule": signal["modelVersion"],
-        "high_winrate_gate_passed": True,
+        "high_winrate_gate_passed": signal["validationGatePassed"],
         "high_winrate_gate_value": signal["confidence"],
-        "high_winrate_gate_min": None,
+        "high_winrate_gate_min": signal["selectedConfidenceThreshold"],
         "expected_return": signal["expectedReturn"],
         "model_version": signal["modelVersion"],
         "feature_window": signal["featureWindow"],
@@ -173,6 +182,16 @@ def _expected_return(probability_up: float, version: dict[str, Any]) -> float:
     up_mean = float(stats.get("upMean") or 0.0)
     down_mean = float(stats.get("downMean") or 0.0)
     return float(np.round(probability_up * up_mean + (1.0 - probability_up) * down_mean, 8))
+
+
+def _selected_confidence_threshold(version: dict[str, Any]) -> float:
+    threshold = version.get("selectedConfidenceThreshold")
+    if threshold is None:
+        gate = version.get("validationGate") or {}
+        threshold = gate.get("minConfidence")
+    if threshold is None:
+        raise ValueError("LSTM model version missing selected confidence threshold")
+    return float(threshold)
 
 
 def _untrained_status(symbol: str, duration: str) -> dict[str, Any]:
@@ -201,8 +220,3 @@ def _shadow_prediction_ready_reason(
         return str(snapshot["reason"])
     return "passed"
 
-
-def _normalized_status(status: dict[str, Any]) -> dict[str, Any]:
-    if status.get("status") != "validation_failed":
-        return status
-    return {key: value for key, value in status.items() if key != "reason"} | {"status": "trained"}

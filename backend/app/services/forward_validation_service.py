@@ -70,6 +70,7 @@ def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
     if entry_price is None or exit_price is None:
         return False
     actual_return = _directional_return(float(entry_price), float(exit_price), row["direction"])
+    prediction_correct = _direction_correct(float(entry_price), float(exit_price), row["direction"])
     conn.execute(
         """
         UPDATE predictions
@@ -77,7 +78,7 @@ def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
             prediction_correct = ?, settled_at = ?
         WHERE id = ?
         """,
-        (entry_price, exit_price, actual_return, int(actual_return > 0), _utc_now(), row["id"]),
+        (entry_price, exit_price, actual_return, int(prediction_correct), _utc_now(), row["id"]),
     )
     return True
 
@@ -176,6 +177,12 @@ def _directional_return(entry_price: float, exit_price: float, direction: str) -
     gross = exit_price / entry_price - 1.0
     signed = gross if direction == "up" else -gross
     return signed - ROUNDTRIP_COST_RATE
+
+
+def _direction_correct(entry_price: float, exit_price: float, direction: str) -> bool:
+    if direction == "up":
+        return exit_price > entry_price
+    return exit_price < entry_price
 
 
 def _duration_ms(duration: str) -> int:
