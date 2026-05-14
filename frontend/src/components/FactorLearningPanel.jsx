@@ -8,7 +8,6 @@ import {
 import FactorAdaptiveLearningPanel from "./FactorAdaptiveLearningPanel";
 import FactorLearningCandidateIdeas from "./FactorLearningCandidateIdeas";
 import FactorLearningMemoryGrid from "./FactorLearningMemoryGrid";
-import FactorLearningMetricsHelp from "./FactorLearningMetricsHelp";
 import FactorLearningOperatorLibrary from "./FactorLearningOperatorLibrary";
 import FactorLearningStatusBoxes from "./FactorLearningStatusBoxes";
 import "./FactorLearningPanel.css";
@@ -76,7 +75,6 @@ export default function FactorLearningPanel({ symbol, duration }) {
         lstm={lstmState.data || memoryState.data?.lstmShadow}
         lstmStatus={lstmState.status}
       />
-      <FactorLearningMetricsHelp />
       <FactorLearningCandidateIdeas memory={memoryState.data} />
       <FactorLearningMemoryGrid memory={memoryState.data} />
       <FactorLearningStatusBoxes
