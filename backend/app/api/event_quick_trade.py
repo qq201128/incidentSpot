@@ -53,7 +53,7 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
     conn = get_conn()
     now = datetime.now(timezone.utc).isoformat()
     try:
-        if has_open_position(conn, ctx.symbol, ctx.strategy_key):
+        if has_open_position(conn, ctx.symbol, ctx.strategy_key, event_interval=ctx.event_interval):
             raise HTTPException(status_code=409, detail="已有进行中持仓，需等待上一笔结束后再下单")
         external_order = _place_external_order(ctx)
         event_id = _insert_event(conn=conn, ctx=ctx, now=now)
