@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from copy import deepcopy
 from typing import Any, Protocol
 
@@ -10,7 +12,20 @@ from app.services.siliconflow_chat_client import SiliconFlowChatClient
 AGENT_NAME = "siliconflow_kimi_factor_agent_v1"
 AGENT_PROVIDER = "siliconflow"
 AGENT_TEMPERATURE = 0.2
-AGENT_MAX_TOKENS = 2400
+# Chinese-heavy JSON can exceed a few thousand characters; 2400 tokens often truncates mid-object.
+AGENT_MAX_TOKENS_DEFAULT = 8192
+
+
+def _agent_max_tokens() -> int:
+    raw = os.getenv("FACTOR_LEARNING_AGENT_MAX_TOKENS", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return AGENT_MAX_TOKENS_DEFAULT
+        if 256 <= value <= 32768:
+            return value
+    return AGENT_MAX_TOKENS_DEFAULT
 
 
 class ChatCompletionClient(Protocol):
@@ -47,7 +62,7 @@ def _agent_payload(memory: dict[str, Any]) -> dict[str, Any]:
             {"role": "user", "content": _user_prompt(memory)},
         ],
         "temperature": AGENT_TEMPERATURE,
-        "max_tokens": AGENT_MAX_TOKENS,
+        "max_tokens": _agent_max_tokens(),
         "response_format": {"type": "json_object"},
     }
 
@@ -126,22 +141,79 @@ def _top_weights(weights: dict[str, Any]) -> dict[str, Any]:
 
 
 def _review_from_completion(completion: dict[str, Any]) -> dict[str, Any]:
-    content = _assistant_content(completion)
+    content, finish_reason = _assistant_message(completion)
     try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("SiliconFlow factor agent returned invalid JSON") from exc
+        parsed = _parse_factor_agent_json(content)
+    except (json.JSONDecodeError, ValueError) as exc:
+        tail = content[-500:] if len(content) > 500 else content
+        fr = f" finish_reason={finish_reason!r}" if finish_reason else ""
+        truncated = finish_reason == "length" or not content.rstrip().endswith("}")
+        hint = " (completion may be truncated: raise FACTOR_LEARNING_AGENT_MAX_TOKENS)" if truncated else ""
+        raise RuntimeError(
+            f"SiliconFlow factor agent returned invalid JSON{fr}{hint}; tail={tail!r}"
+        ) from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("SiliconFlow factor agent JSON must be an object")
     return parsed
 
 
-def _assistant_content(completion: dict[str, Any]) -> str:
+def _strip_markdown_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    # ```json\n{...}\n``` or ```\n{...}\n```
+    stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n?", "", stripped, count=1)
+    stripped = re.sub(r"\n?```\s*$", "", stripped, count=1)
+    return stripped.strip()
+
+
+def _extract_outer_json_object(text: str) -> str:
+    """Return substring from first '{' through matching '}' (handles leading prose)."""
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("no JSON object start '{' in assistant content")
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError("unterminated JSON object in assistant content")
+
+
+def _parse_factor_agent_json(content: str) -> Any:
+    trimmed = _strip_markdown_json_fence(content)
+    try:
+        return json.loads(trimmed)
+    except json.JSONDecodeError:
+        candidate = _extract_outer_json_object(trimmed)
+        return json.loads(candidate)
+
+
+def _assistant_message(completion: dict[str, Any]) -> tuple[str, str | None]:
     choices = completion.get("choices")
     if not isinstance(choices, list) or not choices:
         raise RuntimeError("SiliconFlow response missing choices")
-    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message") if isinstance(first, dict) else None
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("SiliconFlow response missing assistant content")
-    return content
+    finish_reason = first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else None
+    return content, finish_reason

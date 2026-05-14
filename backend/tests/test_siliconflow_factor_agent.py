@@ -4,7 +4,10 @@ import json
 
 import pytest
 
-from app.services.factor_learning_llm_agent import attach_llm_agent_review
+from app.services.factor_learning_llm_agent import (
+    _parse_factor_agent_json,
+    attach_llm_agent_review,
+)
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.siliconflow_chat_client import (
     DEFAULT_TIMEOUT_SECONDS,
@@ -64,7 +67,18 @@ def test_siliconflow_client_sends_bearer_request(monkeypatch: pytest.MonkeyPatch
     assert calls[0]["timeout"] == DEFAULT_TIMEOUT_SECONDS
 
 
-def test_factor_agent_attaches_json_review() -> None:
+def test_parse_factor_agent_json_strips_markdown_fence() -> None:
+    raw = '```json\n{"notes": ["x"]}\n```'
+    assert _parse_factor_agent_json(raw) == {"notes": ["x"]}
+
+
+def test_parse_factor_agent_json_skips_leading_prose() -> None:
+    raw = 'Here you go:\n{"notes": ["y"]}\ntrailing'
+    assert _parse_factor_agent_json(raw) == {"notes": ["y"]}
+
+
+def test_factor_agent_attaches_json_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FACTOR_LEARNING_AGENT_MAX_TOKENS", raising=False)
     client = FakeClient()
     memory = {"symbol": "BTCUSDT", "duration": "10m", "weights": {"factor_a": 0.7}}
 
@@ -73,6 +87,7 @@ def test_factor_agent_attaches_json_review() -> None:
     assert updated["llmAgent"]["model"] == DEFAULT_SILICONFLOW_MODEL
     assert updated["llmAgent"]["review"]["notes"] == ["keep_loss_memory_explicit"]
     assert client.payload["response_format"] == {"type": "json_object"}
+    assert client.payload["max_tokens"] == 8192
     assert "factor_a" in client.payload["messages"][1]["content"]
     assert "operator_library" in client.payload["messages"][1]["content"]
     assert "llmAgent" not in memory
