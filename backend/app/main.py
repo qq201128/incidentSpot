@@ -22,6 +22,10 @@ from app.services.auto_settlement_service import auto_settlement_loop
 from app.services.auto_trade_service import auto_trade_loop
 from app.services.factor_combination_background import factor_combination_daily_refresh_loop
 from app.services.factor_ranking_background import factor_ranking_refresh_loop
+from app.services.lstm_daily_review_background import (
+    lstm_daily_review_enabled,
+    lstm_daily_review_loop,
+)
 from app.services.ws_service import proxy_index_kline_stream, proxy_kline_stream
 
 load_backend_env_file()
@@ -49,6 +53,8 @@ app.state.factor_ranking_task = None
 app.state.factor_ranking_stop_event = None
 app.state.factor_combo_daily_task = None
 app.state.factor_combo_daily_stop_event = None
+app.state.lstm_daily_review_task = None
+app.state.lstm_daily_review_stop_event = None
 ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
 
 app.add_middleware(
@@ -96,6 +102,11 @@ async def on_startup() -> None:
         factor_combination_daily_refresh_loop(factor_combo_stop)
     )
 
+    if lstm_daily_review_enabled():
+        lstm_review_stop = asyncio.Event()
+        app.state.lstm_daily_review_stop_event = lstm_review_stop
+        app.state.lstm_daily_review_task = asyncio.create_task(lstm_daily_review_loop(lstm_review_stop))
+
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
@@ -105,6 +116,7 @@ async def on_shutdown() -> None:
         "trade_stop_event",
         "factor_ranking_stop_event",
         "factor_combo_daily_stop_event",
+        "lstm_daily_review_stop_event",
     ):
         ev = getattr(app.state, attr, None)
         if ev:
@@ -115,6 +127,7 @@ async def on_shutdown() -> None:
         "trade_task",
         "factor_ranking_task",
         "factor_combo_daily_task",
+        "lstm_daily_review_task",
     ):
         task = getattr(app.state, attr, None)
         if task:
