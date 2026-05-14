@@ -51,17 +51,14 @@ def refresh_combination_ranking_for_symbol_duration(
 
 
 def _sync_lstm_shadow_model(symbol: str, duration: str, report: dict) -> None:
-    try:
-        sync = sync_lstm_model_to_combo_ranking(symbol, duration, ranking_report=report)
-        logger.info(
-            "lstm combo sync: %s %s status=%s model=%s",
-            symbol,
-            duration,
-            sync["status"],
-            sync.get("modelVersion"),
-        )
-    except Exception:
-        logger.exception("lstm combo sync failed after ranking update: %s %s", symbol, duration)
+    sync = sync_lstm_model_to_combo_ranking(symbol, duration, ranking_report=report)
+    logger.info(
+        "lstm combo sync: %s %s status=%s model=%s",
+        symbol,
+        duration,
+        sync["status"],
+        sync.get("modelVersion"),
+    )
 
 
 def refresh_symbol_combination_rankings(

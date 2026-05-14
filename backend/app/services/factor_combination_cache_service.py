@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
 
 logger = logging.getLogger("uvicorn.error")
 
 
 def get_cached_combination_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
+    sym = symbol.strip().upper()
     row = _cache_row(symbol, duration)
     if row is None:
         return None
@@ -21,7 +23,12 @@ def get_cached_combination_ranking(symbol: str, duration: str) -> dict[str, Any]
         return None
     if not isinstance(payload, dict):
         return None
-    return {**payload, "updatedAt": str(row["updated_at"])}
+    cache_meta = payload.get("cacheMeta")
+    return {
+        **payload,
+        "updatedAt": str(row["updated_at"]),
+        "cacheStatus": cache_status(cache_meta, sym),
+    }
 
 
 def save_cached_combination_ranking(report: dict[str, Any]) -> None:
@@ -30,8 +37,9 @@ def save_cached_combination_ranking(report: dict[str, Any]) -> None:
     ranking = report.get("ranking")
     if not isinstance(ranking, list):
         raise ValueError("combination ranking report must contain a ranking list")
-    payload = json.dumps(report, ensure_ascii=False)
-    config = json.dumps(report.get("searchConfig") or {}, ensure_ascii=False)
+    persisted = {**report, "cacheMeta": ranking_cache_metadata(symbol, duration)}
+    payload = json.dumps(persisted, ensure_ascii=False)
+    config = json.dumps(persisted.get("searchConfig") or {}, ensure_ascii=False)
     conn = get_conn()
     try:
         conn.execute(

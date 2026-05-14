@@ -11,6 +11,7 @@ import pytest
 from app.services import auto_predict_service
 from app.services import rule_signal_service
 from app.services import lstm_shadow_learning
+from app.services import lstm_combo_snapshot
 from app.services import auto_trade_service
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
@@ -33,10 +34,10 @@ def test_duration_labeled_frame_uses_period_specific_future_return() -> None:
 
     labeled = duration_labeled_frame(frame, "10m", 10, 0.0)
 
-    assert labeled["open_time"].iloc[0] == 0
-    assert labeled["entry_open_time"].iloc[0] == 60_000
+    assert labeled["open_time"].iloc[0] == 9 * 60_000
+    assert labeled["entry_open_time"].iloc[0] == 10 * 60_000
     assert labeled["open_time"].iloc[-1] == 19 * 60_000
-    assert labeled.loc[0, "future_return"] == pytest.approx(110 / 100 - 1)
+    assert labeled.loc[0, "future_return"] == pytest.approx(119 / 109 - 1)
 
 
 def test_train_lstm_model_writes_separate_artifacts() -> None:
@@ -163,7 +164,7 @@ class _FakeBackend:
 
 
 def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
-    sample_count = 60
+    sample_count = 400
     y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
     x = np.zeros((sample_count, config.feature_window, 2), dtype=np.float32)
     x[:, :, 0] = np.where(y[:, None] > 0, 1.0, -1.0)
@@ -174,11 +175,7 @@ def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
 
 
 def _combo_snapshot() -> list[dict]:
-    return [
-        {"rank": 1, "factorName": "combo_a", "members": ["factor_a"]},
-        {"rank": 2, "factorName": "combo_b", "members": ["factor_b"]},
-        {"rank": 3, "factorName": "combo_c", "members": ["factor_c"]},
-    ]
+    return lstm_combo_snapshot.combo_snapshot_from_ranking(_combo_ranking())
 
 
 def _combo_ranking() -> dict:
@@ -186,8 +183,9 @@ def _combo_ranking() -> dict:
         "symbol": "BTCUSDT",
         "duration": "10m",
         "ranking": [
-            {"factorName": row["factorName"], "members": [{"name": name} for name in row["members"]]}
-            for row in _combo_snapshot()
+            {"factorName": "combo_a", "members": [{"name": "factor_a"}]},
+            {"factorName": "combo_b", "members": [{"name": "factor_b"}]},
+            {"factorName": "combo_c", "members": [{"name": "factor_c"}]},
         ],
     }
 

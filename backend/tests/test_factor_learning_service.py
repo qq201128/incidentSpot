@@ -59,6 +59,7 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["factorLearning"]["filterPassed"] is False
     assert result["factorLearning"]["lossPatternMatches"]
     assert result["qualityPassed"] is False
+    assert result["qualityGateReason"] == "factor_learning_filter_blocked"
 
 
 def test_good_combo_is_promoted_to_mined_factor_library(monkeypatch: pytest.MonkeyPatch) -> None:

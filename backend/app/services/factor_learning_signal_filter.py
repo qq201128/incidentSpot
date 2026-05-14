@@ -40,6 +40,8 @@ def apply_factor_learning_memory(
     confirmations = _confirmation_count(frame, index, members, enriched["direction"])
     filter_passed = _filter_passed(memory.get("filters") or {}, confirmations, len(members), loss_matches)
     enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
+    if payload["qualityPassed"] and not filter_passed:
+        enriched["qualityGateReason"] = "factor_learning_filter_blocked"
     enriched["factorLearning"] = _learning_payload(
         memory,
         payload,

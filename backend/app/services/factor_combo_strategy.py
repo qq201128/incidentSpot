@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.factor_cache_metadata import assert_cache_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
@@ -42,6 +43,7 @@ def predict_factor_combo_rank_direction(
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
+    assert_cache_usable(cached, f"factor combination ranking {symbol.upper()} {duration}")
     top = _ranked_combo(cached, combo_rank)
     frame = materialize_mined_factor_frame(
         load_factor_frame(symbol),

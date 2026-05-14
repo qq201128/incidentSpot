@@ -95,6 +95,9 @@ def agent_mined_factor_count(selected: list[Any]) -> int:
 def config_payload(config: Any) -> dict[str, Any]:
     return {
         "baseFactorLimit": config.base_factor_limit,
+        "nativeFactorLimit": config.native_factor_limit,
+        "minedFactorLimit": config.mined_factor_limit,
+        "agentFactorLimit": config.agent_factor_limit,
         "comboSizes": list(config.combo_sizes),
         "resultLimit": config.result_limit,
         "method": config.method,

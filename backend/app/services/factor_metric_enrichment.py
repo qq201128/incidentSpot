@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.services.factor_performance_metrics import add_contribution_scores
+from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, add_contribution_scores
 
 WIN_RATE_WEIGHT = 35.0
 SHARPE_WEIGHT = 20.0
@@ -18,6 +18,7 @@ IR_SCALE = 2.0
 PROFIT_FACTOR_SCALE = 2.0
 SCORE_DECIMALS = 2
 METRIC_DECIMALS = 4
+INVALID_BACKTEST_SCORE = 0.0
 
 
 def enrich_factor_results(
@@ -33,6 +34,9 @@ def enrich_factor_results(
 
 
 def factor_score(row: dict[str, Any]) -> float:
+    validity = backtest_validity(row)
+    if not validity["valid"]:
+        return INVALID_BACKTEST_SCORE
     raw = (
         _clamp01(row.get("winRate")) * WIN_RATE_WEIGHT
         + _scaled_abs(row.get("sharpe"), SHARPE_SCALE) * SHARPE_WEIGHT
@@ -42,6 +46,15 @@ def factor_score(row: dict[str, Any]) -> float:
         + _correlation_score(row.get("avgAbsCorrelation")) * CORRELATION_WEIGHT
     )
     return round(raw, SCORE_DECIMALS)
+
+
+def backtest_validity(row: dict[str, Any]) -> dict[str, Any]:
+    periods = int(row.get("totalPeriods") or 0)
+    if periods < BACKTEST_MIN_PERIODS:
+        return _validity(False, "insufficient_periods", periods)
+    if _finite_float(row.get("winRate")) is None:
+        return _validity(False, "win_rate_missing", periods)
+    return _validity(True, "passed", periods)
 
 
 def factor_avg_abs_correlations(frame: pd.DataFrame, names: list[str]) -> dict[str, float | None]:
@@ -85,8 +98,17 @@ def _row_factor_name(row: dict[str, Any]) -> str:
 def _correlation_score(value: Any) -> float:
     number = _finite_float(value)
     if number is None:
-        return 1.0
+        return 0.0
     return 1.0 - _clamp01(number)
+
+
+def _validity(valid: bool, reason: str, periods: int) -> dict[str, Any]:
+    return {
+        "valid": valid,
+        "reason": reason,
+        "minPeriods": BACKTEST_MIN_PERIODS,
+        "totalPeriods": periods,
+    }
 
 
 def _profit_factor_score(value: Any) -> float:

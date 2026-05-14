@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.factor_backtest_batch_service import BACKTEST_DURATION_ORDER
+from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
@@ -28,12 +29,16 @@ def build_combination_signal_watchlist(
     signals = []
     missing = []
     failures = []
+    cache_issues = []
     for duration in BACKTEST_DURATION_ORDER:
         if duration not in SUPPORTED_RULE_DURATIONS:
             continue
         cached = get_cached_combination_ranking(symbol, duration)
         if cached is None:
             missing.append(duration)
+            continue
+        if not cache_is_usable(cached):
+            cache_issues.append(_cache_issue(duration, cached))
             continue
         mined = materialize_mined_factor_frame(frame, symbol=symbol, duration=duration)
         failures.extend(mined.failures)
@@ -56,6 +61,7 @@ def build_combination_signal_watchlist(
         "missingDurations": missing,
         "topPerDuration": top_per_duration,
         "signalFailures": failures,
+        "cacheIssues": cache_issues,
     }
 
 
@@ -81,4 +87,13 @@ def _signal_failure(row: dict[str, Any], duration: str, exc: Exception) -> dict[
         "factorName": row.get("factorName"),
         "stage": "build_live_signal",
         "error": str(exc),
+    }
+
+
+def _cache_issue(duration: str, cached: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "duration": duration,
+        "stage": "load_cached_combination_ranking",
+        "error": "stale_combination_ranking_cache",
+        "cacheStatus": cached.get("cacheStatus"),
     }

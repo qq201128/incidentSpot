@@ -10,6 +10,7 @@ import pytest
 
 from app.services import lstm_combo_snapshot
 from app.services import lstm_prediction_service
+from app.services.lstm_artifacts import artifact_paths
 from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_feature_builder import LstmDataset
 from app.services.lstm_training_service import train_lstm_model
@@ -75,16 +76,20 @@ def test_predict_lstm_signal_reads_validation_gate_from_report(monkeypatch) -> N
 
 
 def test_train_lstm_model_marks_validation_failed_when_no_threshold_passes() -> None:
+    artifact_root = _runtime_path("validation-failed")
     report = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
-        artifact_root=_runtime_path("validation-failed"),
+        artifact_root=artifact_root,
         backend=_LowConfidenceBackend(),
         dataset_builder=_fake_dataset,
     )
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
 
     assert report["status"] == "validation_failed"
     assert report["validationGate"]["reason"] == "no_validation_confidence_threshold_met"
     assert report["selectedConfidenceThreshold"] is None
+    assert not paths.status.exists()
+    assert paths.attempt.exists()
 
 
 class _PredictOnlyBackend:
@@ -103,7 +108,7 @@ class _LowConfidenceBackend:
 
 
 def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
-    sample_count = 60
+    sample_count = 400
     y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
     x = np.zeros((sample_count, config.feature_window, 2), dtype=np.float32)
     x[:, :, 0] = np.where(y[:, None] > 0, 1.0, -1.0)
@@ -114,11 +119,7 @@ def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
 
 
 def _combo_snapshot() -> list[dict]:
-    return [
-        {"rank": 1, "factorName": "combo_a", "members": ["factor_a"]},
-        {"rank": 2, "factorName": "combo_b", "members": ["factor_b"]},
-        {"rank": 3, "factorName": "combo_c", "members": ["factor_c"]},
-    ]
+    return lstm_combo_snapshot.combo_snapshot_from_ranking(_combo_ranking())
 
 
 def _combo_ranking() -> dict:
@@ -126,8 +127,9 @@ def _combo_ranking() -> dict:
         "symbol": "BTCUSDT",
         "duration": "10m",
         "ranking": [
-            {"factorName": row["factorName"], "members": [{"name": name} for name in row["members"]]}
-            for row in _combo_snapshot()
+            {"factorName": "combo_a", "members": [{"name": "factor_a"}]},
+            {"factorName": "combo_b", "members": [{"name": "factor_b"}]},
+            {"factorName": "combo_c", "members": [{"name": "factor_c"}]},
         ],
     }
 

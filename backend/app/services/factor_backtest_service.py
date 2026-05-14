@@ -20,8 +20,8 @@ from scipy import stats
 
 from app.services.factor_duration_alignment import backtest_duration_frame
 from app.services.factor_frame_service import load_factor_frame
-from app.services.factor_metric_enrichment import enrich_factor_results
-from app.services.factor_performance_metrics import compute_signal_metrics
+from app.services.factor_metric_enrichment import backtest_validity, enrich_factor_results
+from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
 from app.services.factor_registry import (
     FactorCategory,
     FactorDefinition,
@@ -31,7 +31,6 @@ from app.services.factor_registry import (
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
 
-BACKTEST_MIN_PERIODS = 100
 QUINTILE_COUNT = 5
 IC_ROLLING_WINDOW = 20
 
@@ -237,6 +236,10 @@ def _compute_turnover(df: pd.DataFrame, factor_name: str) -> float | None:
 
 
 def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) -> dict[str, Any]:
+    validity = backtest_validity({
+        "totalPeriods": result.total_periods,
+        "winRate": result.win_rate,
+    })
     return {
         "factorName": result.factor_name,
         "factorDisplayName": factor_def.description,
@@ -261,6 +264,9 @@ def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) 
         "winRate": _round_or_none(result.win_rate, 4),
         "maxDrawdown": _round_or_none(result.max_drawdown, 6),
         "profitFactor": _round_or_none(result.profit_factor, 4),
+        "backtestValid": validity["valid"],
+        "backtestInvalidReason": None if validity["valid"] else validity["reason"],
+        "backtestMinPeriods": validity["minPeriods"],
     }
 
 

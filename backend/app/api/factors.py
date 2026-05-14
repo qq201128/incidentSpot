@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.services.factor_backtest_batch_service import run_all_factor_backtests
 from app.services.factor_backtest_service import run_factor_backtest
+from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_background import refresh_symbol_combination_rankings
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_live_service import build_combination_signal_watchlist
@@ -99,6 +100,8 @@ def factor_combination_ranking(
     cached = get_cached_combination_ranking(sym_u, duration)
     if cached is None:
         return _empty_combination_ranking(sym_u, duration)
+    if not cache_is_usable(cached):
+        return _stale_combination_ranking(sym_u, duration, cached)
     return {**cached, "source": "cache"}
 
 
@@ -165,6 +168,8 @@ def factor_ranking(
             "precomputedSymbols": precomputed,
             "hint": "排名由后台定时写入缓存；当前交易对/周期尚无数据。可将该交易对加入 FACTOR_RANKING_SYMBOLS 或使用 POST /ranking/refresh 排队重算。",
         }
+    if not cache_is_usable(cached):
+        return _stale_factor_ranking(sym_u, duration, category, cached, precomputed)
 
     full = list(cached["ranking"])
     filtered = _filter_ranking_by_category(full, category)
@@ -228,6 +233,43 @@ def _empty_combination_ranking(symbol: str, duration: str) -> dict:
         "source": "none",
         "precomputedSymbols": factor_ranking_precomputed_symbols(),
         "hint": "多因子组合排名尚无缓存；可使用 POST /api/factors/combinations/refresh 排队重算。",
+    }
+
+
+def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict:
+    return {
+        "symbol": symbol,
+        "duration": duration,
+        "ranking": [],
+        "total": 0,
+        "updatedAt": cached.get("updatedAt"),
+        "source": "stale_cache",
+        "staleRankingTotal": cached.get("total"),
+        "cacheStatus": cached.get("cacheStatus"),
+        "precomputedSymbols": factor_ranking_precomputed_symbols(),
+        "hint": "多因子组合缓存对应的历史数据已变化或缺少数据指纹；请刷新重算后再使用。",
+    }
+
+
+def _stale_factor_ranking(
+    symbol: str,
+    duration: str,
+    category: str | None,
+    cached: dict,
+    precomputed: list[str],
+) -> dict:
+    return {
+        "symbol": symbol,
+        "duration": duration,
+        "category": category,
+        "ranking": [],
+        "total": 0,
+        "updatedAt": cached.get("updatedAt"),
+        "source": "stale_cache",
+        "staleRankingTotal": cached.get("total"),
+        "cacheStatus": cached.get("cacheStatus"),
+        "precomputedSymbols": precomputed,
+        "hint": "因子排名缓存对应的历史数据已变化或缺少数据指纹；请刷新重算后再使用。",
     }
 
 

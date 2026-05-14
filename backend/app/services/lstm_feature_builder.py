@@ -7,8 +7,10 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from app.services.factor_cache_metadata import assert_cache_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_scoring import combination_score
+from app.services.factor_duration_alignment import duration_entry_rows, duration_entry_source_open_time
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.lstm_combo_snapshot import assert_combo_snapshot_matches, combo_snapshot_from_ranking
@@ -118,9 +120,18 @@ def duration_feature_frame(
     open_time = pd.to_numeric(out["open_time"], errors="raise").astype("int64")
     out["entry_open_time"] = open_time + MS_PER_MINUTE
     if entry_open_time is not None:
-        out = out[open_time <= int(entry_open_time) - MS_PER_MINUTE].copy()
-        out["entry_open_time"] = int(entry_open_time)
-    return out.reset_index(drop=True)
+        source_open_time = duration_entry_source_open_time(entry_open_time)
+        out = out[open_time <= source_open_time].copy()
+    sampled = duration_entry_rows(out, duration).reset_index(drop=True)
+    if entry_open_time is not None:
+        _assert_live_entry_row(sampled, int(entry_open_time))
+    return sampled
+
+
+def _assert_live_entry_row(frame: pd.DataFrame, entry_open_time: int) -> None:
+    source_open_time = duration_entry_source_open_time(entry_open_time)
+    if frame.empty or int(frame.iloc[-1]["open_time"]) != source_open_time:
+        raise LstmDataError(f"missing completed LSTM source row at open_time={source_open_time}")
 
 
 def candidate_feature_columns(frame: pd.DataFrame) -> list[str]:
@@ -176,6 +187,10 @@ def _ranking_or_raise(
     ranking = ranking_loader(symbol.strip().upper(), duration)
     if ranking is None:
         raise LstmDataError(f"no cached factor combination ranking for {symbol.upper()} {duration}")
+    try:
+        assert_cache_usable(ranking, f"factor combination ranking {symbol.upper()} {duration}")
+    except ValueError as exc:
+        raise LstmDataError(str(exc)) from exc
     return ranking
 
 

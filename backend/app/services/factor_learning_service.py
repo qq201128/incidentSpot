@@ -9,6 +9,7 @@ from app.services.agent_mined_factor_library import (
     agent_mined_factor_library_summary,
     process_agent_factor_candidates,
 )
+from app.services.factor_cache_metadata import assert_cache_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_monitor_service import factor_combo_monitor_report
 from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
@@ -124,6 +125,7 @@ def _cached_ranking_or_raise(symbol: str, duration: str) -> dict[str, Any]:
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
         raise ValueError(f"no cached factor combination ranking for {symbol} {duration}")
+    assert_cache_usable(cached, f"factor combination ranking {symbol} {duration}")
     return cached
 
 

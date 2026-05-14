@@ -7,10 +7,11 @@ from typing import Any, Callable
 
 import numpy as np
 
-from app.services.lstm_artifacts import artifact_paths, write_json
+from app.services.lstm_artifacts import artifact_paths, artifact_paths_for_root, publish_artifacts, write_json
 from app.services.lstm_config import LSTM_RULE_NAME, LstmTrainingConfig, validated_lstm_config
 from app.services.lstm_feature_builder import LstmDataError, LstmDataset, build_lstm_training_dataset
 from app.services.lstm_torch_backend import TorchLstmBackend, TorchLstmOptions
+from app.services.lstm_training_gate import validation_failure_reason, validation_gate
 from app.services.lstm_validation import (
     apply_standardizer,
     binary_classification_metrics,
@@ -19,10 +20,6 @@ from app.services.lstm_validation import (
 )
 
 DatasetBuilder = Callable[[LstmTrainingConfig], LstmDataset]
-TRADE_GATE_THRESHOLDS = (0.60, 0.65, 0.70)
-MIN_VALIDATION_WIN_RATE = 0.5
-MIN_VALIDATION_PROFIT_FACTOR = 1.0
-MIN_VALIDATION_AVG_RETURN = 0.0
 
 
 def train_lstm_model(
@@ -34,24 +31,28 @@ def train_lstm_model(
 ) -> dict[str, Any]:
     cfg = validated_lstm_config(config)
     paths = artifact_paths(cfg.symbol, cfg.duration, artifact_root)
-    write_json(paths.status, _status_payload("training", cfg))
+    version = _model_version(cfg)
+    staging = artifact_paths_for_root(paths.root / "_staging" / version)
+    write_json(paths.attempt, _attempt_payload("training", cfg, version))
     try:
         dataset = dataset_builder(cfg)
     except LstmDataError as exc:
-        write_json(paths.status, _status_payload("insufficient_samples", cfg, str(exc)))
+        write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, str(exc)))
         raise
     try:
-        return _train_with_dataset(cfg, dataset, paths, backend or TorchLstmBackend())
+        return _train_with_dataset(cfg, dataset, paths, staging, backend or TorchLstmBackend(), version)
     except Exception as exc:
-        write_json(paths.status, _status_payload("failed", cfg, str(exc)))
+        write_json(paths.attempt, _attempt_payload("failed", cfg, version, str(exc)))
         raise
 
 
 def _train_with_dataset(
     cfg: LstmTrainingConfig,
     dataset: LstmDataset,
-    paths,
+    active_paths,
+    staging_paths,
     trainer: Any,
+    version: str,
 ) -> dict[str, Any]:
     split = chronological_split(dataset.x, dataset.y, dataset.future_returns, cfg.train_ratio, cfg.val_ratio)
     scaler = fit_standardizer(split.train_x)
@@ -62,10 +63,16 @@ def _train_with_dataset(
         scaled.val_x,
         scaled.val_y,
         options=_torch_options(cfg, len(dataset.feature_columns)),
-        model_path=paths.model,
+        model_path=staging_paths.model,
     )
-    report = _training_report(cfg, dataset, scaled, trainer, paths.model, losses)
-    _write_training_artifacts(paths, cfg, dataset, scaler, report)
+    report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version)
+    _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
+    if report["status"] == "trained":
+        publish_artifacts(staging_paths, active_paths)
+    write_json(
+        active_paths.attempt,
+        _attempt_payload(report["status"], cfg, version, report.get("validationFailureReason")),
+    )
     return report
 
 
@@ -76,14 +83,14 @@ def _training_report(
     backend: Any,
     model_path: Path,
     losses: dict[str, Any],
+    version: str,
 ) -> dict[str, Any]:
     val_prob = backend.predict(model_path, split.val_x)
     test_prob = backend.predict(model_path, split.test_x)
     val_metrics = binary_classification_metrics(split.val_y, val_prob, split.val_returns)
     test_metrics = binary_classification_metrics(split.test_y, test_prob, split.test_returns)
-    validation_gate = _validation_gate(val_metrics)
-    version = _model_version(cfg)
-    status = "trained" if validation_gate["status"] == "passed" else "validation_failed"
+    gate = validation_gate(val_metrics, test_metrics)
+    status = "trained" if gate["status"] == "passed" else "validation_failed"
     return _finite_payload({
         "status": status,
         "modelVersion": version,
@@ -97,9 +104,9 @@ def _training_report(
         "validation": val_metrics,
         "test": test_metrics,
         "outOfSample": {"validation": val_metrics, "test": test_metrics},
-        "validationGate": validation_gate,
-        "selectedConfidenceThreshold": validation_gate.get("minConfidence"),
-        "validationFailureReason": _validation_failure_reason(validation_gate),
+        "validationGate": gate,
+        "selectedConfidenceThreshold": gate.get("minConfidence"),
+        "validationFailureReason": validation_failure_reason(gate),
         "losses": losses,
         "returnStats": _return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
@@ -172,6 +179,17 @@ def _status_payload(status: str, cfg: LstmTrainingConfig, reason: str | None = N
     return payload
 
 
+def _attempt_payload(
+    status: str,
+    cfg: LstmTrainingConfig,
+    model_version: str,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    payload = _status_payload(status, cfg, reason)
+    payload["modelVersion"] = model_version
+    return payload
+
+
 def _return_stats(returns: np.ndarray) -> dict[str, float]:
     up = returns[returns > 0]
     down = returns[returns <= 0]
@@ -180,49 +198,6 @@ def _return_stats(returns: np.ndarray) -> dict[str, float]:
         "upMean": _mean(up),
         "downMean": _mean(down),
     }
-
-
-def _validation_gate(metrics: dict[str, Any]) -> dict[str, Any]:
-    criteria = _validation_gate_criteria()
-    candidates = [
-        row for row in metrics.get("confidenceThresholds", [])
-        if float(row.get("minConfidence") or 0.0) in TRADE_GATE_THRESHOLDS
-    ]
-    for row in candidates:
-        if _threshold_passes(row):
-            return {"status": "passed", "criteria": criteria, **row}
-    return {
-        "status": "failed",
-        "reason": "no_validation_confidence_threshold_met",
-        "criteria": criteria,
-        "candidates": candidates,
-    }
-
-
-def _threshold_passes(row: dict[str, Any]) -> bool:
-    return (
-        row.get("winRate") is not None
-        and float(row["winRate"]) > MIN_VALIDATION_WIN_RATE
-        and row.get("profitFactor") is not None
-        and float(row["profitFactor"]) > MIN_VALIDATION_PROFIT_FACTOR
-        and row.get("avgReturn") is not None
-        and float(row["avgReturn"]) > MIN_VALIDATION_AVG_RETURN
-    )
-
-
-def _validation_gate_criteria() -> dict[str, Any]:
-    return {
-        "thresholds": list(TRADE_GATE_THRESHOLDS),
-        "minWinRateExclusive": MIN_VALIDATION_WIN_RATE,
-        "minProfitFactorExclusive": MIN_VALIDATION_PROFIT_FACTOR,
-        "minAvgReturnExclusive": MIN_VALIDATION_AVG_RETURN,
-    }
-
-
-def _validation_failure_reason(validation_gate: dict[str, Any]) -> str | None:
-    if validation_gate["status"] == "passed":
-        return None
-    return str(validation_gate["reason"])
 
 
 def _model_version(cfg: LstmTrainingConfig) -> str:
@@ -244,5 +219,5 @@ def _finite_payload(value: Any) -> Any:
     if isinstance(value, list):
         return [_finite_payload(item) for item in value]
     if isinstance(value, float) and not isfinite(value):
-        return None if value < 0 else 999999.0
+        return None
     return value

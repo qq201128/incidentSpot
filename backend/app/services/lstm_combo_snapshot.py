@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
+from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.lstm_artifacts import artifact_paths, read_json
 
@@ -46,7 +49,7 @@ def current_combo_snapshot(
     ranking_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     ranking = ranking_report or get_cached_combination_ranking(symbol.strip().upper(), duration)
-    if ranking is None:
+    if ranking is None or not cache_is_usable(ranking):
         return []
     return combo_snapshot_from_ranking(ranking)
 
@@ -75,11 +78,33 @@ def assert_combo_snapshot_matches(
 
 
 def _combo_row_snapshot(row: dict[str, Any], rank: int) -> dict[str, Any]:
-    return {
+    members = [_member_snapshot(member) for member in _members(row)]
+    payload = {
         "rank": rank,
         "factorName": row.get("factorName"),
-        "members": [member.get("name") for member in _members(row)],
+        "method": row.get("method"),
+        "formula": row.get("formula"),
+        "members": members,
     }
+    return {
+        **payload,
+        "fingerprint": _fingerprint(payload),
+    }
+
+
+def _member_snapshot(member: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": member.get("name"),
+        "orientation": int(member.get("orientation") or 1),
+        "category": member.get("category"),
+        "formula": member.get("formula"),
+        "sourceFile": member.get("sourceFile") or member.get("source"),
+    }
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 def _members(row: dict[str, Any]) -> list[dict[str, Any]]:

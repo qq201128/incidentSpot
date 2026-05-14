@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
+from app.services.factor_candidate_selection import select_base_candidates
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_metric_enrichment import (
@@ -29,19 +30,23 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 COMBINATION_METHOD = "expanding_oriented_zscore_mean_v1"
 COMBO_SOURCE_FILE = "factor_combination_service.py"
 DEFAULT_BASE_FACTOR_LIMIT = 16
+DEFAULT_NATIVE_FACTOR_LIMIT = 10
+DEFAULT_MINED_FACTOR_LIMIT = 4
+DEFAULT_AGENT_FACTOR_LIMIT = 2
 DEFAULT_RESULT_LIMIT = 200
 MIN_COMBO_SIZE = 2
 DEFAULT_MAX_COMBO_SIZE = 3
 DEFAULT_COMBO_SIZES = (MIN_COMBO_SIZE, DEFAULT_MAX_COMBO_SIZE)
 
-
 @dataclass(frozen=True)
 class CombinationSearchConfig:
     base_factor_limit: int = DEFAULT_BASE_FACTOR_LIMIT
+    native_factor_limit: int = DEFAULT_NATIVE_FACTOR_LIMIT
+    mined_factor_limit: int = DEFAULT_MINED_FACTOR_LIMIT
+    agent_factor_limit: int = DEFAULT_AGENT_FACTOR_LIMIT
     combo_sizes: tuple[int, ...] = DEFAULT_COMBO_SIZES
     result_limit: int = DEFAULT_RESULT_LIMIT
     method: str = COMBINATION_METHOD
-
 
 @dataclass(frozen=True)
 class _BaseCandidate:
@@ -49,13 +54,11 @@ class _BaseCandidate:
     metrics: dict[str, Any]
     orientation: int
 
-
 @dataclass(frozen=True)
 class _CombinationContext:
     frame: pd.DataFrame
     symbol: str
     duration: str
-
 
 def run_factor_combination_ranking(
     symbol: str,
@@ -73,7 +76,6 @@ def run_factor_combination_ranking(
         config=cfg,
     )
 
-
 def run_factor_combination_ranking_on_frame(
     frame: pd.DataFrame,
     *,
@@ -88,7 +90,7 @@ def run_factor_combination_ranking_on_frame(
     base, base_failures = _base_candidates(mined.frame, symbol.upper(), duration)
     base.extend(_mined_base_candidates(mined.candidates))
     base = _enriched_base_candidates(base, mined.frame)
-    selected = sorted(base, key=_base_rank_key, reverse=True)[: cfg.base_factor_limit]
+    selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
     context = _CombinationContext(mined.frame, symbol.upper(), duration)
     ranking, tested_count, combo_failures = _rank_combinations(context, selected, cfg)
     failures = [*base_failures, *mined.failures, *combo_failures]
@@ -273,8 +275,13 @@ def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfi
         raise ValueError("combo sizes must be non-empty and base_factor_limit must be >= largest combo size")
     if config.result_limit <= 0 or any(size < MIN_COMBO_SIZE for size in sizes):
         raise ValueError("result_limit must be > 0 and combo sizes must be >= 2")
+    if min(config.native_factor_limit, config.mined_factor_limit, config.agent_factor_limit) < 0:
+        raise ValueError("factor source limits must be >= 0")
     return CombinationSearchConfig(
         base_factor_limit=int(config.base_factor_limit),
+        native_factor_limit=int(config.native_factor_limit),
+        mined_factor_limit=int(config.mined_factor_limit),
+        agent_factor_limit=int(config.agent_factor_limit),
         combo_sizes=sizes,
         result_limit=int(config.result_limit),
         method=config.method,

@@ -205,11 +205,7 @@ def _ranking(factor_name: str, member_name: str) -> dict[str, Any]:
 
 
 def _snapshot(factor_name: str, member_name: str) -> list[dict[str, Any]]:
-    return [
-        {"rank": 1, "factorName": factor_name, "members": [member_name]},
-        {"rank": 2, "factorName": "combo_top2", "members": ["factor_c"]},
-        {"rank": 3, "factorName": "combo_top3", "members": ["factor_d"]},
-    ]
+    return lstm_combo_snapshot.combo_snapshot_from_ranking(_ranking(factor_name, member_name))
 
 
 def _promotion(report: dict[str, Any]) -> dict[str, Any]:
