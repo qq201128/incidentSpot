@@ -4,13 +4,18 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from app.db.session import get_conn
 from app.services.agent_mined_factor_library import (
     agent_mined_factor_library_summary,
     process_agent_factor_candidates,
 )
-from app.services.factor_cache_metadata import assert_cache_usable
+from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
+from app.services.factor_combination_cache_service import save_cached_combination_ranking
+from app.services.factor_combination_service import CombinationSearchConfig
+from app.services.factor_combination_service import run_factor_combination_ranking_on_frame
 from app.services.factor_combo_monitor_service import factor_combo_monitor_report
 from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
 from app.services.factor_learning_common import utc_now
@@ -47,9 +52,10 @@ def refresh_factor_learning_memory(
 ) -> dict[str, Any]:
     _validate_duration(duration)
     sym = symbol.strip().upper()
-    report = ranking_report or _cached_ranking_or_raise(sym, duration)
+    base_frame = load_factor_frame(sym, duration)
+    report = ranking_report or _current_ranking_report(sym, duration, base_frame)
     settlement = settle_due_predictions(sym, duration)
-    mined_frame = materialize_mined_factor_frame(load_factor_frame(sym), symbol=sym, duration=duration)
+    mined_frame = materialize_mined_factor_frame(base_frame, symbol=sym, duration=duration)
     predictions = _settled_factor_combo_predictions(sym, duration)
     memory = build_factor_learning_memory(
         mined_frame.frame,
@@ -84,7 +90,7 @@ def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
 def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:
     try:
         reviewed = attach_llm_agent_review(memory)
-        frame = load_factor_frame(str(reviewed["symbol"]))
+        frame = load_factor_frame(str(reviewed["symbol"]), str(reviewed["duration"]))
         promoted = process_agent_factor_candidates(reviewed, frame)
         return _save_memory_payload(promoted)
     except Exception as exc:
@@ -121,11 +127,26 @@ def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "memoryPath": _path_payload(path)}
 
 
-def _cached_ranking_or_raise(symbol: str, duration: str) -> dict[str, Any]:
+def _current_ranking_report(symbol: str, duration: str, frame: pd.DataFrame) -> dict[str, Any]:
+    cached = _usable_cached_ranking(symbol, duration)
+    if cached is not None:
+        return {**cached, "learningRefreshSource": "cache"}
+    report = run_factor_combination_ranking_on_frame(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        config=CombinationSearchConfig(),
+    )
+    save_cached_combination_ranking(report)
+    return {**report, "learningRefreshSource": "rebuilt_cache"}
+
+
+def _usable_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
-        raise ValueError(f"no cached factor combination ranking for {symbol} {duration}")
-    assert_cache_usable(cached, f"factor combination ranking {symbol} {duration}")
+        return None
+    if not cache_is_usable(cached):
+        return None
     return cached
 
 

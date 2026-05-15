@@ -8,6 +8,7 @@ from app.services import factor_combination_cache_service
 from app.services import factor_ranking_cache_service
 
 ONE_MINUTE_MS = 60_000
+TEN_MINUTES_MS = 10 * ONE_MINUTE_MS
 
 
 def test_factor_ranking_cache_becomes_stale_when_market_data_changes(
@@ -16,7 +17,8 @@ def test_factor_ranking_cache_becomes_stale_when_market_data_changes(
 ) -> None:
     db_path = _init_db(tmp_path)
     _patch_cache_db(monkeypatch, db_path)
-    _insert_kline(db_path, 0)
+    _insert_kline(db_path, "1m", 0)
+    _insert_kline(db_path, "10m", 0)
 
     factor_ranking_cache_service.save_cached_ranking(
         "BTCUSDT",
@@ -26,7 +28,12 @@ def test_factor_ranking_cache_becomes_stale_when_market_data_changes(
 
     assert factor_ranking_cache_service.get_cached_ranking("BTCUSDT", "10m")["cacheStatus"]["usable"] is True
 
-    _insert_kline(db_path, ONE_MINUTE_MS)
+    _insert_kline(db_path, "1m", ONE_MINUTE_MS)
+    cached = factor_ranking_cache_service.get_cached_ranking("BTCUSDT", "10m")
+
+    assert cached["cacheStatus"]["usable"] is True
+
+    _insert_kline(db_path, "10m", TEN_MINUTES_MS)
     cached = factor_ranking_cache_service.get_cached_ranking("BTCUSDT", "10m")
 
     assert cached["cacheStatus"]["usable"] is False
@@ -36,7 +43,7 @@ def test_factor_ranking_cache_becomes_stale_when_market_data_changes(
 def test_legacy_combination_cache_is_marked_stale(monkeypatch, tmp_path: Path) -> None:
     db_path = _init_db(tmp_path)
     _patch_cache_db(monkeypatch, db_path)
-    _insert_kline(db_path, 0)
+    _insert_kline(db_path, "10m", 0)
     _insert_legacy_combo_cache(db_path)
 
     cached = factor_combination_cache_service.get_cached_combination_ranking("BTCUSDT", "10m")
@@ -44,6 +51,34 @@ def test_legacy_combination_cache_is_marked_stale(monkeypatch, tmp_path: Path) -
     assert cached["ranking"][0]["factorName"] == "combo_a"
     assert cached["cacheStatus"]["usable"] is False
     assert cached["cacheStatus"]["reason"] == "legacy_without_fingerprint"
+
+
+def test_append_only_market_change_is_allowed_for_live_signal() -> None:
+    payload = {
+        "cacheStatus": {
+            "usable": False,
+            "reason": "market_data_changed",
+            "cachedMarketData": {"rowCount": 1000, "maxOpenTime": 100},
+            "currentMarketData": {"rowCount": 1001, "maxOpenTime": 200},
+        }
+    }
+
+    assert factor_cache_metadata.cache_is_usable(payload) is False
+    assert factor_cache_metadata.cache_is_usable_for_live_signal(payload) is True
+    assert factor_cache_metadata.live_signal_cache_reason(payload) == "market_data_appended"
+
+
+def test_rewritten_market_change_is_not_allowed_for_live_signal() -> None:
+    payload = {
+        "cacheStatus": {
+            "usable": False,
+            "reason": "market_data_changed",
+            "cachedMarketData": {"rowCount": 1000, "maxOpenTime": 200},
+            "currentMarketData": {"rowCount": 999, "maxOpenTime": 100},
+        }
+    }
+
+    assert factor_cache_metadata.cache_is_usable_for_live_signal(payload) is False
 
 
 def _patch_cache_db(monkeypatch, db_path: Path) -> None:
@@ -94,12 +129,12 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _insert_kline(db_path: Path, open_time: int) -> None:
+def _insert_kline(db_path: Path, interval: str, open_time: int) -> None:
     conn = _connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO klines(symbol, interval, open_time) VALUES('BTCUSDT', '1m', ?)",
-            (open_time,),
+            "INSERT INTO klines(symbol, interval, open_time) VALUES('BTCUSDT', ?, ?)",
+            (interval, open_time),
         )
         conn.commit()
     finally:

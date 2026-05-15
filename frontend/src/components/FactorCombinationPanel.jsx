@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchFactorCombinationRanking,
   fetchFactorCombinationSignals,
@@ -13,6 +13,7 @@ const TOP_PER_DURATION = 3;
 const SIGNAL_LIMIT = 12;
 const REFRESH_RELOAD_DELAY_MS = 3000;
 const DURATION_LABELS = { "10m": "10m", "30m": "30m", "60m": "60m", "1d": "1d" };
+const SIGNAL_IDLE_STATUS = "周期信号未加载";
 
 export default function FactorCombinationPanel({ symbol, duration }) {
   const combo = useFactorCombinationData(symbol, duration);
@@ -22,27 +23,31 @@ export default function FactorCombinationPanel({ symbol, duration }) {
 function useFactorCombinationData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [rankingState, setRankingState] = useState({ items: [], status: "", updatedAt: null });
-  const [signalState, setSignalState] = useState({ items: [], status: "", missing: [], failures: [] });
+  const [signalState, setSignalState] = useState(initialSignalState);
   const [refreshing, setRefreshing] = useState(false);
-
-  const loadData = useCallback(async (signal) => {
-    if (!isValidSymbol(normalizedSymbol)) {
-      setInvalidStates(setRankingState, setSignalState);
-      return;
-    }
-    setRankingState((state) => ({ ...state, status: "加载多因子组合缓存…" }));
-    setSignalState((state) => ({ ...state, status: "刷新周期信号…" }));
-    await Promise.all([
-      loadRankingState({ duration, setState: setRankingState, signal, symbol: normalizedSymbol }),
-      loadSignalState(normalizedSymbol, signal, setSignalState),
-    ]);
-  }, [duration, normalizedSymbol]);
+  const [loadingSignals, setLoadingSignals] = useState(false);
+  const signalAbortRef = useRef(null);
+  const loadRanking = useRankingLoader(normalizedSymbol, duration, setRankingState);
 
   useEffect(() => {
     const ac = new AbortController();
-    void loadData(ac.signal);
+    void loadRanking(ac.signal);
     return () => ac.abort();
-  }, [loadData]);
+  }, [loadRanking]);
+
+  useEffect(() => {
+    signalAbortRef.current?.abort();
+    setLoadingSignals(false);
+    setSignalState(isValidSymbol(normalizedSymbol) ? initialSignalState() : invalidSignalState());
+  }, [normalizedSymbol]);
+
+  useEffect(() => () => signalAbortRef.current?.abort(), []);
+  const loadSignals = useSignalLoader({
+    symbol: normalizedSymbol,
+    signalAbortRef,
+    setLoadingSignals,
+    setSignalState,
+  });
 
   const refresh = useCallback(async (targetDuration) => {
     if (!isValidSymbol(normalizedSymbol)) return setInvalidRanking(setRankingState);
@@ -50,21 +55,50 @@ function useFactorCombinationData(symbol, duration) {
     try {
       await requestFactorCombinationRefresh(normalizedSymbol, targetDuration);
       setRankingState((state) => ({ ...state, status: refreshStatus(targetDuration) }));
-      window.setTimeout(() => void loadData(new AbortController().signal), REFRESH_RELOAD_DELAY_MS);
+      window.setTimeout(() => void loadRanking(new AbortController().signal), REFRESH_RELOAD_DELAY_MS);
     } catch (error) {
       setRankingState((state) => ({ ...state, status: `刷新失败：${error.message}` }));
     } finally {
       setRefreshing(false);
     }
-  }, [loadData, normalizedSymbol]);
+  }, [loadRanking, normalizedSymbol]);
 
   return {
     symbol: normalizedSymbol,
     rankingState,
     signalState,
     refreshing,
+    loadingSignals,
+    onLoadSignals: () => void loadSignals(),
     onRefreshCurrent: () => void refresh(duration), onRefreshAll: () => void refresh(undefined),
   };
+}
+
+function useRankingLoader(symbol, duration, setRankingState) {
+  return useCallback(async (signal) => {
+    if (!isValidSymbol(symbol)) {
+      setInvalidRanking(setRankingState);
+      return;
+    }
+    setRankingState((state) => ({ ...state, status: "加载多因子组合缓存…" }));
+    await loadRankingState({ duration, setState: setRankingState, signal, symbol });
+  }, [duration, setRankingState, symbol]);
+}
+
+function useSignalLoader({ symbol, signalAbortRef, setLoadingSignals, setSignalState }) {
+  return useCallback(async () => {
+    if (!isValidSymbol(symbol)) return setSignalState(invalidSignalState());
+    signalAbortRef.current?.abort();
+    const ac = new AbortController();
+    signalAbortRef.current = ac;
+    setLoadingSignals(true);
+    setSignalState((state) => ({ ...state, status: "刷新周期信号…" }));
+    try {
+      await loadSignalState(symbol, ac.signal, setSignalState);
+    } finally {
+      if (!ac.signal.aborted) setLoadingSignals(false);
+    }
+  }, [setLoadingSignals, setSignalState, signalAbortRef, symbol]);
 }
 
 async function loadRankingState({ symbol, duration, signal, setState }) {
@@ -129,8 +163,10 @@ function ComboPanelHeader({
   rankingState,
   signalState,
   refreshing,
+  loadingSignals,
   onRefreshCurrent,
   onRefreshAll,
+  onLoadSignals,
 }) {
   return (
     <div className="factor-combo-head">
@@ -141,6 +177,9 @@ function ComboPanelHeader({
         <p>{signalState.status}</p>
       </div>
       <div className="factor-combo-actions">
+        <button type="button" disabled={loadingSignals} onClick={onLoadSignals}>
+          加载周期信号
+        </button>
         <button type="button" disabled={refreshing} onClick={onRefreshCurrent}>
           当前周期
         </button>
@@ -170,13 +209,16 @@ function refreshStatus(duration) {
   return duration ? `已排队重算 ${duration} 多因子组合` : "已排队重算全部周期多因子组合";
 }
 
-function setInvalidStates(setRankingState, setSignalState) {
-  setInvalidRanking(setRankingState);
-  setSignalState({ items: [], status: "请输入有效交易对", missing: [], failures: [] });
-}
-
 function setInvalidRanking(setRankingState) {
   setRankingState({ items: [], status: "请输入有效交易对", updatedAt: null });
+}
+
+function initialSignalState() {
+  return { items: [], status: SIGNAL_IDLE_STATUS, missing: [], failures: [] };
+}
+
+function invalidSignalState() {
+  return { items: [], status: "请输入有效交易对", missing: [], failures: [] };
 }
 
 function isValidSymbol(symbol) {

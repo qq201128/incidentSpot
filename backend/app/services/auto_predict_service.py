@@ -27,6 +27,7 @@ from app.services.prediction_cache_service import (
     prediction_response,
     save_prediction,
 )
+from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
@@ -71,16 +72,27 @@ async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
 
 
 async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
-    # 每次预测前拉取最新 1m K 写入库，保证任意周期（10m/30m/60m/1d）结算与规则输入与行情对齐。
+    # 每次预测前拉取最新 1m 和策略周期 K；结算用 1m，因子预测用策略周期 K。
     by_symbol: dict[str, list[int]] = {}
+    by_symbol_duration: dict[tuple[str, str], list[int]] = {}
     for settings in settings_list:
         sym = settings.symbol.upper()
         by_symbol.setdefault(sym, []).append(current_rule_entry_open_time_for_duration(settings.duration))
+        key = (sym, settings.duration)
+        by_symbol_duration.setdefault(key, []).append(current_rule_entry_open_time_for_duration(settings.duration))
     if by_symbol:
         await asyncio.gather(
             *(
-                asyncio.to_thread(_refresh_prediction_input, symbol, max(buckets))
+                asyncio.to_thread(_refresh_1m_prediction_input, symbol, max(buckets))
                 for symbol, buckets in by_symbol.items()
+                if buckets
+            )
+        )
+    if by_symbol_duration:
+        await asyncio.gather(
+            *(
+                asyncio.to_thread(_refresh_duration_prediction_input, symbol, duration, max(buckets))
+                for (symbol, duration), buckets in by_symbol_duration.items()
                 if buckets
             )
         )
@@ -326,30 +338,39 @@ def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tup
     return sorted({(settings.symbol.upper(), settings.duration) for settings in settings_list})
 
 
-def _refresh_prediction_input(symbol: str, entry_open_time: int) -> None:
-    latest_open_time = _latest_1m_open_time(symbol)
+def _refresh_1m_prediction_input(symbol: str, entry_open_time: int) -> None:
+    latest_open_time = _latest_open_time(symbol, "1m")
     limit = INITIAL_KLINE_LIMIT if latest_open_time is None else REFRESH_KLINE_LIMIT
     rows = fetch_klines(symbol, "1m", limit=limit)
     if not rows:
         raise ValueError(f"no latest 1m klines returned for {symbol.upper()}")
-    _upsert_1m_klines(symbol, rows)
-    _assert_entry_input_ready(symbol, entry_open_time)
+    _upsert_klines(symbol, "1m", rows)
+    _assert_interval_input_ready(symbol, "1m", entry_open_time - MS_PER_MINUTE)
 
 
-def _assert_entry_input_ready(symbol: str, entry_open_time: int) -> None:
-    required_open_time = int(entry_open_time) - MS_PER_MINUTE
-    latest_open_time = _latest_1m_open_time(symbol)
+def _refresh_duration_prediction_input(symbol: str, duration: str, entry_open_time: int) -> None:
+    latest_open_time = _latest_open_time(symbol, duration)
+    limit = INITIAL_KLINE_LIMIT if latest_open_time is None else REFRESH_KLINE_LIMIT
+    rows = fetch_klines(symbol, duration, limit=limit)
+    if not rows:
+        raise ValueError(f"no latest {duration} klines returned for {symbol.upper()}")
+    _upsert_klines(symbol, duration, rows)
+    _assert_interval_input_ready(symbol, duration, entry_open_time - _duration_ms(duration))
+
+
+def _assert_interval_input_ready(symbol: str, interval: str, required_open_time: int) -> None:
+    latest_open_time = _latest_open_time(symbol, interval)
     if latest_open_time is None or latest_open_time < required_open_time:
         raise ValueError(
-            f"missing completed 1m kline before entry {entry_open_time} for {symbol.upper()}"
+            f"missing completed {interval} kline at {required_open_time} for {symbol.upper()}"
         )
 
 
-def _latest_1m_open_time(symbol: str) -> int | None:
+def _latest_open_time(symbol: str, interval: str) -> int | None:
     conn = get_conn()
     row = conn.execute(
         "SELECT MAX(open_time) AS max_open_time FROM klines WHERE symbol = ? AND interval = ?",
-        (symbol.upper(), "1m"),
+        (symbol.upper(), interval),
     ).fetchone()
     conn.close()
     if row is None or row["max_open_time"] is None:
@@ -357,7 +378,7 @@ def _latest_1m_open_time(symbol: str) -> int | None:
     return int(row["max_open_time"])
 
 
-def _upsert_1m_klines(symbol: str, rows: list[dict]) -> None:
+def _upsert_klines(symbol: str, interval: str, rows: list[dict]) -> None:
     conn = get_conn()
     for item in rows:
         conn.execute(
@@ -374,7 +395,7 @@ def _upsert_1m_klines(symbol: str, rows: list[dict]) -> None:
             """,
             (
                 symbol.upper(),
-                "1m",
+                interval,
                 item["openTime"],
                 item["open"],
                 item["high"],
@@ -386,6 +407,10 @@ def _upsert_1m_klines(symbol: str, rows: list[dict]) -> None:
         )
     conn.commit()
     conn.close()
+
+
+def _duration_ms(duration: str) -> int:
+    return DURATION_TO_MINUTES[duration] * MS_PER_MINUTE
 
 
 def _next_predict_wait(targets: list[AutoTradeSettings], poll_seconds: int) -> float:

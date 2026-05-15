@@ -69,11 +69,16 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
         assert run_llm_agent is True
         calls.append(("learn", symbol, duration, ranking_report["duration"]))
 
+    def fake_signal_cache(symbol: str) -> None:
+        calls.append(("signals", symbol, None, None))
+
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
+    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)
     monkeypatch.setattr(combo_background, "refresh_factor_learning_memory", fake_learning)
+    monkeypatch.setattr(combo_background, "_refresh_signal_watchlist_cache", fake_signal_cache)
     combo_background.refresh_symbol_combination_rankings("btcusdt")
 
     run_durations = [item[2] for item in calls if item[0] == "run"]
@@ -81,6 +86,7 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
     assert [item[2] for item in calls if item[0] == "promote"] == run_durations
     assert [item[2] for item in calls if item[0] == "sync"] == run_durations
     assert [item[2] for item in calls if item[0] == "learn"] == run_durations
+    assert [item for item in calls if item[0] == "signals"] == [("signals", "BTCUSDT", None, None)]
     assert run_durations == ["10m", "30m", "60m", "1d"]
 
 
@@ -91,6 +97,7 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
         "run_factor_combination_ranking",
         lambda symbol, duration, _config: {"symbol": symbol, "duration": duration, "ranking": []},
     )
+    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", lambda _report: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", _promotion_report)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", _fail_sync)
@@ -100,6 +107,87 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
         combo_background.refresh_combination_ranking_for_symbol_duration("BTCUSDT", "10m")
 
     assert calls == []
+
+
+def test_startup_stale_refresh_only_rebuilds_unusable_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    refreshed = []
+    cache_by_duration = {
+        "10m": {"cacheStatus": {"usable": False, "reason": "legacy_without_fingerprint"}},
+        "30m": {"cacheStatus": {"usable": True, "reason": "usable"}},
+        "60m": None,
+        "1d": {"cacheStatus": {"usable": True, "reason": "usable"}},
+    }
+
+    monkeypatch.setattr(combo_background, "_sync_default_simulation_slots", lambda: None)
+    monkeypatch.setattr(combo_background, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
+    monkeypatch.setattr(
+        combo_background,
+        "get_cached_combination_ranking",
+        lambda _symbol, duration: cache_by_duration[duration],
+    )
+    monkeypatch.setattr(
+        combo_background,
+        "refresh_combination_ranking_for_symbol_duration",
+        lambda symbol, duration, config, **_kwargs: refreshed.append((symbol, duration, config)),
+    )
+
+    combo_background.refresh_stale_configured_combination_rankings("cfg")
+
+    assert refreshed == [("BTCUSDT", "10m", "cfg"), ("BTCUSDT", "60m", "cfg")]
+
+
+def test_combo_refresh_writes_duration_klines_before_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    rows = [_kline_row(0)]
+
+    monkeypatch.setattr(combo_background, "fetch_klines", lambda symbol, duration, limit: rows)
+    monkeypatch.setattr(combo_background, "upsert_klines_rows", lambda symbol, interval, rows: calls.append(("klines", symbol, interval, len(rows))))
+    monkeypatch.setattr(combo_background, "_backfill_duration_klines", lambda *_args: None)
+    monkeypatch.setattr(
+        combo_background,
+        "run_factor_combination_ranking",
+        lambda symbol, duration, _config: calls.append(("rank", symbol, duration, None)) or {"symbol": symbol, "duration": duration, "ranking": []},
+    )
+    monkeypatch.setattr(combo_background, "save_cached_combination_ranking", lambda _report: None)
+    monkeypatch.setattr(combo_background, "upsert_good_combinations", _promotion_report)
+    monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", lambda *_args, **_kwargs: {"status": "up_to_date"})
+    monkeypatch.setattr(combo_background, "refresh_factor_learning_memory", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(combo_background, "_refresh_signal_watchlist_cache", lambda *_args: None)
+
+    combo_background.refresh_combination_ranking_for_symbol_duration("btcusdt", "10m")
+
+    assert calls[:2] == [("klines", "BTCUSDT", "10m", 1), ("rank", "BTCUSDT", "10m", None)]
+
+
+def test_duration_kline_refresh_backfills_until_min_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    counts = [0, 300, 540]
+    fetches = []
+    open_times = [600_000, 0]
+
+    def fetch_klines(symbol: str, duration: str, *, limit: int, end_time: int | None = None) -> list[dict]:
+        fetches.append((symbol, duration, end_time))
+        return [_kline_row(open_times.pop(0))]
+
+    monkeypatch.setattr(combo_background, "fetch_klines", fetch_klines)
+    monkeypatch.setattr(combo_background, "upsert_klines_rows", lambda *_args: None)
+    monkeypatch.setattr(combo_background, "oldest_open_time", lambda *_args: 1_200_000)
+    monkeypatch.setattr(combo_background, "count_klines", lambda *_args: counts.pop(0))
+
+    combo_background._backfill_duration_klines("BTCUSDT", "10m")
+
+    assert fetches == [("BTCUSDT", "10m", 1_199_999), ("BTCUSDT", "10m", 599_999)]
+
+
+def _kline_row(open_time: int) -> dict:
+    return {
+        "openTime": open_time,
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "volume": 1.0,
+        "closeTime": open_time + 1,
+    }
 
 
 def _candidate(name: str, source_file: str, score: float):

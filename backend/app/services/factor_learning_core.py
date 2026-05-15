@@ -82,6 +82,7 @@ def _source_payload(
     return {
         "rankingTotal": int(ranking_report.get("total") or 0),
         "baseFactorCount": int(ranking_report.get("baseFactorCount") or 0),
+        "rankingRefreshSource": str(ranking_report.get("learningRefreshSource") or "provided"),
         "minedFactorSourceCount": int(ranking_report.get("minedFactorSourceCount") or 0),
         "minedFactorUsedCount": int(ranking_report.get("minedFactorUsedCount") or 0),
         "settledPredictionCount": len(settled_predictions),

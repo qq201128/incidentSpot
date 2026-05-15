@@ -102,6 +102,15 @@ SCHEMA_MIGRATIONS = (
     PRIMARY KEY (symbol, duration)
   )
   """,
+  """
+  CREATE TABLE IF NOT EXISTS factor_combo_signal_cache (
+    symbol TEXT NOT NULL PRIMARY KEY,
+    updated_at TEXT NOT NULL,
+    top_per_duration INTEGER NOT NULL,
+    limit_count INTEGER NOT NULL,
+    payload TEXT NOT NULL
+  )
+  """,
 )
 
 

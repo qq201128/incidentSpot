@@ -68,7 +68,7 @@ def run_factor_combination_ranking(
     cfg = _validated_config(config or CombinationSearchConfig())
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    frame = load_factor_frame(symbol)
+    frame = load_factor_frame(symbol, duration)
     return run_factor_combination_ranking_on_frame(
         frame,
         symbol=symbol,

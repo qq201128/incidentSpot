@@ -29,7 +29,7 @@ from app.services.factor_registry import (
     get_factor,
     list_factors,
 )
-from app.services.rule_config import SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 QUINTILE_COUNT = 5
 IC_ROLLING_WINDOW = 20
@@ -67,7 +67,7 @@ def run_factor_backtest(
     if factor_def is None:
         raise ValueError(f"unknown factor: {factor_name}")
 
-    feature_frame = load_factor_frame(symbol)
+    feature_frame = load_factor_frame(symbol, duration)
     result = run_factor_backtest_on_frame(
         factor_def,
         feature_frame,
@@ -99,7 +99,7 @@ def run_factor_ranking(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
 
-    feature_frame = load_factor_frame(symbol)
+    feature_frame = load_factor_frame(symbol, duration)
 
     factors = list_factors()
     if category:
@@ -130,55 +130,31 @@ def _compute_factor_metrics(
     duration: str,
 ) -> FactorBacktestResult:
     factor_name = factor_def.name
-    horizon = horizon_minutes_for_duration(duration)
+    horizon = 1
     df = backtest_duration_frame(frame, factor_name, duration)
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=[factor_name, "fwd_ret"])
 
     if len(df) < BACKTEST_MIN_PERIODS:
-        return FactorBacktestResult(
-            factor_name=factor_name,
-            symbol=symbol.upper(),
-            duration=duration,
-            total_periods=len(df),
-            ic_mean=None,
-            ic_std=None,
-            ir=None,
-            ic_positive_rate=None,
-            quintile_returns=[],
-            long_short_return=None,
-            turnover=None,
-            t_stat=None,
-            p_value=None,
-            sharpe=None,
-            win_rate=None,
-            max_drawdown=None,
-            profit_factor=None,
-        )
+        return _empty_factor_result(factor_name, symbol, duration, len(df))
 
     ic_series = _compute_rolling_ic(df[factor_name], df["fwd_ret"])
-    ic_mean = float(ic_series.mean()) if not ic_series.empty else None
-    ic_std = float(ic_series.std()) if not ic_series.empty else None
-    ir = ic_mean / ic_std if ic_mean is not None and ic_std and ic_std > 0 else None
-    ic_positive_rate = float((ic_series > 0).mean()) if not ic_series.empty else None
-
     t_stat, p_value = _compute_ic_ttest(ic_series)
-
     quintile_returns = _compute_quintile_returns(df, factor_name)
     long_short = quintile_returns[-1] - quintile_returns[0] if len(quintile_returns) == QUINTILE_COUNT else None
-
     turnover = _compute_turnover(df, factor_name)
     sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor_def, horizon)
+    ic_metrics = _ic_metrics(ic_series)
 
     return FactorBacktestResult(
         factor_name=factor_name,
         symbol=symbol.upper(),
         duration=duration,
         total_periods=len(df),
-        ic_mean=ic_mean,
-        ic_std=ic_std,
-        ir=ir,
-        ic_positive_rate=ic_positive_rate,
+        ic_mean=ic_metrics["mean"],
+        ic_std=ic_metrics["std"],
+        ir=ic_metrics["ir"],
+        ic_positive_rate=ic_metrics["positive_rate"],
         quintile_returns=quintile_returns,
         long_short_return=long_short,
         turnover=turnover,
@@ -189,6 +165,41 @@ def _compute_factor_metrics(
         max_drawdown=max_drawdown,
         profit_factor=profit_factor,
     )
+
+
+def _empty_factor_result(
+    factor_name: str,
+    symbol: str,
+    duration: str,
+    total_periods: int,
+) -> FactorBacktestResult:
+    return FactorBacktestResult(
+        factor_name=factor_name,
+        symbol=symbol.upper(),
+        duration=duration,
+        total_periods=total_periods,
+        ic_mean=None,
+        ic_std=None,
+        ir=None,
+        ic_positive_rate=None,
+        quintile_returns=[],
+        long_short_return=None,
+        turnover=None,
+        t_stat=None,
+        p_value=None,
+        sharpe=None,
+        win_rate=None,
+        max_drawdown=None,
+        profit_factor=None,
+    )
+
+
+def _ic_metrics(ic_series: pd.Series) -> dict[str, float | None]:
+    ic_mean = float(ic_series.mean()) if not ic_series.empty else None
+    ic_std = float(ic_series.std()) if not ic_series.empty else None
+    ir = ic_mean / ic_std if ic_mean is not None and ic_std and ic_std > 0 else None
+    positive_rate = float((ic_series > 0).mean()) if not ic_series.empty else None
+    return {"mean": ic_mean, "std": ic_std, "ir": ir, "positive_rate": positive_rate}
 
 
 def _compute_rolling_ic(factor: pd.Series, fwd_ret: pd.Series) -> pd.Series:

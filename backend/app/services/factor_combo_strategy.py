@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.factor_cache_metadata import assert_cache_usable
+from app.services.factor_cache_metadata import (
+    assert_cache_usable_for_live_signal,
+    live_signal_cache_reason,
+)
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
@@ -43,10 +46,10 @@ def predict_factor_combo_rank_direction(
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
-    assert_cache_usable(cached, f"factor combination ranking {symbol.upper()} {duration}")
+    assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
     top = _ranked_combo(cached, combo_rank)
     frame = materialize_mined_factor_frame(
-        load_factor_frame(symbol),
+        load_factor_frame(symbol, duration),
         symbol=symbol,
         duration=duration,
     ).frame
@@ -58,7 +61,12 @@ def predict_factor_combo_rank_direction(
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,
     )
-    return _prediction_payload(signal, entry_open_time, result_strategy_key)
+    return _prediction_payload(
+        signal,
+        entry_open_time,
+        result_strategy_key,
+        cache_reason=live_signal_cache_reason(cached),
+    )
 
 
 def _ranked_combo(cached: dict[str, Any], combo_rank: int) -> dict[str, Any]:
@@ -74,6 +82,8 @@ def _prediction_payload(
     signal: dict[str, Any],
     entry_open_time: int | None,
     strategy_key: str,
+    *,
+    cache_reason: str,
 ) -> dict[str, Any]:
     open_time = int(entry_open_time if entry_open_time is not None else signal["sourceOpenTime"])
     return {
@@ -97,18 +107,19 @@ def _prediction_payload(
         "quality_gate_reason": signal["qualityGateReason"],
         "signal_source": signal["source"],
         "rule_score": signal["score"],
-        "rule_reasons": _rule_reasons(signal),
+        "rule_reasons": _rule_reasons(signal, cache_reason),
         "orderbook": None,
         "timeframe_votes": [],
     }
 
 
-def _rule_reasons(signal: dict[str, Any]) -> list[str]:
+def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
     member_names = ",".join(str(member["name"]) for member in signal["members"])
     reasons = [
         f"rule={FACTOR_COMBO_RULE_NAME}",
         f"combo={signal['factorName']}",
         f"combo_rank={signal.get('comboRank') or 1}",
+        f"combo_cache={cache_reason}",
         f"members={member_names}",
         f"method={signal['method']}",
         f"historical_win_rate={signal['historicalWinRate']}",

@@ -27,17 +27,17 @@ ENTRY_OPEN_TIME = 1778121600000
 
 def test_duration_labeled_frame_uses_period_specific_future_return() -> None:
     frame = pd.DataFrame({
-        "open_time": np.arange(30) * 60_000,
+        "open_time": np.arange(30) * 10 * 60_000,
         "close": 100 + np.arange(30),
         "feature_a": np.arange(30, dtype=float),
     })
 
     labeled = duration_labeled_frame(frame, "10m", 10, 0.0)
 
-    assert labeled["open_time"].iloc[0] == 9 * 60_000
+    assert labeled["open_time"].iloc[0] == 0
     assert labeled["entry_open_time"].iloc[0] == 10 * 60_000
-    assert labeled["open_time"].iloc[-1] == 19 * 60_000
-    assert labeled.loc[0, "future_return"] == pytest.approx(119 / 109 - 1)
+    assert labeled["open_time"].iloc[-1] == 28 * 10 * 60_000
+    assert labeled.loc[0, "future_return"] == pytest.approx(101 / 100 - 1)
 
 
 def test_train_lstm_model_writes_separate_artifacts() -> None:

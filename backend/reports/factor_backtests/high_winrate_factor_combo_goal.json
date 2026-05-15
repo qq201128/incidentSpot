@@ -1,0 +1,225 @@
+{
+  "version": "high_winrate_factor_combo_goal_v1",
+  "updatedAt": "2026-05-15T03:44:47.875062+00:00",
+  "symbol": "BTCUSDT",
+  "duration": "30m",
+  "target": {
+    "targetCount": 5,
+    "minWinRate": 0.7,
+    "minProfitFactor": 1.05,
+    "minTrades": 100,
+    "thresholds": [
+      0.5,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      1.75,
+      2.0
+    ],
+    "method": "oriented_expanding_zscore_pair_threshold_v1"
+  },
+  "onlineResearchSources": [
+    {
+      "title": "Explainable Patterns in Cryptocurrency Microstructure",
+      "url": "https://arxiv.org/pdf/2602.00776",
+      "factorFamilies": [
+        "order flow imbalance",
+        "spread",
+        "VWAP-to-mid pressure"
+      ]
+    },
+    {
+      "title": "Order flow and cryptocurrency returns",
+      "url": "https://www.sciencedirect.com/science/article/pii/S1386418126000029",
+      "factorFamilies": [
+        "signed order flow",
+        "buyer/seller initiated volume"
+      ]
+    },
+    {
+      "title": "The Crypto Signal Compendium",
+      "url": "https://the-algotrading-book-website.vercel.app/chapters/01-foundations/024-crypto-signal-compendium/",
+      "factorFamilies": [
+        "open interest",
+        "long/short ratio",
+        "taker buy/sell",
+        "sentiment"
+      ]
+    }
+  ],
+  "search": {
+    "entryRows": 761,
+    "candidateFactors": 235,
+    "testedPairs": 27495
+  },
+  "ranking": [
+    {
+      "rank": 1,
+      "factorName": "goal_combo__tf_1d_ret_vol_3__tf_1d_ret_vol_7",
+      "members": [
+        "tf_1d_ret_vol_3",
+        "tf_1d_ret_vol_7"
+      ],
+      "threshold": 1.0,
+      "winRate": 0.8942,
+      "profitFactor": 37.8912,
+      "trades": 104,
+      "avgReturn": 0.00804568
+    },
+    {
+      "rank": 2,
+      "factorName": "goal_combo__vol_of_vol_20__tf_15m_ret_vol_32",
+      "members": [
+        "vol_of_vol_20",
+        "tf_15m_ret_vol_32"
+      ],
+      "threshold": 0.75,
+      "winRate": 0.8812,
+      "profitFactor": 10.1388,
+      "trades": 101,
+      "avgReturn": 0.00515015
+    },
+    {
+      "rank": 3,
+      "factorName": "goal_combo__vol_of_vol_20__close_to_low_20",
+      "members": [
+        "vol_of_vol_20",
+        "close_to_low_20"
+      ],
+      "threshold": 0.75,
+      "winRate": 0.8624,
+      "profitFactor": 8.4821,
+      "trades": 109,
+      "avgReturn": 0.00705117
+    },
+    {
+      "rank": 4,
+      "factorName": "goal_combo__vol_ma_120__vol_ma_240",
+      "members": [
+        "vol_ma_120",
+        "vol_ma_240"
+      ],
+      "threshold": 1.0,
+      "winRate": 0.86,
+      "profitFactor": 21.2418,
+      "trades": 100,
+      "avgReturn": 0.00412843
+    },
+    {
+      "rank": 5,
+      "factorName": "goal_combo__downside_vol_20__tf_30m_ret_vol_8",
+      "members": [
+        "downside_vol_20",
+        "tf_30m_ret_vol_8"
+      ],
+      "threshold": 0.5,
+      "winRate": 0.8545,
+      "profitFactor": 10.2291,
+      "trades": 110,
+      "avgReturn": 0.00736326
+    }
+  ],
+  "paperLiveSimulation": [
+    {
+      "rank": 1,
+      "factorName": "goal_combo__tf_1d_ret_vol_3__tf_1d_ret_vol_7",
+      "members": [
+        "tf_1d_ret_vol_3",
+        "tf_1d_ret_vol_7"
+      ],
+      "threshold": 1.0,
+      "winRate": 0.8942,
+      "profitFactor": 37.8912,
+      "trades": 104,
+      "avgReturn": 0.00804568,
+      "simulationMode": "paper_live",
+      "simulationStrategyKey": "high_winrate_factor_combo_goal_top1",
+      "sourceOpenTime": 1778815800000,
+      "entryPrice": 81177.3,
+      "score": -0.394694,
+      "direction": "wait",
+      "qualityPassed": false
+    },
+    {
+      "rank": 2,
+      "factorName": "goal_combo__vol_of_vol_20__tf_15m_ret_vol_32",
+      "members": [
+        "vol_of_vol_20",
+        "tf_15m_ret_vol_32"
+      ],
+      "threshold": 0.75,
+      "winRate": 0.8812,
+      "profitFactor": 10.1388,
+      "trades": 101,
+      "avgReturn": 0.00515015,
+      "simulationMode": "paper_live",
+      "simulationStrategyKey": "high_winrate_factor_combo_goal_top2",
+      "sourceOpenTime": 1778815800000,
+      "entryPrice": 81177.3,
+      "score": 0.538485,
+      "direction": "wait",
+      "qualityPassed": false
+    },
+    {
+      "rank": 3,
+      "factorName": "goal_combo__vol_of_vol_20__close_to_low_20",
+      "members": [
+        "vol_of_vol_20",
+        "close_to_low_20"
+      ],
+      "threshold": 0.75,
+      "winRate": 0.8624,
+      "profitFactor": 8.4821,
+      "trades": 109,
+      "avgReturn": 0.00705117,
+      "simulationMode": "paper_live",
+      "simulationStrategyKey": "high_winrate_factor_combo_goal_top3",
+      "sourceOpenTime": 1778815800000,
+      "entryPrice": 81177.3,
+      "score": 0.382052,
+      "direction": "wait",
+      "qualityPassed": false
+    },
+    {
+      "rank": 4,
+      "factorName": "goal_combo__vol_ma_120__vol_ma_240",
+      "members": [
+        "vol_ma_120",
+        "vol_ma_240"
+      ],
+      "threshold": 1.0,
+      "winRate": 0.86,
+      "profitFactor": 21.2418,
+      "trades": 100,
+      "avgReturn": 0.00412843,
+      "simulationMode": "paper_live",
+      "simulationStrategyKey": "high_winrate_factor_combo_goal_top4",
+      "sourceOpenTime": 1778815800000,
+      "entryPrice": 81177.3,
+      "score": -0.132624,
+      "direction": "wait",
+      "qualityPassed": false
+    },
+    {
+      "rank": 5,
+      "factorName": "goal_combo__downside_vol_20__tf_30m_ret_vol_8",
+      "members": [
+        "downside_vol_20",
+        "tf_30m_ret_vol_8"
+      ],
+      "threshold": 0.5,
+      "winRate": 0.8545,
+      "profitFactor": 10.2291,
+      "trades": 110,
+      "avgReturn": 0.00736326,
+      "simulationMode": "paper_live",
+      "simulationStrategyKey": "high_winrate_factor_combo_goal_top5",
+      "sourceOpenTime": 1778815800000,
+      "entryPrice": 81177.3,
+      "score": 0.050386,
+      "direction": "wait",
+      "qualityPassed": false
+    }
+  ]
+}

@@ -9,16 +9,24 @@ from app.services.enhanced_features import (
     load_orderbook_features,
 )
 from app.services.external_factor_data import load_external_feature_frames
+from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 FACTOR_FRAME_MIN_HISTORY = 240
 
 
-def load_factor_frame(symbol: str, *, min_history: int = FACTOR_FRAME_MIN_HISTORY) -> pd.DataFrame:
-    df_1m = load_klines(symbol, "1m")
+def load_factor_frame(
+    symbol: str,
+    duration: str = "10m",
+    *,
+    min_history: int = FACTOR_FRAME_MIN_HISTORY,
+) -> pd.DataFrame:
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise ValueError(f"unsupported factor frame duration: {duration}")
+    df = load_klines(symbol, duration)
     orderbook = load_orderbook_features(symbol)
     funding = load_funding_features(symbol)
     frame, _ = build_enhanced_feature_frame(
-        df_1m,
+        df,
         ob_df=orderbook,
         funding_df=funding,
         external_frames=load_external_feature_frames(symbol),

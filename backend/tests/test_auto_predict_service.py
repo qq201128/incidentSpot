@@ -25,7 +25,8 @@ ENTRY_OPEN_TIME = 1778121600000
 
 
 def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None:
-    refresh_calls = []
+    refresh_1m_calls = []
+    refresh_duration_calls = []
     settlement_calls = []
     strategy_settings = [
         _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY),
@@ -33,13 +34,17 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
         _settings(ORDERBOOK_NOTIONAL_STRATEGY_KEY, symbol="ETHUSDT"),
     ]
 
-    def refresh(symbol: str, entry_open_time: int) -> None:
-        refresh_calls.append((symbol, entry_open_time))
+    def refresh_1m(symbol: str, entry_open_time: int) -> None:
+        refresh_1m_calls.append((symbol, entry_open_time))
+
+    def refresh_duration(symbol: str, duration: str, entry_open_time: int) -> None:
+        refresh_duration_calls.append((symbol, duration, entry_open_time))
 
     def settle(symbol: str, duration: str) -> None:
         settlement_calls.append((symbol, duration))
 
-    monkeypatch.setattr(service, "_refresh_prediction_input", refresh)
+    monkeypatch.setattr(service, "_refresh_1m_prediction_input", refresh_1m)
+    monkeypatch.setattr(service, "_refresh_duration_prediction_input", refresh_duration)
     monkeypatch.setattr(service, "settle_due_predictions", settle)
     monkeypatch.setattr(
         service,
@@ -49,9 +54,13 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
 
     asyncio.run(service._prepare_prediction_inputs(strategy_settings))
 
-    assert refresh_calls == [
+    assert refresh_1m_calls == [
         ("BTCUSDT", ENTRY_OPEN_TIME),
         ("ETHUSDT", ENTRY_OPEN_TIME),
+    ]
+    assert refresh_duration_calls == [
+        ("BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME),
+        ("ETHUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME),
     ]
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 

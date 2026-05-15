@@ -15,6 +15,7 @@ from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.lstm_combo_snapshot import assert_combo_snapshot_matches, combo_snapshot_from_ranking
 from app.services.lstm_config import LstmTrainingConfig
+from app.services.rule_config import horizon_minutes_for_duration
 
 MS_PER_MINUTE = 60_000
 COMBO_RANKS = (1, 2, 3)
@@ -45,7 +46,7 @@ class LstmDataset:
 def build_lstm_training_dataset(
     config: LstmTrainingConfig,
     *,
-    frame_loader: Callable[[str], pd.DataFrame] = load_factor_frame,
+    frame_loader: Callable[[str, str], pd.DataFrame] = load_factor_frame,
     ranking_loader: Callable[[str, str], dict[str, Any] | None] = get_cached_combination_ranking,
 ) -> LstmDataset:
     frame = _load_enriched_factor_frame(config, frame_loader)
@@ -105,7 +106,7 @@ def duration_labeled_frame(
     min_move_bps: float,
 ) -> pd.DataFrame:
     out = frame.sort_values("open_time").reset_index(drop=True).copy()
-    out["future_return"] = out["close"].shift(-horizon_minutes) / out["close"] - 1.0
+    out["future_return"] = out["close"].shift(-1) / out["close"] - 1.0
     out["label_up"] = _label_series(out["future_return"], min_move_bps)
     sampled = duration_feature_frame(out, duration)
     return sampled.dropna(subset=["future_return", "label_up"]).reset_index(drop=True)
@@ -118,18 +119,18 @@ def duration_feature_frame(
 ) -> pd.DataFrame:
     out = frame.sort_values("open_time").reset_index(drop=True).copy()
     open_time = pd.to_numeric(out["open_time"], errors="raise").astype("int64")
-    out["entry_open_time"] = open_time + MS_PER_MINUTE
+    out["entry_open_time"] = open_time + _duration_ms(duration)
     if entry_open_time is not None:
-        source_open_time = duration_entry_source_open_time(entry_open_time)
+        source_open_time = duration_entry_source_open_time(entry_open_time, duration)
         out = out[open_time <= source_open_time].copy()
     sampled = duration_entry_rows(out, duration).reset_index(drop=True)
     if entry_open_time is not None:
-        _assert_live_entry_row(sampled, int(entry_open_time))
+        _assert_live_entry_row(sampled, int(entry_open_time), duration)
     return sampled
 
 
-def _assert_live_entry_row(frame: pd.DataFrame, entry_open_time: int) -> None:
-    source_open_time = duration_entry_source_open_time(entry_open_time)
+def _assert_live_entry_row(frame: pd.DataFrame, entry_open_time: int, duration: str) -> None:
+    source_open_time = duration_entry_source_open_time(entry_open_time, duration)
     if frame.empty or int(frame.iloc[-1]["open_time"]) != source_open_time:
         raise LstmDataError(f"missing completed LSTM source row at open_time={source_open_time}")
 
@@ -168,15 +169,19 @@ def windowed_lstm_dataset(
 
 def _load_enriched_factor_frame(
     config: LstmTrainingConfig,
-    frame_loader: Callable[[str], pd.DataFrame],
+    frame_loader: Callable[[str, str], pd.DataFrame],
 ) -> pd.DataFrame:
-    base = frame_loader(config.symbol)
+    base = frame_loader(config.symbol, config.duration)
     return materialize_mined_factor_frame(base, symbol=config.symbol, duration=config.duration).frame
 
 
 def _load_enriched_factor_frame_symbol(symbol: str, duration: str) -> pd.DataFrame:
-    base = load_factor_frame(symbol)
+    base = load_factor_frame(symbol, duration)
     return materialize_mined_factor_frame(base, symbol=symbol, duration=duration).frame
+
+
+def _duration_ms(duration: str) -> int:
+    return horizon_minutes_for_duration(duration) * MS_PER_MINUTE
 
 
 def _ranking_or_raise(

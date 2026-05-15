@@ -14,7 +14,7 @@ BACKTEST_DURATION_ORDER = ("10m", "30m", "60m", "1d")
 
 @dataclass(frozen=True)
 class _BacktestContext:
-    frame: Any
+    frames: dict[str, Any]
     symbol: str
 
 
@@ -30,7 +30,8 @@ def run_all_factor_backtests(
     durations: tuple[str, ...] = BACKTEST_DURATION_ORDER,
 ) -> dict[str, Any]:
     _validate_durations(durations)
-    context = _BacktestContext(frame=load_factor_frame(symbol), symbol=symbol.upper())
+    frames = {duration: load_factor_frame(symbol, duration) for duration in durations}
+    context = _BacktestContext(frames=frames, symbol=symbol.upper())
     factors = list_factors()
     results, failures = _backtest_factor_matrix(context, factors, durations)
     enrich_factor_results(results, duration_scoped=True)
@@ -73,7 +74,7 @@ def _append_factor_backtest(
     try:
         result = run_factor_backtest_on_frame(
             task.factor,
-            task.context.frame,
+            task.context.frames[task.duration],
             symbol=task.context.symbol,
             duration=task.duration,
         )

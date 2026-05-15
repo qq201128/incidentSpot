@@ -151,7 +151,7 @@ def test_live_signal_uses_completed_duration_entry_row(
         config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
     )
     entry_open_time = 180 * 60_000
-    source_open_time = entry_open_time - 60_000
+    source_open_time = entry_open_time - 10 * 60_000
     signal = build_live_signal_from_ranking(
         synthetic_frame,
         report["ranking"][0],
@@ -195,11 +195,13 @@ def test_signal_watchlist_returns_top_three_per_duration(
     synthetic_frame: pd.DataFrame,
 ) -> None:
     rows = [{"factorName": f"combo_{idx}"} for idx in range(4)]
-    monkeypatch.setattr(combo_live, "load_factor_frame", lambda _symbol: synthetic_frame)
+    monkeypatch.setattr(combo_live, "get_cached_combination_signals", lambda _symbol: None)
+    monkeypatch.setattr(combo_live, "save_cached_combination_signals", lambda _payload: None)
+    monkeypatch.setattr(combo_live, "load_factor_frame", lambda _symbol, _duration: synthetic_frame)
     monkeypatch.setattr(
         combo_live,
         "get_cached_combination_ranking",
-        lambda _symbol, dur: {"ranking": rows} if dur == "10m" else None,
+        lambda _symbol, dur: _usable_cache(rows) if dur == "10m" else None,
     )
     monkeypatch.setattr(
         combo_live,
@@ -215,6 +217,36 @@ def test_signal_watchlist_returns_top_three_per_duration(
     assert payload["signals"][1]["simulationStrategyKey"] == factor_combo_shadow_strategy_key(2)
     assert payload["signals"][2]["simulationMode"] == "paper_live"
     assert payload["topPerDuration"] == 3
+
+
+def test_signal_watchlist_uses_matching_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    cached = {
+        "symbol": "BTCUSDT",
+        "source": "signal_cache",
+        "signals": [{"factorName": "cached"}],
+        "total": 1,
+        "limit": 12,
+        "topPerDuration": 3,
+        "durationCacheReasons": {
+            "10m": "usable:u1:100:200",
+            "30m": "stale::",
+            "60m": "stale::",
+            "1d": "stale::",
+        },
+    }
+
+    monkeypatch.setattr(combo_live, "get_cached_combination_signals", lambda _symbol: cached)
+    monkeypatch.setattr(
+        combo_live,
+        "get_cached_combination_ranking",
+        lambda _symbol, dur: _usable_cache([], updated_at="u1") if dur == "10m" else None,
+    )
+    monkeypatch.setattr(combo_live, "rebuild_combination_signal_watchlist", _fail_rebuild_watchlist)
+
+    payload = combo_live.build_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
+
+    assert payload["signals"] == [{"factorName": "cached"}]
+    assert payload["source"] == "signal_cache"
 
 
 def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +279,22 @@ def _fake_live_signal(_frame: pd.DataFrame, row: dict, *, symbol: str, duration:
         "direction": "up",
         "qualityPassed": True,
     }
+
+
+def _usable_cache(rows: list[dict], *, updated_at: str = "") -> dict:
+    return {
+        "ranking": rows,
+        "updatedAt": updated_at,
+        "cacheStatus": {
+            "usable": True,
+            "reason": "usable",
+            "currentMarketData": {"rowCount": 100, "maxOpenTime": 200},
+        },
+    }
+
+
+def _fail_rebuild_watchlist(*_args, **_kwargs) -> dict:
+    raise AssertionError("matching signal cache should skip rebuild")
 
 
 def _factor(name: str, description: str, direction: FactorDirection) -> FactorDefinition:
