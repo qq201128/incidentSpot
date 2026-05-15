@@ -20,6 +20,7 @@ LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
 LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
+DEFAULT_SIGNAL_THRESHOLD = 0.0
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ def build_live_signal_from_ranking(
         duration=duration,
         mined_by_name=None if context is None else context.mined_by_name,
     )
-    quality = _quality_gate(row, confidence, window, timing=timing)
+    quality = _quality_gate(row, confidence, window, timing=timing, score=score)
     payload = _live_signal_payload(
         _SignalContext(
             row=row,
@@ -170,6 +171,8 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "historicalTotalPeriods": ctx.row.get("totalPeriods"),
         "qualityPassed": ctx.quality["passed"],
         "qualityMetricsPassed": ctx.quality["metricsPassed"],
+        "qualityThresholdPassed": ctx.quality["thresholdPassed"],
+        "signalThreshold": _signal_threshold(ctx.row),
         "qualityEntryWindowPassed": ctx.quality["entryWindowPassed"],
         "factorTimingMode": ctx.timing.mode,
         "factorTimingPassed": ctx.quality["factorTimingPassed"],
@@ -179,7 +182,7 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityGateReason": ctx.quality["reason"],
         "qualityMinWinRate": LIVE_MIN_WIN_RATE,
         "qualityMinProfitFactor": LIVE_MIN_PROFIT_FACTOR,
-        "qualityMinPeriods": LIVE_MIN_TOTAL_PERIODS,
+        "qualityMinPeriods": _min_total_periods(ctx.row),
         "frameIndex": str(ctx.index),
     }
 
@@ -190,17 +193,21 @@ def _quality_gate(
     window: _EntryWindow,
     *,
     timing: FactorSignalTiming,
+    score: float,
 ) -> dict[str, Any]:
     metric_reason = _quality_metric_reason(row, confidence)
+    threshold_reason = _threshold_reason(row, score)
     entry_passed = _entry_window_passed(window)
     metrics_passed = metric_reason == "passed"
-    passed = metrics_passed and entry_passed is not False and timing.passed
+    threshold_passed = threshold_reason == "passed"
+    passed = metrics_passed and threshold_passed and entry_passed is not False and timing.passed
     return {
         "passed": passed,
         "metricsPassed": metrics_passed,
+        "thresholdPassed": threshold_passed,
         "entryWindowPassed": entry_passed,
         "factorTimingPassed": timing.passed,
-        "reason": _quality_reason(metric_reason, entry_passed, timing),
+        "reason": _quality_reason(metric_reason, threshold_reason, entry_passed, timing),
     }
 
 
@@ -212,12 +219,38 @@ def _quality_metric_reason(row: dict[str, Any], confidence: float) -> str:
         return "profit_factor_missing"
     if profit_factor < LIVE_MIN_PROFIT_FACTOR:
         return "profit_factor_below_min"
+    min_periods = _min_total_periods(row)
     total_periods = _finite_float(row.get("totalPeriods"))
     if total_periods is None:
         return "total_periods_missing"
-    if total_periods < LIVE_MIN_TOTAL_PERIODS:
+    if total_periods < min_periods:
         return "total_periods_below_min"
     return "passed"
+
+
+def _min_total_periods(row: dict[str, Any]) -> float:
+    value = _finite_float(row.get("minTrades"))
+    if value is None:
+        return float(LIVE_MIN_TOTAL_PERIODS)
+    if value <= 0:
+        raise ValueError(f"combination row has invalid minTrades: {row.get('factorName')}")
+    return value
+
+
+def _threshold_reason(row: dict[str, Any], score: float) -> str:
+    threshold = _signal_threshold(row)
+    if abs(score) < threshold:
+        return "signal_threshold_not_met"
+    return "passed"
+
+
+def _signal_threshold(row: dict[str, Any]) -> float:
+    threshold = _finite_float(row.get("threshold"))
+    if threshold is None:
+        return DEFAULT_SIGNAL_THRESHOLD
+    if threshold < 0:
+        raise ValueError(f"combination row has negative threshold: {row.get('factorName')}")
+    return threshold
 
 
 def _entry_window_passed(window: _EntryWindow) -> bool | None:
@@ -228,11 +261,14 @@ def _entry_window_passed(window: _EntryWindow) -> bool | None:
 
 def _quality_reason(
     metric_reason: str,
+    threshold_reason: str,
     entry_passed: bool | None,
     timing: FactorSignalTiming,
 ) -> str:
     if metric_reason != "passed":
         return metric_reason
+    if threshold_reason != "passed":
+        return threshold_reason
     if not timing.passed:
         return timing.reason
     if entry_passed is False:

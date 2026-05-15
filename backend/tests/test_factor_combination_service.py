@@ -8,19 +8,29 @@ from app.services import factor_combination_live_service as combo_live
 from app.services import factor_combination_service as combo_service
 from app.services import factor_learning_signal_filter
 from app.services import rule_signal_service
+from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_combination_service import CombinationSearchConfig
 from app.services.factor_combination_signal_service import (
     LIVE_MIN_PROFIT_FACTOR,
     LIVE_MIN_WIN_RATE,
     build_live_signal_from_ranking,
 )
-from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
+from app.services.factor_combo_simulation_keys import (
+    factor_combo_shadow_strategy_key,
+    high_winrate_factor_combo_simulation_strategy_key,
+)
+from app.services.factor_mined_candidates import MINED_FACTOR_SOURCE_FILE
 from app.services.factor_mined_candidates import MinedCandidateResult, MinedFrameResult
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
-from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
+from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
 ROWS = 1300
 HORIZON = 10
+
+
+@pytest.fixture(autouse=True)
+def no_high_winrate_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(combo_live, "get_cached_high_winrate_combo_ranking", lambda *_args: None)
 
 
 @pytest.fixture
@@ -82,6 +92,45 @@ def test_combination_ranking_returns_score_sorted_rows(
     assert report["baseFactors"][0]["factorScore"] > 0
 
 
+def test_combination_ranking_skips_mined_combo_candidates_but_keeps_agent_factors(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors[:2])
+    monkeypatch.setattr(
+        combo_service,
+        "build_mined_candidates",
+        lambda frame, **_kwargs: MinedCandidateResult(
+            frame,
+            (
+                _mined_candidate(
+                    "combo__factor_a__factor_b",
+                    "组合：未来收益动量 + 平滑收益动量",
+                    MINED_FACTOR_SOURCE_FILE,
+                ),
+                _mined_candidate("agent_alpha", "Agent单因子", AGENT_FACTOR_SOURCE_FILE),
+            ),
+            2,
+            (),
+        ),
+    )
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=5),
+    )
+
+    base_names = [item["name"] for item in report["baseFactors"]]
+    ranking_names = [item["factorName"] for item in report["ranking"]]
+
+    assert "agent_alpha" in base_names
+    assert "combo__factor_a__factor_b" not in base_names
+    assert all("combo__combo__" not in name for name in ranking_names)
+
+
 def test_live_signal_uses_cached_combo_members(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
@@ -135,6 +184,54 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
     assert blocked["qualityGateReason"] == "profit_factor_below_min"
     assert blocked["qualityMinWinRate"] == LIVE_MIN_WIN_RATE
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
+
+
+def test_live_signal_requires_thresholded_score_for_trade_quality(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = synthetic_frame.assign(factor_static=np.sin(np.arange(ROWS) / 11.0))
+    row = {
+        "factorName": "goal_combo__factor_static",
+        "factorDisplayName": "组合：固定弱信号",
+        "members": [{"name": "factor_static", "category": "return", "orientation": 1}],
+        "method": "oriented_expanding_zscore_pair_threshold_v1",
+        "threshold": 10.0,
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": ROWS,
+    }
+
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["qualityPassed"] is False
+    assert signal["qualityThresholdPassed"] is False
+    assert signal["qualityGateReason"] == "signal_threshold_not_met"
+    assert signal["signalThreshold"] == 10.0
+
+
+def test_live_signal_uses_row_min_trades_for_goal_combo(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    row = {
+        "factorName": "goal_combo__factor_a__factor_b",
+        "factorDisplayName": "组合：factor_a + factor_b",
+        "members": [{"name": "factor_a", "category": "return", "orientation": 1}],
+        "method": "oriented_expanding_zscore_pair_threshold_v1",
+        "threshold": 0.0,
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": 64,
+        "minTrades": 60,
+    }
+
+    signal = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["qualityPassed"] is True
+    assert signal["qualityMinPeriods"] == 60
 
 
 def test_live_signal_uses_completed_duration_entry_row(
@@ -218,6 +315,31 @@ def test_signal_watchlist_returns_top_three_per_duration(
     assert payload["topPerDuration"] == 3
 
 
+def test_signal_watchlist_marks_goal_combos_as_high_winrate_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    rows = [{"factorName": "goal_combo__alpha__beta"}]
+    monkeypatch.setattr(combo_live, "load_factor_frame", lambda _symbol, _duration: synthetic_frame)
+    monkeypatch.setattr(
+        combo_live,
+        "get_cached_combination_ranking",
+        lambda _symbol, dur: _usable_cache(rows) if dur == "10m" else None,
+    )
+    monkeypatch.setattr(
+        combo_live,
+        "materialize_mined_factor_frame_for_rows",
+        lambda frame, **_kwargs: MinedFrameResult(frame, 0, ()),
+    )
+    monkeypatch.setattr(combo_live, "mined_factor_rows_for_duration", lambda *_args: [])
+    monkeypatch.setattr(combo_live, "build_live_signal_from_ranking", _fake_live_signal)
+
+    payload = combo_live.rebuild_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
+
+    assert payload["signals"][0]["comboStrategyFamily"] == "high_winrate_goal"
+    assert payload["signals"][0]["simulationStrategyKey"] == high_winrate_factor_combo_simulation_strategy_key(1)
+
+
 def test_signal_watchlist_cache_read_does_not_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(combo_live, "get_cached_combination_signals", lambda _symbol: None)
     monkeypatch.setattr(combo_live, "rebuild_combination_signal_watchlist", _fail_rebuild_watchlist)
@@ -279,6 +401,27 @@ def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatc
     assert captured["entry_grace_ms"] > 0
 
 
+def test_rule_signal_routes_high_winrate_combo_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def predict_high_winrate_combo(symbol: str, duration: str, **kwargs) -> dict:
+        captured.update({"symbol": symbol, "duration": duration, **kwargs})
+        return {"strategy_key": HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}
+
+    monkeypatch.setattr(rule_signal_service, "predict_high_winrate_factor_combo_direction", predict_high_winrate_combo)
+
+    result = rule_signal_service.predict_rule_direction(
+        "btcusdt",
+        "10m",
+        entry_open_time=123,
+        strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+    )
+
+    assert result["strategy_key"] == HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
+    assert captured["symbol"] == "BTCUSDT"
+    assert captured["entry_open_time"] == 123
+
+
 def _fake_live_signal(
     _frame: pd.DataFrame,
     row: dict,
@@ -321,4 +464,20 @@ def _factor(name: str, description: str, direction: FactorDirection) -> FactorDe
         description=description,
         formula=name,
         direction=direction,
+    )
+
+
+def _mined_candidate(name: str, description: str, source_file: str):
+    factor = FactorDefinition(
+        name=name,
+        category=FactorCategory.PERFORMANCE,
+        description=description,
+        formula=name,
+        source_file=source_file,
+        direction=FactorDirection.HIGHER_BETTER,
+    )
+    return combo_service._BaseCandidate(
+        factor=factor,
+        metrics={"factorScore": 5.0, "winRate": 0.62, "sharpe": 1.1, "totalPeriods": ROWS},
+        orientation=1,
     )

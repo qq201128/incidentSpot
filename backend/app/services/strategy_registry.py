@@ -53,6 +53,8 @@ FIVE_BAR_10M_RM_RULE_NAME = "five_bar_10m_reverse_martingale_v1"
 
 FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
 FACTOR_COMBO_RULE_NAME = "factor_combo_cached_ranking_v1"
+HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY = "high_winrate_factor_combo_v1"
+HIGH_WINRATE_FACTOR_COMBO_RULE_NAME = "high_winrate_factor_combo_goal_v1"
 LSTM_SHADOW_DURATIONS = tuple(DURATION_TO_MINUTES)
 
 # 三连/四连/五连 10m：自动下单用面板基础数量；仅在指数 n 连形态再现时下注，无 Recovery 补单。
@@ -129,6 +131,19 @@ STRATEGIES = (
         requires_vegas_confirmation=False,
         signal_source="factor_combination_ranking",
         rule_names=(FACTOR_COMBO_RULE_NAME,),
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+    ),
+    StrategyDefinition(
+        key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+        name="高胜率目标组合",
+        description=(
+            "只读取 high-winrate goal 搜索写入的 goal_combo 组合；"
+            "用于把 10m/30m 70%+ 目标组合与普通多因子组合分开观察。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="high_winrate_factor_combo_goal",
+        rule_names=(HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,),
         requires_kline_features=True,
         uses_trade_policy_gates=False,
     ),
@@ -313,9 +328,43 @@ def strategy_definition(strategy_key: str | None) -> StrategyDefinition:
     for strategy in STRATEGIES:
         if strategy.key == key:
             return strategy
+    if key.startswith(f"{FACTOR_COMBO_STRATEGY_KEY}_top"):
+        return _factor_combo_shadow_strategy_definition(key)
+    if key.startswith(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top"):
+        return _high_winrate_combo_shadow_strategy_definition(key)
     if is_lstm_shadow_strategy(key):
         return _lstm_shadow_strategy_definition(key)
     raise ValueError(f"unsupported strategy: {key}")
+
+
+def _factor_combo_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
+    rank = strategy_key.removeprefix(f"{FACTOR_COMBO_STRATEGY_KEY}_top")
+    return StrategyDefinition(
+        key=strategy_key,
+        name=f"多因子组合胜率榜·Top{rank}",
+        description="多因子组合胜率榜影子排名，仅用于模拟实盘对比。",
+        requires_vegas_confirmation=False,
+        signal_source="factor_combination_ranking",
+        rule_names=(FACTOR_COMBO_RULE_NAME,),
+        tradable=False,
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+    )
+
+
+def _high_winrate_combo_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
+    rank = strategy_key.removeprefix(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top")
+    return StrategyDefinition(
+        key=strategy_key,
+        name=f"高胜率目标组合·Top{rank}",
+        description="高胜率目标组合影子排名，仅用于模拟实盘对比。",
+        requires_vegas_confirmation=False,
+        signal_source="high_winrate_factor_combo_goal",
+        rule_names=(HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,),
+        tradable=False,
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+    )
 
 
 def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:

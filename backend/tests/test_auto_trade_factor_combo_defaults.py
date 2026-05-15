@@ -3,9 +3,16 @@ from __future__ import annotations
 import sqlite3
 
 from app.db.session import _ensure_auto_trade_strategies
+from app.services import auto_trade_service
+from app.services.auto_trade_types import AutoTradeSettings
+from app.services.high_winrate_strategy_demotion import STATUS_ACTIVE, STATUS_DEMOTED
 from app.services.auto_trade_service import AUTO_TRADE_SLOT_DURATIONS
 from app.services.rule_config import DURATION_TO_MINUTES
-from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, ORDERBOOK_NOTIONAL_STRATEGY_KEY
+from app.services.strategy_registry import (
+    FACTOR_COMBO_STRATEGY_KEY,
+    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+    ORDERBOOK_NOTIONAL_STRATEGY_KEY,
+)
 
 
 def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
@@ -27,6 +34,42 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert set(by_duration) == set(AUTO_TRADE_SLOT_DURATIONS)
     assert all(by_duration[duration]["enabled"] == 1 for duration in AUTO_TRADE_SLOT_DURATIONS)
     assert all(by_duration[duration]["live_trading_enabled"] == 0 for duration in AUTO_TRADE_SLOT_DURATIONS)
+
+
+def test_high_winrate_live_trade_requires_active_status(monkeypatch) -> None:
+    settings = _high_winrate_settings(live=True)
+    prediction = _passing_prediction()
+    monkeypatch.setattr(
+        auto_trade_service,
+        "high_winrate_demotion_status",
+        lambda *_args: {"status": STATUS_DEMOTED},
+    )
+
+    assert auto_trade_service._is_prediction_tradable(prediction, settings) is False
+
+
+def test_high_winrate_sim_trade_keeps_collecting_when_demoted(monkeypatch) -> None:
+    settings = _high_winrate_settings(live=False)
+    prediction = _passing_prediction()
+    monkeypatch.setattr(
+        auto_trade_service,
+        "high_winrate_demotion_status",
+        lambda *_args: {"status": STATUS_DEMOTED},
+    )
+
+    assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
+
+
+def test_high_winrate_live_trade_allowed_when_active(monkeypatch) -> None:
+    settings = _high_winrate_settings(live=True)
+    prediction = _passing_prediction()
+    monkeypatch.setattr(
+        auto_trade_service,
+        "high_winrate_demotion_status",
+        lambda *_args: {"status": STATUS_ACTIVE},
+    )
+
+    assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
 
 
 def _auto_trade_conn() -> sqlite3.Connection:
@@ -68,3 +111,23 @@ def _insert_strategy(
         """,
         (key, duration, enabled, live, DURATION_TO_MINUTES[duration]),
     )
+
+
+def _high_winrate_settings(*, live: bool) -> AutoTradeSettings:
+    return AutoTradeSettings(
+        strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+        enabled=True,
+        symbol="BTCUSDT",
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=live,
+    )
+
+
+def _passing_prediction() -> dict:
+    return {
+        "probability_up": 0.8,
+        "trade_quality_passed": 1,
+        "trade_quality_score": 0.8,
+    }

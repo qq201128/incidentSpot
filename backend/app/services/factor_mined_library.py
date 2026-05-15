@@ -14,10 +14,12 @@ from app.services.factor_learning_common import (
     utc_now,
 )
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
 MINED_FACTOR_LIBRARY_VERSION = "mined_factor_library_v1"
 MINED_FACTOR_LIBRARY_PATH = FACTOR_LEARNING_DIR / "mined_factor_library.json"
 MINED_FACTOR_SOURCE = "factor_combo_ranking"
+MINED_FACTOR_SOURCE_FILE = "mined_factor_library.json"
 SUMMARY_FACTOR_LIMIT = 12
 
 
@@ -39,6 +41,44 @@ def mined_factor_rows_for_duration(symbol: str, duration: str) -> list[dict[str,
         for row in rows
         if _row_symbol(row) == symbol.strip().upper() and str(row.get("duration")) == duration
     ]
+
+
+def mined_factor_rows() -> list[dict[str, Any]]:
+    return deepcopy(load_mined_factor_library().get("factors") or [])
+
+
+def mined_factor_definition(row: dict[str, Any]) -> FactorDefinition:
+    duration = str(row.get("duration") or "")
+    return FactorDefinition(
+        name=str(row["factorName"]),
+        category=FactorCategory.PERFORMANCE,
+        description=str(row.get("factorDisplayName") or row["factorName"]),
+        formula=str(row.get("formula") or row["factorName"]),
+        source_file=MINED_FACTOR_SOURCE_FILE,
+        timeframes=(duration,) if duration else (),
+        direction=FactorDirection.HIGHER_BETTER,
+        parameters=_mined_factor_parameters(row),
+    )
+
+
+def mined_factor_payload(row: dict[str, Any]) -> dict[str, Any]:
+    metrics = row.get("metrics") or {}
+    return {
+        "name": str(row["factorName"]),
+        "category": "performance",
+        "categoryName": "绩效因子",
+        "displayName": str(row.get("factorDisplayName") or row["factorName"]),
+        "description": str(row.get("description") or row.get("factorDisplayName") or row["factorName"]),
+        "formula": str(row.get("formula") or row["factorName"]),
+        "sourceFile": MINED_FACTOR_SOURCE_FILE,
+        "timeframes": [str(row.get("duration"))] if row.get("duration") else [],
+        "direction": FactorDirection.HIGHER_BETTER.value,
+        "parameters": _mined_factor_parameters(row),
+        "symbol": _row_symbol(row),
+        "duration": str(row.get("duration") or ""),
+        "promotionCount": int(row.get("promotionCount") or 0),
+        "metrics": dict(metrics) if isinstance(metrics, dict) else {},
+    }
 
 
 def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
@@ -88,6 +128,8 @@ def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] 
         "category": "performance",
         "source": MINED_FACTOR_SOURCE,
         "members": [_member_payload(member) for member in members],
+        "threshold": finite(row.get("threshold")),
+        "minTrades": int(row.get("minTrades") or row.get("totalPeriods") or 0),
         "metrics": _metric_payload(row),
         "score": _row_score(row),
         "firstSeenAt": now,
@@ -155,6 +197,18 @@ def _threshold_payload() -> dict[str, float]:
     return {
         "minWinRate": SUCCESS_WIN_RATE_MIN,
         "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
+    }
+
+
+def _mined_factor_parameters(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "members": [
+            str(member["name"])
+            for member in row.get("members") or []
+            if isinstance(member, dict) and member.get("name")
+        ],
+        "symbol": _row_symbol(row),
+        "duration": str(row.get("duration") or ""),
     }
 
 

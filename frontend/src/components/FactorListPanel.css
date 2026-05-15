@@ -1,6 +1,9 @@
 .factors-list-panel {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   padding: 14px 16px 16px;
   min-height: 200px;
+  overflow: hidden;
 }
 
 .factors-section-head {
@@ -14,11 +17,34 @@
   white-space: nowrap;
 }
 
+.factors-list-tabs {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.factors-list-tab {
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.factors-list-tab-active {
+  border-color: rgba(120, 167, 255, 0.5);
+  background: rgba(120, 167, 255, 0.1);
+  color: var(--blue);
+}
+
 .factors-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  max-height: 84px;
+  max-height: 72px;
   margin-bottom: 12px;
   padding-right: 4px;
   overflow: auto;
@@ -26,7 +52,8 @@
 
 .factors-chip {
   border-radius: 999px;
-  padding: 6px 12px;
+  min-height: 28px;
+  padding: 4px 10px;
   font-size: 12px;
   font-weight: 700;
   background: var(--surface-3);
@@ -77,7 +104,7 @@
 }
 
 .factors-table-wrap {
-  max-height: 460px;
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -91,7 +118,7 @@
 
 .factors-table th {
   text-align: left;
-  padding: 9px 11px;
+  padding: 7px 10px;
   background: rgba(9, 13, 16, 0.9);
   color: var(--gold);
   font-weight: 700;
@@ -102,7 +129,7 @@
 }
 
 .factors-table td {
-  padding: 9px 11px;
+  padding: 7px 10px;
   border-bottom: 1px solid rgba(43, 54, 61, 0.65);
   vertical-align: top;
 }
@@ -121,7 +148,7 @@
 
 .factors-code {
   display: inline-block;
-  margin-top: 4px;
+  margin-top: 2px;
   font-size: 12px;
   color: var(--blue);
   background: rgba(120, 167, 255, 0.08);
@@ -177,6 +204,14 @@
 }
 
 @media (max-width: 640px) {
+  .factors-list-panel {
+    overflow: visible;
+  }
+
+  .factors-table-wrap {
+    max-height: 420px;
+  }
+
   .factors-list-controls,
   .factors-pagination {
     grid-template-columns: 1fr;

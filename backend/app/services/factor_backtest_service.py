@@ -21,6 +21,11 @@ from scipy import stats
 from app.services.factor_duration_alignment import backtest_duration_frame
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_metric_enrichment import backtest_validity, enrich_factor_results
+from app.services.factor_catalog import (
+    factor_definition_for_backtest,
+    is_mined_factor_definition,
+    mined_factor_row_for_backtest,
+)
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
 from app.services.factor_registry import (
     FactorCategory,
@@ -63,11 +68,10 @@ def run_factor_backtest(
 ) -> dict[str, Any]:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    factor_def = get_factor(factor_name)
-    if factor_def is None:
-        raise ValueError(f"unknown factor: {factor_name}")
+    factor_def = factor_definition_for_backtest(factor_name, symbol, duration)
 
     feature_frame = load_factor_frame(symbol, duration)
+    feature_frame = _materialized_frame_for_factor(feature_frame, factor_def, symbol, duration)
     result = run_factor_backtest_on_frame(
         factor_def,
         feature_frame,
@@ -121,6 +125,30 @@ def run_factor_ranking(
     enrich_factor_results(results, frame=feature_frame)
     results.sort(key=lambda x: x.get("factorScore") or 0.0, reverse=True)
     return results
+
+
+def _materialized_frame_for_factor(
+    frame: pd.DataFrame,
+    factor_def: FactorDefinition,
+    symbol: str,
+    duration: str,
+) -> pd.DataFrame:
+    if not is_mined_factor_definition(factor_def):
+        return frame
+    row = mined_factor_row_for_backtest(factor_def.name, symbol, duration)
+    if row is None:
+        raise ValueError(f"unknown mined factor for {symbol.upper()} {duration}: {factor_def.name}")
+    from app.services.factor_mined_candidates import materialize_mined_factor_frame_for_targets
+
+    materialized = materialize_mined_factor_frame_for_targets(
+        frame,
+        symbol=symbol.upper(),
+        duration=duration,
+        target_rows=[row],
+    )
+    if materialized.failures:
+        raise ValueError(f"failed to materialize mined factor {factor_def.name}: {materialized.failures}")
+    return materialized.frame
 
 
 def _compute_factor_metrics(

@@ -13,6 +13,7 @@ from app.services.factor_combo_simulation_keys import (
 )
 from app.services.factor_combo_strategy import predict_factor_combo_rank_direction
 from app.services.forward_validation_service import settle_due_predictions
+from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_demotion
 from app.services.kline_timing import (
     MS_PER_MINUTE,
     current_rule_entry_open_time_for_duration,
@@ -99,6 +100,12 @@ async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> 
     await asyncio.gather(
         *(
             asyncio.to_thread(settle_due_predictions, symbol, duration)
+            for symbol, duration in _unique_symbol_durations(settings_list)
+        )
+    )
+    await asyncio.gather(
+        *(
+            asyncio.to_thread(evaluate_high_winrate_demotion, symbol, duration)
             for symbol, duration in _unique_symbol_durations(settings_list)
         )
     )

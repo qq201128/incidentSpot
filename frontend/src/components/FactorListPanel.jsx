@@ -3,10 +3,16 @@ import { directionLabel, factorTitle } from "./factorDisplayUtils";
 import "./FactorListPanel.css";
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48];
+const LIST_TABS = [
+  { key: "single", label: "单因子", title: "因子列表" },
+  { key: "combo", label: "组合因子", title: "组合因子列表" },
+];
 
 export default function FactorListPanel({
   categories,
   category,
+  comboFactors,
+  comboTotal,
   factors,
   onCategoryChange,
   onQueryChange,
@@ -15,18 +21,22 @@ export default function FactorListPanel({
   selectedName,
   total,
 }) {
+  const [activeTab, setActiveTab] = useState(LIST_TABS[0].key);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
-  const totalItems = factors.length;
+  const activeFactors = activeTab === "combo" ? comboFactors : factors;
+  const activeTotal = activeTab === "combo" ? comboTotal : total;
+  const totalItems = activeFactors.length;
   const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
   const visibleFactors = useMemo(
-    () => factors.slice((page - 1) * pageSize, page * pageSize),
-    [factors, page, pageSize],
+    () => activeFactors.slice((page - 1) * pageSize, page * pageSize),
+    [activeFactors, page, pageSize],
   );
+  const activeTitle = listTitle(activeTab);
 
   useEffect(() => {
     setPage(1);
-  }, [category, query, pageSize]);
+  }, [activeTab, category, query, pageSize]);
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -37,11 +47,14 @@ export default function FactorListPanel({
       <div className="section-head factors-section-head">
         <div>
           <span className="section-kicker">筛选</span>
-          <h2>因子列表</h2>
+          <h2>{activeTitle}</h2>
         </div>
-        <span className="factors-count">{totalItems} / {total} 项</span>
+        <span className="factors-count">{totalItems} / {activeTotal} 项</span>
       </div>
-      <CategoryChips categories={categories} category={category} onChange={onCategoryChange} />
+      <ListTabs activeTab={activeTab} onChange={setActiveTab} />
+      {activeTab === "single" ? (
+        <CategoryChips categories={categories} category={category} onChange={onCategoryChange} />
+      ) : null}
       <div className="factors-list-controls">
         <SearchBox query={query} onChange={onQueryChange} />
         <PageSizeSelect pageSize={pageSize} onChange={setPageSize} />
@@ -55,6 +68,29 @@ export default function FactorListPanel({
         onPageChange={setPage}
       />
     </section>
+  );
+}
+
+function listTitle(activeTab) {
+  return LIST_TABS.find((item) => item.key === activeTab)?.title || LIST_TABS[0].title;
+}
+
+function ListTabs({ activeTab, onChange }) {
+  return (
+    <div className="factors-list-tabs" role="tablist" aria-label="因子列表类型">
+      {LIST_TABS.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === item.key}
+          className={`factors-list-tab${activeTab === item.key ? " factors-list-tab-active" : ""}`}
+          onClick={() => onChange(item.key)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

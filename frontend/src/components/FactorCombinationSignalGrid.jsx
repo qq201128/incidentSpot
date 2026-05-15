@@ -35,6 +35,9 @@ function SignalCard({ onSelect, selected, signal }) {
         <span>{signal.duration} · Top{signal.comboRank || "—"}</span>
         <strong>{directionText(signal.direction)}</strong>
       </div>
+      <span className={`factor-combo-signal-family ${familyClass(signal)}`}>
+        {familyText(signal)}
+      </span>
       <h3 title={signal.factorDisplayName}>{signal.factorDisplayName || signal.factorName}</h3>
       <p>{memberText(signal.members)}</p>
       <div className="factor-combo-signal-metrics">
@@ -85,8 +88,21 @@ function Metric({ label, value }) {
 }
 
 function simulationLabel(signal) {
+  if (signal.comboStrategyFamily === "high_winrate_goal") {
+    return signal.comboRank === 1 ? "高胜率主策略" : `高胜率影子${signal.comboRank}`;
+  }
   if (signal.simulationStrategyKey) return signal.comboRank === 1 ? "实盘主策略" : `实盘影子${signal.comboRank}`;
   return "未标记";
+}
+
+function familyText(signal) {
+  if (signal.comboStrategyFamily === "high_winrate_goal") return "高胜率目标";
+  return "普通组合";
+}
+
+function familyClass(signal) {
+  if (signal.comboStrategyFamily === "high_winrate_goal") return "is-goal";
+  return "is-regular";
 }
 
 function memberText(members) {

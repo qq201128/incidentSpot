@@ -1,0 +1,52 @@
+.factor-learning-page {
+  width: min(100%, 1520px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.factor-learning-page-topbar {
+  min-height: 70px;
+}
+
+.factor-learning-page-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px 12px;
+}
+
+.factor-learning-page-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.factor-learning-page-controls input,
+.factor-learning-page-controls select {
+  min-width: 140px;
+}
+
+.factor-learning-page-body {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.factor-learning-page-body .factor-learning-panel {
+  padding-bottom: 20px;
+}
+
+@media (max-width: 720px) {
+  .factor-learning-page-controls,
+  .factor-learning-page-controls label {
+    align-items: stretch;
+  }
+
+  .factor-learning-page-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-content: stretch;
+  }
+}

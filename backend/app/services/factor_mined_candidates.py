@@ -76,6 +76,25 @@ def materialize_mined_factor_frame_for_rows(
     )
 
 
+def materialize_mined_factor_frame_for_targets(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+    target_rows: list[dict[str, Any]],
+) -> MinedFrameResult:
+    source_rows = mined_factor_rows_for_duration(symbol, duration)
+    selected = _target_and_dependency_rows(target_rows, source_rows)
+    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    return _materialize_mined_rows(
+        agent.frame,
+        selected,
+        agent.source_count,
+        agent.failures,
+        source_count=len(source_rows),
+    )
+
+
 def _materialize_mined_rows(
     frame: pd.DataFrame,
     rows: list[dict[str, Any]],
@@ -105,6 +124,16 @@ def _dependency_rows(target_rows: list[dict[str, Any]], source_rows: list[dict[s
     selected: dict[str, dict[str, Any]] = {}
     for row in target_rows:
         _collect_dependencies(row, by_name, selected, set())
+    return list(selected.values())
+
+
+def _target_and_dependency_rows(
+    target_rows: list[dict[str, Any]],
+    source_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected = {str(row.get("factorName")): row for row in _dependency_rows(target_rows, source_rows)}
+    for row in target_rows:
+        selected[str(row.get("factorName"))] = row
     return list(selected.values())
 
 

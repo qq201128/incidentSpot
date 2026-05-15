@@ -9,9 +9,16 @@ from app.services.factor_cache_metadata import (
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
-from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, FACTOR_COMBO_RULE_NAME
+from app.services.strategy_registry import (
+    FACTOR_COMBO_STRATEGY_KEY,
+    FACTOR_COMBO_RULE_NAME,
+    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+    HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,
+)
 
 
 def predict_factor_combo_direction(
@@ -31,6 +38,24 @@ def predict_factor_combo_direction(
     )
 
 
+def predict_high_winrate_factor_combo_direction(
+    symbol: str,
+    duration: str = RULE_DURATION,
+    *,
+    entry_open_time: int | None = None,
+    entry_grace_ms: int | None = None,
+) -> dict[str, Any]:
+    return predict_factor_combo_rank_direction(
+        symbol,
+        duration,
+        combo_rank=1,
+        result_strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+        entry_open_time=entry_open_time,
+        entry_grace_ms=entry_grace_ms,
+        require_high_winrate_goal=True,
+    )
+
+
 def predict_factor_combo_rank_direction(
     symbol: str,
     duration: str = RULE_DURATION,
@@ -39,15 +64,18 @@ def predict_factor_combo_rank_direction(
     result_strategy_key: str,
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
+    require_high_winrate_goal: bool = False,
 ) -> dict[str, Any]:
     if duration not in SUPPORTED_RULE_DURATIONS:
         supported = sorted(SUPPORTED_RULE_DURATIONS)
         raise ValueError(f"factor combo strategy supports only {supported}, got {duration}")
-    cached = get_cached_combination_ranking(symbol, duration)
+    cached = _ranking_cache(symbol, duration, require_high_winrate_goal)
     if cached is None:
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
     assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
     top = _ranked_combo(cached, combo_rank)
+    if require_high_winrate_goal:
+        _assert_high_winrate_combo(top, combo_rank, symbol, duration)
     frame = materialize_mined_factor_frame(
         load_factor_frame(symbol, duration),
         symbol=symbol,
@@ -78,6 +106,21 @@ def _ranked_combo(cached: dict[str, Any], combo_rank: int) -> dict[str, Any]:
     return {**dict(ranking[combo_rank - 1]), "comboRank": combo_rank}
 
 
+def _ranking_cache(symbol: str, duration: str, high_winrate_goal: bool) -> dict[str, Any] | None:
+    if high_winrate_goal:
+        return get_cached_high_winrate_combo_ranking(symbol, duration)
+    return get_cached_combination_ranking(symbol, duration)
+
+
+def _assert_high_winrate_combo(row: dict[str, Any], rank: int, symbol: str, duration: str) -> None:
+    factor_name = str(row.get("factorName") or "")
+    if is_high_winrate_combo_name(factor_name):
+        return
+    raise ValueError(
+        f"Top{rank} for {symbol.upper()} {duration} is not a high-winrate goal combo: {factor_name}"
+    )
+
+
 def _prediction_payload(
     signal: dict[str, Any],
     entry_open_time: int | None,
@@ -86,6 +129,7 @@ def _prediction_payload(
     cache_reason: str,
 ) -> dict[str, Any]:
     open_time = int(entry_open_time if entry_open_time is not None else signal["sourceOpenTime"])
+    gate_name = _gate_name(strategy_key)
     return {
         "symbol": signal["symbol"],
         "strategy_key": strategy_key,
@@ -98,10 +142,10 @@ def _prediction_payload(
         "certainty_label": "FACTOR_COMBO_TRADE" if signal["qualityPassed"] else "FACTOR_COMBO_WAIT",
         "trade_quality_score": _trade_quality_score(signal),
         "trade_quality_passed": signal["qualityPassed"],
-        "trade_quality_gate": FACTOR_COMBO_RULE_NAME,
-        "high_winrate_gate": None,
+        "trade_quality_gate": gate_name,
+        "high_winrate_gate": gate_name,
         "high_winrate_rule": str(signal["factorName"]),
-        "high_winrate_gate_passed": None,
+        "high_winrate_gate_passed": signal["qualityPassed"],
         "high_winrate_gate_value": signal["historicalWinRate"],
         "high_winrate_gate_min": signal["qualityMinWinRate"],
         "quality_gate_reason": signal["qualityGateReason"],
@@ -116,7 +160,7 @@ def _prediction_payload(
 def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
     member_names = ",".join(str(member["name"]) for member in signal["members"])
     reasons = [
-        f"rule={FACTOR_COMBO_RULE_NAME}",
+        f"rule={_signal_rule_name(signal)}",
         f"combo={signal['factorName']}",
         f"combo_rank={signal.get('comboRank') or 1}",
         f"combo_cache={cache_reason}",
@@ -125,6 +169,8 @@ def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
         f"historical_win_rate={signal['historicalWinRate']}",
         f"historical_profit_factor={signal['historicalProfitFactor']}",
         f"score={signal['score']}",
+        f"signal_threshold={signal.get('signalThreshold')}",
+        f"signal_threshold_passed={signal.get('qualityThresholdPassed')}",
         f"quality_gate={signal['qualityGateReason']}",
         f"factor_timing={signal.get('factorTimingReason')}",
         f"factor_timing_passed={signal.get('factorTimingPassed')}",
@@ -136,6 +182,18 @@ def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
     if isinstance(learning, dict):
         reasons.extend(_factor_learning_reasons(learning))
     return reasons
+
+
+def _gate_name(strategy_key: str) -> str:
+    if strategy_key.startswith(HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY):
+        return HIGH_WINRATE_FACTOR_COMBO_RULE_NAME
+    return FACTOR_COMBO_RULE_NAME
+
+
+def _signal_rule_name(signal: dict[str, Any]) -> str:
+    if is_high_winrate_combo_name(str(signal.get("factorName") or "")):
+        return HIGH_WINRATE_FACTOR_COMBO_RULE_NAME
+    return FACTOR_COMBO_RULE_NAME
 
 
 def _trade_quality_score(signal: dict[str, Any]) -> float:

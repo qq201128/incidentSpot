@@ -16,7 +16,11 @@ from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_memory_store import load_factor_learning_memory
 from app.services.factor_mined_candidates import materialize_mined_factor_frame_for_rows
 from app.services.factor_mined_library import mined_factor_rows_for_duration
-from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_key
+from app.services.factor_combo_simulation_keys import (
+    is_high_winrate_combo_name,
+    simulation_strategy_key_for_combo,
+)
+from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 
@@ -50,7 +54,7 @@ def rebuild_combination_signal_watchlist(
     for duration in BACKTEST_DURATION_ORDER:
         if duration not in SUPPORTED_RULE_DURATIONS:
             continue
-        cached = get_cached_combination_ranking(symbol, duration)
+        cached = _preferred_signal_cache(symbol, duration)
         if cached is None:
             missing.append(duration)
             continue
@@ -106,16 +110,26 @@ def _top_ranking_rows(cached: dict[str, Any], top_per_duration: int) -> list[dic
     return [dict(row) for row in ranking[:top_per_duration]]
 
 
+def _preferred_signal_cache(symbol: str, duration: str) -> dict[str, Any] | None:
+    high = get_cached_high_winrate_combo_ranking(symbol, duration)
+    if high is not None and cache_is_usable_for_live_signal(high):
+        return high
+    return get_cached_combination_ranking(symbol, duration)
+
+
 def _rows_by_name(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(row.get("factorName")): row for row in rows}
 
 
 def _simulation_signal(signal: dict[str, Any], rank: int) -> dict[str, Any]:
+    factor_name = str(signal.get("factorName") or "")
+    is_goal = is_high_winrate_combo_name(factor_name)
     return {
         **signal,
         "comboRank": rank,
+        "comboStrategyFamily": "high_winrate_goal" if is_goal else "regular_combo",
         "simulationMode": "paper_live",
-        "simulationStrategyKey": factor_combo_simulation_strategy_key(rank),
+        "simulationStrategyKey": simulation_strategy_key_for_combo(factor_name, rank),
     }
 
 
@@ -228,7 +242,7 @@ def _duration_cache_reasons(symbol: str) -> dict[str, str]:
     for duration in BACKTEST_DURATION_ORDER:
         if duration not in SUPPORTED_RULE_DURATIONS:
             continue
-        cached = get_cached_combination_ranking(symbol, duration)
+        cached = _preferred_signal_cache(symbol, duration)
         reasons[duration] = _duration_cache_stamp(cached)
     return reasons
 

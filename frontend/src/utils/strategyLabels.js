@@ -14,6 +14,11 @@ export const STRATEGY_LABELS = {
   four_bar_10m_reverse_martingale_v1: "四连10m反向·不倍投",
   five_bar_10m_reverse_martingale_v1: "五连10m反向·不倍投",
   factor_combo_ranker_v1: "多因子组合胜率榜",
+  factor_combo_ranker_v1_top2: "多因子组合胜率榜·Top2",
+  factor_combo_ranker_v1_top3: "多因子组合胜率榜·Top3",
+  high_winrate_factor_combo_v1: "高胜率目标组合",
+  high_winrate_factor_combo_v1_top2: "高胜率目标组合·Top2",
+  high_winrate_factor_combo_v1_top3: "高胜率目标组合·Top3",
 };
 
 export function strategyLabel(key) {

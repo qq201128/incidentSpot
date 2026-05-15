@@ -1,6 +1,15 @@
 .factors-page {
-  gap: 16px;
+  --factors-workbench-h: calc(100vh - var(--layout-chrome) - 144px);
+  gap: 12px;
   grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.factors-topbar {
+  min-height: 62px;
+}
+
+.factors-topbar h1 {
+  font-size: 22px;
 }
 
 .factors-status-pill {
@@ -9,7 +18,7 @@
 }
 
 .factors-toolbar {
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid rgba(81, 100, 108, 0.64);
   background: rgba(13, 18, 23, 0.78);
@@ -19,13 +28,13 @@
 .factors-toolbar-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
+  align-items: center;
+  gap: 8px 12px;
 }
 
 .factors-toolbar-row label {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
   font-size: 12px;
   color: var(--muted);
@@ -35,6 +44,10 @@
 .factors-toolbar-row input,
 .factors-toolbar-row select {
   min-width: 140px;
+}
+
+.factors-toolbar-row button {
+  min-height: 34px;
 }
 
 .factors-btn-secondary {
@@ -49,9 +62,10 @@
 }
 
 .factors-rank-hint {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   font-size: 13px;
   color: var(--muted);
+  line-height: 1.35;
 }
 
 .card-surface {
@@ -62,31 +76,77 @@
   box-shadow: var(--shadow);
 }
 
-.factors-grid {
+.factors-workbench {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: minmax(320px, 420px) minmax(620px, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  height: clamp(480px, var(--factors-workbench-h), 680px);
   min-height: 0;
 }
 
-.factors-secondary-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 16px;
-  align-items: start;
+.factors-workbench > * {
+  min-width: 0;
+  min-height: 0;
 }
 
-@media (max-width: 960px) {
-  .factors-grid,
-  .factors-secondary-grid {
+.factors-workspace-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.factors-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.factors-workspace-tabs button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.factors-workspace-tabs .factors-workspace-tab-active {
+  border-color: rgba(63, 211, 166, 0.55);
+  color: var(--green);
+  background: rgba(63, 211, 166, 0.1);
+}
+
+.factors-workspace-content {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 1240px) {
+  .factors-page {
+    --factors-workbench-h: auto;
+  }
+
+  .factors-workbench {
     grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .factors-workspace-panel {
+    overflow: visible;
+  }
+
+  .factors-workspace-content {
+    overflow: visible;
   }
 }
 
 .factors-detail-panel {
-  padding: 14px 16px 18px;
+  padding: 14px 16px 16px;
   min-height: 200px;
+  overflow: auto;
 }
 
 .factors-desc-preview {
@@ -113,9 +173,9 @@
 }
 
 .factors-dl {
-  margin: 0 0 18px;
+  margin: 0 0 14px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .factors-dl > div {
@@ -133,22 +193,24 @@
 
 .factors-dl dd {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .factors-formula {
   display: block;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
-  line-height: 1.5;
+  max-height: 92px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .factors-backtest-block {
   border-top: 1px solid var(--line);
-  padding-top: 14px;
-  margin-bottom: 16px;
+  padding-top: 12px;
+  margin-bottom: 14px;
 }
 
 .factors-subhead {
@@ -159,10 +221,10 @@
 }
 
 .factors-metrics {
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px 14px;
+  grid-template-columns: repeat(auto-fill, minmax(106px, 1fr));
+  gap: 8px 10px;
 }
 
 .factors-metrics dt {
@@ -173,17 +235,17 @@
 
 .factors-metrics dd {
   margin: 2px 0 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .factors-ranking-block {
   border-top: 1px solid var(--line);
-  padding-top: 14px;
+  padding-top: 12px;
 }
 
 .factors-ranking-wrap {
-  max-height: min(36vh, 360px);
+  max-height: 260px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -198,4 +260,21 @@
 
 .factors-ranking-empty {
   border-top: none;
+}
+
+@media (max-width: 720px) {
+  .factors-status-pill {
+    max-width: none;
+    text-align: left;
+  }
+
+  .factors-toolbar-row,
+  .factors-toolbar-row label {
+    align-items: stretch;
+  }
+
+  .factors-toolbar-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }

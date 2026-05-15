@@ -244,3 +244,29 @@ CREATE TABLE IF NOT EXISTS factor_combo_signal_cache (
   limit_count INTEGER NOT NULL,
   payload TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS high_winrate_combo_ranking_cache (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  search_config TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (symbol, duration)
+);
+
+CREATE TABLE IF NOT EXISTS high_winrate_strategy_status (
+  strategy_key TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  sample_count INTEGER NOT NULL,
+  win_rate REAL,
+  profit_factor REAL,
+  consecutive_losses INTEGER NOT NULL,
+  evaluated_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (strategy_key, symbol, duration)
+);

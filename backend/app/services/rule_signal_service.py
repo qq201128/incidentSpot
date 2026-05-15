@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.blind_reverse_martingale_strategy import predict_blind_reverse_martingale_direction
-from app.services.factor_combo_strategy import predict_factor_combo_direction
+from app.services.factor_combo_strategy import (
+    predict_factor_combo_direction,
+    predict_high_winrate_factor_combo_direction,
+)
 from app.services.lstm_prediction_service import predict_lstm_shadow_prediction
 from app.services.orderbook_notional_strategy import predict_orderbook_notional_direction
 from app.services.orderbook_trade_flow_strategy import predict_orderbook_trade_flow_direction
@@ -19,6 +22,7 @@ from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
     FIVE_BAR_10M_RM_STRATEGY_KEY,
     FOUR_BAR_10M_RM_STRATEGY_KEY,
+    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_10M_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_MG_51020_STRATEGY_KEY,
     ORDERBOOK_NOTIONAL_15M_STRATEGY_KEY,
@@ -110,7 +114,14 @@ def _predict_factor_combo(
     entry_grace_ms: int,
 ) -> dict[str, Any] | None:
     if strategy_key != FACTOR_COMBO_STRATEGY_KEY:
-        return None
+        if strategy_key != HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
+            return None
+        return predict_high_winrate_factor_combo_direction(
+            symbol,
+            duration,
+            entry_open_time=entry_open_time,
+            entry_grace_ms=entry_grace_ms,
+        )
     return predict_factor_combo_direction(
         symbol,
         duration,

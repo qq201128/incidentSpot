@@ -49,12 +49,29 @@ def test_paper_signal_waits_when_latest_score_is_inside_threshold() -> None:
     assert signal["members"][1]["orientation"] == -1
 
 
+def test_search_frame_uses_next_duration_bar_return() -> None:
+    frame = pd.DataFrame(
+        {
+            "open_time": [0, THIRTY_MINUTES_MS, THIRTY_MINUTES_MS * 2],
+            "close": [100.0, 105.0, 90.0],
+            "factor_a": [1.0, 2.0, 3.0],
+        }
+    )
+
+    result = goal._search_frame(frame, "30m")
+
+    assert result["fwd_ret"].iloc[0] == pytest.approx(0.05)
+    assert result["fwd_ret"].iloc[1] == pytest.approx(90.0 / 105.0 - 1.0)
+    assert pd.isna(result["fwd_ret"].iloc[2])
+
+
 def test_run_goal_promotes_selected_combos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     output = tmp_path / "report.json"
     library = tmp_path / "library.json"
     frame = _frame()
     hit = goal.ComboHit(("factor_a", "factor_b"), (1, -1), 1.0, 0.75, 2.0, ROWS, 0.01, _score())
     promoted = []
+    cached = []
 
     monkeypatch.setattr(goal, "load_backend_env_file", lambda: None)
     monkeypatch.setattr(goal, "load_factor_frame", lambda *_args: frame)
@@ -66,15 +83,69 @@ def test_run_goal_promotes_selected_combos(monkeypatch: pytest.MonkeyPatch, tmp_
         "upsert_good_combinations",
         lambda report: promoted.append(report["ranking"][0]["factorName"]) or {"promoted": 1, "libraryTotal": 1},
     )
+    monkeypatch.setattr(goal, "save_cached_high_winrate_combo_ranking", lambda report: cached.append(report["duration"]))
+    monkeypatch.setattr(goal, "promote_high_winrate_strategy", lambda *_args: {"status": "active"})
+    monkeypatch.setattr(goal, "rebuild_combination_signal_watchlist", lambda _symbol: {"symbol": "BTCUSDT"})
+    monkeypatch.setattr(goal, "save_cached_combination_signals", lambda _payload: None)
 
     payload = goal.run_goal("btcusdt", "30m", 1, output, library)
 
     report = json.loads(output.read_text(encoding="utf-8"))
     stored = json.loads(library.read_text(encoding="utf-8"))
     assert promoted == ["goal_combo__factor_a__factor_b"]
+    assert cached == ["30m"]
     assert payload["promotion"]["promoted"] == 1
     assert report["promotion"]["libraryTotal"] == 1
     assert stored["factors"][0]["members"][1]["orientation"] == -1
+
+
+def test_library_payload_preserves_trade_threshold(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(goal, "load_backend_env_file", lambda: None)
+    monkeypatch.setattr(goal, "load_factor_frame", lambda *_args: _frame())
+    monkeypatch.setattr(goal, "_search_frame", lambda *_args: _frame())
+    monkeypatch.setattr(goal, "_oriented_scores", lambda _frame: {})
+    monkeypatch.setattr(goal, "save_cached_high_winrate_combo_ranking", lambda _report: None)
+    monkeypatch.setattr(goal, "promote_high_winrate_strategy", lambda *_args: {"status": "active"})
+    monkeypatch.setattr(goal, "rebuild_combination_signal_watchlist", lambda _symbol: {"symbol": "BTCUSDT"})
+    monkeypatch.setattr(goal, "save_cached_combination_signals", lambda _payload: None)
+    hit = goal.ComboHit(("factor_a", "factor_b"), (1, -1), 1.75, 0.75, 2.0, ROWS, 0.01, _score())
+
+    captured = {}
+
+    def upsert(report: dict) -> dict:
+        captured.update(report["ranking"][0])
+        return {"promoted": 1, "libraryTotal": 1}
+
+    monkeypatch.setattr(goal, "_ranked_hits", lambda *_args: [hit])
+    monkeypatch.setattr(goal, "upsert_good_combinations", upsert)
+
+    goal.run_goal("btcusdt", "30m", 1, tmp_path / "report.json", tmp_path / "library.json")
+
+    assert captured["threshold"] == 1.75
+
+
+def test_ranked_hits_can_select_four_member_combo(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = _frame()
+    score = _score()
+    scores = {
+        f"factor_{index}": goal.OrientedScore(score, 1)
+        for index in range(4)
+    }
+    monkeypatch.setattr(goal, "_search_candidate_names", lambda *_args: list(scores))
+
+    hits = goal._ranked_hits(frame, scores)
+
+    assert any(len(row.members) == 4 for row in hits)
+
+
+def test_ranking_row_names_all_combo_members() -> None:
+    hit = goal.ComboHit(("factor_a", "factor_b", "factor_c"), (1, -1, 1), 0.75, 0.8, 2.0, ROWS, 0.01, _score())
+
+    row = goal._ranking_row(1, hit)
+
+    assert row["factorName"] == "goal_combo__factor_a__factor_b__factor_c"
+    assert row["formula"] == "oriented_zscore_pair_threshold_v1(factor_a, factor_b, factor_c)"
+    assert row["comboSize"] == 3
 
 
 def test_run_multi_duration_goal_writes_aggregate_outputs(tmp_path: Path) -> None:

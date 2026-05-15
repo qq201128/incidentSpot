@@ -22,14 +22,21 @@ from app.services.factor_duration_alignment import duration_entry_rows, live_dur
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, utc_now
 from app.services.high_winrate_combo_multi_duration import parse_durations, run_multi_duration_goal
+from app.services.factor_combination_live_service import rebuild_combination_signal_watchlist
+from app.services.factor_combination_signal_cache_service import save_cached_combination_signals
 from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
-from app.services.rule_config import horizon_minutes_for_duration
+from app.services.high_winrate_combo_cache_service import save_cached_high_winrate_combo_ranking
+from app.services.high_winrate_strategy_demotion import promote_high_winrate_strategy
 
 TARGET_WIN_RATE = 0.70
 TARGET_COUNT = 5
+TARGET_MIN_TRADES = BACKTEST_MIN_PERIODS
+NEXT_ENTRY_HORIZON_BARS = 1
 ZSCORE_CLIP = 4.0
-SIGNAL_THRESHOLDS = (0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00)
+SIGNAL_THRESHOLDS = (0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00)
+COMBO_SIZES = (2, 3, 4)
+SEARCH_CANDIDATE_LIMIT = 30
 EXCLUDED_COLUMNS = frozenset({"open_time", "open", "high", "low", "close", "volume", "fwd_ret"})
 REPORT_PATH = BACKEND_ROOT / "reports" / "factor_backtests" / "high_winrate_factor_combo_goal.json"
 LIBRARY_PATH = BACKEND_ROOT / "models" / "factor_learning" / "high_winrate_factor_combo_goal_library.json"
@@ -47,8 +54,8 @@ class OrientedScore:
 
 @dataclass(frozen=True)
 class ComboHit:
-    members: tuple[str, str]
-    orientations: tuple[int, int]
+    members: tuple[str, ...]
+    orientations: tuple[int, ...]
     threshold: float
     win_rate: float
     profit_factor: float
@@ -75,14 +82,16 @@ def run_goal(
         _write_json(library, _library_payload(payload))
         raise RuntimeError(f"only found {len(selected)} combos with winRate >= {TARGET_WIN_RATE}")
     payload["promotion"] = upsert_good_combinations(payload)
+    save_cached_high_winrate_combo_ranking(payload)
+    promote_high_winrate_strategy(symbol, duration)
+    save_cached_combination_signals(rebuild_combination_signal_watchlist(symbol))
     _write_json(output, payload)
     _write_json(library, _library_payload(payload))
     return payload
 
 def _search_frame(frame: pd.DataFrame, duration: str) -> pd.DataFrame:
-    horizon = horizon_minutes_for_duration(duration)
     out = duration_entry_rows(frame.copy(), duration)
-    out["fwd_ret"] = out["close"].shift(-horizon) / out["close"] - 1.0
+    out["fwd_ret"] = out["close"].shift(-NEXT_ENTRY_HORIZON_BARS) / out["close"] - 1.0
     return out
 
 def _oriented_scores(frame: pd.DataFrame) -> dict[str, OrientedScore]:
@@ -121,26 +130,38 @@ def _expanding_zscore(series: pd.Series) -> pd.Series:
 
 
 def _ranked_hits(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> list[ComboHit]:
-    hits: dict[tuple[str, str], ComboHit] = {}
-    for left, right in combinations(scores, 2):
-        best = _best_pair_hit(frame, left, right, scores)
-        if best is not None:
-            hits[best.members] = best
+    hits: dict[tuple[str, ...], ComboHit] = {}
+    names = _search_candidate_names(frame, scores)
+    for size in COMBO_SIZES:
+        for members in combinations(names, size):
+            best = _best_combo_hit(frame, members, scores)
+            if best is not None:
+                hits[best.members] = best
     rows = list(hits.values())
     rows.sort(key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), reverse=True)
     return rows
 
 
-def _best_pair_hit(
+def _search_candidate_names(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> list[str]:
+    hits = [
+        row for row in (_best_combo_hit(frame, (name,), scores, min_win_rate=0.0) for name in scores)
+        if row is not None
+    ]
+    hits.sort(key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), reverse=True)
+    return [row.members[0] for row in hits[:SEARCH_CANDIDATE_LIMIT]]
+
+
+def _best_combo_hit(
     frame: pd.DataFrame,
-    left: str,
-    right: str,
+    members: tuple[str, ...],
     scores: dict[str, OrientedScore],
+    *,
+    min_win_rate: float = TARGET_WIN_RATE,
 ) -> ComboHit | None:
-    combo_score = (scores[left].score + scores[right].score) / 2.0
-    orientations = (scores[left].orientation, scores[right].orientation)
+    combo_score = sum(scores[name].score for name in members) / len(members)
+    orientations = tuple(scores[name].orientation for name in members)
     candidates = [
-        _combo_hit(frame, (left, right), orientations, combo_score, threshold)
+        _combo_hit(frame, members, orientations, combo_score, threshold, min_win_rate=min_win_rate)
         for threshold in SIGNAL_THRESHOLDS
     ]
     valid = [row for row in candidates if row is not None]
@@ -149,18 +170,20 @@ def _best_pair_hit(
 
 def _combo_hit(
     frame: pd.DataFrame,
-    members: tuple[str, str],
-    orientations: tuple[int, int],
+    members: tuple[str, ...],
+    orientations: tuple[int, ...],
     score: pd.Series,
     threshold: float,
+    *,
+    min_win_rate: float = TARGET_WIN_RATE,
 ) -> ComboHit | None:
     signal = pd.Series(np.where(score >= threshold, 1.0, np.where(score <= -threshold, -1.0, np.nan)), index=frame.index)
     returns = (signal * frame["fwd_ret"]).replace([np.inf, -np.inf], np.nan).dropna()
-    if len(returns) < BACKTEST_MIN_PERIODS:
+    if len(returns) < TARGET_MIN_TRADES:
         return None
     win_rate = float((returns > 0).mean())
     profit_factor = _profit_factor(returns)
-    if win_rate < TARGET_WIN_RATE or profit_factor < SUCCESS_PROFIT_FACTOR_MIN:
+    if win_rate < min_win_rate or profit_factor < SUCCESS_PROFIT_FACTOR_MIN:
         return None
     return ComboHit(members, orientations, threshold, win_rate, profit_factor, len(returns), float(returns.mean()), score)
 
@@ -201,7 +224,7 @@ def _target_payload(target_count: int) -> dict[str, Any]:
         "targetCount": target_count,
         "minWinRate": TARGET_WIN_RATE,
         "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
-        "minTrades": BACKTEST_MIN_PERIODS,
+        "minTrades": TARGET_MIN_TRADES,
         "thresholds": list(SIGNAL_THRESHOLDS),
         "method": "oriented_expanding_zscore_pair_threshold_v1",
     }
@@ -213,7 +236,8 @@ def _search_payload(frame: pd.DataFrame, scores: dict[str, pd.Series]) -> dict[s
 
 
 def _ranking_row(rank: int, hit: ComboHit) -> dict[str, Any]:
-    name = f"goal_combo__{hit.members[0]}__{hit.members[1]}"
+    member_names = "__".join(hit.members)
+    name = f"goal_combo__{member_names}"
     members = [_member_payload(member, orientation) for member, orientation in zip(hit.members, hit.orientations)]
     display_name = _combo_display_name(members)
     return {
@@ -221,7 +245,7 @@ def _ranking_row(rank: int, hit: ComboHit) -> dict[str, Any]:
         "factorName": name,
         "factorDisplayName": display_name,
         "description": display_name,
-        "formula": f"oriented_zscore_pair_threshold_v1({hit.members[0]}, {hit.members[1]})",
+        "formula": f"oriented_zscore_pair_threshold_v1({', '.join(hit.members)})",
         "method": "oriented_expanding_zscore_pair_threshold_v1",
         "members": members,
         "comboSize": len(hit.members),
@@ -230,6 +254,7 @@ def _ranking_row(rank: int, hit: ComboHit) -> dict[str, Any]:
         "profitFactor": round(hit.profit_factor, 4),
         "trades": hit.trades,
         "totalPeriods": hit.trades,
+        "minTrades": TARGET_MIN_TRADES,
         "avgReturn": round(hit.avg_return, 8),
     }
 
@@ -280,13 +305,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", default="30m")
     parser.add_argument("--durations", help="Comma-separated durations, e.g. 10m,30m,60m,1d")
     parser.add_argument("--target-count", type=int, default=TARGET_COUNT)
+    parser.add_argument("--min-trades", type=int, default=TARGET_MIN_TRADES)
     parser.add_argument("--output", type=Path, default=REPORT_PATH)
     parser.add_argument("--library", type=Path, default=LIBRARY_PATH)
     return parser.parse_args()
 
 
 def main() -> None:
+    global TARGET_MIN_TRADES
     args = _parse_args()
+    TARGET_MIN_TRADES = int(args.min_trades)
     durations = parse_durations(args.durations)
     if durations:
         report = run_multi_duration_goal(args.symbol, durations, args.target_count, args.output, args.library, run_goal)

@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_candidate_selection import select_base_candidates
 from app.services.factor_combo_scoring import combination_score
@@ -211,7 +212,11 @@ def _enriched_combo_result(result: dict[str, Any], members: tuple[_BaseCandidate
 
 
 def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:
-    return [_BaseCandidate(item.factor, item.metrics, item.orientation) for item in candidates]
+    return [
+        _BaseCandidate(item.factor, item.metrics, item.orientation)
+        for item in candidates
+        if item.factor.source_file == AGENT_FACTOR_SOURCE_FILE
+    ]
 
 
 def _enriched_base_candidates(

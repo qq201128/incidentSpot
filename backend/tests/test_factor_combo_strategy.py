@@ -4,6 +4,11 @@ from types import SimpleNamespace
 from typing import Any
 
 from app.services import factor_combo_strategy
+from app.services.strategy_registry import (
+    FACTOR_COMBO_RULE_NAME,
+    HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,
+    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+)
 
 
 def test_prediction_uses_usable_combo_cache(monkeypatch) -> None:
@@ -30,6 +35,8 @@ def test_prediction_uses_usable_combo_cache(monkeypatch) -> None:
     )
 
     assert result["high_winrate_rule"] == "cached_combo"
+    assert result["high_winrate_gate"] == FACTOR_COMBO_RULE_NAME
+    assert result["high_winrate_gate_passed"] is True
     assert result["open_time"] == 123
 
 
@@ -85,6 +92,44 @@ def test_prediction_allows_append_only_combo_cache(monkeypatch) -> None:
     assert "combo_cache=market_data_appended" in result["rule_reasons"]
 
 
+def test_high_winrate_strategy_accepts_goal_combo(monkeypatch) -> None:
+    cache = {
+        "ranking": [_ranking_row("goal_combo__alpha__beta")],
+        "cacheStatus": {"usable": True, "reason": "usable"},
+    }
+
+    monkeypatch.setattr(factor_combo_strategy, "get_cached_high_winrate_combo_ranking", lambda *_args: cache)
+    monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
+    monkeypatch.setattr(
+        factor_combo_strategy,
+        "materialize_mined_factor_frame",
+        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+    )
+    monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
+
+    result = factor_combo_strategy.predict_high_winrate_factor_combo_direction("btcusdt", "10m")
+
+    assert result["strategy_key"] == HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
+    assert result["high_winrate_gate"] == HIGH_WINRATE_FACTOR_COMBO_RULE_NAME
+    assert "rule=high_winrate_factor_combo_goal_v1" in result["rule_reasons"]
+
+
+def test_high_winrate_strategy_rejects_regular_combo(monkeypatch) -> None:
+    cache = {
+        "ranking": [_ranking_row("combo__alpha__beta")],
+        "cacheStatus": {"usable": True, "reason": "usable"},
+    }
+
+    monkeypatch.setattr(factor_combo_strategy, "get_cached_high_winrate_combo_ranking", lambda *_args: cache)
+
+    try:
+        factor_combo_strategy.predict_high_winrate_factor_combo_direction("btcusdt", "10m")
+    except ValueError as exc:
+        assert "not a high-winrate goal combo" in str(exc)
+    else:
+        raise AssertionError("regular combo must not run through high-winrate strategy")
+
+
 def _ranking_row(name: str) -> dict[str, Any]:
     return {
         "factorName": name,
@@ -105,6 +150,8 @@ def _signal_from_row(_frame: object, row: dict[str, Any], **kwargs) -> dict[str,
         "probabilityUp": 0.7,
         "confidence": 0.7,
         "qualityPassed": True,
+        "qualityThresholdPassed": True,
+        "signalThreshold": 0.5,
         "factorName": row["factorName"],
         "members": row["members"],
         "method": row["method"],

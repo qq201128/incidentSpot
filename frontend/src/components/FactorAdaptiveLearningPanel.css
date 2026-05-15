@@ -2,6 +2,7 @@
   display: grid;
   gap: 14px;
   padding: 16px;
+  min-width: 0;
   border: 1px solid rgba(120, 167, 255, 0.28);
   border-radius: 8px;
   background:
@@ -124,11 +125,12 @@
 
 .factor-lstm-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
 .factor-lstm-grid .factor-adaptive-metric {
+  min-width: 0;
   padding: 10px;
   background: rgba(7, 10, 18, 0.54);
 }
@@ -140,11 +142,12 @@
 
 .factor-lstm-compare {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 8px;
 }
 
 .factor-lstm-compare span {
+  min-width: 0;
   display: grid;
   gap: 3px;
   padding: 8px 10px;

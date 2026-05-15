@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FactorLearningPage from "./pages/FactorLearningPage";
 import FactorsPage from "./pages/FactorsPage";
 import KlineChart from "./components/KlineChart";
 import OrderBook from "./components/OrderBook";
@@ -294,6 +295,14 @@ export default function App() {
       >
         因子库
       </button>
+      <button
+        type="button"
+        className={`app-nav-link${appView === "learning" ? " app-nav-link-active" : ""}`}
+        onClick={() => setAppView("learning")}
+        aria-current={appView === "learning" ? "page" : undefined}
+      >
+        自动挖掘
+      </button>
     </nav>
   );
 
@@ -302,6 +311,15 @@ export default function App() {
       <>
         {appNav}
         <FactorsPage />
+      </>
+    );
+  }
+
+  if (appView === "learning") {
+    return (
+      <>
+        {appNav}
+        <FactorLearningPage />
       </>
     );
   }

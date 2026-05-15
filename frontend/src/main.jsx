@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App";
+import FactorLearningPage from "./pages/FactorLearningPage";
 import FactorsPage from "./pages/FactorsPage";
 import "./app.css";
 
@@ -11,6 +12,7 @@ function Root() {
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/factors" element={<FactorsPage />} />
+        <Route path="/learning" element={<FactorLearningPage />} />
       </Routes>
     </BrowserRouter>
   );

@@ -24,6 +24,7 @@ export function useFactorsPageData() {
   const detail = useFactorDetail(selectedName, backtest.reset);
   const ranking = useFactorRanking({ category, duration, symbol });
   const filteredFactors = useFilteredFactors(list.factors, query);
+  const filteredComboFactors = useFilteredFactors(list.comboFactors, query);
 
   return {
     actions: {
@@ -38,15 +39,17 @@ export function useFactorsPageData() {
     animationKeys: {
       backtestKey: `${backtest.loading}:${backtest.data?.factorScore ?? ""}:${backtest.error}`,
       detailKey: `${selectedName ?? ""}:${detail.data?.name ?? ""}:${detail.error}`,
-      listKey: `${filteredFactors.length}:${query}:${category}`,
+      listKey: `${filteredFactors.length}:${filteredComboFactors.length}:${query}:${category}`,
       rankingKey: `${ranking.items.length}:${ranking.status}`,
     },
     state: {
       backtest,
       categories: list.categories,
       category,
+      comboTotal: list.comboTotal,
       detail,
       duration,
+      filteredComboFactors,
       filteredFactors,
       listStatus: list.status,
       query,
@@ -61,24 +64,32 @@ export function useFactorsPageData() {
 function useFactorsList(category) {
   const [status, setStatus] = useState("加载中…");
   const [factors, setFactors] = useState([]);
+  const [comboFactors, setComboFactors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [total, setTotal] = useState(0);
+  const [comboTotal, setComboTotal] = useState(0);
 
   useEffect(() => {
     fetchFactorsList(category || undefined)
       .then((data) => {
         setFactors(Array.isArray(data.factors) ? data.factors : []);
+        setComboFactors(Array.isArray(data.comboFactors) ? data.comboFactors : []);
         setCategories(Array.isArray(data.categories) ? data.categories : []);
         setTotal(data.total ?? 0);
-        setStatus(`已加载 ${data.total ?? 0} 个因子`);
+        setComboTotal(data.comboTotal ?? 0);
+        setStatus(`已加载 ${data.total ?? 0} 个单因子，${data.comboTotal ?? 0} 个组合因子`);
       })
       .catch((error) => {
         setStatus(`列表失败：${error.message}`);
+        setCategories([]);
         setFactors([]);
+        setComboFactors([]);
+        setTotal(0);
+        setComboTotal(0);
       });
   }, [category]);
 
-  return { categories, factors, status, total };
+  return { categories, comboFactors, comboTotal, factors, status, total };
 }
 
 function useBacktest({ duration, selectedName, symbol }) {

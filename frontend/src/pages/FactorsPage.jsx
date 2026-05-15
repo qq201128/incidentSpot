@@ -1,7 +1,6 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import FactorCombinationPanel from "../components/FactorCombinationPanel";
 import FactorDetailPanel from "../components/FactorDetailPanel";
-import FactorLearningPanel from "../components/FactorLearningPanel";
 import FactorListPanel from "../components/FactorListPanel";
 import "./FactorsPage.css";
 import { useFactorPageAnimations } from "./useFactorPageAnimations";
@@ -14,8 +13,14 @@ const DURATIONS = [
   { value: "1d", label: "1 天" },
 ];
 
+const WORKSPACE_TABS = [
+  { key: "detail", label: "因子详情" },
+  { key: "combination", label: "多因子组合" },
+];
+
 export default function FactorsPage() {
   const pageRef = useRef(null);
+  const [workspaceTab, setWorkspaceTab] = useState(WORKSPACE_TABS[0].key);
   const { actions, animationKeys, state } = useFactorsPageData();
 
   useFactorPageAnimations({ pageRef, ...animationKeys });
@@ -24,8 +29,7 @@ export default function FactorsPage() {
     <main ref={pageRef} className="factors-page layout">
       <FactorsTopbar listStatus={state.listStatus} />
       <FactorsToolbar actions={actions} state={state} />
-      <FactorsPrimaryGrid actions={actions} state={state} />
-      <FactorsSecondaryGrid duration={state.duration} symbol={state.symbol} />
+      <FactorsWorkbench actions={actions} state={state} tab={workspaceTab} onTabChange={setWorkspaceTab} />
     </main>
   );
 }
@@ -73,40 +77,72 @@ function FactorsToolbar({ actions, state }) {
   );
 }
 
-function FactorsPrimaryGrid({ actions, state }) {
+function FactorsWorkbench({ actions, state, tab, onTabChange }) {
+  const selectFactor = (factorName) => {
+    actions.setSelectedName(factorName);
+    onTabChange("detail");
+  };
+
   return (
-    <div className="factors-grid" data-factor-motion="primary-grid">
+    <div className="factors-workbench" data-factor-motion="primary-grid">
       <FactorListPanel
         categories={state.categories}
         category={state.category}
+        comboFactors={state.filteredComboFactors}
+        comboTotal={state.comboTotal}
         factors={state.filteredFactors}
         onCategoryChange={actions.setCategory}
         onQueryChange={actions.setQuery}
-        onSelectFactor={actions.setSelectedName}
+        onSelectFactor={selectFactor}
         query={state.query}
         selectedName={state.selectedName}
         total={state.total}
       />
-      <FactorDetailPanel
-        backtest={state.backtest.data}
-        backtestError={state.backtest.error}
-        backtestLoading={state.backtest.loading}
-        detail={state.detail.data}
-        detailError={state.detail.error}
-        onRunBacktest={actions.runBacktest}
-        onSelectFactor={actions.setSelectedName}
-        ranking={state.ranking.items}
-        selectedName={state.selectedName}
+      <FactorsWorkspacePanel
+        actions={actions}
+        duration={state.duration}
+        state={state}
+        symbol={state.symbol}
+        tab={tab}
+        onTabChange={onTabChange}
       />
     </div>
   );
 }
 
-function FactorsSecondaryGrid({ duration, symbol }) {
+function FactorsWorkspacePanel({ actions, duration, state, symbol, tab, onTabChange }) {
   return (
-    <div className="factors-secondary-grid" data-factor-motion="secondary-grid">
-      <FactorCombinationPanel symbol={symbol} duration={duration} />
-      <FactorLearningPanel symbol={symbol} duration={duration} />
-    </div>
+    <section className="factors-workspace-panel card-surface" data-factor-motion="secondary-grid">
+      <div className="factors-workspace-tabs" role="tablist" aria-label="因子工作区">
+        {WORKSPACE_TABS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.key}
+            className={tab === item.key ? "factors-workspace-tab-active" : ""}
+            onClick={() => onTabChange(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="factors-workspace-content">
+        {tab === "detail" ? (
+          <FactorDetailPanel
+            backtest={state.backtest.data}
+            backtestError={state.backtest.error}
+            backtestLoading={state.backtest.loading}
+            detail={state.detail.data}
+            detailError={state.detail.error}
+            onRunBacktest={actions.runBacktest}
+            onSelectFactor={actions.setSelectedName}
+            ranking={state.ranking.items}
+            selectedName={state.selectedName}
+          />
+        ) : null}
+        {tab === "combination" ? <FactorCombinationPanel symbol={symbol} duration={duration} /> : null}
+      </div>
+    </section>
   );
 }
