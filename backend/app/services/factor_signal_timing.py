@@ -39,12 +39,14 @@ def combination_kline_close_timing(
     *,
     symbol: str,
     duration: str,
+    mined_by_name: dict[str, dict[str, Any]] | None = None,
 ) -> FactorSignalTiming:
     eligible: list[str] = []
     blocked: list[str] = []
+    mined_rows = mined_by_name if mined_by_name is not None else _mined_rows_by_name(symbol, duration)
     for member in _members(row):
         name = _member_name(member)
-        is_kline_close = _member_is_kline_close(member, symbol, duration, visiting=frozenset())
+        is_kline_close = _member_is_kline_close(member, mined_rows, visiting=frozenset())
         target = eligible if is_kline_close else blocked
         target.append(name)
     return _timing_result(eligible, blocked)
@@ -52,8 +54,7 @@ def combination_kline_close_timing(
 
 def _member_is_kline_close(
     member: dict[str, Any],
-    symbol: str,
-    duration: str,
+    mined_by_name: dict[str, dict[str, Any]],
     *,
     visiting: frozenset[str],
 ) -> bool:
@@ -63,16 +64,15 @@ def _member_is_kline_close(
         if factor.category.value == "performance":
             return factor.source_file != "mined_factor_library.json"
         return factor.category.value in _KLINE_CLOSE_CATEGORIES
-    mined_row = _mined_row(name, symbol, duration)
+    mined_row = mined_by_name.get(name)
     if mined_row is not None:
-        return _mined_row_is_kline_close(mined_row, symbol, duration, visiting=visiting)
+        return _mined_row_is_kline_close(mined_row, mined_by_name, visiting=visiting)
     return str(member.get("category") or "") in _KLINE_CLOSE_CATEGORIES
 
 
 def _mined_row_is_kline_close(
     row: dict[str, Any],
-    symbol: str,
-    duration: str,
+    mined_by_name: dict[str, dict[str, Any]],
     *,
     visiting: frozenset[str],
 ) -> bool:
@@ -81,16 +81,13 @@ def _mined_row_is_kline_close(
         raise ValueError(f"cycle in mined factor timing: {name}")
     next_visiting = visiting | frozenset({name})
     return all(
-        _member_is_kline_close(member, symbol, duration, visiting=next_visiting)
+        _member_is_kline_close(member, mined_by_name, visiting=next_visiting)
         for member in _members(row)
     )
 
 
-def _mined_row(name: str, symbol: str, duration: str) -> dict[str, Any] | None:
-    for row in mined_factor_rows_for_duration(symbol, duration):
-        if str(row.get("factorName")) == name:
-            return row
-    return None
+def _mined_rows_by_name(symbol: str, duration: str) -> dict[str, dict[str, Any]]:
+    return {str(row.get("factorName")): row for row in mined_factor_rows_for_duration(symbol, duration)}
 
 
 def _timing_result(eligible: list[str], blocked: list[str]) -> FactorSignalTiming:

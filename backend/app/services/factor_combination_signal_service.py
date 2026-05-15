@@ -11,7 +11,7 @@ from app.services.factor_combo_scoring import combination_score
 from app.services.factor_combination_service import COMBINATION_METHOD
 from app.services.factor_duration_alignment import live_duration_entry_index
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
-from app.services.factor_learning_signal_filter import enrich_signal_with_factor_learning
+from app.services.factor_learning_signal_filter import MEMORY_NOT_PROVIDED, enrich_signal_with_factor_learning
 from app.services.factor_signal_timing import FactorSignalTiming, combination_kline_close_timing
 from app.services.kline_timing import is_within_entry_grace
 
@@ -41,6 +41,13 @@ class _SignalContext:
     timing: FactorSignalTiming
 
 
+@dataclass(frozen=True)
+class SignalBuildContext:
+    learning_memory: dict[str, Any] | None
+    zscore_cache: dict[tuple[str, int], pd.Series]
+    mined_by_name: dict[str, dict[str, Any]]
+
+
 def build_live_signal_from_ranking(
     frame: pd.DataFrame,
     row: dict[str, Any],
@@ -49,17 +56,24 @@ def build_live_signal_from_ranking(
     duration: str,
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
+    context: SignalBuildContext | None = None,
 ) -> dict[str, Any]:
     score, index = _combo_score_at_duration_entry(
         frame,
         row,
         duration=duration,
         entry_open_time=entry_open_time,
+        zscore_cache=None if context is None else context.zscore_cache,
     )
     direction = "up" if score >= 0 else "down"
     confidence = _live_confidence(row)
     window = _EntryWindow(entry_open_time, entry_grace_ms)
-    timing = combination_kline_close_timing(row, symbol=symbol, duration=duration)
+    timing = combination_kline_close_timing(
+        row,
+        symbol=symbol,
+        duration=duration,
+        mined_by_name=None if context is None else context.mined_by_name,
+    )
     quality = _quality_gate(row, confidence, window, timing=timing)
     payload = _live_signal_payload(
         _SignalContext(
@@ -79,7 +93,15 @@ def build_live_signal_from_ranking(
         "entryPrice": _frame_value(frame, index, "close"),
         "sourceOpenTime": _frame_value(frame, index, "open_time"),
     }
-    return enrich_signal_with_factor_learning(priced, frame, index, symbol=symbol, duration=duration)
+    return enrich_signal_with_factor_learning(
+        priced,
+        frame,
+        index,
+        symbol=symbol,
+        duration=duration,
+        memory=MEMORY_NOT_PROVIDED if context is None else context.learning_memory,
+        zscore_cache=None if context is None else context.zscore_cache,
+    )
 
 
 def _combo_score_at_duration_entry(
@@ -88,15 +110,42 @@ def _combo_score_at_duration_entry(
     *,
     duration: str,
     entry_open_time: int | None,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
 ) -> tuple[float, Any]:
     members = _row_members(row)
     _require_member_columns(frame, members)
     index = live_duration_entry_index(frame, duration, entry_open_time)
-    scores = combination_score(frame, members)
-    score = _finite_float(_series_value_at(scores, index))
+    score = _combo_score_at_index(frame, members, index, zscore_cache)
     if score is None:
         raise ValueError(f"combination signal has no finite score at {duration} entry: {row.get('factorName')}")
     return score, index
+
+
+def _combo_score_at_index(
+    frame: pd.DataFrame,
+    members: list[dict[str, Any]],
+    index: Any,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
+) -> float | None:
+    if zscore_cache is None:
+        return _finite_float(_series_value_at(combination_score(frame, members), index))
+    values = [_member_score_at_index(frame, member, index, zscore_cache) for member in members]
+    finite = [value for value in values if value is not None]
+    return None if not finite else sum(finite) / len(finite)
+
+
+def _member_score_at_index(
+    frame: pd.DataFrame,
+    member: dict[str, Any],
+    index: Any,
+    zscore_cache: dict[tuple[str, int], pd.Series],
+) -> float | None:
+    name = str(member["name"])
+    orientation = int(member.get("orientation") or 1)
+    key = (name, orientation)
+    if key not in zscore_cache:
+        zscore_cache[key] = combination_score(frame, [member])
+    return _finite_float(_series_value_at(zscore_cache[key], index))
 
 
 def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:

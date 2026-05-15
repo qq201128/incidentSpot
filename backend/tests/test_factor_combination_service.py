@@ -195,8 +195,6 @@ def test_signal_watchlist_returns_top_three_per_duration(
     synthetic_frame: pd.DataFrame,
 ) -> None:
     rows = [{"factorName": f"combo_{idx}"} for idx in range(4)]
-    monkeypatch.setattr(combo_live, "get_cached_combination_signals", lambda _symbol: None)
-    monkeypatch.setattr(combo_live, "save_cached_combination_signals", lambda _payload: None)
     monkeypatch.setattr(combo_live, "load_factor_frame", lambda _symbol, _duration: synthetic_frame)
     monkeypatch.setattr(
         combo_live,
@@ -205,18 +203,30 @@ def test_signal_watchlist_returns_top_three_per_duration(
     )
     monkeypatch.setattr(
         combo_live,
-        "materialize_mined_factor_frame",
+        "materialize_mined_factor_frame_for_rows",
         lambda frame, **_kwargs: MinedFrameResult(frame, 0, ()),
     )
+    monkeypatch.setattr(combo_live, "mined_factor_rows_for_duration", lambda *_args: [])
     monkeypatch.setattr(combo_live, "build_live_signal_from_ranking", _fake_live_signal)
 
-    payload = combo_live.build_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
+    payload = combo_live.rebuild_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
 
     assert [item["comboRank"] for item in payload["signals"]] == [1, 2, 3]
     assert [item["factorName"] for item in payload["signals"]] == ["combo_0", "combo_1", "combo_2"]
     assert payload["signals"][1]["simulationStrategyKey"] == factor_combo_shadow_strategy_key(2)
     assert payload["signals"][2]["simulationMode"] == "paper_live"
     assert payload["topPerDuration"] == 3
+
+
+def test_signal_watchlist_cache_read_does_not_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(combo_live, "get_cached_combination_signals", lambda _symbol: None)
+    monkeypatch.setattr(combo_live, "rebuild_combination_signal_watchlist", _fail_rebuild_watchlist)
+
+    payload = combo_live.build_combination_signal_watchlist("BTCUSDT", limit=12, top_per_duration=3)
+
+    assert payload["source"] == "none"
+    assert payload["signals"] == []
+    assert payload["signalCacheStatus"]["reason"] == "signal_cache_missing"
 
 
 def test_signal_watchlist_uses_matching_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,7 +279,14 @@ def test_rule_signal_routes_factor_combo_strategy(monkeypatch: pytest.MonkeyPatc
     assert captured["entry_grace_ms"] > 0
 
 
-def _fake_live_signal(_frame: pd.DataFrame, row: dict, *, symbol: str, duration: str) -> dict:
+def _fake_live_signal(
+    _frame: pd.DataFrame,
+    row: dict,
+    *,
+    symbol: str,
+    duration: str,
+    context=None,
+) -> dict:
     return {
         "symbol": symbol,
         "duration": duration,

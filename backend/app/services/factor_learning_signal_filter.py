@@ -11,6 +11,7 @@ from app.services.factor_learning_memory_store import load_factor_learning_memor
 SCORE_DECIMALS = 6
 PROBABILITY_DECIMALS = 4
 FILTERED_QUALITY_SCORE_MAX = 0.49
+MEMORY_NOT_PROVIDED = object()
 
 
 def enrich_signal_with_factor_learning(
@@ -20,11 +21,13 @@ def enrich_signal_with_factor_learning(
     *,
     symbol: str,
     duration: str,
+    memory: dict[str, Any] | None | object = MEMORY_NOT_PROVIDED,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None = None,
 ) -> dict[str, Any]:
-    memory = load_factor_learning_memory(symbol, duration)
-    if memory is None:
+    resolved_memory = _resolve_memory(memory, symbol, duration)
+    if resolved_memory is None:
         return _with_missing_memory(payload)
-    return apply_factor_learning_memory(payload, frame, index, memory)
+    return apply_factor_learning_memory(payload, frame, index, resolved_memory, zscore_cache=zscore_cache)
 
 
 def apply_factor_learning_memory(
@@ -32,12 +35,14 @@ def apply_factor_learning_memory(
     frame: pd.DataFrame,
     index: Any,
     memory: dict[str, Any],
+    *,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None = None,
 ) -> dict[str, Any]:
     members = _members(payload)
-    weighted = _weighted_member_score(frame, index, members, memory.get("weights") or {})
+    weighted = _weighted_member_score(frame, index, members, memory.get("weights") or {}, zscore_cache)
     enriched = _apply_weighted_score(dict(payload), weighted)
     loss_matches = _matched_loss_patterns(frame, index, memory)
-    confirmations = _confirmation_count(frame, index, members, enriched["direction"])
+    confirmations = _confirmation_count(frame, index, members, enriched["direction"], zscore_cache)
     filter_passed = _filter_passed(memory.get("filters") or {}, confirmations, len(members), loss_matches)
     enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
     if payload["qualityPassed"] and not filter_passed:
@@ -63,6 +68,16 @@ def _with_missing_memory(payload: dict[str, Any]) -> dict[str, Any]:
             "qualityScore": payload["confidence"],
         },
     }
+
+
+def _resolve_memory(
+    memory: dict[str, Any] | None | object,
+    symbol: str,
+    duration: str,
+) -> dict[str, Any] | None:
+    if memory is MEMORY_NOT_PROVIDED:
+        return load_factor_learning_memory(symbol, duration)
+    return memory if isinstance(memory, dict) else None
 
 
 def _apply_weighted_score(payload: dict[str, Any], weighted: dict[str, Any] | None) -> dict[str, Any]:
@@ -108,13 +123,14 @@ def _weighted_member_score(
     index: Any,
     members: list[dict[str, Any]],
     weights: dict[str, Any],
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
 ) -> dict[str, Any] | None:
     weighted_scores = []
     total_weight = 0.0
     for member in members:
         name = str(member["name"])
         weight = _finite_float(weights.get(name))
-        score = _member_score_at(frame, index, member)
+        score = _member_score_at(frame, index, member, zscore_cache)
         if weight is None or score is None or weight <= 0:
             continue
         weighted_scores.append(score * weight)
@@ -129,21 +145,41 @@ def _confirmation_count(
     index: Any,
     members: list[dict[str, Any]],
     direction: str,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
 ) -> int:
     target = 1 if direction == "up" else -1
-    scores = [_member_score_at(frame, index, member) for member in members]
+    scores = [_member_score_at(frame, index, member, zscore_cache) for member in members]
     return sum(1 for score in scores if score is not None and score * target > 0)
 
 
-def _member_score_at(frame: pd.DataFrame, index: Any, member: dict[str, Any]) -> float | None:
+def _member_score_at(
+    frame: pd.DataFrame,
+    index: Any,
+    member: dict[str, Any],
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
+) -> float | None:
     name = str(member["name"])
     if name not in frame.columns:
         return None
-    values = oriented_zscore(frame[name], int(member.get("orientation") or 1))
+    values = _cached_oriented_zscore(frame[name], name, int(member.get("orientation") or 1), zscore_cache)
     if index not in values.index:
         return None
     score = _finite_float(values.at[index])
     return None if score is None else float(score)
+
+
+def _cached_oriented_zscore(
+    series: pd.Series,
+    name: str,
+    orientation: int,
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
+) -> pd.Series:
+    if zscore_cache is None:
+        return oriented_zscore(series, orientation)
+    key = (name, orientation)
+    if key not in zscore_cache:
+        zscore_cache[key] = oriented_zscore(series, orientation)
+    return zscore_cache[key]
 
 
 def _matched_loss_patterns(frame: pd.DataFrame, index: Any, memory: dict[str, Any]) -> list[dict[str, Any]]:

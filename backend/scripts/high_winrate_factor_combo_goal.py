@@ -21,6 +21,8 @@ from app.config.env_file import load_backend_env_file
 from app.services.factor_duration_alignment import duration_entry_rows, live_duration_entry_index
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, utc_now
+from app.services.high_winrate_combo_multi_duration import parse_durations, run_multi_duration_goal
+from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
 from app.services.rule_config import horizon_minutes_for_duration
 
@@ -33,34 +35,26 @@ REPORT_PATH = BACKEND_ROOT / "reports" / "factor_backtests" / "high_winrate_fact
 LIBRARY_PATH = BACKEND_ROOT / "models" / "factor_learning" / "high_winrate_factor_combo_goal_library.json"
 
 ONLINE_RESEARCH_SOURCES = (
-    {
-        "title": "Explainable Patterns in Cryptocurrency Microstructure",
-        "url": "https://arxiv.org/pdf/2602.00776",
-        "factorFamilies": ["order flow imbalance", "spread", "VWAP-to-mid pressure"],
-    },
-    {
-        "title": "Order flow and cryptocurrency returns",
-        "url": "https://www.sciencedirect.com/science/article/pii/S1386418126000029",
-        "factorFamilies": ["signed order flow", "buyer/seller initiated volume"],
-    },
-    {
-        "title": "The Crypto Signal Compendium",
-        "url": "https://the-algotrading-book-website.vercel.app/chapters/01-foundations/024-crypto-signal-compendium/",
-        "factorFamilies": ["open interest", "long/short ratio", "taker buy/sell", "sentiment"],
-    },
+    {"title": "Explainable Patterns in Cryptocurrency Microstructure", "url": "https://arxiv.org/pdf/2602.00776", "factorFamilies": ["order flow imbalance", "spread", "VWAP-to-mid pressure"]},
+    {"title": "Order flow and cryptocurrency returns", "url": "https://www.sciencedirect.com/science/article/pii/S1386418126000029", "factorFamilies": ["signed order flow", "buyer/seller initiated volume"]},
+    {"title": "The Crypto Signal Compendium", "url": "https://the-algotrading-book-website.vercel.app/chapters/01-foundations/024-crypto-signal-compendium/", "factorFamilies": ["open interest", "long/short ratio", "taker buy/sell", "sentiment"]},
 )
 
+@dataclass(frozen=True)
+class OrientedScore:
+    score: pd.Series
+    orientation: int
 
 @dataclass(frozen=True)
 class ComboHit:
     members: tuple[str, str]
+    orientations: tuple[int, int]
     threshold: float
     win_rate: float
     profit_factor: float
     trades: int
     avg_return: float
     score: pd.Series
-
 
 def run_goal(
     symbol: str,
@@ -76,12 +70,14 @@ def run_goal(
     hits = _ranked_hits(search_frame, scores)
     selected = _selected_hits(hits, target_count)
     payload = _report_payload(symbol, duration, target_count, search_frame, scores, selected)
+    if len(selected) < target_count:
+        _write_json(output, payload)
+        _write_json(library, _library_payload(payload))
+        raise RuntimeError(f"only found {len(selected)} combos with winRate >= {TARGET_WIN_RATE}")
+    payload["promotion"] = upsert_good_combinations(payload)
     _write_json(output, payload)
     _write_json(library, _library_payload(payload))
-    if len(selected) < target_count:
-        raise RuntimeError(f"only found {len(selected)} combos with winRate >= {TARGET_WIN_RATE}")
     return payload
-
 
 def _search_frame(frame: pd.DataFrame, duration: str) -> pd.DataFrame:
     horizon = horizon_minutes_for_duration(duration)
@@ -89,17 +85,15 @@ def _search_frame(frame: pd.DataFrame, duration: str) -> pd.DataFrame:
     out["fwd_ret"] = out["close"].shift(-horizon) / out["close"] - 1.0
     return out
 
-
-def _oriented_scores(frame: pd.DataFrame) -> dict[str, pd.Series]:
-    scores: dict[str, pd.Series] = {}
+def _oriented_scores(frame: pd.DataFrame) -> dict[str, OrientedScore]:
+    scores: dict[str, OrientedScore] = {}
     for name in _numeric_factor_columns(frame):
         series = pd.to_numeric(frame[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
         if _usable_pair_count(series, frame["fwd_ret"]) < BACKTEST_MIN_PERIODS:
             continue
         orientation = _orientation(series, frame["fwd_ret"])
-        scores[name] = _expanding_zscore(series) * orientation
+        scores[name] = OrientedScore(_expanding_zscore(series) * orientation, orientation)
     return scores
-
 
 def _numeric_factor_columns(frame: pd.DataFrame) -> list[str]:
     return [
@@ -111,7 +105,6 @@ def _numeric_factor_columns(frame: pd.DataFrame) -> list[str]:
 
 def _usable_pair_count(series: pd.Series, fwd_ret: pd.Series) -> int:
     return len(pd.concat([series, fwd_ret], axis=1).dropna())
-
 
 def _orientation(series: pd.Series, fwd_ret: pd.Series) -> int:
     valid = pd.concat([series, fwd_ret], axis=1).dropna()
@@ -127,7 +120,7 @@ def _expanding_zscore(series: pd.Series) -> pd.Series:
     return ((series - mean) / std.replace(0.0, np.nan)).clip(-ZSCORE_CLIP, ZSCORE_CLIP)
 
 
-def _ranked_hits(frame: pd.DataFrame, scores: dict[str, pd.Series]) -> list[ComboHit]:
+def _ranked_hits(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> list[ComboHit]:
     hits: dict[tuple[str, str], ComboHit] = {}
     for left, right in combinations(scores, 2):
         best = _best_pair_hit(frame, left, right, scores)
@@ -142,10 +135,14 @@ def _best_pair_hit(
     frame: pd.DataFrame,
     left: str,
     right: str,
-    scores: dict[str, pd.Series],
+    scores: dict[str, OrientedScore],
 ) -> ComboHit | None:
-    combo_score = (scores[left] + scores[right]) / 2.0
-    candidates = [_combo_hit(frame, (left, right), combo_score, threshold) for threshold in SIGNAL_THRESHOLDS]
+    combo_score = (scores[left].score + scores[right].score) / 2.0
+    orientations = (scores[left].orientation, scores[right].orientation)
+    candidates = [
+        _combo_hit(frame, (left, right), orientations, combo_score, threshold)
+        for threshold in SIGNAL_THRESHOLDS
+    ]
     valid = [row for row in candidates if row is not None]
     return max(valid, key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), default=None)
 
@@ -153,6 +150,7 @@ def _best_pair_hit(
 def _combo_hit(
     frame: pd.DataFrame,
     members: tuple[str, str],
+    orientations: tuple[int, int],
     score: pd.Series,
     threshold: float,
 ) -> ComboHit | None:
@@ -164,7 +162,7 @@ def _combo_hit(
     profit_factor = _profit_factor(returns)
     if win_rate < TARGET_WIN_RATE or profit_factor < SUCCESS_PROFIT_FACTOR_MIN:
         return None
-    return ComboHit(members, threshold, win_rate, profit_factor, len(returns), float(returns.mean()), score)
+    return ComboHit(members, orientations, threshold, win_rate, profit_factor, len(returns), float(returns.mean()), score)
 
 
 def _profit_factor(returns: pd.Series) -> float:
@@ -182,7 +180,7 @@ def _report_payload(
     duration: str,
     target_count: int,
     frame: pd.DataFrame,
-    scores: dict[str, pd.Series],
+    scores: dict[str, OrientedScore],
     selected: list[ComboHit],
 ) -> dict[str, Any]:
     return {
@@ -215,16 +213,33 @@ def _search_payload(frame: pd.DataFrame, scores: dict[str, pd.Series]) -> dict[s
 
 
 def _ranking_row(rank: int, hit: ComboHit) -> dict[str, Any]:
+    name = f"goal_combo__{hit.members[0]}__{hit.members[1]}"
+    members = [_member_payload(member, orientation) for member, orientation in zip(hit.members, hit.orientations)]
+    display_name = _combo_display_name(members)
     return {
         "rank": rank,
-        "factorName": f"goal_combo__{hit.members[0]}__{hit.members[1]}",
-        "members": list(hit.members),
+        "factorName": name,
+        "factorDisplayName": display_name,
+        "description": display_name,
+        "formula": f"oriented_zscore_pair_threshold_v1({hit.members[0]}, {hit.members[1]})",
+        "method": "oriented_expanding_zscore_pair_threshold_v1",
+        "members": members,
+        "comboSize": len(hit.members),
         "threshold": hit.threshold,
         "winRate": round(hit.win_rate, 4),
         "profitFactor": round(hit.profit_factor, 4),
         "trades": hit.trades,
+        "totalPeriods": hit.trades,
         "avgReturn": round(hit.avg_return, 8),
     }
+
+
+def _member_payload(name: str, orientation: int) -> dict[str, Any]:
+    return {"name": name, "displayName": name, "category": "unknown", "orientation": orientation}
+
+
+def _combo_display_name(members: list[dict[str, Any]]) -> str:
+    return "组合：" + " + ".join(str(member["displayName"]) for member in members)
 
 
 def _paper_signal(frame: pd.DataFrame, rank: int, hit: ComboHit, duration: str) -> dict[str, Any]:
@@ -263,6 +278,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Find high-win-rate factor combos and paper-live signals.")
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--duration", default="30m")
+    parser.add_argument("--durations", help="Comma-separated durations, e.g. 10m,30m,60m,1d")
     parser.add_argument("--target-count", type=int, default=TARGET_COUNT)
     parser.add_argument("--output", type=Path, default=REPORT_PATH)
     parser.add_argument("--library", type=Path, default=LIBRARY_PATH)
@@ -271,8 +287,13 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    durations = parse_durations(args.durations)
+    if durations:
+        report = run_multi_duration_goal(args.symbol, durations, args.target_count, args.output, args.library, run_goal)
+        print(json.dumps({"output": str(args.output), "library": str(args.library), "promotion": report["promotion"], "bestRanking": report["bestRanking"]}, ensure_ascii=False, indent=2))
+        return
     report = run_goal(args.symbol, args.duration, args.target_count, args.output, args.library)
-    print(json.dumps({"output": str(args.output), "library": str(args.library), "ranking": report["ranking"]}, ensure_ascii=False, indent=2))
+    print(json.dumps({"output": str(args.output), "library": str(args.library), "promotion": report.get("promotion"), "ranking": report["ranking"]}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -47,11 +47,46 @@ def materialize_mined_factor_frame(
     duration: str,
 ) -> MinedFrameResult:
     agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
-    frame = agent.frame
     rows = mined_factor_rows_for_duration(symbol, duration)
+    return _materialize_mined_rows(
+        agent.frame,
+        rows,
+        agent.source_count,
+        agent.failures,
+    )
+
+
+def materialize_mined_factor_frame_for_rows(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+    target_rows: list[dict[str, Any]],
+    source_rows: list[dict[str, Any]] | None = None,
+) -> MinedFrameResult:
+    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    rows = source_rows if source_rows is not None else mined_factor_rows_for_duration(symbol, duration)
+    selected = _dependency_rows(target_rows, rows)
+    return _materialize_mined_rows(
+        agent.frame,
+        selected,
+        agent.source_count,
+        agent.failures,
+        source_count=len(rows),
+    )
+
+
+def _materialize_mined_rows(
+    frame: pd.DataFrame,
+    rows: list[dict[str, Any]],
+    agent_count: int,
+    agent_failures: tuple[dict[str, Any], ...],
+    *,
+    source_count: int | None = None,
+) -> MinedFrameResult:
     if not rows:
-        return MinedFrameResult(frame, agent.source_count, agent.failures)
-    failures: list[dict[str, Any]] = list(agent.failures)
+        return MinedFrameResult(frame, agent_count, agent_failures)
+    failures: list[dict[str, Any]] = list(agent_failures)
     pending: dict[str, pd.Series] = {}
     materialized = {str(column) for column in frame.columns}
     by_name = {str(row.get("factorName")): row for row in rows}
@@ -61,7 +96,35 @@ def materialize_mined_factor_frame(
         except Exception as exc:
             failures.append(_failure(row, "materialize_mined_factor", exc))
     working = _frame_with_pending_columns(frame, pending)
-    return MinedFrameResult(working, len(rows) + agent.source_count, tuple(failures))
+    count = len(rows) if source_count is None else source_count
+    return MinedFrameResult(working, count + agent_count, tuple(failures))
+
+
+def _dependency_rows(target_rows: list[dict[str, Any]], source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_name = {str(row.get("factorName")): row for row in source_rows}
+    selected: dict[str, dict[str, Any]] = {}
+    for row in target_rows:
+        _collect_dependencies(row, by_name, selected, set())
+    return list(selected.values())
+
+
+def _collect_dependencies(
+    row: dict[str, Any],
+    by_name: dict[str, dict[str, Any]],
+    selected: dict[str, dict[str, Any]],
+    visiting: set[str],
+) -> None:
+    for member in _members(row):
+        name = str(member["name"])
+        dependency = by_name.get(name)
+        if dependency is None or name in selected:
+            continue
+        if name in visiting:
+            raise ValueError(f"cycle in mined factor library: {name}")
+        visiting.add(name)
+        _collect_dependencies(dependency, by_name, selected, visiting)
+        visiting.remove(name)
+        selected[name] = dependency
 
 
 def build_mined_candidates(

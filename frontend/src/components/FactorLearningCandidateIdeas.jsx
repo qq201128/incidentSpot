@@ -64,7 +64,11 @@ function TagList({ items, empty, muted = false }) {
   const rows = Array.isArray(items) ? items.filter(Boolean) : [];
   return (
     <div className={`factor-learning-tags${muted ? " muted" : ""}`}>
-      {rows.length ? rows.slice(0, 6).map((item) => <span key={item}>{item}</span>) : <span>{empty}</span>}
+      {rows.length
+        ? rows.slice(0, 6).map((item, index) => (
+            <span key={`${index}-${item}`}>{item}</span>
+          ))
+        : <span>{empty}</span>}
     </div>
   );
 }

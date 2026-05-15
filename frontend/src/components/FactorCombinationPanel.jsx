@@ -92,7 +92,7 @@ function useSignalLoader({ symbol, signalAbortRef, setLoadingSignals, setSignalS
     const ac = new AbortController();
     signalAbortRef.current = ac;
     setLoadingSignals(true);
-    setSignalState((state) => ({ ...state, status: "刷新周期信号…" }));
+    setSignalState((state) => ({ ...state, status: "读取数据层周期信号…" }));
     try {
       await loadSignalState(symbol, ac.signal, setSignalState);
     } finally {
@@ -124,7 +124,7 @@ async function loadSignalState(symbol, signal, setState) {
     const items = Array.isArray(data.signals) ? data.signals : [];
     const missing = Array.isArray(data.missingDurations) ? data.missingDurations : [];
     const failures = Array.isArray(data.signalFailures) ? data.signalFailures : [];
-    setState({ items, missing, failures, status: signalStatus(items, missing, failures) });
+    setState({ items, missing, failures, status: signalStatus(items, missing, failures, data.signalCacheStatus) });
   } catch (error) {
     if (isCanceled(error, signal)) return;
     setState({ items: [], missing: [], failures: [], status: `周期信号失败：${error.message}` });
@@ -199,10 +199,14 @@ function rankingStatus(data, symbol, duration) {
   return `组合排名：${data.total ?? 0} 项（${symbol} / ${duration}${updated}）`;
 }
 
-function signalStatus(items, missing, failures) {
+function signalStatus(items, missing, failures, cacheStatus) {
+  if (cacheStatus?.reason === "signal_cache_missing") {
+    return cacheStatus.message || "周期信号缓存不存在";
+  }
   const suffix = missing.length ? ` · 缺少 ${missing.join(", ")}` : "";
   const failed = failures.length ? ` · 失败 ${failures.length}` : "";
-  return `周期 Top${TOP_PER_DURATION} 实盘模拟：${items.length} 个${suffix}${failed}`;
+  const cache = cacheStatus?.usable === false ? " · 数据层缓存需刷新" : " · 数据层缓存";
+  return `周期 Top${TOP_PER_DURATION} 实盘模拟：${items.length} 个${suffix}${failed}${cache}`;
 }
 
 function refreshStatus(duration) {

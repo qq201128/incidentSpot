@@ -48,6 +48,9 @@ backend/data.db-wal
 # --- 模型与训练产物（体积大、常变；勿提交以免仓库膨胀） ---
 backend/models/
 
+# --- 回测/报告产物（本地生成，勿提交） ---
+**/reports/
+
 # --- OS ---
 .DS_Store
 Thumbs.db
