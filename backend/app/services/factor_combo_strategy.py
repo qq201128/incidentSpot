@@ -12,6 +12,7 @@ from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
+from app.services.high_winrate_strategy_demotion import high_winrate_active_rank
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
@@ -45,10 +46,11 @@ def predict_high_winrate_factor_combo_direction(
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
 ) -> dict[str, Any]:
+    combo_rank = high_winrate_active_rank(symbol, duration)
     return predict_factor_combo_rank_direction(
         symbol,
         duration,
-        combo_rank=1,
+        combo_rank=combo_rank,
         result_strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,

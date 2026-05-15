@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-TRADE_GATE_THRESHOLDS = (0.60, 0.65, 0.70)
-MIN_VALIDATION_WIN_RATE = 0.5
+TRADE_GATE_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70)
+TARGET_VALIDATION_WIN_RATE = 0.70
 MIN_VALIDATION_PROFIT_FACTOR = 1.0
 MIN_VALIDATION_AVG_RETURN = 0.0
 MIN_THRESHOLD_SAMPLE_COUNT = 50
@@ -38,7 +38,7 @@ def validation_failure_reason(gate: dict[str, Any]) -> str | None:
 def validation_gate_criteria() -> dict[str, Any]:
     return {
         "thresholds": list(TRADE_GATE_THRESHOLDS),
-        "minWinRateExclusive": MIN_VALIDATION_WIN_RATE,
+        "targetWinRateInclusive": TARGET_VALIDATION_WIN_RATE,
         "minProfitFactorExclusive": MIN_VALIDATION_PROFIT_FACTOR,
         "minAvgReturnExclusive": MIN_VALIDATION_AVG_RETURN,
         "minThresholdSampleCount": MIN_THRESHOLD_SAMPLE_COUNT,
@@ -82,7 +82,7 @@ def _threshold_passes(row: dict[str, Any]) -> bool:
     return (
         int(row.get("sampleCount") or 0) >= MIN_THRESHOLD_SAMPLE_COUNT
         and row.get("winRate") is not None
-        and float(row["winRate"]) > MIN_VALIDATION_WIN_RATE
+        and float(row["winRate"]) >= TARGET_VALIDATION_WIN_RATE
         and row.get("profitFactor") is not None
         and float(row["profitFactor"]) > MIN_VALIDATION_PROFIT_FACTOR
         and row.get("avgReturn") is not None

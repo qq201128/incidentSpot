@@ -2,7 +2,7 @@
   border: 1px solid rgba(81, 100, 108, 0.55);
   border-radius: 8px;
   background: rgba(13, 18, 23, 0.72);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .factor-combo-position-head {
@@ -53,8 +53,7 @@
 }
 
 .factor-combo-position-table-wrap {
-  max-height: 280px;
-  overflow: auto;
+  overflow-x: auto;
   border-top: 1px solid var(--line);
 }
 

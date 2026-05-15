@@ -3,6 +3,7 @@ import FactorCombinationPanel from "../components/FactorCombinationPanel";
 import FactorDetailPanel from "../components/FactorDetailPanel";
 import FactorListPanel from "../components/FactorListPanel";
 import "./FactorsPage.css";
+import "./FactorsDetail.css";
 import { useFactorPageAnimations } from "./useFactorPageAnimations";
 import { useFactorsPageData } from "./useFactorsPageData";
 
@@ -27,31 +28,50 @@ export default function FactorsPage() {
 
   return (
     <main ref={pageRef} className="factors-page layout">
-      <FactorsTopbar listStatus={state.listStatus} />
+      <FactorsTopbar state={state} />
       <FactorsToolbar actions={actions} state={state} />
       <FactorsWorkbench actions={actions} state={state} tab={workspaceTab} onTabChange={setWorkspaceTab} />
     </main>
   );
 }
 
-function FactorsTopbar({ listStatus }) {
+function FactorsTopbar({ state }) {
   return (
     <header className="factors-topbar topbar" data-factor-motion="hero">
       <div>
         <span className="eyebrow">因子库</span>
         <h1>量化因子目录与回测</h1>
+        <p>统一管理单因子、组合因子、回测评分与排名缓存。</p>
       </div>
-      <p className="status-pill factors-status-pill">{listStatus}</p>
+      <div className="factors-topbar-metrics" aria-label="因子库概览">
+        <TopbarMetric label="单因子" value={state.total} />
+        <TopbarMetric label="组合因子" value={state.comboTotal} />
+        <TopbarMetric label="排名" value={state.ranking.items.length} />
+      </div>
+      <p className="status-pill factors-status-pill">{state.listStatus}</p>
     </header>
+  );
+}
+
+function TopbarMetric({ label, value }) {
+  return (
+    <span className="factors-topbar-metric">
+      <small>{label}</small>
+      <b>{value ?? 0}</b>
+    </span>
   );
 }
 
 function FactorsToolbar({ actions, state }) {
   return (
     <section className="factors-toolbar card-surface" data-factor-motion="toolbar">
+      <div className="factors-toolbar-title">
+        <span className="section-kicker">检索条件</span>
+        <strong>当前上下文</strong>
+      </div>
       <div className="factors-toolbar-row">
         <label>
-          交易对
+          <span>交易对</span>
           <input
             value={state.symbol}
             onChange={(event) => actions.setSymbol(event.target.value.toUpperCase())}
@@ -59,7 +79,7 @@ function FactorsToolbar({ actions, state }) {
           />
         </label>
         <label>
-          规则周期
+          <span>规则周期</span>
           <select value={state.duration} onChange={(event) => actions.setDuration(event.target.value)}>
             {DURATIONS.map((duration) => (
               <option key={duration.value} value={duration.value}>
@@ -69,10 +89,10 @@ function FactorsToolbar({ actions, state }) {
           </select>
         </label>
         <button type="button" className="factors-btn-secondary" onClick={actions.requestRankingRefresh}>
-          请求后台刷新排名
+          刷新排名
         </button>
       </div>
-      <p className="factors-rank-hint">{state.ranking.status}</p>
+      <p className="factors-rank-hint" role="status">{state.ranking.status}</p>
     </section>
   );
 }

@@ -88,8 +88,49 @@ def test_train_lstm_model_marks_validation_failed_when_no_threshold_passes() -> 
     assert report["status"] == "validation_failed"
     assert report["validationGate"]["reason"] == "no_validation_confidence_threshold_met"
     assert report["selectedConfidenceThreshold"] is None
-    assert not paths.status.exists()
+    assert _read_json(paths.status)["status"] == "validation_failed"
     assert paths.attempt.exists()
+
+
+def test_train_lstm_model_keeps_old_active_model_when_validation_fails(monkeypatch) -> None:
+    artifact_root = _runtime_path("old-active-validation-failed")
+    _write_report_gate_artifacts(artifact_root)
+    report = train_lstm_model(
+        LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
+        artifact_root=artifact_root,
+        backend=_LowConfidenceBackend(),
+        dataset_builder=_fake_dataset,
+    )
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+
+    status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
+
+    assert report["status"] == "validation_failed"
+    assert _read_json(paths.status)["status"] == "trained"
+    assert status["activeModelStatus"] == "trained"
+    assert status["lastAttemptStatus"] == "validation_failed"
+    assert status["validationFailureReason"] == "no_validation_confidence_threshold_met"
+
+
+def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monkeypatch) -> None:
+    artifact_root = _runtime_path("validation-passed")
+    report = train_lstm_model(
+        LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
+        artifact_root=artifact_root,
+        backend=_HighConfidenceBackend(),
+        dataset_builder=_fake_dataset,
+    )
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+
+    status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
+
+    assert report["status"] == "trained"
+    assert paths.model.exists()
+    assert status["activeModelStatus"] == "trained"
+    assert status["lastAttemptStatus"] == "trained"
+    assert status["selectedConfidenceThreshold"] is not None
 
 
 class _PredictOnlyBackend:
@@ -105,6 +146,12 @@ class _LowConfidenceBackend:
 
     def predict(self, _model_path, x):
         return np.full(len(x), 0.51, dtype=np.float32)
+
+
+class _HighConfidenceBackend(_LowConfidenceBackend):
+    def predict(self, _model_path, x):
+        probs = np.where(x[:, 0, 0] > 0.0, 0.9, 0.1)
+        return probs.astype(np.float32)
 
 
 def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
@@ -214,6 +261,10 @@ def _write_report_gate_artifacts(root: Path) -> None:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _runtime_path(name: str) -> Path:

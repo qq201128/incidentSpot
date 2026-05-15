@@ -65,7 +65,7 @@ def test_train_lstm_model_writes_separate_artifacts() -> None:
     assert (model_dir / "features.json").exists()
     assert (model_dir / "model_version.json").exists()
     assert report["validationGate"]["status"] == "passed"
-    assert report["selectedConfidenceThreshold"] == pytest.approx(0.6)
+    assert report["selectedConfidenceThreshold"] == pytest.approx(0.5)
 
 
 def test_predict_lstm_signal_missing_model_raises() -> None:

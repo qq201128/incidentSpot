@@ -3,8 +3,6 @@ import {
   learningPatternLabel,
 } from "../utils/factorLearningLabels";
 
-const TOP_WEIGHT_LIMIT = 10;
-
 export default function FactorLearningMemoryGrid({ memory }) {
   return (
     <div className="factor-learning-grid">
@@ -38,7 +36,7 @@ function LossPatternBox({ lossMemory }) {
         <MetricRow label="状态" value={lossMemoryStatusLabel(lossMemory.status)} />
         <MetricRow label="样本" value={lossMemory.sampleCount ?? "—"} />
         <MetricRow label="亏损" value={lossMemory.lossCount ?? "—"} />
-        {items.slice(0, 5).map((item, index) => (
+        {items.map((item, index) => (
           <li key={`亏损特征-${index}`}>
             <strong>{learningPatternLabel(item, "feature")}</strong>
             <span>{metaLabel("lossRate", item.lossRate)}</span>
@@ -60,7 +58,7 @@ function PatternBox({ title, items, valueKey, metaKey }) {
         <span>{items.length}</span>
       </div>
       <ul>
-        {items.slice(0, 8).map((item, index) => (
+        {items.map((item, index) => (
           <li key={`${title}-${index}`}>
             <strong>{learningPatternLabel(item, valueKey)}</strong>
             <span>{metaLabel(metaKey, item[metaKey])}</span>
@@ -74,8 +72,7 @@ function PatternBox({ title, items, valueKey, metaKey }) {
 
 function WeightsBox({ weights }) {
   const rows = Object.entries(weights)
-    .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .slice(0, TOP_WEIGHT_LIMIT);
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
   return (
     <section className="factor-learning-box">
       <div className="factor-learning-title compact">

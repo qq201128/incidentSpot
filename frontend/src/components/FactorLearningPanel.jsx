@@ -11,10 +11,41 @@ import FactorLearningMemoryGrid from "./FactorLearningMemoryGrid";
 import FactorLearningOperatorLibrary from "./FactorLearningOperatorLibrary";
 import FactorLearningStatusBoxes from "./FactorLearningStatusBoxes";
 import "./FactorLearningPanel.css";
+import "./FactorLearningCards.css";
 
 const AGENT_RELOAD_DELAY_MS = 5000;
 
 export default function FactorLearningPanel({ symbol, duration }) {
+  const learning = useFactorLearningData(symbol, duration);
+
+  return (
+    <section className="factor-learning-panel">
+      <LearningHeader
+        memory={learning.memoryState.data}
+        operatorState={learning.operatorState}
+        status={learning.memoryState.status}
+        refreshing={learning.refreshing}
+        onRefreshAgent={() => void learning.refresh(true)}
+        onRefreshLocal={() => void learning.refresh(false)}
+      />
+      <FactorAdaptiveLearningPanel
+        learning={learning.memoryState.data?.adaptiveLearning}
+        lstm={learning.lstmState.data || learning.memoryState.data?.lstmShadow}
+        lstmStatus={learning.lstmState.status}
+      />
+      <FactorLearningCandidateIdeas memory={learning.memoryState.data} />
+      <FactorLearningMemoryGrid memory={learning.memoryState.data} />
+      <FactorLearningStatusBoxes
+        memory={learning.memoryState.data}
+        refreshing={learning.refreshing}
+        onRefreshLocal={() => void learning.refresh(false)}
+      />
+      <FactorLearningOperatorLibrary operators={learning.operatorState.data?.operators || []} />
+    </section>
+  );
+}
+
+function useFactorLearningData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [memoryState, setMemoryState] = useState({ data: null, status: "" });
   const [operatorState, setOperatorState] = useState({ data: null, status: "" });
@@ -48,11 +79,7 @@ export default function FactorLearningPanel({ symbol, duration }) {
     setRefreshing(true);
     setMemoryState((state) => ({ ...state, status: runAgent ? "联网挖掘中…" : "本地复盘中…" }));
     try {
-      const data = await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
-      setMemoryState({ data, status: memoryStatus(data) });
-      if (data.agentQueued) {
-        window.setTimeout(() => void loadData(new AbortController().signal), AGENT_RELOAD_DELAY_MS);
-      }
+      await refreshLearningMemory({ duration, loadData, normalizedSymbol, runAgent, setMemoryState });
     } catch (error) {
       setMemoryState((state) => ({ ...state, status: `刷新失败：${error.message}` }));
     } finally {
@@ -60,31 +87,15 @@ export default function FactorLearningPanel({ symbol, duration }) {
     }
   }, [duration, loadData, normalizedSymbol]);
 
-  return (
-    <section className="factor-learning-panel">
-      <LearningHeader
-        memory={memoryState.data}
-        operatorState={operatorState}
-        status={memoryState.status}
-        refreshing={refreshing}
-        onRefreshAgent={() => void refresh(true)}
-        onRefreshLocal={() => void refresh(false)}
-      />
-      <FactorAdaptiveLearningPanel
-        learning={memoryState.data?.adaptiveLearning}
-        lstm={lstmState.data || memoryState.data?.lstmShadow}
-        lstmStatus={lstmState.status}
-      />
-      <FactorLearningCandidateIdeas memory={memoryState.data} />
-      <FactorLearningMemoryGrid memory={memoryState.data} />
-      <FactorLearningStatusBoxes
-        memory={memoryState.data}
-        refreshing={refreshing}
-        onRefreshLocal={() => void refresh(false)}
-      />
-      <FactorLearningOperatorLibrary operators={operatorState.data?.operators || []} />
-    </section>
-  );
+  return { memoryState, operatorState, lstmState, refresh, refreshing };
+}
+
+async function refreshLearningMemory({ normalizedSymbol, duration, runAgent, loadData, setMemoryState }) {
+  const data = await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
+  setMemoryState({ data, status: memoryStatus(data) });
+  if (data.agentQueued) {
+    window.setTimeout(() => void loadData(new AbortController().signal), AGENT_RELOAD_DELAY_MS);
+  }
 }
 
 async function loadMemory({ symbol, duration, signal, setState }) {
@@ -93,7 +104,8 @@ async function loadMemory({ symbol, duration, signal, setState }) {
     if (!signal.aborted) setState({ data, status: memoryStatus(data) });
   } catch (error) {
     if (isCanceled(error, signal)) return;
-    const status = error?.response?.status === 404 ? "暂无因子学习记忆" : `读取失败：${error.message}`;
+    const detail = error?.response?.data?.detail || error.message;
+    const status = error?.response?.status === 404 ? `暂无因子学习记忆：${detail}` : `读取失败：${detail}`;
     setState({ data: null, status });
   }
 }
@@ -104,7 +116,7 @@ async function loadOperators(signal, setState) {
     if (!signal.aborted) setState({ data, status: `算子库：${data.total ?? 0} 个` });
   } catch (error) {
     if (isCanceled(error, signal)) return;
-    setState({ data: null, status: `算子库失败：${error.message}` });
+    setState({ data: null, status: `算子库失败：${error?.response?.data?.detail || error.message}` });
   }
 }
 
@@ -114,33 +126,52 @@ async function loadLstmStatus({ symbol, duration, signal, setState }) {
     if (!signal.aborted) setState({ data, status: lstmStatusText(data) });
   } catch (error) {
     if (isCanceled(error, signal)) return;
-    setState({ data: null, status: `LSTM状态失败：${error.message}` });
+    setState({ data: null, status: `LSTM状态失败：${error?.response?.data?.detail || error.message}` });
   }
 }
 
 function LearningHeader(props) {
   const agent = props.memory?.llmAgent;
   const source = props.memory?.source || {};
+  const agentStatus = agent?.status || (agent?.review ? "done" : "idle");
   return (
     <div className="factor-learning-head">
-      <div>
+      <div className="factor-learning-head-main">
         <span className="section-kicker">因子学习 / 自动挖掘</span>
         <h2>{agent?.model || "Kimi 因子挖掘 Agent"}</h2>
-        <p>{props.status}</p>
-        <p>{props.operatorState.status}</p>
+        <div className="factor-learning-status-line">
+          <HeaderStatus status={agentStatus} text={agentStatusLabel(agentStatus)} />
+          <HeaderStatus text={props.status} />
+          <HeaderStatus text={props.operatorState.status} />
+        </div>
       </div>
       <div className="factor-learning-actions">
         <Metric label="结算样本" value={source.settledPredictionCount ?? "—"} />
         <Metric label="亏损模式" value={source.lossPatternCount ?? "—"} />
-        <button type="button" disabled={props.refreshing} onClick={props.onRefreshLocal}>
+        <button
+          type="button"
+          className="factor-learning-action-secondary"
+          disabled={props.refreshing}
+          onClick={props.onRefreshLocal}
+        >
           本地复盘
         </button>
-        <button type="button" disabled={props.refreshing} onClick={props.onRefreshAgent}>
+        <button
+          type="button"
+          className="factor-learning-action-primary"
+          disabled={props.refreshing}
+          onClick={props.onRefreshAgent}
+        >
           联网挖掘
         </button>
       </div>
     </div>
   );
+}
+
+function HeaderStatus({ status = "info", text }) {
+  if (!text) return null;
+  return <span className={`factor-learning-status is-${status}`}>{text}</span>;
 }
 
 function Metric({ label, value }) {
@@ -150,6 +181,17 @@ function Metric({ label, value }) {
       <b>{value}</b>
     </span>
   );
+}
+
+function agentStatusLabel(status) {
+  const labels = {
+    done: "Agent 已完成",
+    failed: "Agent 失败",
+    idle: "等待挖掘",
+    pending: "Agent 排队中",
+    running: "Agent 运行中",
+  };
+  return labels[status] || status;
 }
 
 function memoryStatus(data) {

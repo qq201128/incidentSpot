@@ -1,4 +1,4 @@
-const RANKING_PREVIEW_LIMIT = 16;
+import "./FactorCombinationRankingTable.css";
 
 export default function FactorCombinationRankingTable({
   highWinrateRanking = [],
@@ -19,7 +19,6 @@ export default function FactorCombinationRankingTable({
 }
 
 function RankingSection({ emptyText, ranking, summary = "", title }) {
-  const items = ranking.slice(0, RANKING_PREVIEW_LIMIT);
   return (
     <div className="factor-combo-ranking">
       <div className="factor-combo-ranking-title">
@@ -27,7 +26,7 @@ function RankingSection({ emptyText, ranking, summary = "", title }) {
         <span>{countText(ranking.length, summary)}</span>
       </div>
       <div className="factor-combo-rank-list">
-        {items.map(renderRankingRow)}
+        {ranking.map(renderRankingRow)}
         {!ranking.length ? <p className="factor-combo-empty">{emptyText}</p> : null}
       </div>
     </div>

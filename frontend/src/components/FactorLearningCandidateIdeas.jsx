@@ -65,7 +65,7 @@ function TagList({ items, empty, muted = false }) {
   return (
     <div className={`factor-learning-tags${muted ? " muted" : ""}`}>
       {rows.length
-        ? rows.slice(0, 6).map((item, index) => (
+        ? rows.map((item, index) => (
             <span key={`${index}-${item}`}>{item}</span>
           ))
         : <span>{empty}</span>}

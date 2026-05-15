@@ -7,7 +7,14 @@ from typing import Any, Callable
 
 import numpy as np
 
-from app.services.lstm_artifacts import artifact_paths, artifact_paths_for_root, publish_artifacts, write_json
+from app.services.lstm_artifacts import (
+    artifact_paths,
+    artifact_paths_for_root,
+    publish_artifacts,
+    read_json,
+    required_artifacts_exist,
+    write_json,
+)
 from app.services.lstm_config import LSTM_RULE_NAME, LstmTrainingConfig, validated_lstm_config
 from app.services.lstm_feature_builder import LstmDataError, LstmDataset, build_lstm_training_dataset
 from app.services.lstm_torch_backend import TorchLstmBackend, TorchLstmOptions
@@ -38,11 +45,13 @@ def train_lstm_model(
         dataset = dataset_builder(cfg)
     except LstmDataError as exc:
         write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, str(exc)))
+        _write_failed_active_status_if_unavailable(paths, cfg, "failed", str(exc))
         raise
     try:
         return _train_with_dataset(cfg, dataset, paths, staging, backend or TorchLstmBackend(), version)
     except Exception as exc:
         write_json(paths.attempt, _attempt_payload("failed", cfg, version, str(exc)))
+        _write_failed_active_status_if_unavailable(paths, cfg, "failed", str(exc))
         raise
 
 
@@ -69,6 +78,11 @@ def _train_with_dataset(
     _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
     if report["status"] == "trained":
         publish_artifacts(staging_paths, active_paths)
+    elif not _active_model_available(active_paths):
+        write_json(
+            active_paths.status,
+            _status_payload(report["status"], cfg, report.get("validationFailureReason")),
+        )
     write_json(
         active_paths.attempt,
         _attempt_payload(report["status"], cfg, version, report.get("validationFailureReason")),
@@ -100,6 +114,7 @@ def _training_report(
         "trainedAt": _utc_now(),
         "featureWindow": cfg.feature_window,
         "horizonMinutes": cfg.horizon_minutes,
+        "minMoveBps": cfg.min_move_bps,
         "sampleCounts": _sample_counts(split),
         "validation": val_metrics,
         "test": test_metrics,
@@ -150,6 +165,7 @@ def _feature_payload(cfg: LstmTrainingConfig, dataset: LstmDataset) -> dict[str,
         "symbol": cfg.symbol,
         "duration": cfg.duration,
         "featureWindow": cfg.feature_window,
+        "minMoveBps": cfg.min_move_bps,
         "columns": dataset.feature_columns,
         "comboSnapshot": dataset.combo_snapshot,
         "count": len(dataset.feature_columns),
@@ -161,6 +177,7 @@ def _version_payload(report: dict[str, Any]) -> dict[str, Any]:
         "modelVersion": report["modelVersion"],
         "trainedAt": report["trainedAt"],
         "returnStats": report["returnStats"],
+        "minMoveBps": report.get("minMoveBps"),
         "validationGate": report.get("validationGate"),
         "selectedConfidenceThreshold": report.get("selectedConfidenceThreshold"),
     }
@@ -172,6 +189,7 @@ def _status_payload(status: str, cfg: LstmTrainingConfig, reason: str | None = N
         "symbol": cfg.symbol.strip().upper(),
         "duration": cfg.duration,
         "featureWindow": cfg.feature_window,
+        "minMoveBps": cfg.min_move_bps,
         "updatedAt": _utc_now(),
     }
     if reason:
@@ -190,6 +208,22 @@ def _attempt_payload(
     return payload
 
 
+def _write_failed_active_status_if_unavailable(
+    paths,
+    cfg: LstmTrainingConfig,
+    status: str,
+    reason: str,
+) -> None:
+    if _active_model_available(paths):
+        return
+    write_json(paths.status, _status_payload(status, cfg, reason))
+
+
+def _active_model_available(paths) -> bool:
+    status = read_json(paths.status) or {}
+    return status.get("status") == "trained" and required_artifacts_exist(paths)
+
+
 def _return_stats(returns: np.ndarray) -> dict[str, float]:
     up = returns[returns > 0]
     down = returns[returns <= 0]
@@ -202,7 +236,8 @@ def _return_stats(returns: np.ndarray) -> dict[str, float]:
 
 def _model_version(cfg: LstmTrainingConfig) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"lstm_{cfg.symbol}_{cfg.duration}_w{cfg.feature_window}_{stamp}"
+    bps = f"{cfg.min_move_bps:g}".replace(".", "p")
+    return f"lstm_{cfg.symbol}_{cfg.duration}_w{cfg.feature_window}_m{bps}_{stamp}"
 
 
 def _utc_now() -> str:

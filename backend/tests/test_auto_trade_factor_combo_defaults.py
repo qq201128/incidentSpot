@@ -5,7 +5,13 @@ import sqlite3
 from app.db.session import _ensure_auto_trade_strategies
 from app.services import auto_trade_service
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.high_winrate_strategy_demotion import STATUS_ACTIVE, STATUS_DEMOTED
+from app.services.high_winrate_strategy_demotion import (
+    STATUS_BACKTEST_CANDIDATE,
+    STATUS_DEMOTED,
+    STATUS_PAPER_LIVE_COLLECTING,
+    STATUS_PAPER_LIVE_PASSED,
+    STATUS_TRADABLE,
+)
 from app.services.auto_trade_service import AUTO_TRADE_SLOT_DURATIONS
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
@@ -36,16 +42,21 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert all(by_duration[duration]["live_trading_enabled"] == 0 for duration in AUTO_TRADE_SLOT_DURATIONS)
 
 
-def test_high_winrate_live_trade_requires_active_status(monkeypatch) -> None:
+def test_high_winrate_live_trade_rejects_non_tradable_statuses(monkeypatch) -> None:
     settings = _high_winrate_settings(live=True)
     prediction = _passing_prediction()
-    monkeypatch.setattr(
-        auto_trade_service,
-        "high_winrate_demotion_status",
-        lambda *_args: {"status": STATUS_DEMOTED},
-    )
-
-    assert auto_trade_service._is_prediction_tradable(prediction, settings) is False
+    for status in (
+        STATUS_BACKTEST_CANDIDATE,
+        STATUS_PAPER_LIVE_COLLECTING,
+        STATUS_PAPER_LIVE_PASSED,
+        STATUS_DEMOTED,
+    ):
+        monkeypatch.setattr(
+            auto_trade_service,
+            "high_winrate_demotion_status",
+            lambda *_args, value=status: {"status": value},
+        )
+        assert auto_trade_service._is_prediction_tradable(prediction, settings) is False
 
 
 def test_high_winrate_sim_trade_keeps_collecting_when_demoted(monkeypatch) -> None:
@@ -60,13 +71,13 @@ def test_high_winrate_sim_trade_keeps_collecting_when_demoted(monkeypatch) -> No
     assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
 
 
-def test_high_winrate_live_trade_allowed_when_active(monkeypatch) -> None:
+def test_high_winrate_live_trade_allowed_when_tradable(monkeypatch) -> None:
     settings = _high_winrate_settings(live=True)
     prediction = _passing_prediction()
     monkeypatch.setattr(
         auto_trade_service,
         "high_winrate_demotion_status",
-        lambda *_args: {"status": STATUS_ACTIVE},
+        lambda *_args: {"status": STATUS_TRADABLE},
     )
 
     assert auto_trade_service._is_prediction_tradable(prediction, settings) is True

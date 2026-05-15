@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 EPSILON = 1e-12
-CONFIDENCE_THRESHOLDS = (0.55, 0.60, 0.65, 0.70)
+CONFIDENCE_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70)
 
 
 @dataclass(frozen=True)

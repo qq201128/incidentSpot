@@ -8,7 +8,9 @@ from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_background import refresh_symbol_combination_rankings
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_live_service import build_combination_signal_watchlist
+from app.services.data_coverage_report import CoverageOptions, build_data_coverage_report
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
+from app.services.high_winrate_strategy_demotion import high_winrate_demotion_status
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
 from app.services.factor_combination_service import (
@@ -120,7 +122,34 @@ def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict
 
 def _high_winrate_view(symbol: str, duration: str) -> dict:
     cached = get_cached_high_winrate_combo_ranking(symbol, duration)
-    return build_high_winrate_combo_view(cached, duration)
+    return {
+        **build_high_winrate_combo_view(cached, duration),
+        "highWinrateStatus": high_winrate_demotion_status(symbol, duration),
+        "dataCoverage": _data_coverage_summary(symbol, duration),
+    }
+
+
+def _data_coverage_summary(symbol: str, duration: str) -> dict:
+    report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration))
+    return {
+        "mainRange": report["mainRange"],
+        "missingFeatureSources": _missing_feature_sources(report["tables"]),
+    }
+
+
+def _missing_feature_sources(tables: list[dict]) -> list[dict]:
+    missing = []
+    for table in tables:
+        for row in table.get("rows") or []:
+            if row.get("status") in {"healthy"}:
+                continue
+            missing.append({
+                "table": table.get("table"),
+                "status": row.get("status"),
+                "coveragePct": row.get("coveragePct"),
+                "missingReason": row.get("missingReason"),
+            })
+    return missing
 
 
 def _regular_ranking_rows(cached: dict) -> list[dict]:

@@ -1,7 +1,5 @@
 import { directionLabel, factorTitle, formatNum, formatPct } from "./factorDisplayUtils";
 
-const RANKING_LIMIT = 40;
-
 export default function FactorDetailPanel({
   backtest,
   backtestError,
@@ -131,9 +129,7 @@ function RankingBlock({ ranking, selectedName, onSelect }) {
             </tr>
           </thead>
           <tbody>
-            {ranking
-              .slice(0, RANKING_LIMIT)
-              .map((row, index) => renderRankingRow({ row, index, selectedName, onSelect }))}
+            {ranking.map((row, index) => renderRankingRow({ row, index, selectedName, onSelect }))}
           </tbody>
         </table>
         {!ranking.length ? <p className="factors-empty factors-ranking-empty">暂无排名数据</p> : null}

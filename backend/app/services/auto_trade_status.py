@@ -8,6 +8,8 @@ from app.services.auto_trade_service import fresh_prediction_ms_for_strategy, li
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.position_guard import has_open_position
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
+from app.services.high_winrate_strategy_demotion import high_winrate_demotion_status
+from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, strategy_uses_trade_policy_gates
 
 MS_PER_SECOND = 1000
@@ -25,6 +27,7 @@ def _strategy_status(settings: AutoTradeSettings) -> dict[str, Any]:
         "settings": settings.to_response(),
         "openPosition": _has_open_position(settings),
         "latestPrediction": _prediction_status(prediction, settings),
+        "highWinrateStatus": _high_winrate_status(settings),
     }
     return {**status, "reason": _reason(status)}
 
@@ -75,6 +78,9 @@ def _reason(status: dict[str, Any]) -> str:
     prediction = status["latestPrediction"]
     if prediction is None:
         return "waiting_prediction"
+    high_winrate_reason = _high_winrate_strategy_reason(status)
+    if high_winrate_reason is not None:
+        return high_winrate_reason
     if prediction["ageMs"] > prediction["freshPredictionMs"]:
         return "waiting_fresh_prediction"
     if not prediction["tradePolicyGatesEnabled"]:
@@ -141,6 +147,24 @@ def _high_winrate_reason(prediction: dict[str, Any]) -> str:
     if not prediction["highWinrateGatePassed"]:
         return "high_winrate_gate_failed"
     return "ready_to_place_order"
+
+
+def _high_winrate_status(settings: AutoTradeSettings) -> dict[str, Any] | None:
+    if settings.strategy_key != HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
+        return None
+    return high_winrate_demotion_status(settings.symbol, settings.duration)
+
+
+def _high_winrate_strategy_reason(status: dict[str, Any]) -> str | None:
+    details = status.get("highWinrateStatus")
+    settings = status["settings"]
+    if settings["strategyKey"] != HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
+        return None
+    if not settings.get("liveTradingEnabled"):
+        return None
+    if details and details.get("status") != "tradable":
+        return str(details.get("reason") or f"high_winrate_status_{details.get('status')}")
+    return None
 
 
 def _ungated_strategy_reason(prediction: dict[str, Any]) -> str:

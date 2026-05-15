@@ -1,74 +1,128 @@
 .factor-learning-panel {
+  --ant-blue: #1677ff;
+  --ant-blue-hover: #4096ff;
+  --ant-border: rgba(91, 108, 122, 0.56);
+  --ant-card: rgba(13, 18, 23, 0.78);
   display: grid;
-  gap: 14px;
-  padding: 4px 0 2px;
+  gap: 12px;
+  padding: 2px 0 20px;
   min-width: 0;
 }
 
 .factor-learning-head,
 .factor-learning-section,
 .factor-learning-operators {
-  border: 1px solid rgba(81, 100, 108, 0.55);
+  border: 1px solid var(--ant-border);
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(232, 191, 99, 0.08), transparent 38%),
-    rgba(13, 18, 23, 0.72);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 66px),
+    var(--ant-card);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
 }
 
 .factor-learning-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 14px 16px;
-  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  padding: 16px;
 }
 
 .factor-learning-head h2 {
-  margin: 2px 0 8px;
+  margin: 3px 0 10px;
   font-size: 20px;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
-.factor-learning-head p {
-  margin: 2px 0;
+.factor-learning-head-main {
+  min-width: 0;
+}
+
+.factor-learning-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.factor-learning-status {
+  max-width: 100%;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid rgba(120, 167, 255, 0.24);
+  border-radius: 6px;
+  background: rgba(120, 167, 255, 0.08);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.factor-learning-status.is-done {
+  border-color: rgba(63, 211, 166, 0.38);
+  background: rgba(63, 211, 166, 0.1);
+  color: #baf7e5;
+}
+
+.factor-learning-status.is-failed {
+  border-color: rgba(240, 109, 123, 0.45);
+  background: rgba(240, 109, 123, 0.1);
+  color: #ffb4bf;
+}
+
+.factor-learning-status.is-pending,
+.factor-learning-status.is-running {
+  border-color: rgba(232, 191, 99, 0.4);
+  background: rgba(232, 191, 99, 0.12);
+  color: #f2d68f;
 }
 
 .factor-learning-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(100px, 1fr));
   gap: 8px;
-  max-width: min(520px, 52%);
+  min-width: min(440px, 42vw);
 }
 
 .factor-learning-actions button {
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  color: var(--text);
+  min-height: 34px;
   font-weight: 800;
 }
 
+.factor-learning-action-primary {
+  border-color: rgba(22, 119, 255, 0.68);
+  background: var(--ant-blue);
+  color: #fff;
+}
+
+.factor-learning-action-secondary {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 .factor-learning-metric {
-  min-width: 92px;
+  min-width: 0;
   display: grid;
   gap: 2px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
 }
 
-.factor-learning-metric small {
+.factor-learning-metric small,
+.factor-learning-title span {
   color: var(--muted);
   font-size: 11px;
+  font-weight: 700;
 }
 
 .factor-learning-metric b {
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .factor-learning-title {
@@ -89,212 +143,14 @@
   font-size: 15px;
 }
 
-.factor-learning-title span {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.factor-learning-candidates {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  padding: 12px 14px 14px;
-}
-
-.factor-learning-candidate {
-  min-width: 0;
-  display: grid;
-  gap: 10px;
-  padding: 13px 14px;
-  border: 1px solid rgba(232, 191, 99, 0.28);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(232, 191, 99, 0.05), transparent),
-    rgba(9, 13, 16, 0.62);
-}
-
-.factor-learning-candidate-top strong {
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.3;
-}
-
-.factor-learning-candidate-top span {
-  color: var(--gold);
-  font-size: 12px;
-  font-weight: 800;
-  overflow-wrap: anywhere;
-}
-
-.factor-learning-candidate code {
-  max-height: 74px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--blue);
-  font-size: 12px;
-  line-height: 1.45;
-  background: rgba(120, 167, 255, 0.08);
-  border-radius: 6px;
-  padding: 8px;
-}
-
-.factor-learning-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.factor-learning-tags span {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  border-radius: 999px;
-  border: 1px solid rgba(63, 211, 166, 0.32);
-  color: #baf7e5;
-  background: rgba(63, 211, 166, 0.08);
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.factor-learning-tags.muted span {
-  border-color: rgba(120, 167, 255, 0.24);
-  color: var(--muted);
-  background: rgba(120, 167, 255, 0.06);
-}
-
-.factor-learning-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.factor-learning-box {
-  min-height: 194px;
-  padding: 13px 14px;
-  border: 1px solid rgba(81, 100, 108, 0.55);
-  border-radius: 8px;
-  background: rgba(13, 18, 23, 0.72);
-}
-
-.factor-learning-box ul {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.factor-learning-box li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 0;
-  border-top: 1px solid rgba(43, 54, 61, 0.65);
-}
-
-.factor-learning-box strong {
-  min-width: 0;
-  color: var(--text);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.factor-learning-box li span {
-  color: var(--gold);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.factor-learning-operators {
-  overflow: hidden;
-}
-
-.factor-learning-operator-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  padding: 12px 14px 14px;
-}
-
-.factor-learning-operator-family {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.028);
-}
-
-.factor-learning-operator-family h4 {
-  margin: 0 0 8px;
-  color: var(--gold);
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.factor-learning-operator-family div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.factor-learning-operator-family span {
-  border-radius: 6px;
-  color: var(--text);
-  background: rgba(120, 167, 255, 0.08);
-  border: 1px solid rgba(120, 167, 255, 0.18);
-  padding: 3px 6px;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.factor-learning-empty {
-  margin: 0;
-  padding: 14px 16px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(13, 18, 23, 0.55);
-}
-
-.factor-learning-candidate-empty {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 7px;
-}
-
-.factor-learning-candidate-empty strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.factor-learning-candidate-empty span {
-  overflow-wrap: anywhere;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-@media (max-width: 720px) {
-  .factor-learning-head {
-    flex-direction: column;
+@media (max-width: 900px) {
+  .factor-learning-head,
+  .factor-learning-actions {
+    grid-template-columns: 1fr;
   }
 
   .factor-learning-actions {
-    max-width: none;
+    min-width: 0;
     width: 100%;
-    justify-content: stretch;
-  }
-
-  .factor-learning-actions button,
-  .factor-learning-metric {
-    flex: 1 1 130px;
-  }
-
-  .factor-learning-candidates,
-  .factor-learning-grid,
-  .factor-learning-operator-grid {
-    grid-template-columns: 1fr;
   }
 }

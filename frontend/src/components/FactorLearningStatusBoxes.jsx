@@ -1,10 +1,6 @@
 import { factorLabel } from "../utils/factorLearningLabels";
 import "./FactorLearningStatusBoxes.css";
 
-const LIBRARY_PREVIEW_LIMIT = 6;
-const ISSUE_PREVIEW_LIMIT = 4;
-const SOLUTION_PREVIEW_LIMIT = 4;
-
 export default function FactorLearningStatusBoxes({ memory, refreshing = false, onRefreshLocal }) {
   return (
     <div className="factor-learning-grid factor-learning-status-grid">
@@ -22,7 +18,7 @@ export default function FactorLearningStatusBoxes({ memory, refreshing = false, 
 }
 
 function AgentLibraryBox({ library }) {
-  const rows = Array.isArray(library.factors) ? library.factors.slice(0, LIBRARY_PREVIEW_LIMIT) : [];
+  const rows = Array.isArray(library.factors) ? library.factors : [];
   return (
     <section
       className="factor-learning-box"
@@ -43,7 +39,7 @@ function AgentLibraryBox({ library }) {
 }
 
 function LibraryBox({ library }) {
-  const rows = Array.isArray(library.factors) ? library.factors.slice(0, LIBRARY_PREVIEW_LIMIT) : [];
+  const rows = Array.isArray(library.factors) ? library.factors : [];
   return (
     <section
       className="factor-learning-box"
@@ -98,7 +94,7 @@ function MonitorBox({ monitoring }) {
 }
 
 function IssueBox({ monitoring }) {
-  const issues = Array.isArray(monitoring.issues) ? monitoring.issues.slice(0, ISSUE_PREVIEW_LIMIT) : [];
+  const issues = Array.isArray(monitoring.issues) ? monitoring.issues : [];
   return (
     <section className="factor-learning-box" title="右侧高/中/低为严重级别；与成功率、候选成功率、连续亏损等阈值相关。">
       <BoxTitle title="低胜率告警" count={issues.length} />
@@ -117,7 +113,7 @@ function IssueBox({ monitoring }) {
 
 function SolutionBox({ monitoring, refreshing, onRefreshLocal }) {
   const rows = Array.isArray(monitoring.solutions)
-    ? monitoring.solutions.slice(0, SOLUTION_PREVIEW_LIMIT).map(normalizeSolution)
+    ? monitoring.solutions.map(normalizeSolution)
     : [];
   return (
     <section className="factor-learning-box" title="与告警关联的处理建议；会改变候选逻辑的项目需人工确认。">

@@ -7,7 +7,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from app.services.factor_cache_metadata import assert_cache_usable
+from app.services.factor_cache_metadata import assert_cache_usable, cache_is_usable
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_duration_alignment import duration_entry_rows, duration_entry_source_open_time
@@ -192,11 +192,25 @@ def _ranking_or_raise(
     ranking = ranking_loader(symbol.strip().upper(), duration)
     if ranking is None:
         raise LstmDataError(f"no cached factor combination ranking for {symbol.upper()} {duration}")
+    if not cache_is_usable(ranking) and ranking_loader is get_cached_combination_ranking:
+        ranking = _rebuild_cached_ranking(symbol, duration)
     try:
         assert_cache_usable(ranking, f"factor combination ranking {symbol.upper()} {duration}")
     except ValueError as exc:
         raise LstmDataError(str(exc)) from exc
     return ranking
+
+
+def _rebuild_cached_ranking(symbol: str, duration: str) -> dict[str, Any]:
+    from app.services.factor_combination_cache_service import save_cached_combination_ranking
+    from app.services.factor_combination_service import run_factor_combination_ranking
+
+    report = run_factor_combination_ranking(symbol.strip().upper(), duration)
+    save_cached_combination_ranking(report)
+    refreshed = get_cached_combination_ranking(symbol, duration)
+    if refreshed is None:
+        raise LstmDataError(f"rebuilt factor combination ranking missing for {symbol.upper()} {duration}")
+    return refreshed
 
 
 def _assert_combo_snapshot_matches(

@@ -114,6 +114,28 @@ def test_high_winrate_strategy_accepts_goal_combo(monkeypatch) -> None:
     assert "rule=high_winrate_factor_combo_goal_v1" in result["rule_reasons"]
 
 
+def test_high_winrate_strategy_uses_active_rotation_rank(monkeypatch) -> None:
+    cache = {
+        "ranking": [_ranking_row("goal_combo__top1"), _ranking_row("goal_combo__top2")],
+        "cacheStatus": {"usable": True, "reason": "usable"},
+    }
+
+    monkeypatch.setattr(factor_combo_strategy, "high_winrate_active_rank", lambda *_args: 2)
+    monkeypatch.setattr(factor_combo_strategy, "get_cached_high_winrate_combo_ranking", lambda *_args: cache)
+    monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
+    monkeypatch.setattr(
+        factor_combo_strategy,
+        "materialize_mined_factor_frame",
+        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+    )
+    monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
+
+    result = factor_combo_strategy.predict_high_winrate_factor_combo_direction("btcusdt", "10m")
+
+    assert result["high_winrate_rule"] == "goal_combo__top2"
+    assert "combo_rank=2" in result["rule_reasons"]
+
+
 def test_high_winrate_strategy_rejects_regular_combo(monkeypatch) -> None:
     cache = {
         "ranking": [_ranking_row("combo__alpha__beta")],
@@ -153,6 +175,7 @@ def _signal_from_row(_frame: object, row: dict[str, Any], **kwargs) -> dict[str,
         "qualityThresholdPassed": True,
         "signalThreshold": 0.5,
         "factorName": row["factorName"],
+        "comboRank": row.get("comboRank"),
         "members": row["members"],
         "method": row["method"],
         "historicalWinRate": row["winRate"],

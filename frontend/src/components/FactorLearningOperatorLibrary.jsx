@@ -3,8 +3,6 @@ import {
   operatorLabel,
 } from "../utils/factorLearningLabels";
 
-const OPERATOR_PREVIEW_LIMIT = 64;
-
 export default function FactorLearningOperatorLibrary({ operators }) {
   const grouped = groupOperators(operators);
   return (
@@ -14,7 +12,7 @@ export default function FactorLearningOperatorLibrary({ operators }) {
         <span>{operators.length} 个</span>
       </div>
       <div className="factor-learning-operator-grid">
-        {grouped.slice(0, OPERATOR_PREVIEW_LIMIT).map(([category, items]) => (
+        {grouped.map(([category, items]) => (
           <section key={category} className="factor-learning-operator-family">
             <h4>{categoryLabel(category)}</h4>
             <div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { directionLabel, factorTitle } from "./factorDisplayUtils";
 import "./FactorListPanel.css";
 
-const PAGE_SIZE_OPTIONS = [12, 24, 48];
+const PAGE_SIZE_OPTIONS = [24, 48, 96];
 const LIST_TABS = [
   { key: "single", label: "单因子", title: "因子列表" },
   { key: "combo", label: "组合因子", title: "组合因子列表" },

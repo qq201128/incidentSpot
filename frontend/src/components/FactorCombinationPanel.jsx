@@ -108,7 +108,7 @@ function useRefreshHandler({ loadRanking, loadSignals, setRankingState, setRefre
       window.setTimeout(() => void loadRanking(new AbortController().signal), REFRESH_RELOAD_DELAY_MS);
       window.setTimeout(() => void loadSignals(), REFRESH_RELOAD_DELAY_MS);
     } catch (error) {
-      setRankingState((state) => ({ ...state, status: `刷新失败：${error.message}` }));
+      setRankingState((state) => ({ ...state, status: `刷新失败：${errorMessage(error)}` }));
     } finally {
       setRefreshing(false);
     }
@@ -142,6 +142,8 @@ async function loadRankingState({ symbol, duration, signal, setBaseSummary, setS
       items,
       highWinrateItems,
       highWinrateSummary: data.highWinrateSummary || null,
+      highWinrateStatus: data.highWinrateStatus || null,
+      dataCoverage: data.dataCoverage || null,
       status: rankingStatus(data, symbol, duration),
       updatedAt: data.updatedAt,
     });
@@ -166,7 +168,7 @@ async function loadSignalState(symbol, signal, setState) {
     setState({ items, missing, failures, status: signalStatus(items, missing, failures, data.signalCacheStatus) });
   } catch (error) {
     if (isCanceled(error, signal)) return;
-    setState({ items: [], missing: [], failures: [], status: `周期信号失败：${error.message}` });
+    setState({ items: [], missing: [], failures: [], status: `周期信号失败：${errorMessage(error)}` });
   }
 }
 
@@ -219,6 +221,8 @@ function ComboPanelHeader({
         <h2>{symbol} · {DURATION_LABELS[duration] || duration}</h2>
         <p>{rankingState.status}</p>
         {baseSummary ? <p>{baseSummary}</p> : null}
+        <StatusLine data={rankingState.highWinrateStatus} />
+        <CoverageLine data={rankingState.dataCoverage} />
         <p>{signalState.status}</p>
       </div>
       <div className="factor-combo-actions">
@@ -277,6 +281,44 @@ function cacheReasonText(reason) {
   return texts[reason] || reason;
 }
 
+function StatusLine({ data }) {
+  if (!data) return null;
+  const metrics = data.metrics || {};
+  const settled = data.settledSampleCount ?? data.sampleCount ?? metrics.sampleCount ?? 0;
+  const required = data.requiredSampleCount ?? data.thresholds?.requiredSampleCount ?? data.thresholds?.activeSampleCount ?? "—";
+  const winRate = formatPct(data.winRate ?? metrics.winRate, 1);
+  return (
+    <p>
+      High-winrate：{data.status || "unknown"} · settled {settled}/{required} · winRate {winRate} · {data.reason || "no_reason"}
+    </p>
+  );
+}
+
+function CoverageLine({ data }) {
+  if (!data?.mainRange) return null;
+  const range = data.mainRange;
+  const missing = Array.isArray(data.missingFeatureSources) ? data.missingFeatureSources : [];
+  const missingNames = [...new Set(missing.map((row) => row.table).filter(Boolean))];
+  const missingText = missingNames.length ? ` · 缺失特征源 ${missingNames.join(", ")}` : "";
+  return (
+    <p>
+      数据覆盖：10m K线 {range.rowCount ?? 0} 根 · {formatDate(range.minTimeUtc)} 至 {formatDate(range.maxTimeUtc)}{missingText}
+    </p>
+  );
+}
+
+function formatPct(value, digits) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
 function refreshStatus(duration) {
   return duration ? `已排队重算 ${duration} 多因子组合` : "已排队重算全部周期多因子组合";
 }
@@ -290,13 +332,19 @@ function initialRankingState() {
     items: [],
     highWinrateItems: [],
     highWinrateSummary: null,
+    highWinrateStatus: null,
+    dataCoverage: null,
     status: "",
     updatedAt: null,
   };
 }
 
 function errorRankingState(error) {
-  return { ...initialRankingState(), status: `组合排名失败：${error.message}` };
+  return { ...initialRankingState(), status: `组合排名失败：${errorMessage(error)}` };
+}
+
+function errorMessage(error) {
+  return error?.response?.data?.detail || error?.message || "unknown_error";
 }
 
 function initialSignalState() {

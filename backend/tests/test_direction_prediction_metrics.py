@@ -33,7 +33,8 @@ def test_lstm_metrics_include_confidence_threshold_samples() -> None:
         row["minConfidence"]: row
         for row in metrics["confidenceThresholds"]
     }
-    assert list(thresholds) == [0.55, 0.6, 0.65, 0.7]
+    assert list(thresholds) == [0.5, 0.55, 0.6, 0.65, 0.7]
+    assert thresholds[0.5]["sampleCount"] == 4
     assert thresholds[0.55]["sampleCount"] == 3
     assert thresholds[0.55]["winRate"] == pytest.approx(2 / 3)
     assert thresholds[0.55]["avgReturn"] == pytest.approx(0.01)
@@ -50,7 +51,10 @@ def test_lstm_confidence_threshold_metrics_handles_empty_buckets() -> None:
         np.asarray([0.01], dtype=np.float32),
     )
 
-    for row in metrics["confidenceThresholds"]:
+    rows = {row["minConfidence"]: row for row in metrics["confidenceThresholds"]}
+    assert rows[0.5]["sampleCount"] == 1
+    assert rows[0.5]["winRate"] == pytest.approx(1.0)
+    for row in [item for key, item in rows.items() if key > 0.5]:
         assert row["sampleCount"] == 0
         assert row["winRate"] is None
         assert row["avgReturn"] is None

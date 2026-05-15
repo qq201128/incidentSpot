@@ -13,7 +13,7 @@ from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.rule_config import DURATION_TO_MINUTES
-from app.services.high_winrate_strategy_demotion import STATUS_ACTIVE, high_winrate_demotion_status
+from app.services.high_winrate_strategy_demotion import STATUS_TRADABLE, high_winrate_demotion_status
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     N_BAR_10M_RM_STRATEGY_KEYS,
@@ -221,7 +221,7 @@ def _blocked_by_high_winrate_live_state(settings: AutoTradeSettings) -> bool:
     if not settings.live_trading_enabled:
         return False
     status = high_winrate_demotion_status(settings.symbol, settings.duration)
-    return status.get("status") != STATUS_ACTIVE
+    return status.get("status") != STATUS_TRADABLE
 
 
 def _latest_prediction_row(settings: AutoTradeSettings) -> dict[str, Any] | None:

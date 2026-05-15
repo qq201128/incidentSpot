@@ -53,6 +53,10 @@ function LstmShadowCard({ lstm, statusText }) {
       <div className="factor-lstm-grid">
         <Metric label="预测状态" value={readinessLabel(shadow)} strong={shadow.shadowPredictionReady} />
         <Metric label="阻断原因" value={blockedReasonLabel(shadow.shadowPredictionBlockedReason)} />
+        <Metric label="Active状态" value={lstmStatusLabel(shadow.activeModelStatus || shadow.status)} />
+        <Metric label="最近尝试" value={lstmStatusLabel(shadow.lastAttemptStatus)} />
+        <Metric label="验证失败" value={shadow.validationFailureReason || "—"} />
+        <Metric label="置信阈值" value={formatNum(shadow.selectedConfidenceThreshold, 2)} />
         <Metric label="Torch" value={shadow.torchAvailable ? "可用" : "不可用"} />
         <Metric label="模型版本" value={shortVersion(shadow.modelVersion)} />
         <Metric label="最近训练" value={formatDate(shadow.trainedAt)} />
@@ -113,6 +117,7 @@ function statusLabel(status) {
 function lstmStatusLabel(status) {
   if (status === "training") return "训练中";
   if (status === "trained") return "已训练";
+  if (status === "validation_failed") return "验证失败";
   if (status === "insufficient_samples") return "样本不足";
   if (status === "failed") return "训练失败";
   return "未训练";
@@ -160,6 +165,11 @@ function formatPct(value, digits) {
   return `${(Number(value) * 100).toFixed(digits)}%`;
 }
 
+function formatNum(value, digits) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Number(value).toFixed(digits);
+}
+
 function formatDate(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -169,5 +179,5 @@ function formatDate(value) {
 
 function shortVersion(value) {
   if (!value) return "—";
-  return String(value).replace(/^lstm_/, "").slice(0, 24);
+  return String(value).replace(/^lstm_/, "");
 }

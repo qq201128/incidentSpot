@@ -10,11 +10,12 @@ LSTM_RULE_NAME = "lstm_shadow_signal_v1"
 DEFAULT_FEATURE_WINDOW = 64
 DEFAULT_TRAIN_RATIO = 0.70
 DEFAULT_VAL_RATIO = 0.15
-DEFAULT_BATCH_SIZE = 64
-DEFAULT_EPOCHS = 20
-DEFAULT_HIDDEN_SIZE = 32
+DEFAULT_BATCH_SIZE = 32
+DEFAULT_EPOCHS = 5
+DEFAULT_HIDDEN_SIZE = 64
 DEFAULT_NUM_LAYERS = 1
 DEFAULT_LEARNING_RATE = 0.001
+DEFAULT_MIN_MOVE_BPS = 8.0
 DEFAULT_SEED = 20260513
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class LstmTrainingConfig:
     learning_rate: float = DEFAULT_LEARNING_RATE
     train_ratio: float = DEFAULT_TRAIN_RATIO
     val_ratio: float = DEFAULT_VAL_RATIO
-    min_move_bps: float = 0.0
+    min_move_bps: float = DEFAULT_MIN_MOVE_BPS
     seed: int = DEFAULT_SEED
 
 
@@ -46,6 +47,12 @@ def validated_lstm_config(config: LstmTrainingConfig) -> LstmTrainingConfig:
         raise ValueError("min_samples must be greater than feature_window")
     if config.epochs <= 0 or config.batch_size <= 0:
         raise ValueError("epochs and batch_size must be positive")
+    if config.hidden_size <= 0 or config.num_layers <= 0:
+        raise ValueError("hidden_size and num_layers must be positive")
+    if config.train_ratio <= 0 or config.val_ratio <= 0 or config.train_ratio + config.val_ratio >= 1:
+        raise ValueError("train_ratio and val_ratio must be positive and leave a test split")
+    if config.min_move_bps < 0:
+        raise ValueError("min_move_bps must be >= 0")
     horizon = config.horizon_minutes or duration_minutes(config.duration)
     if horizon <= 0:
         raise ValueError("horizon_minutes must be positive")

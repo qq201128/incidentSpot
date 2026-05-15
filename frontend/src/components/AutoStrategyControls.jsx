@@ -235,12 +235,17 @@ function StrategyDemotionSummary({ slots }) {
     <div className="strategy-demotion-list">
       {rows.map((slot) => (
         <span key={slot.duration} className={`strategy-demotion ${slot.demotion.status}`}>
-          {_durationChipLabel(slot.durationMinutes)} {demotionStatusText(slot.demotion)}：
+          {_durationChipLabel(slot.durationMinutes)} {demotionRankText(slot.demotion)}
+          {demotionStatusText(slot.demotion)}：
           {demotionReason(slot.demotion)}
         </span>
       ))}
     </div>
   );
+}
+
+function demotionRankText(demotion) {
+  return demotion?.activeRank ? `Top${demotion.activeRank} ` : "";
 }
 
 function demotionStatusText(demotion) {
@@ -256,8 +261,10 @@ function demotionReason(demotion) {
   const winRate = metrics.winRate == null ? "--" : `${(Number(metrics.winRate) * 100).toFixed(1)}%`;
   const losses = metrics.consecutiveLosses ?? 0;
   if (demotion?.reason === "consecutive_losses") return `连续亏损 ${losses} 次`;
+  if (demotion?.reason === "rotated_after_candidate_failed") return "上一候选未达标，切换后重新观察";
+  if (demotion?.reason === "candidate_pool_exhausted_refreshing") return "候选已用尽，正在刷新榜单";
   if (demotion?.reason === "insufficient_settled_samples") {
-    return `样本 ${metrics.sampleCount ?? 0}，满 ${demotion.thresholds?.activeSampleCount ?? 20} 单再判定`;
+    return `样本 ${metrics.sampleCount ?? 0}，当前胜率 ${winRate}，满 ${demotion.thresholds?.activeSampleCount ?? 20} 单再判定`;
   }
   if (demotion?.reason === "stable_live_target_met") return `最近胜率 ${winRate}`;
   if (demotion?.reason === "profit_factor_below_one") return `盈亏比 ${metrics.profitFactor}`;

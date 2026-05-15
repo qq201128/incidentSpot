@@ -1,23 +1,39 @@
 .factor-learning-page {
   width: min(100%, 1520px);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 12px;
 }
 
 .factor-learning-page-topbar {
-  min-height: 70px;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  background:
+    linear-gradient(90deg, rgba(22, 119, 255, 0.12), transparent 48%),
+    rgba(13, 18, 23, 0.82);
+}
+
+.factor-learning-page-topbar h1 {
+  font-size: 22px;
+}
+
+.factor-learning-page-topbar p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .factor-learning-page-controls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
   gap: 10px 12px;
+  align-items: end;
 }
 
 .factor-learning-page-controls label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  gap: 5px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -26,11 +42,12 @@
 .factor-learning-page-controls input,
 .factor-learning-page-controls select {
   min-width: 140px;
+  height: 34px;
 }
 
 .factor-learning-page-body {
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding-right: 2px;
 }
 
@@ -39,14 +56,14 @@
 }
 
 @media (max-width: 720px) {
+  .factor-learning-page-topbar,
   .factor-learning-page-controls,
   .factor-learning-page-controls label {
+    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
   .factor-learning-page-controls {
-    display: grid;
-    grid-template-columns: 1fr;
     justify-content: stretch;
   }
 }

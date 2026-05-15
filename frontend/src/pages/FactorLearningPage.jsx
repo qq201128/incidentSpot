@@ -21,10 +21,11 @@ export default function FactorLearningPage() {
         <div>
           <span className="eyebrow">自动挖掘</span>
           <h1>因子学习与候选挖掘</h1>
+          <p>从亏损样本、Agent 候选、算子库和 LSTM 影子信号中提炼可入库因子。</p>
         </div>
         <div className="factor-learning-page-controls">
           <label>
-            交易对
+            <span>交易对</span>
             <input
               value={symbol}
               onChange={(event) => setSymbol(event.target.value.toUpperCase())}
@@ -32,7 +33,7 @@ export default function FactorLearningPage() {
             />
           </label>
           <label>
-            规则周期
+            <span>规则周期</span>
             <select value={duration} onChange={(event) => setDuration(event.target.value)}>
               {DURATIONS.map((item) => (
                 <option key={item.value} value={item.value}>

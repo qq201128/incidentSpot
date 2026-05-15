@@ -17,6 +17,7 @@ from app.services.lstm_config import (
     DEFAULT_FEATURE_WINDOW,
     DEFAULT_HIDDEN_SIZE,
     DEFAULT_LEARNING_RATE,
+    DEFAULT_MIN_MOVE_BPS,
     DEFAULT_NUM_LAYERS,
     LstmTrainingConfig,
 )
@@ -53,6 +54,7 @@ class LstmDailyReviewConfig:
     learning_rate: float = DEFAULT_LEARNING_RATE
     hidden_size: int = DEFAULT_HIDDEN_SIZE
     num_layers: int = DEFAULT_NUM_LAYERS
+    min_move_bps: float = DEFAULT_MIN_MOVE_BPS
     run_llm_agent: bool = False
 
 
@@ -215,6 +217,7 @@ def _training_config(symbol: str, duration: str, config: LstmDailyReviewConfig) 
         learning_rate=config.learning_rate,
         hidden_size=config.hidden_size,
         num_layers=config.num_layers,
+        min_move_bps=config.min_move_bps,
     )
 
 

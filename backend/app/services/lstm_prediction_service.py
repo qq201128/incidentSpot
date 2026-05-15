@@ -23,6 +23,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
     sym = symbol.strip().upper()
     paths = artifact_paths(sym, duration, artifact_root)
     status = read_json(paths.status) or _untrained_status(sym, duration)
+    attempt = read_json(paths.attempt) or {}
     report = read_json(paths.report) or {}
     version = read_json(paths.version) or {}
     snapshot = combo_snapshot_status(sym, duration, artifact_root=artifact_root)
@@ -50,6 +51,10 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
             version.get("selectedConfidenceThreshold")
             or report.get("selectedConfidenceThreshold")
         ),
+        "activeModelStatus": status.get("status"),
+        "lastAttemptStatus": attempt.get("status"),
+        "lastTrainingAttempt": attempt,
+        "validationFailureReason": _validation_failure_reason(status, attempt, report),
         "artifactsReady": artifacts_ready,
         "torchAvailable": torch_available,
         "torchStatus": torch_status,
@@ -277,6 +282,21 @@ def _untrained_status(symbol: str, duration: str) -> dict[str, Any]:
         "featureWindow": None,
         "updatedAt": None,
     }
+
+
+def _validation_failure_reason(
+    status: dict[str, Any],
+    attempt: dict[str, Any],
+    report: dict[str, Any],
+) -> str | None:
+    for payload in (attempt, status, report):
+        reason = payload.get("validationFailureReason") or payload.get("reason")
+        if reason:
+            return str(reason)
+    gate = report.get("validationGate") or {}
+    if isinstance(gate, dict) and gate.get("status") != "passed":
+        return gate.get("reason")
+    return None
 
 
 def _shadow_prediction_ready_reason(
