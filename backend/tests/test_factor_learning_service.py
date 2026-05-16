@@ -88,6 +88,11 @@ def test_mined_factor_materialization_batches_dependent_columns(monkeypatch: pyt
         "mined_factor_rows_for_duration",
         lambda *_args: rows,
     )
+    monkeypatch.setattr(
+        factor_mined_candidates,
+        "materialize_agent_factor_frame",
+        lambda frame, **_kwargs: factor_mined_candidates.MinedFrameResult(frame, 0, ()),
+    )
 
     with warnings.catch_warnings(record=True) as caught:
         result = factor_mined_candidates.materialize_mined_factor_frame(

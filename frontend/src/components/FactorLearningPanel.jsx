@@ -133,6 +133,8 @@ async function loadLstmStatus({ symbol, duration, signal, setState }) {
 function LearningHeader(props) {
   const agent = props.memory?.llmAgent;
   const source = props.memory?.source || {};
+  const minedLibrary = props.memory?.minedFactorLibrary || {};
+  const agentLibrary = props.memory?.agentMinedFactorLibrary || {};
   const agentStatus = agent?.status || (agent?.review ? "done" : "idle");
   return (
     <div className="factor-learning-head">
@@ -143,11 +145,14 @@ function LearningHeader(props) {
           <HeaderStatus status={agentStatus} text={agentStatusLabel(agentStatus)} />
           <HeaderStatus text={props.status} />
           <HeaderStatus text={props.operatorState.status} />
+          <HeaderStatus text={rankingRefreshSourceLabel(source.rankingRefreshSource)} />
         </div>
       </div>
       <div className="factor-learning-actions">
         <Metric label="结算样本" value={source.settledPredictionCount ?? "—"} />
         <Metric label="亏损模式" value={source.lossPatternCount ?? "—"} />
+        <Metric label="组合回灌" value={minedLibrary.total ?? "—"} />
+        <Metric label="Agent入库" value={agentLibrary.total ?? "—"} />
         <button
           type="button"
           className="factor-learning-action-secondary"
@@ -192,6 +197,15 @@ function agentStatusLabel(status) {
     running: "Agent 运行中",
   };
   return labels[status] || status;
+}
+
+function rankingRefreshSourceLabel(value) {
+  const labels = {
+    cache: "复盘来源：缓存",
+    rebuilt_cache: "复盘来源：重建缓存",
+    provided: "复盘来源：组合重算",
+  };
+  return labels[value] || (value ? `复盘来源：${value}` : "");
 }
 
 function memoryStatus(data) {

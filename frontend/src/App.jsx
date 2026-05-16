@@ -93,7 +93,10 @@ export default function App() {
         .then((p) => {
           if (!stopped) setTickerPrice(p);
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("最新指数价加载失败", err);
+          if (!stopped) setStatus(`最新指数价加载失败：${err.message}`);
+        });
     };
     tick();
     timer = window.setInterval(tick, 2000);
@@ -110,7 +113,10 @@ export default function App() {
         .then((rows) => {
           if (!stopped) setAggTrades(Array.isArray(rows) ? rows : []);
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("近期成交加载失败", err);
+          if (!stopped) setStatus(`近期成交加载失败：${err.message}`);
+        });
     };
     poll();
     const timer = window.setInterval(poll, 2000);
@@ -138,8 +144,9 @@ export default function App() {
         if (stopped || !Array.isArray(rows) || !rows.length) return;
         setHistory(rows);
         setLatest(rows[rows.length - 1]);
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error("指数K线 REST 刷新失败", err);
+        if (!stopped) setStatus(`指数K线 REST 刷新失败：${err.message}`);
       }
     };
 
@@ -167,8 +174,9 @@ export default function App() {
         if (!stopped) {
           setEvents(rows);
         }
-      } catch {
-        // Keep UI resilient; status already reflects realtime channel state.
+      } catch (err) {
+        console.error("事件刷新失败", err);
+        if (!stopped) setStatus(`事件刷新失败：${err.message}`);
       }
     };
 
@@ -191,20 +199,26 @@ export default function App() {
 
     const connect = () => {
       if (stopped) return;
-      ws = openIndexKlineSocket(symbol, interval, (payload) => {
-        setLatest((prev) => mergeKlineCandle(prev, payload));
-        const t = Date.now();
-        lastKlineAtRef.current = t;
-        setLastKlineAt(t);
-        setHistory((prev) => {
-          if (!prev.length) return [payload];
-          const idx = prev.findIndex((x) => x.openTime === payload.openTime);
-          if (idx === -1) return [...prev.slice(-499), payload];
-          const copy = [...prev];
-          copy[idx] = mergeKlineCandle(copy[idx], payload);
-          return copy;
+      try {
+        ws = openIndexKlineSocket(symbol, interval, (payload) => {
+          setLatest((prev) => mergeKlineCandle(prev, payload));
+          const t = Date.now();
+          lastKlineAtRef.current = t;
+          setLastKlineAt(t);
+          setHistory((prev) => {
+            if (!prev.length) return [payload];
+            const idx = prev.findIndex((x) => x.openTime === payload.openTime);
+            if (idx === -1) return [...prev.slice(-499), payload];
+            const copy = [...prev];
+            copy[idx] = mergeKlineCandle(copy[idx], payload);
+            return copy;
+          });
         });
-      });
+      } catch (err) {
+        console.error("指数K线 WebSocket 创建失败", err);
+        setStatus(`指数K线 WebSocket 创建失败：${err.message}`);
+        return;
+      }
 
       ws.onopen = async () => {
         retryCount = 0;
@@ -213,11 +227,15 @@ export default function App() {
           const rows = await fetchIndexKlines(symbol, interval, 500);
           setHistory(rows);
           if (rows.length) setLatest(rows[rows.length - 1]);
-        } catch {
-          setStatus("指数K线重连刷新失败");
+        } catch (err) {
+          console.error("指数K线重连刷新失败", err);
+          setStatus(`指数K线重连刷新失败：${err.message}`);
         }
       };
-      ws.onerror = () => setStatus("指数K线实时连接异常");
+      ws.onerror = (err) => {
+        console.error("指数K线实时连接异常", err);
+        setStatus("指数K线实时连接异常");
+      };
       ws.onclose = () => {
         if (stopped) return;
         const wait = Math.min(1000 * 2 ** retryCount, 10000);
@@ -258,7 +276,7 @@ export default function App() {
   async function handleQuickTrade(payload) {
     const quickTradeResult = await createQuickTrade(payload);
     const simulated = quickTradeResult.simulated || quickTradeResult.externalStatus === "SIMULATED";
-    const statusLabel = simulated ? "模拟事件已创建" : "真实事件已创建";
+    const statusLabel = simulated ? "模拟事件已创建（未调用 Binance）" : "真实事件已创建";
     const externalText = !simulated && quickTradeResult.externalOrderId
       ? ` / Binance #${quickTradeResult.externalOrderId}`
       : "";

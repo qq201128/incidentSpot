@@ -24,7 +24,6 @@ from app.services.kline_timing import (
 from app.services.lstm_config import is_lstm_shadow_strategy, lstm_shadow_strategy_key
 from app.services.prediction_cache_service import (
     prediction_exists,
-    prediction_passed_exists,
     prediction_response,
     save_prediction,
 )
@@ -33,10 +32,10 @@ from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     FACTOR_COMBO_STRATEGY_KEY,
-    is_continuous_orderbook_strategy,
     strategy_entry_grace_ms,
     strategy_supports_duration,
 )
+from app.services.strategy_prediction_readiness import strategy_prediction_readiness
 from app.services.lstm_prediction_service import (
     lstm_model_status,
     predict_lstm_shadow_prediction,
@@ -133,8 +132,7 @@ async def _run_prediction(
         entry_open_time=entry_open_time,
         strategy_key=settings.strategy_key,
     )
-    allow_existing = is_continuous_orderbook_strategy(settings.strategy_key)
-    if not await _save_prediction(result, write_lock, allow_existing=allow_existing):
+    if not await _save_prediction(result, write_lock):
         await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
         return
     await _broadcast(prediction_response(result))
@@ -236,13 +234,46 @@ def _prediction_failures(
 
 def _prediction_targets() -> list[AutoTradeSettings]:
     settings = list_auto_trade_settings()
-    enabled = [
-        item for item in settings
-        if item.enabled and strategy_supports_duration(item.strategy_key, item.duration)
-    ]
+    enabled = _ready_enabled_prediction_targets(settings)
     if enabled:
         return enabled
-    return [get_auto_trade_settings(DEFAULT_STRATEGY_KEY)]
+    if any(item.enabled for item in settings):
+        return []
+    return _default_prediction_targets()
+
+
+def _default_prediction_targets() -> list[AutoTradeSettings]:
+    default = get_auto_trade_settings(DEFAULT_STRATEGY_KEY)
+    readiness = strategy_prediction_readiness(default.strategy_key, default.symbol, default.duration)
+    if readiness.ready:
+        return [default]
+    logger.warning(
+        "default predict target skipped strategy=%s symbol=%s duration=%s reason=%s",
+        default.strategy_key,
+        default.symbol,
+        default.duration,
+        readiness.reason,
+    )
+    return []
+
+
+def _ready_enabled_prediction_targets(settings: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    targets = []
+    for item in settings:
+        if not item.enabled or not strategy_supports_duration(item.strategy_key, item.duration):
+            continue
+        readiness = strategy_prediction_readiness(item.strategy_key, item.symbol, item.duration)
+        if readiness.ready:
+            targets.append(item)
+            continue
+        logger.warning(
+            "predict target skipped strategy=%s symbol=%s duration=%s reason=%s",
+            item.strategy_key,
+            item.symbol,
+            item.duration,
+            readiness.reason,
+        )
+    return targets
 
 
 def _due_prediction_targets(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
@@ -258,13 +289,6 @@ def _should_predict_entry(settings: AutoTradeSettings) -> bool:
         return False
     if is_lstm_shadow_strategy(settings.strategy_key):
         return _ready_lstm_strategy_due(settings, bucket)
-    if is_continuous_orderbook_strategy(settings.strategy_key):
-        return not prediction_passed_exists(
-            strategy_key=settings.strategy_key,
-            symbol=settings.symbol,
-            duration=settings.duration,
-            open_time=bucket,
-        )
     return (
         not prediction_exists(
             strategy_key=settings.strategy_key,

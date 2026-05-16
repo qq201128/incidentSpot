@@ -11,7 +11,6 @@ from app.api.event_quick_trade import (
     create_quick_trade_record,
     quick_trade_strategy_key,
 )
-from app.api.event_martingale_qty import adjust_quick_trade_qty_for_martingale
 from app.api.event_response import event_response
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
@@ -189,7 +188,6 @@ def create_quick_trade(payload: QuickTradeCreate) -> dict:
     )
     symbol = payload.event.symbol.upper()
     entry_price = _entry_price_from_payload(payload.event)
-    payload = adjust_quick_trade_qty_for_martingale(payload, strategy_key, symbol)
     return create_quick_trade_record(
         QuickTradeContext(
             payload=payload,

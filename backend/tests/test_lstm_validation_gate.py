@@ -21,7 +21,7 @@ ENTRY_OPEN_TIME = 1778121600000
 def test_validation_failed_status_blocks_prediction(monkeypatch) -> None:
     artifact_root = _runtime_path("legacy-status")
     _write_validation_failed_artifacts(artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    _patch_combo_ranking(monkeypatch)
     monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
@@ -40,7 +40,7 @@ def test_validation_failed_status_blocks_prediction(monkeypatch) -> None:
 def test_trained_artifacts_missing_validation_gate_block_prediction(monkeypatch) -> None:
     artifact_root = _runtime_path("missing-gate")
     _write_legacy_trained_artifacts(artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    _patch_combo_ranking(monkeypatch)
     monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
@@ -61,7 +61,7 @@ def test_trained_artifacts_missing_validation_gate_block_prediction(monkeypatch)
 def test_predict_lstm_signal_reads_validation_gate_from_report(monkeypatch) -> None:
     artifact_root = _runtime_path("report-gate")
     _write_report_gate_artifacts(artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    _patch_combo_ranking(monkeypatch)
     monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
 
     signal = lstm_prediction_service.predict_lstm_signal(
@@ -75,7 +75,7 @@ def test_predict_lstm_signal_reads_validation_gate_from_report(monkeypatch) -> N
     assert signal["validationGatePassed"] is True
 
 
-def test_train_lstm_model_marks_validation_failed_when_no_threshold_passes() -> None:
+def test_train_lstm_model_records_failed_attempt_without_active_model(monkeypatch) -> None:
     artifact_root = _runtime_path("validation-failed")
     report = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
@@ -84,12 +84,21 @@ def test_train_lstm_model_marks_validation_failed_when_no_threshold_passes() -> 
         dataset_builder=_fake_dataset,
     )
     paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    staging_status = _staging_status(artifact_root, report["modelVersion"])
+    _patch_combo_ranking(monkeypatch)
+
+    status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
     assert report["status"] == "validation_failed"
     assert report["validationGate"]["reason"] == "no_validation_confidence_threshold_met"
     assert report["selectedConfidenceThreshold"] is None
-    assert _read_json(paths.status)["status"] == "validation_failed"
-    assert paths.attempt.exists()
+    assert paths.status.exists() is False
+    assert _read_json(paths.attempt)["status"] == "validation_failed"
+    assert staging_status["status"] == "validation_failed"
+    assert status["status"] == "untrained"
+    assert status["activeModelStatus"] == "untrained"
+    assert status["lastAttemptStatus"] == "validation_failed"
+    assert status["validationFailureReason"] == "no_validation_confidence_threshold_met"
 
 
 def test_train_lstm_model_keeps_old_active_model_when_validation_fails(monkeypatch) -> None:
@@ -102,7 +111,7 @@ def test_train_lstm_model_keeps_old_active_model_when_validation_fails(monkeypat
         dataset_builder=_fake_dataset,
     )
     paths = artifact_paths("BTCUSDT", "10m", artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    _patch_combo_ranking(monkeypatch)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
@@ -122,7 +131,7 @@ def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monke
         dataset_builder=_fake_dataset,
     )
     paths = artifact_paths("BTCUSDT", "10m", artifact_root)
-    monkeypatch.setattr(lstm_combo_snapshot, "get_cached_combination_ranking", lambda *_args: _combo_ranking())
+    _patch_combo_ranking(monkeypatch)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
@@ -131,6 +140,11 @@ def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monke
     assert status["activeModelStatus"] == "trained"
     assert status["lastAttemptStatus"] == "trained"
     assert status["selectedConfidenceThreshold"] is not None
+
+
+def _staging_status(root: Path, model_version: str) -> dict:
+    paths = artifact_paths("BTCUSDT", "10m", root)
+    return _read_json(paths.root / "_staging" / model_version / "status.json")
 
 
 class _PredictOnlyBackend:
@@ -179,6 +193,10 @@ def _combo_ranking() -> dict:
             {"factorName": "combo_c", "members": [{"name": "factor_c"}]},
         ],
     }
+
+
+def _patch_combo_ranking(monkeypatch) -> None:
+    monkeypatch.setattr(lstm_combo_snapshot, "resolve_lstm_combo_ranking", lambda *_args, **_kwargs: _combo_ranking())
 
 
 def _live_window(*_args, **_kwargs):

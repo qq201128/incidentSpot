@@ -104,10 +104,11 @@ def _simulated_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
         "request": request,
         "response": {
             "simulation": True,
-            "message": "simulation mode enabled; Binance order API was not called",
+            "message": "模拟交易已启用；未调用 Binance 下单接口",
         },
         "externalOrderId": None,
         "externalStatus": "SIMULATED",
+        "simulationNotice": "模拟交易：未调用 Binance",
         "simulated": True,
     }
 
@@ -192,5 +193,7 @@ def _response(result: QuickTradeResult) -> dict:
         "externalOrderId": result.external_order.get("externalOrderId"),
         "externalStatus": result.external_order.get("externalStatus"),
         "binance": result.external_order.get("response"),
+        "binanceCalled": result.external_order.get("simulated") is not True,
+        "simulationNotice": result.external_order.get("simulationNotice"),
         "simulated": result.external_order.get("simulated") is True,
     }

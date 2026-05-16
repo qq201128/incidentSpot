@@ -5,8 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.services.factor_cache_metadata import cache_is_usable
-from app.services.factor_combination_cache_service import get_cached_combination_ranking
+from app.services.lstm_combo_ranking import resolve_lstm_combo_ranking
 from app.services.lstm_artifacts import artifact_paths, read_json
 
 SNAPSHOT_RANK_LIMIT = 3
@@ -48,8 +47,8 @@ def current_combo_snapshot(
     *,
     ranking_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    ranking = ranking_report or get_cached_combination_ranking(symbol.strip().upper(), duration)
-    if ranking is None or not cache_is_usable(ranking):
+    ranking = _resolved_current_ranking(symbol, duration, ranking_report)
+    if ranking is None:
         return []
     return combo_snapshot_from_ranking(ranking)
 
@@ -75,6 +74,16 @@ def assert_combo_snapshot_matches(
     current = combo_snapshot_from_ranking(ranking_report)
     if current != expected:
         raise ValueError("current factor combo Top1/Top2/Top3 differs from LSTM training snapshot")
+
+
+def _resolved_current_ranking(
+    symbol: str,
+    duration: str,
+    ranking_report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if _report_has_ranking(ranking_report):
+        return ranking_report
+    return resolve_lstm_combo_ranking(symbol, duration)
 
 
 def _combo_row_snapshot(row: dict[str, Any], rank: int) -> dict[str, Any]:
@@ -112,6 +121,11 @@ def _members(row: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(members, list) or not members:
         raise ValueError(f"combination row missing members: {row.get('factorName')}")
     return [dict(member) for member in members]
+
+
+def _report_has_ranking(ranking: dict[str, Any] | None) -> bool:
+    rows = None if ranking is None else ranking.get("ranking")
+    return bool(isinstance(rows, list) and rows)
 
 
 def _status(

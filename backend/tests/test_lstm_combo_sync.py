@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from app.services import factor_combination_background as combo_background
+from app.services import lstm_combo_sync_service as combo_sync
 from app.services import lstm_combo_snapshot, lstm_prediction_service
+from app.services import lstm_combo_ranking
+from app.services import lstm_status_service
 from app.services.lstm_artifacts import artifact_paths, write_json
 from app.services.lstm_combo_sync_service import (
     LSTM_SYNC_TRAINED,
@@ -19,7 +22,7 @@ def test_lstm_model_status_marks_stale_combo_snapshot(monkeypatch) -> None:
     artifact_root = _runtime_path("status-stale")
     _write_trained_artifacts(artifact_root, _snapshot("combo_old", "factor_a"))
     monkeypatch.setattr(
-        lstm_combo_snapshot,
+        lstm_combo_ranking,
         "get_cached_combination_ranking",
         lambda *_args: _ranking("combo_new", "factor_b"),
     )
@@ -39,12 +42,12 @@ def test_lstm_model_status_exposes_torch_blocker(monkeypatch) -> None:
     artifact_root = _runtime_path("status-torch")
     _write_trained_artifacts(artifact_root, _snapshot("combo_current", "factor_a"))
     monkeypatch.setattr(
-        lstm_combo_snapshot,
+        lstm_combo_ranking,
         "get_cached_combination_ranking",
         lambda *_args: _ranking("combo_current", "factor_a"),
     )
     monkeypatch.setattr(
-        lstm_prediction_service,
+        lstm_status_service,
         "torch_availability",
         lambda: {"available": False, "error": "missing torch"},
     )
@@ -102,6 +105,35 @@ def test_sync_lstm_model_skips_when_combo_snapshot_matches() -> None:
     assert result["status"] == LSTM_SYNC_UP_TO_DATE
 
 
+def test_sync_lstm_model_skips_when_active_artifacts_pass_but_status_is_failed() -> None:
+    artifact_root = _runtime_path("sync-polluted-status")
+    snapshot = _snapshot("combo_current", "factor_a")
+    _write_trained_artifacts(artifact_root, snapshot)
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    write_json(
+        paths.status,
+        {
+            "status": "validation_failed",
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "reason": "no_validation_confidence_threshold_met",
+        },
+    )
+
+    def trainer(_config: LstmTrainingConfig) -> dict[str, Any]:
+        raise AssertionError("trainer should not run when active artifacts are valid")
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=_ranking("combo_current", "factor_a"),
+        artifact_root=artifact_root,
+        trainer=trainer,
+    )
+
+    assert result["status"] == LSTM_SYNC_UP_TO_DATE
+
+
 def test_sync_lstm_model_retrains_when_validation_gate_missing() -> None:
     artifact_root = _runtime_path("sync-missing-gate")
     snapshot = _snapshot("combo_current", "factor_a")
@@ -123,6 +155,75 @@ def test_sync_lstm_model_retrains_when_validation_gate_missing() -> None:
     assert result["status"] == LSTM_SYNC_TRAINED
     assert result["modelVersion"] == "lstm_new"
     assert len(calls) == 1
+
+
+def test_sync_lstm_model_trains_with_supplied_ranking_snapshot(monkeypatch) -> None:
+    artifact_root = _runtime_path("sync-current-ranking")
+    current = _ranking("combo_current", "factor_a")
+    captured = {}
+
+    def fake_build_dataset(config: LstmTrainingConfig, *, ranking_loader):
+        captured["ranking"] = ranking_loader(config.symbol, config.duration)
+        return object()
+
+    def fake_train(config: LstmTrainingConfig, *, artifact_root=None, dataset_builder):
+        captured["artifactRoot"] = artifact_root
+        dataset_builder(config)
+        return {"status": "trained", "modelVersion": "lstm_new"}
+
+    monkeypatch.setattr(combo_sync, "build_lstm_training_dataset", fake_build_dataset)
+    monkeypatch.setattr(combo_sync, "train_lstm_model", fake_train)
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=current,
+        artifact_root=artifact_root,
+    )
+
+    assert result["status"] == LSTM_SYNC_TRAINED
+    assert captured["ranking"] is current
+    assert captured["artifactRoot"] == artifact_root
+
+
+def test_sync_lstm_model_uses_high_winrate_ranking_when_primary_is_empty(monkeypatch) -> None:
+    artifact_root = _runtime_path("sync-high-winrate")
+    current = {"symbol": "BTCUSDT", "duration": "10m", "ranking": []}
+    high = _ranking("combo_high", "factor_a")
+    captured = {}
+
+    def fake_build_dataset(config: LstmTrainingConfig, *, ranking_loader):
+        captured["ranking"] = ranking_loader(config.symbol, config.duration)
+        return object()
+
+    def fake_train(config: LstmTrainingConfig, *, artifact_root=None, dataset_builder):
+        captured["artifactRoot"] = artifact_root
+        dataset_builder(config)
+        return {"status": "trained", "modelVersion": "lstm_new"}
+
+    monkeypatch.setattr(combo_sync, "build_lstm_training_dataset", fake_build_dataset)
+    monkeypatch.setattr(combo_sync, "train_lstm_model", fake_train)
+    monkeypatch.setattr(
+        lstm_combo_ranking,
+        "get_cached_combination_ranking",
+        lambda *_args: current,
+    )
+    monkeypatch.setattr(
+        lstm_combo_ranking,
+        "get_cached_high_winrate_combo_ranking",
+        lambda *_args: high,
+    )
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=current,
+        artifact_root=artifact_root,
+    )
+
+    assert result["status"] == LSTM_SYNC_TRAINED
+    assert captured["ranking"]["ranking"][0]["factorName"] == "combo_high"
+    assert captured["ranking"]["lstmComboRankingSource"] == lstm_combo_ranking.LSTM_COMBO_SOURCE_HIGH_WINRATE
 
 
 def test_factor_combo_refresh_syncs_lstm_before_learning(monkeypatch) -> None:
@@ -148,6 +249,7 @@ def test_factor_combo_refresh_syncs_lstm_before_learning(monkeypatch) -> None:
         calls.append(("learn", symbol, duration, ranking_report["ranking"][0]["factorName"]))
 
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
+    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)

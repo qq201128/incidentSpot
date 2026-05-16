@@ -17,8 +17,8 @@ function readStoredView() {
   try {
     const raw = localStorage.getItem(STORAGE_VIEW);
     if (raw === "bids" || raw === "asks" || raw === "both") return raw;
-  } catch {
-    // ignore
+  } catch (err) {
+    console.error("订单簿视图读取失败", err);
   }
   return "both";
 }
@@ -59,8 +59,8 @@ export default function OrderBook({ symbol, lastTrade = null }) {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_VIEW, viewMode);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("订单簿视图保存失败", err);
     }
   }, [viewMode]);
 

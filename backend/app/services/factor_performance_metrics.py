@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from app.services.factor_registry import FactorDefinition
+from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 BACKTEST_MIN_PERIODS = 100
 
@@ -15,13 +16,7 @@ def compute_signal_metrics(
     factor_def: FactorDefinition,
     horizon: int,
 ) -> tuple[float | None, float | None, float | None, float | None]:
-    factor = df[factor_def.name].astype(float)
-    median = factor.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1)
-    signal = pd.Series(np.where(factor >= median, 1.0, -1.0), index=df.index)
-    if factor_def.direction.value == "lower_better":
-        signal = -signal
-    returns = (signal * df["fwd_ret"].astype(float)).replace([np.inf, -np.inf], np.nan)
-    returns = returns.loc[returns.index.isin(median.dropna().index)].dropna()
+    returns = signal_returns(df, factor_def)
     if returns.empty:
         return None, None, None, None
     return (
@@ -30,6 +25,16 @@ def compute_signal_metrics(
         _max_drawdown(returns),
         _profit_factor(returns),
     )
+
+
+def signal_returns(df: pd.DataFrame, factor_def: FactorDefinition) -> pd.Series:
+    factor = df[factor_def.name].astype(float)
+    median = factor.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1)
+    signal = pd.Series(np.where(factor >= median, 1.0, -1.0), index=df.index)
+    if factor_def.direction.value == "lower_better":
+        signal = -signal
+    returns = (signal * df["fwd_ret"].astype(float) - ROUNDTRIP_COST_RATE).replace([np.inf, -np.inf], np.nan)
+    return returns.loc[returns.index.isin(median.dropna().index)].dropna()
 
 
 def add_contribution_scores(results: list[dict], *, duration_scoped: bool = False) -> None:

@@ -49,49 +49,11 @@ def prediction_exists(
         conn.close()
 
 
-def prediction_passed_exists(
-    *,
-    strategy_key: str,
-    symbol: str,
-    duration: str,
-    open_time: int,
-) -> bool:
-    conn = get_conn()
-    try:
-        request = {
-            "strategy_key": strategy_key,
-            "symbol": symbol,
-            "duration": duration,
-            "open_time": open_time,
-        }
-        return prediction_passed_exists_conn(conn, request)
-    finally:
-        conn.close()
-
-
 def prediction_exists_conn(conn, request: dict) -> bool:
     row = conn.execute(
         """
         SELECT 1 FROM predictions
         WHERE strategy_key = ? AND symbol = ? AND duration = ? AND open_time = ?
-        LIMIT 1
-        """,
-        (
-            _strategy_key(request),
-            request["symbol"].upper(),
-            request["duration"],
-            int(request["open_time"]),
-        ),
-    ).fetchone()
-    return row is not None
-
-
-def prediction_passed_exists_conn(conn, request: dict) -> bool:
-    row = conn.execute(
-        """
-        SELECT 1 FROM predictions
-        WHERE strategy_key = ? AND symbol = ? AND duration = ? AND open_time = ?
-          AND trade_quality_passed = 1
         LIMIT 1
         """,
         (

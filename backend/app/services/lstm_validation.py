@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from app.services.trading_costs import ROUNDTRIP_COST_RATE
+
 EPSILON = 1e-12
 CONFIDENCE_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70)
 
@@ -127,7 +129,7 @@ def sharpe_ratio(returns: np.ndarray) -> float | None:
 
 
 def _directional_returns(pred_up: np.ndarray, future_returns: np.ndarray) -> np.ndarray:
-    return np.where(pred_up, future_returns, -future_returns)
+    return np.where(pred_up, future_returns, -future_returns) - ROUNDTRIP_COST_RATE
 
 
 def _confidence_threshold_payload(threshold: float, returns: np.ndarray) -> dict[str, Any]:

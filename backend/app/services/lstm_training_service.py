@@ -11,8 +11,6 @@ from app.services.lstm_artifacts import (
     artifact_paths,
     artifact_paths_for_root,
     publish_artifacts,
-    read_json,
-    required_artifacts_exist,
     write_json,
 )
 from app.services.lstm_config import LSTM_RULE_NAME, LstmTrainingConfig, validated_lstm_config
@@ -44,14 +42,16 @@ def train_lstm_model(
     try:
         dataset = dataset_builder(cfg)
     except LstmDataError as exc:
-        write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, str(exc)))
-        _write_failed_active_status_if_unavailable(paths, cfg, "failed", str(exc))
+        reason = str(exc)
+        write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, reason))
+        _write_failed_staging_status(staging, cfg, "insufficient_samples", reason)
         raise
     try:
         return _train_with_dataset(cfg, dataset, paths, staging, backend or TorchLstmBackend(), version)
     except Exception as exc:
-        write_json(paths.attempt, _attempt_payload("failed", cfg, version, str(exc)))
-        _write_failed_active_status_if_unavailable(paths, cfg, "failed", str(exc))
+        reason = str(exc)
+        write_json(paths.attempt, _attempt_payload("failed", cfg, version, reason))
+        _write_failed_staging_status(staging, cfg, "failed", reason)
         raise
 
 
@@ -78,11 +78,6 @@ def _train_with_dataset(
     _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
     if report["status"] == "trained":
         publish_artifacts(staging_paths, active_paths)
-    elif not _active_model_available(active_paths):
-        write_json(
-            active_paths.status,
-            _status_payload(report["status"], cfg, report.get("validationFailureReason")),
-        )
     write_json(
         active_paths.attempt,
         _attempt_payload(report["status"], cfg, version, report.get("validationFailureReason")),
@@ -208,20 +203,14 @@ def _attempt_payload(
     return payload
 
 
-def _write_failed_active_status_if_unavailable(
-    paths,
+def _write_failed_staging_status(
+    staging_paths,
     cfg: LstmTrainingConfig,
     status: str,
     reason: str,
 ) -> None:
-    if _active_model_available(paths):
-        return
-    write_json(paths.status, _status_payload(status, cfg, reason))
-
-
-def _active_model_available(paths) -> bool:
-    status = read_json(paths.status) or {}
-    return status.get("status") == "trained" and required_artifacts_exist(paths)
+    staging_paths.root.mkdir(parents=True, exist_ok=True)
+    write_json(staging_paths.status, _status_payload(status, cfg, reason))
 
 
 def _return_stats(returns: np.ndarray) -> dict[str, float]:

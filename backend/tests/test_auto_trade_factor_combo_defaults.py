@@ -17,7 +17,6 @@ from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-    ORDERBOOK_NOTIONAL_STRATEGY_KEY,
 )
 
 
@@ -40,6 +39,7 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert set(by_duration) == set(AUTO_TRADE_SLOT_DURATIONS)
     assert all(by_duration[duration]["enabled"] == 1 for duration in AUTO_TRADE_SLOT_DURATIONS)
     assert all(by_duration[duration]["live_trading_enabled"] == 0 for duration in AUTO_TRADE_SLOT_DURATIONS)
+    assert _strategy_count(conn, "orderbook_notional_40m") == 0
 
 
 def test_high_winrate_live_trade_rejects_non_tradable_statuses(monkeypatch) -> None:
@@ -101,7 +101,7 @@ def _auto_trade_conn() -> sqlite3.Connection:
         )
         """
     )
-    _insert_strategy(conn, ORDERBOOK_NOTIONAL_STRATEGY_KEY, "10m", enabled=0, live=0)
+    _insert_strategy(conn, "orderbook_notional_40m", "10m", enabled=0, live=0)
     return conn
 
 
@@ -122,6 +122,14 @@ def _insert_strategy(
         """,
         (key, duration, enabled, live, DURATION_TO_MINUTES[duration]),
     )
+
+
+def _strategy_count(conn: sqlite3.Connection, key: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM auto_trade_strategies WHERE strategy_key = ?",
+        (key,),
+    ).fetchone()
+    return int(row["count"])
 
 
 def _high_winrate_settings(*, live: bool) -> AutoTradeSettings:

@@ -22,8 +22,8 @@ function httpOriginToWsOrigin(httpUrl) {
     const u = new URL(httpUrl);
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     return u.origin;
-  } catch {
-    return "ws://127.0.0.1:8000";
+  } catch (err) {
+    throw new Error(`无法从 API 地址解析 WebSocket 地址：${httpUrl}`, { cause: err });
   }
 }
 

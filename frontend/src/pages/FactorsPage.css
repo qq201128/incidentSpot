@@ -31,6 +31,12 @@
   gap: 8px;
 }
 
+.factors-topbar-meta {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .factors-topbar-metric {
   min-width: 0;
   display: grid;
@@ -51,6 +57,37 @@
   color: #fff;
   font-size: 16px;
   line-height: 1;
+}
+
+.factors-topbar-sources {
+  display: grid;
+  gap: 6px;
+}
+
+.factors-source-group {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factors-source-group b {
+  color: var(--text);
+}
+
+.factors-source-group span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid rgba(120, 167, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(120, 167, 255, 0.07);
+  color: #c9d9ff;
 }
 
 .factors-status-pill {

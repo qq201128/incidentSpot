@@ -25,6 +25,8 @@ export function useFactorsPageData() {
   const ranking = useFactorRanking({ category, duration, symbol });
   const filteredFactors = useFilteredFactors(list.factors, query);
   const filteredComboFactors = useFilteredFactors(list.comboFactors, query);
+  const singleSourceSummary = useMemo(() => summarizeFactorSources(list.factors), [list.factors]);
+  const comboSourceSummary = useMemo(() => summarizeFactorSources(list.comboFactors), [list.comboFactors]);
 
   return {
     actions: {
@@ -52,9 +54,11 @@ export function useFactorsPageData() {
       filteredComboFactors,
       filteredFactors,
       listStatus: list.status,
+      comboSourceSummary,
       query,
       ranking,
       selectedName,
+      singleSourceSummary,
       symbol,
       total: list.total,
     },
@@ -273,4 +277,19 @@ function normalizeSymbol(symbol) {
 
 function valueIncludes(value, query) {
   return value ? value.toLowerCase().includes(query) : false;
+}
+
+function summarizeFactorSources(items) {
+  const summary = { native: 0, mined: 0, agent: 0 };
+  for (const factor of items) {
+    summary[sourceGroup(factor.sourceFile)] += 1;
+  }
+  return summary;
+}
+
+function sourceGroup(sourceFile) {
+  const raw = String(sourceFile || "");
+  if (raw === "mined_factor_library.json") return "mined";
+  if (raw === "agent_mined_factor_library.json") return "agent";
+  return "native";
 }

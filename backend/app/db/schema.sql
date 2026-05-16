@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS klines_multi (
 -- Real-time prediction stream table
 CREATE TABLE IF NOT EXISTS predictions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  strategy_key TEXT NOT NULL DEFAULT 'orderbook_notional_40m',
+  strategy_key TEXT NOT NULL DEFAULT 'factor_combo_ranker_v1',
   symbol TEXT NOT NULL,
   duration TEXT NOT NULL,
   open_time INTEGER NOT NULL,

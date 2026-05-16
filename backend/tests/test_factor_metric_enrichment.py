@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
+import pytest
+
 from app.services.factor_metric_enrichment import backtest_validity, factor_score
-from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
+from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
+from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
+from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 
 def test_insufficient_backtest_periods_cannot_receive_factor_score() -> None:
@@ -29,3 +35,27 @@ def test_missing_correlation_does_not_create_score_by_itself() -> None:
 
     assert backtest_validity(row)["valid"] is True
     assert factor_score(row) == 0.0
+
+
+def test_factor_signal_metrics_subtract_roundtrip_cost_from_returns() -> None:
+    rows = BACKTEST_MIN_PERIODS + 20
+    df = pd.DataFrame(
+        {
+            "factor_a": np.arange(rows, dtype=float),
+            "fwd_ret": np.full(rows, ROUNDTRIP_COST_RATE / 2, dtype=float),
+        }
+    )
+    factor = FactorDefinition(
+        name="factor_a",
+        category=FactorCategory.RETURN,
+        description="factor_a",
+        formula="factor_a",
+        direction=FactorDirection.HIGHER_BETTER,
+    )
+
+    _sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor, horizon=1)
+
+    assert win_rate == pytest.approx(0.0)
+    assert profit_factor == pytest.approx(0.0)
+    assert max_drawdown is not None
+    assert max_drawdown < 0

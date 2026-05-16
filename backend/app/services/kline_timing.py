@@ -7,10 +7,6 @@ from app.services.rule_config import MS_PER_MINUTE, RULE_DURATION, RULE_HORIZON_
 RULE_INTERVAL_MS = RULE_HORIZON_MINUTES * MS_PER_MINUTE
 KLINE_ENTRY_GRACE_MS = 30_000
 
-# 三连/四连/五连指数 10m：同一根 K 内 open_time 不变，仅放宽「开盘后 30 秒」会导致整段错过；
-# 与图表对齐为「当前 10m 桶内任意时刻均可生成预测/下单」（形态仍相对该桶起点前的已收盘指数 K）。
-N_BAR_10M_RM_ENTRY_GRACE_MS = 10 * MS_PER_MINUTE - 1
-
 
 def rule_interval_ms_for_duration(duration: str) -> int:
     return horizon_minutes_for_duration(duration) * MS_PER_MINUTE

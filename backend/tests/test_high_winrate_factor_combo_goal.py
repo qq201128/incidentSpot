@@ -76,8 +76,8 @@ def test_run_goal_promotes_selected_combos(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setattr(goal, "load_backend_env_file", lambda: None)
     monkeypatch.setattr(goal, "load_factor_frame", lambda *_args: frame)
     monkeypatch.setattr(goal, "_search_frame", lambda *_args: frame)
-    monkeypatch.setattr(goal, "_oriented_scores", lambda _frame: {})
-    monkeypatch.setattr(goal, "_ranked_hits", lambda *_args: [hit])
+    monkeypatch.setattr(goal, "_oriented_score_search", lambda _frame: _score_search())
+    monkeypatch.setattr(goal, "_ranked_hit_search", lambda *_args: _ranked_search([hit]))
     monkeypatch.setattr(
         goal,
         "upsert_good_combinations",
@@ -103,7 +103,7 @@ def test_library_payload_preserves_trade_threshold(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(goal, "load_backend_env_file", lambda: None)
     monkeypatch.setattr(goal, "load_factor_frame", lambda *_args: _frame())
     monkeypatch.setattr(goal, "_search_frame", lambda *_args: _frame())
-    monkeypatch.setattr(goal, "_oriented_scores", lambda _frame: {})
+    monkeypatch.setattr(goal, "_oriented_score_search", lambda _frame: _score_search())
     monkeypatch.setattr(goal, "save_cached_high_winrate_combo_ranking", lambda _report: None)
     monkeypatch.setattr(goal, "promote_high_winrate_strategy", lambda *_args: {"status": "active"})
     monkeypatch.setattr(goal, "rebuild_combination_signal_watchlist", lambda _symbol: {"symbol": "BTCUSDT"})
@@ -116,7 +116,7 @@ def test_library_payload_preserves_trade_threshold(monkeypatch: pytest.MonkeyPat
         captured.update(report["ranking"][0])
         return {"promoted": 1, "libraryTotal": 1}
 
-    monkeypatch.setattr(goal, "_ranked_hits", lambda *_args: [hit])
+    monkeypatch.setattr(goal, "_ranked_hit_search", lambda *_args: _ranked_search([hit]))
     monkeypatch.setattr(goal, "upsert_good_combinations", upsert)
 
     goal.run_goal("btcusdt", "30m", 1, tmp_path / "report.json", tmp_path / "library.json")
@@ -131,11 +131,64 @@ def test_ranked_hits_can_select_four_member_combo(monkeypatch: pytest.MonkeyPatc
         f"factor_{index}": goal.OrientedScore(score, 1)
         for index in range(4)
     }
-    monkeypatch.setattr(goal, "_search_candidate_names", lambda *_args: list(scores))
+    monkeypatch.setattr(goal.goal_search, "search_candidate_names", lambda *_args: list(scores))
 
     hits = goal._ranked_hits(frame, scores)
 
     assert any(len(row.members) == 4 for row in hits)
+
+
+def test_empty_ranking_exposes_combo_gate_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = _frame().assign(fwd_ret=0.01)
+    score = pd.Series(np.where(np.arange(ROWS) % 2 == 0, 1.0, -1.0), dtype=float)
+    scores = {
+        "factor_a": goal.OrientedScore(score, 1),
+        "factor_b": goal.OrientedScore(score, 1),
+    }
+    monkeypatch.setattr(goal.goal_search, "search_candidate_names", lambda *_args: list(scores))
+
+    ranked = goal._ranked_hit_search(frame, scores)
+    score_search = goal.ScoreSearch(scores, _candidate_diag(len(scores)))
+    payload = goal._report_payload("BTCUSDT", "30m", 1, frame, score_search, ranked, [])
+
+    assert payload["ranking"] == []
+    assert payload["rankingFailure"]["stage"] == "combo_threshold_gates"
+    assert payload["rankingFailure"]["reason"] == "no_combo_met_target_gates"
+    assert payload["rankingDiagnostics"]["gateFailures"]["win_rate_below_min"] > 0
+    assert payload["rankingDiagnostics"]["bestRejected"]["reason"] == "win_rate_below_min"
+
+
+def test_empty_candidate_factors_expose_filter_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = pd.DataFrame(
+        {
+            "open_time": np.arange(50) * THIRTY_MINUTES_MS,
+            "close": np.linspace(100.0, 101.0, 50),
+            "factor_a": np.linspace(0.0, 1.0, 50),
+            "fwd_ret": np.linspace(-0.01, 0.01, 50),
+        }
+    )
+
+    score_search = goal._oriented_score_search(frame)
+    ranked = goal._ranked_hit_search(frame, score_search.scores)
+    payload = goal._report_payload("BTCUSDT", "1d", 1, frame, score_search, ranked, [])
+
+    assert payload["search"]["candidateFactors"] == 0
+    assert payload["ranking"] == []
+    assert payload["rankingFailure"]["stage"] == "candidate_factor_filter"
+    assert payload["rankingFailure"]["reason"] == "no_candidate_factors_met_min_periods"
+    assert payload["candidateDiagnostics"]["maxValidPairs"] == 50
+
+
+def test_empty_ranking_does_not_create_silent_success_row() -> None:
+    frame = _frame()
+    score_search = goal.ScoreSearch({}, _candidate_diag(0, reason="no_candidate_factors_met_min_periods"))
+    ranked = _ranked_search([])
+
+    payload = goal._report_payload("BTCUSDT", "30m", 1, frame, score_search, ranked, [])
+
+    assert payload["ranking"] == []
+    assert payload["paperLiveSimulation"] == []
+    assert payload["rankingFailure"] is not None
 
 
 def test_ranking_row_names_all_combo_members() -> None:
@@ -204,4 +257,43 @@ def _duration_payload(symbol: str, duration: str, target_count: int) -> dict:
             }
         ],
         "promotion": {"symbol": symbol.upper(), "duration": duration, "promoted": 1, "libraryTotal": 1},
+    }
+
+
+def _score_search() -> goal.ScoreSearch:
+    return goal.ScoreSearch({}, _candidate_diag(0))
+
+
+def _ranked_search(hits: list[goal.ComboHit]) -> goal.RankedSearch:
+    return goal.RankedSearch(
+        hits,
+        {
+            "stage": "combo_threshold_gates",
+            "searchCandidateLimit": goal.SEARCH_CANDIDATE_LIMIT,
+            "selectedCandidateFactors": 0,
+            "testedCombinations": 0,
+            "testedThresholdEvaluations": 0,
+            "gateFailures": {
+                "min_trades_below_min": 0,
+                "win_rate_below_min": 0,
+                "profit_factor_below_min": 0,
+            },
+            "passedThresholdEvaluations": len(hits),
+            "bestRejected": None,
+            "failureReason": None if hits else "no_candidate_factors",
+            "hitCount": len(hits),
+        },
+    )
+
+
+def _candidate_diag(count: int, *, reason: str | None = None) -> dict:
+    return {
+        "stage": "candidate_factor_filter",
+        "reason": reason,
+        "minPeriods": goal.BACKTEST_MIN_PERIODS,
+        "numericFactorColumns": count,
+        "eligibleCandidateFactors": count,
+        "rejectedCandidateFactors": 0,
+        "maxValidPairs": ROWS,
+        "topRejectedByValidPairs": [],
     }

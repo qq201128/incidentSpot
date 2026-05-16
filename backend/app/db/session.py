@@ -20,7 +20,7 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE events ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'manual'",
   "ALTER TABLE events ADD COLUMN ai_quality_score REAL",
   "ALTER TABLE events ADD COLUMN ai_quality_passed INTEGER",
-  "ALTER TABLE predictions ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'orderbook_notional_40m'",
+  "ALTER TABLE predictions ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'factor_combo_ranker_v1'",
   "ALTER TABLE predictions ADD COLUMN trade_quality_score REAL",
   "ALTER TABLE predictions ADD COLUMN trade_quality_passed INTEGER",
   "ALTER TABLE predictions ADD COLUMN trade_quality_gate TEXT",
@@ -227,13 +227,7 @@ def _migrate_auto_trade_strategies_composite_pk(conn: sqlite3.Connection) -> Non
 
 
 def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
-  _rename_orderbook_notional_strategy(conn)
   _delete_retired_auto_trade_strategies(conn)
-  default_exists = conn.execute(
-    "SELECT 1 FROM auto_trade_strategies WHERE strategy_key = ? LIMIT 1",
-    ("orderbook_notional_40m",),
-  ).fetchone()
-
   from app.services.strategy_registry import strategy_payloads
   from app.services.auto_trade_default_slots import (
     default_slot_flags,
@@ -257,60 +251,33 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
         (key, dur, enabled, live, dm, ts),
       )
   enable_default_simulation_strategy_slots(conn, _AUTO_TRADE_SLOT_DURATIONS, _DURATION_MINUTES, ts)
-  if default_exists is None:
-    _copy_legacy_auto_trade_settings(conn)
 
 
 def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:
-  conn.execute(
-    "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
-    ("complete_day_10m_production",),
-  )
   for key in (
+      "complete_day_10m_production",
       "vegas_fib_resonance",
       "high_winrate_rules",
       "pure_rule_precision",
       "win70_trade_max_rules",
       "daily_trade_floor_tree",
+      "orderbook_notional_40m",
+      "orderbook_notional_40m_mg",
+      "orderbook_notional_10m_mg_5102045",
+      "orderbook_notional_10m",
+      "orderbook_notional_15m",
+      "orderbook_notional_15m_mg_51020",
+      "orderbook_trade_flow_1k",
+      "orderbook_trade_flow_1k_invert_mg",
+      "blind_reverse_martingale_v1",
+      "three_bar_10m_reverse_martingale_v1",
+      "four_bar_10m_reverse_martingale_v1",
+      "five_bar_10m_reverse_martingale_v1",
   ):
     conn.execute(
         "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
         (key,),
     )
-
-
-def _rename_orderbook_notional_strategy(conn: sqlite3.Connection) -> None:
-  exists = conn.execute(
-    "SELECT 1 FROM auto_trade_strategies WHERE strategy_key = ?",
-    ("orderbook_notional_40m",),
-  ).fetchone()
-  if exists is not None:
-    return
-  conn.execute(
-    """
-    UPDATE auto_trade_strategies
-    SET strategy_key = ?
-    WHERE strategy_key = ?
-    """,
-    ("orderbook_notional_40m", "orderbook_notional_50m"),
-  )
-
-
-def _copy_legacy_auto_trade_settings(conn: sqlite3.Connection) -> None:
-  conn.execute(
-    """
-    UPDATE auto_trade_strategies
-    SET
-      enabled = (SELECT enabled FROM auto_trade_settings WHERE id = 1),
-      live_trading_enabled = (SELECT live_trading_enabled FROM auto_trade_settings WHERE id = 1),
-      symbol = (SELECT symbol FROM auto_trade_settings WHERE id = 1),
-      duration_minutes = (SELECT duration_minutes FROM auto_trade_settings WHERE id = 1),
-      qty = (SELECT qty FROM auto_trade_settings WHERE id = 1),
-      updated_at = datetime('now')
-    WHERE strategy_key = 'orderbook_notional_40m'
-      AND duration = (SELECT duration FROM auto_trade_settings WHERE id = 1)
-    """
-  )
 
 
 def _payload_durations(payload: dict) -> tuple[str, ...]:

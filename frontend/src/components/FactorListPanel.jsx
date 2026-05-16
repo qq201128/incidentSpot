@@ -153,6 +153,7 @@ function FactorTable({ factors, selectedName, onSelect }) {
             <th>中文因子</th>
             <th>分类</th>
             <th>方向</th>
+            <th>来源</th>
           </tr>
         </thead>
         <tbody>{factors.map((factor) => renderFactorRow(factor, selectedName, onSelect))}</tbody>
@@ -175,8 +176,27 @@ function renderFactorRow(factor, selectedName, onSelect) {
       </td>
       <td>{factor.categoryName || factor.category}</td>
       <td>{directionLabel(factor.direction)}</td>
+      <td>
+        <span className={`factors-source-tag ${sourceClass(factor.sourceFile)}`}>
+          {sourceLabel(factor.sourceFile)}
+        </span>
+      </td>
     </tr>
   );
+}
+
+function sourceLabel(sourceFile) {
+  const raw = String(sourceFile || "");
+  if (raw === "mined_factor_library.json") return "回灌";
+  if (raw === "agent_mined_factor_library.json") return "Agent";
+  return raw ? "原生" : "—";
+}
+
+function sourceClass(sourceFile) {
+  const raw = String(sourceFile || "");
+  if (raw === "mined_factor_library.json") return "is-mined";
+  if (raw === "agent_mined_factor_library.json") return "is-agent";
+  return raw ? "is-native" : "is-empty";
 }
 
 function Pagination({ page, pageCount, pageSize, totalItems, onPageChange }) {

@@ -6,6 +6,7 @@ export default function FactorLearningStatusBoxes({ memory, refreshing = false, 
     <div className="factor-learning-grid factor-learning-status-grid">
       <AgentLibraryBox library={memory?.agentMinedFactorLibrary || {}} />
       <LibraryBox library={memory?.minedFactorLibrary || {}} />
+      <PromotionBox promotion={memory?.agentCandidatePromotion || {}} />
       <MonitorBox monitoring={memory?.monitoring || {}} />
       <IssueBox monitoring={memory?.monitoring || {}} />
       <SolutionBox
@@ -55,6 +56,22 @@ function LibraryBox({ library }) {
         ))}
       </ul>
       {!rows.length ? <p className="factor-learning-empty small">暂无入库组合</p> : null}
+    </section>
+  );
+}
+
+function PromotionBox({ promotion }) {
+  const records = Array.isArray(promotion.records) ? promotion.records : [];
+  const failed = records.filter((record) => record.status !== "promoted").length;
+  return (
+    <section className="factor-learning-box" title="Agent候选的公式物化、回测和入库结果。">
+      <BoxTitle title="Agent候选结果" count={promotion.promoted ?? 0} />
+      <ul>
+        <MetricRow label="候选" value={promotion.candidateCount ?? "—"} />
+        <MetricRow label="入库" value={promotion.promoted ?? "—"} />
+        <MetricRow label="未入库" value={records.length ? failed : "—"} />
+      </ul>
+      {!records.length ? <p className="factor-learning-empty small">暂无候选回灌结果</p> : null}
     </section>
   );
 }

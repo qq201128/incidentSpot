@@ -7,12 +7,21 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from app.services.factor_cache_metadata import assert_cache_usable, cache_is_usable
+from app.services.factor_cache_metadata import (
+    assert_cache_usable,
+    assert_cache_usable_for_live_signal,
+    cache_is_usable,
+)
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_duration_alignment import duration_entry_rows, duration_entry_source_open_time
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.lstm_combo_ranking import (
+    LSTM_COMBO_SOURCE_HIGH_WINRATE,
+    LSTM_COMBO_SOURCE_PRIMARY,
+    resolve_lstm_combo_ranking,
+)
 from app.services.lstm_combo_snapshot import assert_combo_snapshot_matches, combo_snapshot_from_ranking
 from app.services.lstm_config import LstmTrainingConfig
 from app.services.rule_config import horizon_minutes_for_duration
@@ -47,7 +56,7 @@ def build_lstm_training_dataset(
     config: LstmTrainingConfig,
     *,
     frame_loader: Callable[[str, str], pd.DataFrame] = load_factor_frame,
-    ranking_loader: Callable[[str, str], dict[str, Any] | None] = get_cached_combination_ranking,
+    ranking_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
 ) -> LstmDataset:
     frame = _load_enriched_factor_frame(config, frame_loader)
     ranking = _ranking_or_raise(config.symbol, config.duration, ranking_loader)
@@ -72,7 +81,7 @@ def build_live_feature_window(
     combo_snapshot: list[dict[str, Any]] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     frame = _load_enriched_factor_frame_symbol(symbol, duration)
-    ranking = _ranking_or_raise(symbol, duration, get_cached_combination_ranking)
+    ranking = _ranking_or_raise(symbol, duration, None)
     _assert_combo_snapshot_matches(ranking, combo_snapshot)
     featured = add_factor_combo_features(frame, ranking)
     sampled = duration_feature_frame(featured, duration, entry_open_time)
@@ -187,18 +196,48 @@ def _duration_ms(duration: str) -> int:
 def _ranking_or_raise(
     symbol: str,
     duration: str,
-    ranking_loader: Callable[[str, str], dict[str, Any] | None],
+    ranking_loader: Callable[[str, str], dict[str, Any] | None] | None,
 ) -> dict[str, Any]:
-    ranking = ranking_loader(symbol.strip().upper(), duration)
+    ranking = _load_lstm_ranking(symbol, duration, ranking_loader)
     if ranking is None:
-        raise LstmDataError(f"no cached factor combination ranking for {symbol.upper()} {duration}")
-    if not cache_is_usable(ranking) and ranking_loader is get_cached_combination_ranking:
+        raise LstmDataError(f"no cached LSTM combo ranking for {symbol.upper()} {duration}")
+    if _should_rebuild_primary_ranking(ranking, ranking_loader):
         ranking = _rebuild_cached_ranking(symbol, duration)
+    _assert_lstm_ranking_cache_usable(ranking, symbol, duration)
+    return ranking
+
+
+def _load_lstm_ranking(
+    symbol: str,
+    duration: str,
+    ranking_loader: Callable[[str, str], dict[str, Any] | None] | None,
+) -> dict[str, Any] | None:
+    if ranking_loader is None:
+        return resolve_lstm_combo_ranking(symbol, duration)
+    ranking = ranking_loader(symbol.strip().upper(), duration)
+    if isinstance(ranking, dict) and isinstance(ranking.get("ranking"), list) and ranking.get("ranking"):
+        return dict(ranking)
+    return resolve_lstm_combo_ranking(symbol, duration)
+
+
+def _should_rebuild_primary_ranking(
+    ranking: dict[str, Any],
+    ranking_loader: Callable[[str, str], dict[str, Any] | None] | None,
+) -> bool:
+    if ranking_loader is not None or cache_is_usable(ranking):
+        return False
+    return ranking.get("lstmComboRankingSource") == LSTM_COMBO_SOURCE_PRIMARY
+
+
+def _assert_lstm_ranking_cache_usable(ranking: dict[str, Any], symbol: str, duration: str) -> None:
+    label = f"factor combination ranking {symbol.upper()} {duration}"
     try:
-        assert_cache_usable(ranking, f"factor combination ranking {symbol.upper()} {duration}")
+        if ranking.get("lstmComboRankingSource") == LSTM_COMBO_SOURCE_HIGH_WINRATE:
+            assert_cache_usable_for_live_signal(ranking, label)
+            return
+        assert_cache_usable(ranking, label)
     except ValueError as exc:
         raise LstmDataError(str(exc)) from exc
-    return ranking
 
 
 def _rebuild_cached_ranking(symbol: str, duration: str) -> dict[str, Any]:

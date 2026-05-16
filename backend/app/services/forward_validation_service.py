@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 DAY_MS = 86_400_000
-ROUNDTRIP_COST_RATE = 0.001
 TARGET_WIN_RATE = 0.90
 MIN_MONITOR_TRADES = 20
 OVERFIT_DROP_LIMIT = 0.10

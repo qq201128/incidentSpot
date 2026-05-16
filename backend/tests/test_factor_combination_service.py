@@ -3,8 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from typing import Any
 
 from app.services import factor_combination_live_service as combo_live
+from app.services import factor_combination_signal_service as combo_signal
 from app.services import factor_combination_service as combo_service
 from app.services import factor_learning_signal_filter
 from app.services import rule_signal_service
@@ -19,13 +21,15 @@ from app.services.factor_combo_simulation_keys import (
     factor_combo_shadow_strategy_key,
     high_winrate_factor_combo_simulation_strategy_key,
 )
+from app.services.factor_combination_walk_forward import walk_forward_validation
 from app.services.factor_mined_candidates import MINED_FACTOR_SOURCE_FILE
 from app.services.factor_mined_candidates import MinedCandidateResult, MinedFrameResult
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
+from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 ROWS = 1300
-HORIZON = 10
+HORIZON = 1
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +40,7 @@ def no_high_winrate_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def synthetic_frame() -> pd.DataFrame:
     idx = np.arange(ROWS, dtype=float)
-    returns = 0.001 * np.sin(idx / 7.0) + 0.0005 * np.cos(idx / 13.0)
+    returns = 0.006 * np.sin(idx / 7.0) + 0.003 * np.cos(idx / 13.0)
     close = 100.0 * np.cumprod(1.0 + returns)
     future = pd.Series(close).pct_change(HORIZON).shift(-HORIZON)
     return pd.DataFrame(
@@ -89,6 +93,9 @@ def test_combination_ranking_returns_score_sorted_rows(
     assert ranking[0]["winRate"] is not None
     assert ranking[0]["factorScore"] > 0
     assert ranking[0]["avgAbsCorrelation"] is not None
+    assert ranking[0]["walkForwardPassed"] is True
+    assert "validation" in ranking[0]["walkForward"]
+    assert ranking[0]["walkForwardFailureReason"] is None
     assert report["baseFactors"][0]["factorScore"] > 0
 
 
@@ -154,6 +161,70 @@ def test_live_signal_uses_cached_combo_members(
     assert 0.0 <= signal["probabilityUp"] <= 1.0
     assert signal["entryPrice"] == pytest.approx(float(synthetic_frame["close"].iloc[-1]))
     assert signal["source"] == "factor_combination_ranking"
+
+
+def test_walk_forward_validation_uses_cost_adjusted_returns() -> None:
+    factor = _factor("factor_a", "成本测试因子", FactorDirection.HIGHER_BETTER)
+    losing_frame = pd.DataFrame(
+        {
+            "factor_a": np.arange(400, dtype=float),
+            "fwd_ret": np.full(400, ROUNDTRIP_COST_RATE / 2, dtype=float),
+        }
+    )
+
+    result = walk_forward_validation(losing_frame, factor, "10m")
+
+    assert result.passed is False
+    assert result.failure_reason == "validation_win_rate_below_min"
+    assert result.payload["validation"]["winRate"] == 0.0
+
+
+def test_rank_combinations_excludes_walk_forward_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    candidates = [_rank_filter_candidate(name) for name in ("factor_a", "factor_b", "factor_c")]
+
+    def fake_result(_context, members):
+        names = [member.factor.name for member in members]
+        passed = names == ["factor_a", "factor_b"]
+        return _rank_filter_row("__".join(names), passed), None
+
+    monkeypatch.setattr(combo_service, "_combination_result", fake_result)
+    ranking, tested_count, failures = combo_service._rank_combinations(
+        combo_service._CombinationContext(synthetic_frame, "BTCUSDT", "10m"),
+        candidates,
+        CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=5),
+    )
+
+    assert tested_count == 3
+    assert [row["factorName"] for row in ranking] == ["combo__factor_a__factor_b"]
+    assert {item["error"] for item in failures} == {"validation_win_rate_below_min"}
+
+
+def test_rank_combinations_returns_empty_when_no_walk_forward_combo_passes(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    candidates = [_rank_filter_candidate(name) for name in ("factor_a", "factor_b")]
+    monkeypatch.setattr(
+        combo_service,
+        "_combination_result",
+        lambda _context, members: (_rank_filter_row("__".join(member.factor.name for member in members), False), None),
+    )
+
+    ranking, tested_count, failures = combo_service._rank_combinations(
+        combo_service._CombinationContext(synthetic_frame, "BTCUSDT", "10m"),
+        candidates,
+        CombinationSearchConfig(base_factor_limit=2, combo_sizes=(2,), result_limit=5),
+    )
+
+    assert tested_count == 1
+    assert ranking == []
+    assert [item["error"] for item in failures] == [
+        "validation_win_rate_below_min",
+        "no_walk_forward_combo_passed",
+    ]
 
 
 def test_live_signal_requires_profitable_combo_for_sim_candidate(
@@ -234,6 +305,50 @@ def test_live_signal_uses_row_min_trades_for_goal_combo(
     assert signal["qualityMinPeriods"] == 60
 
 
+def test_live_signal_direction_uses_score_above_historical_median(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _median_direction_frame(130)
+    scores = pd.Series([-2.0] * 129 + [-1.0], index=frame.index)
+    monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
+
+    signal = build_live_signal_from_ranking(frame, _median_direction_row(), symbol="BTCUSDT", duration="10m")
+
+    assert signal["score"] == -1.0
+    assert signal["historicalMedianScore"] == -2.0
+    assert signal["direction"] == "up"
+    assert signal["probabilityUp"] == 0.7
+
+
+def test_live_signal_direction_uses_score_below_historical_median(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _median_direction_frame(130)
+    scores = pd.Series([2.0] * 129 + [1.0], index=frame.index)
+    monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
+
+    signal = build_live_signal_from_ranking(frame, _median_direction_row(), symbol="BTCUSDT", duration="10m")
+
+    assert signal["score"] == 1.0
+    assert signal["historicalMedianScore"] == 2.0
+    assert signal["direction"] == "down"
+    assert signal["probabilityUp"] == 0.3
+
+
+def test_live_signal_direction_requires_historical_median(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _median_direction_frame(100)
+    scores = pd.Series([1.0] * 100, index=frame.index)
+    monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
+
+    with pytest.raises(ValueError, match="insufficient historical median"):
+        build_live_signal_from_ranking(frame, _median_direction_row(), symbol="BTCUSDT", duration="10m")
+
+
 def test_live_signal_uses_completed_duration_entry_row(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
@@ -247,7 +362,7 @@ def test_live_signal_uses_completed_duration_entry_row(
         duration="10m",
         config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
     )
-    entry_open_time = 180 * 60_000
+    entry_open_time = 260 * 60_000
     source_open_time = entry_open_time - 10 * 60_000
     signal = build_live_signal_from_ranking(
         synthetic_frame,
@@ -465,6 +580,60 @@ def _factor(name: str, description: str, direction: FactorDirection) -> FactorDe
         formula=name,
         direction=direction,
     )
+
+
+def _median_direction_frame(rows: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "open_time": np.arange(rows) * 60_000,
+            "close": np.linspace(100.0, 101.0, rows),
+            "factor_signal": np.linspace(-1.0, 1.0, rows),
+        }
+    )
+
+
+def _median_direction_row() -> dict[str, Any]:
+    return {
+        "factorName": "combo__factor_signal",
+        "factorDisplayName": "组合：factor_signal",
+        "members": [{"name": "factor_signal", "category": "return", "orientation": 1}],
+        "method": "test",
+        "threshold": 0.0,
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": ROWS,
+    }
+
+
+def _rank_filter_candidate(name: str):
+    factor = FactorDefinition(
+        name=name,
+        category=FactorCategory.RETURN,
+        description=name,
+        formula=name,
+        direction=FactorDirection.HIGHER_BETTER,
+    )
+    metrics = {"factorScore": 10.0, "winRate": 0.70, "sharpe": 1.0, "totalPeriods": ROWS}
+    return combo_service._BaseCandidate(factor, metrics, 1)
+
+
+def _rank_filter_row(name: str, passed: bool) -> dict[str, Any]:
+    return {
+        "factorName": "combo__" + name,
+        "factorDisplayName": name,
+        "comboSize": 2,
+        "method": "test",
+        "members": [],
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "sharpe": 1.0,
+        "ir": 1.0,
+        "totalPeriods": ROWS,
+        "avgAbsCorrelation": 0.10,
+        "walkForward": {},
+        "walkForwardPassed": passed,
+        "walkForwardFailureReason": None if passed else "validation_win_rate_below_min",
+    }
 
 
 def _mined_candidate(name: str, description: str, source_file: str):

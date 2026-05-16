@@ -24,6 +24,7 @@ from app.services.factor_combination_payloads import (
     member_avg_correlation,
     member_payloads,
 )
+from app.services.factor_combination_walk_forward import walk_forward_validation
 from app.services.factor_mined_candidates import build_mined_candidates
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
@@ -133,19 +134,24 @@ def _rank_combinations(
     candidates: list[_BaseCandidate],
     config: CombinationSearchConfig,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
-    ranking: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
+    attempted = 0
     for size in config.combo_sizes:
         for members in combinations(candidates, size):
+            attempted += 1
             result, failure = _combination_result(context, members)
             if result is not None:
-                ranking.append(result)
+                rows.append(result)
             if failure is not None:
                 failures.append(failure)
-    enrich_factor_results(ranking)
+    enrich_factor_results(rows)
+    failures.extend(_walk_forward_failures(rows))
+    ranking = [row for row in rows if row["walkForwardPassed"]]
     ranking.sort(key=_combo_rank_key, reverse=True)
-    tested_count = len(ranking)
-    return ranking[: config.result_limit], tested_count, failures
+    if rows and not ranking:
+        failures.append({"stage": "walk_forward", "error": "no_walk_forward_combo_passed"})
+    return ranking[: config.result_limit], attempted, failures
 
 
 def _combination_result(
@@ -161,7 +167,7 @@ def _combination_result(
             symbol=context.symbol,
             duration=context.duration,
         )
-        return _enriched_combo_result(result, members), None
+        return _enriched_combo_result(result, members, combo_frame, factor_def), None
     except Exception as exc:
         failure = {"factorName": factor_def.name, "stage": "combination", "error": str(exc)}
         return None, failure
@@ -196,19 +202,40 @@ def _combination_definition(
     )
 
 
-def _enriched_combo_result(result: dict[str, Any], members: tuple[_BaseCandidate, ...]) -> dict[str, Any]:
+def _enriched_combo_result(
+    result: dict[str, Any],
+    members: tuple[_BaseCandidate, ...],
+    combo_frame: pd.DataFrame,
+    factor_def: FactorDefinition,
+) -> dict[str, Any]:
     member_rows = member_payloads(members)
+    walk_forward = walk_forward_validation(combo_frame, factor_def, factor_def.timeframes[0])
     payload = {
         **result,
         "comboSize": len(members),
         "method": COMBINATION_METHOD,
         "members": member_rows,
         "avgAbsCorrelation": member_avg_correlation(members),
+        "walkForward": walk_forward.payload,
+        "walkForwardPassed": walk_forward.passed,
+        "walkForwardFailureReason": walk_forward.failure_reason,
     }
     payload["factorDisplayName"] = combo_display_name(member_rows)
     payload["description"] = payload["factorDisplayName"]
     payload["factorScore"] = factor_score(payload)
     return payload
+
+
+def _walk_forward_failures(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "factorName": row["factorName"],
+            "stage": "walk_forward",
+            "error": row["walkForwardFailureReason"],
+        }
+        for row in rows
+        if not row["walkForwardPassed"]
+    ]
 
 
 def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:

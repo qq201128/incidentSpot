@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from fastapi import FastAPI, WebSocket
@@ -30,6 +31,7 @@ from app.services.lstm_daily_review_background import (
 from app.services.ws_service import proxy_index_kline_stream, proxy_kline_stream
 
 load_backend_env_file()
+logger = logging.getLogger(__name__)
 
 
 def _cors_allow_origins() -> list[str]:
@@ -151,8 +153,7 @@ async def ws_klines(websocket: WebSocket, symbol: str = "btcusdt", interval: str
     try:
         await proxy_kline_stream(websocket, symbol, interval)
     except Exception:
-        # Connection might already be closed by client.
-        pass
+        logger.exception("kline websocket failed: symbol=%s interval=%s", symbol, interval)
 
 
 @app.websocket("/ws/index-klines")
@@ -165,4 +166,4 @@ async def ws_index_klines(websocket: WebSocket, symbol: str = "btcusdt", interva
     try:
         await proxy_index_kline_stream(websocket, symbol, interval)
     except Exception:
-        pass
+        logger.exception("index kline websocket failed: symbol=%s interval=%s", symbol, interval)

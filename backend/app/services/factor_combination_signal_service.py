@@ -21,6 +21,7 @@ LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
 DEFAULT_SIGNAL_THRESHOLD = 0.0
+COMBO_MEDIAN_DECIMALS = 6
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class _SignalContext:
     symbol: str
     duration: str
     score: float
+    historical_median: float
     index: Any
     direction: str
     confidence: float
@@ -59,14 +61,13 @@ def build_live_signal_from_ranking(
     entry_grace_ms: int | None = None,
     context: SignalBuildContext | None = None,
 ) -> dict[str, Any]:
-    score, index = _combo_score_at_duration_entry(
+    signal = _combo_signal_at_duration_entry(
         frame,
         row,
         duration=duration,
         entry_open_time=entry_open_time,
         zscore_cache=None if context is None else context.zscore_cache,
     )
-    direction = "up" if score >= 0 else "down"
     confidence = _live_confidence(row)
     window = _EntryWindow(entry_open_time, entry_grace_ms)
     timing = combination_kline_close_timing(
@@ -75,15 +76,16 @@ def build_live_signal_from_ranking(
         duration=duration,
         mined_by_name=None if context is None else context.mined_by_name,
     )
-    quality = _quality_gate(row, confidence, window, timing=timing, score=score)
+    quality = _quality_gate(row, confidence, window, timing=timing, score=signal.score)
     payload = _live_signal_payload(
         _SignalContext(
             row=row,
             symbol=symbol,
             duration=duration,
-            score=score,
-            index=index,
-            direction=direction,
+            score=signal.score,
+            historical_median=signal.historical_median,
+            index=signal.index,
+            direction=signal.direction,
             confidence=confidence,
             quality=quality,
             timing=timing,
@@ -91,13 +93,13 @@ def build_live_signal_from_ranking(
     )
     priced = {
         **payload,
-        "entryPrice": _frame_value(frame, index, "close"),
-        "sourceOpenTime": _frame_value(frame, index, "open_time"),
+        "entryPrice": _frame_value(frame, signal.index, "close"),
+        "sourceOpenTime": _frame_value(frame, signal.index, "open_time"),
     }
     return enrich_signal_with_factor_learning(
         priced,
         frame,
-        index,
+        signal.index,
         symbol=symbol,
         duration=duration,
         memory=MEMORY_NOT_PROVIDED if context is None else context.learning_memory,
@@ -105,21 +107,55 @@ def build_live_signal_from_ranking(
     )
 
 
-def _combo_score_at_duration_entry(
+@dataclass(frozen=True)
+class _ComboSignal:
+    score: float
+    historical_median: float
+    direction: str
+    index: Any
+
+
+def _combo_signal_at_duration_entry(
     frame: pd.DataFrame,
     row: dict[str, Any],
     *,
     duration: str,
     entry_open_time: int | None,
     zscore_cache: dict[tuple[str, int], pd.Series] | None,
-) -> tuple[float, Any]:
+) -> _ComboSignal:
     members = _row_members(row)
     _require_member_columns(frame, members)
     index = live_duration_entry_index(frame, duration, entry_open_time)
-    score = _combo_score_at_index(frame, members, index, zscore_cache)
+    score_series = _combo_score_series(frame, members, zscore_cache)
+    return _combo_direction_from_expanding_median(score_series, index, row.get("factorName"), duration)
+
+
+def _combo_score_series(
+    frame: pd.DataFrame,
+    members: list[dict[str, Any]],
+    zscore_cache: dict[tuple[str, int], pd.Series] | None,
+) -> pd.Series:
+    if zscore_cache is None:
+        return combination_score(frame, members).replace([float("inf"), float("-inf")], float("nan"))
+    scores = [_member_score_series(frame, member, zscore_cache) for member in members]
+    return pd.concat(scores, axis=1).mean(axis=1).replace([float("inf"), float("-inf")], float("nan"))
+
+
+def _combo_direction_from_expanding_median(
+    score_series: pd.Series,
+    index: Any,
+    factor_name: Any,
+    duration: str,
+) -> _ComboSignal:
+    score = _finite_float(_series_value_at(score_series, index))
     if score is None:
-        raise ValueError(f"combination signal has no finite score at {duration} entry: {row.get('factorName')}")
-    return score, index
+        raise ValueError(f"combination signal has no finite score at {duration} entry: {factor_name}")
+    median_series = score_series.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1)
+    historical_median = _finite_float(_series_value_at(median_series, index))
+    if historical_median is None:
+        raise ValueError(f"combination signal has insufficient historical median at {duration} entry: {factor_name}")
+    direction = "up" if score >= historical_median else "down"
+    return _ComboSignal(score=score, historical_median=historical_median, direction=direction, index=index)
 
 
 def _combo_score_at_index(
@@ -133,6 +169,19 @@ def _combo_score_at_index(
     values = [_member_score_at_index(frame, member, index, zscore_cache) for member in members]
     finite = [value for value in values if value is not None]
     return None if not finite else sum(finite) / len(finite)
+
+
+def _member_score_series(
+    frame: pd.DataFrame,
+    member: dict[str, Any],
+    zscore_cache: dict[tuple[str, int], pd.Series],
+) -> pd.Series:
+    name = str(member["name"])
+    orientation = int(member.get("orientation") or 1)
+    key = (name, orientation)
+    if key not in zscore_cache:
+        zscore_cache[key] = combination_score(frame, [member])
+    return zscore_cache[key]
 
 
 def _member_score_at_index(
@@ -162,6 +211,7 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "probabilityUp": round(probability_up, PROBABILITY_DECIMALS),
         "confidence": round(ctx.confidence, PROBABILITY_DECIMALS),
         "score": round(ctx.score, SCORE_DECIMALS),
+        "historicalMedianScore": round(ctx.historical_median, COMBO_MEDIAN_DECIMALS),
         "source": "factor_combination_ranking",
         "method": ctx.row.get("method") or COMBINATION_METHOD,
         "historicalWinRate": ctx.row.get("winRate"),

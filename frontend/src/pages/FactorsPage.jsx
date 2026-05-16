@@ -43,10 +43,16 @@ function FactorsTopbar({ state }) {
         <h1>量化因子目录与回测</h1>
         <p>统一管理单因子、组合因子、回测评分与排名缓存。</p>
       </div>
-      <div className="factors-topbar-metrics" aria-label="因子库概览">
-        <TopbarMetric label="单因子" value={state.total} />
-        <TopbarMetric label="组合因子" value={state.comboTotal} />
-        <TopbarMetric label="排名" value={state.ranking.items.length} />
+      <div className="factors-topbar-meta">
+        <div className="factors-topbar-metrics" aria-label="因子库概览">
+          <TopbarMetric label="单因子" value={state.total} />
+          <TopbarMetric label="组合因子" value={state.comboTotal} />
+          <TopbarMetric label="排名" value={state.ranking.items.length} />
+        </div>
+        <div className="factors-topbar-sources" aria-label="因子来源">
+          <SourceGroup label="单因子" summary={state.singleSourceSummary} />
+          <SourceGroup label="组合" summary={state.comboSourceSummary} />
+        </div>
       </div>
       <p className="status-pill factors-status-pill">{state.listStatus}</p>
     </header>
@@ -58,6 +64,25 @@ function TopbarMetric({ label, value }) {
     <span className="factors-topbar-metric">
       <small>{label}</small>
       <b>{value ?? 0}</b>
+    </span>
+  );
+}
+
+function SourceGroup({ label, summary }) {
+  return (
+    <span className="factors-source-group">
+      <b>{label}</b>
+      <SourcePill label="原生" value={summary.native} />
+      <SourcePill label="回灌" value={summary.mined} />
+      <SourcePill label="Agent" value={summary.agent} />
+    </span>
+  );
+}
+
+function SourcePill({ label, value }) {
+  return (
+    <span>
+      {label} {value ?? 0}
     </span>
   );
 }
