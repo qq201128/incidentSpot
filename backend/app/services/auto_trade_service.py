@@ -8,6 +8,7 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
@@ -226,6 +227,8 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
         raise ValueError(strategy.disabled_reason or f"strategy is not tradable: {strategy.key}")
     if is_lstm_shadow_strategy(strategy.key) and settings.live_trading_enabled:
         raise ValueError("LSTM shadow strategy supports simulation only; live trading must stay disabled")
+    if is_batch_combo_simulation_strategy(strategy.key) and settings.live_trading_enabled:
+        raise ValueError("batch factor combo strategy supports simulation only; live trading must stay disabled")
     symbol = settings.symbol.strip().upper()
     if len(symbol) < 6:
         raise ValueError("symbol must contain at least 6 characters")

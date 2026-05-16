@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.services.agent_mined_factor_library import (
     AGENT_FACTOR_SOURCE_FILE,
+    AgentFactorFrameResult,
     build_agent_mined_candidates_from_frame,
     materialize_agent_factor_frame,
 )
@@ -85,7 +86,7 @@ def materialize_mined_factor_frame_for_targets(
 ) -> MinedFrameResult:
     source_rows = mined_factor_rows_for_duration(symbol, duration)
     selected = _target_and_dependency_rows(target_rows, source_rows)
-    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    agent = _materialize_agent_targets(frame, symbol=symbol, duration=duration, target_rows=target_rows)
     return _materialize_mined_rows(
         agent.frame,
         selected,
@@ -93,6 +94,19 @@ def materialize_mined_factor_frame_for_targets(
         agent.failures,
         source_count=len(source_rows),
     )
+
+
+def _materialize_agent_targets(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+    target_rows: list[dict[str, Any]],
+) -> Any:
+    agent_targets = [row for row in target_rows if str(row.get("source") or row.get("sourceFile")) == AGENT_FACTOR_SOURCE_FILE]
+    if not agent_targets:
+        return AgentFactorFrameResult(frame, 0, ())
+    return materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
 
 
 def _materialize_mined_rows(

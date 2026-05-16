@@ -29,7 +29,7 @@ DEFAULT_TOP_PER_DURATION = 3
 
 def build_combination_signal_watchlist(
     symbol: str,
-    limit: int = 12,
+    limit: int | None = 12,
     *,
     top_per_duration: int = DEFAULT_TOP_PER_DURATION,
 ) -> dict[str, Any]:
@@ -42,7 +42,7 @@ def build_combination_signal_watchlist(
 
 def rebuild_combination_signal_watchlist(
     symbol: str,
-    limit: int = 12,
+    limit: int | None = 12,
     *,
     top_per_duration: int = DEFAULT_TOP_PER_DURATION,
 ) -> dict[str, Any]:
@@ -61,7 +61,7 @@ def rebuild_combination_signal_watchlist(
         if not cache_is_usable_for_live_signal(cached):
             cache_issues.append(_cache_issue(duration, cached))
             continue
-        rows = _top_ranking_rows(cached, top_per_duration)
+        rows = _ranking_rows(cached, top_per_duration)
         source_rows = mined_factor_rows_for_duration(symbol, duration)
         frame = frame_by_duration.setdefault(duration, load_factor_frame(symbol, duration))
         mined = materialize_mined_factor_frame_for_rows(
@@ -87,13 +87,16 @@ def rebuild_combination_signal_watchlist(
                     duration=duration,
                     context=context,
                 )
-                signals.append(_simulation_signal(signal, rank))
+                if signal.get("qualityPassed"):
+                    signals.append(_simulation_signal(signal, rank))
             except Exception as exc:
                 failures.append(_signal_failure(row, duration, exc))
+    selected = signals if limit is None else signals[:limit]
     return {
         "symbol": symbol.upper(),
-        "signals": signals[:limit],
-        "total": min(len(signals), limit),
+        "signals": selected,
+        "total": len(selected),
+        "eligibleTotal": len(signals),
         "limit": limit,
         "missingDurations": missing,
         "topPerDuration": top_per_duration,
@@ -103,11 +106,12 @@ def rebuild_combination_signal_watchlist(
     }
 
 
-def _top_ranking_rows(cached: dict[str, Any], top_per_duration: int) -> list[dict[str, Any]]:
+def _ranking_rows(cached: dict[str, Any], top_per_duration: int | None) -> list[dict[str, Any]]:
     ranking = cached.get("ranking")
     if not isinstance(ranking, list) or not ranking:
         return []
-    return [dict(row) for row in ranking[:top_per_duration]]
+    rows = ranking if top_per_duration is None else ranking[:top_per_duration]
+    return [dict(row) for row in rows]
 
 
 def _preferred_signal_cache(symbol: str, duration: str) -> dict[str, Any] | None:
@@ -151,14 +155,14 @@ def _cache_issue(duration: str, cached: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validate_watchlist_request(limit: int, top_per_duration: int) -> None:
-    if limit <= 0:
+def _validate_watchlist_request(limit: int | None, top_per_duration: int | None) -> None:
+    if limit is not None and limit <= 0:
         raise ValueError("limit must be > 0")
-    if top_per_duration <= 0:
+    if top_per_duration is not None and top_per_duration <= 0:
         raise ValueError("top_per_duration must be > 0")
 
 
-def _empty_signal_watchlist(symbol: str, limit: int, top_per_duration: int) -> dict[str, Any]:
+def _empty_signal_watchlist(symbol: str, limit: int | None, top_per_duration: int | None) -> dict[str, Any]:
     return {
         "symbol": symbol.strip().upper(),
         "signals": [],
@@ -181,15 +185,17 @@ def _empty_signal_watchlist(symbol: str, limit: int, top_per_duration: int) -> d
 def _cached_signal_watchlist(
     cached: dict[str, Any],
     symbol: str,
-    limit: int,
-    top_per_duration: int,
+    limit: int | None,
+    top_per_duration: int | None,
 ) -> dict[str, Any]:
     status = _cached_signal_status(cached, symbol, limit, top_per_duration)
     signals = cached.get("signals") if isinstance(cached.get("signals"), list) else []
+    selected = signals if limit is None else signals[:limit]
     return {
         **cached,
-        "signals": signals[:limit],
-        "total": min(len(signals), limit),
+        "signals": selected,
+        "total": len(selected),
+        "eligibleTotal": len(signals),
         "limit": limit,
         "topPerDuration": top_per_duration,
         "signalCacheStatus": status,
@@ -199,8 +205,8 @@ def _cached_signal_watchlist(
 def _cached_signal_status(
     cached: dict[str, Any],
     symbol: str,
-    limit: int,
-    top_per_duration: int,
+    limit: int | None,
+    top_per_duration: int | None,
 ) -> dict[str, Any]:
     config_matches = _signal_cache_config_matches(cached, symbol, limit, top_per_duration)
     data_matches = bool(config_matches and cached.get("durationCacheReasons") == _duration_cache_reasons(symbol))
@@ -215,14 +221,14 @@ def _cached_signal_status(
 def _signal_cache_config_matches(
     payload: dict[str, Any],
     symbol: str,
-    limit: int,
-    top_per_duration: int,
+    limit: int | None,
+    top_per_duration: int | None,
 ) -> bool:
     if str(payload.get("symbol") or "").upper() != symbol.strip().upper():
         return False
-    if int(payload.get("topPerDuration") or 0) != int(top_per_duration):
+    if top_per_duration is not None and int(payload.get("topPerDuration") or 0) != int(top_per_duration):
         return False
-    return int(payload.get("limit") or 0) >= int(limit)
+    return limit is None or int(payload.get("limit") or payload.get("total") or 0) >= int(limit)
 
 
 def _signal_cache_mismatch_reason(config_matches: bool) -> str:

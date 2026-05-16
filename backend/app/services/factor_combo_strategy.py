@@ -10,6 +10,7 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
+from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_strategy_demotion import high_winrate_active_rank
@@ -46,7 +47,7 @@ def predict_high_winrate_factor_combo_direction(
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
 ) -> dict[str, Any]:
-    combo_rank = high_winrate_active_rank(symbol, duration)
+    combo_rank = _available_high_winrate_rank(symbol, duration, high_winrate_active_rank(symbol, duration))
     return predict_factor_combo_rank_direction(
         symbol,
         duration,
@@ -99,6 +100,42 @@ def predict_factor_combo_rank_direction(
     )
 
 
+def predict_factor_combo_row_direction(
+    symbol: str,
+    duration: str,
+    row: dict[str, Any],
+    *,
+    entry_open_time: int | None = None,
+    entry_grace_ms: int | None = None,
+) -> dict[str, Any]:
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        supported = sorted(SUPPORTED_RULE_DURATIONS)
+        raise ValueError(f"factor combo strategy supports only {supported}, got {duration}")
+    cached = _ranking_cache(symbol, duration, is_high_winrate_combo_name(str(row.get("factorName") or "")))
+    if cached is None:
+        raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
+    assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
+    frame = materialize_mined_factor_frame(
+        load_factor_frame(symbol, duration),
+        symbol=symbol,
+        duration=duration,
+    ).frame
+    signal = build_live_signal_from_ranking(
+        frame,
+        row,
+        symbol=symbol,
+        duration=duration,
+        entry_open_time=entry_open_time,
+        entry_grace_ms=entry_grace_ms,
+    )
+    return _prediction_payload(
+        signal,
+        entry_open_time,
+        simulation_strategy_key_for_factor_name(str(row["factorName"])),
+        cache_reason=live_signal_cache_reason(cached),
+    )
+
+
 def _ranked_combo(cached: dict[str, Any], combo_rank: int) -> dict[str, Any]:
     ranking = cached.get("ranking")
     if not isinstance(ranking, list) or not ranking:
@@ -112,6 +149,16 @@ def _ranking_cache(symbol: str, duration: str, high_winrate_goal: bool) -> dict[
     if high_winrate_goal:
         return get_cached_high_winrate_combo_ranking(symbol, duration)
     return get_cached_combination_ranking(symbol, duration)
+
+
+def _available_high_winrate_rank(symbol: str, duration: str, preferred_rank: int) -> int:
+    cached = get_cached_high_winrate_combo_ranking(symbol, duration)
+    ranking = None if cached is None else cached.get("ranking")
+    if not isinstance(ranking, list) or not ranking:
+        return preferred_rank
+    if 0 < preferred_rank <= len(ranking):
+        return preferred_rank
+    return 1
 
 
 def _assert_high_winrate_combo(row: dict[str, Any], rank: int, symbol: str, duration: str) -> None:

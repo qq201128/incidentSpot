@@ -4,7 +4,10 @@ import asyncio
 
 from app.services import auto_predict_service as service
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
+from app.services.factor_combo_simulation_keys import (
+    factor_combo_shadow_strategy_key,
+    simulation_strategy_key_for_factor_name,
+)
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_prediction_readiness import PredictionReadiness
@@ -90,6 +93,11 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
     monkeypatch.setattr(
         service,
+        "eligible_factor_combo_rows",
+        lambda *_args: [{"factorName": "combo__a"}, {"factorName": "combo__b"}],
+    )
+    monkeypatch.setattr(
+        service,
         "prediction_exists",
         lambda **kwargs: calls.append(kwargs["strategy_key"]) or kwargs["strategy_key"] != lstm_key,
     )
@@ -97,14 +105,15 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     assert service._should_predict_entry(_settings(FACTOR_COMBO_STRATEGY_KEY))
     assert calls == [
         FACTOR_COMBO_STRATEGY_KEY,
-        factor_combo_shadow_strategy_key(2),
-        factor_combo_shadow_strategy_key(3),
+        simulation_strategy_key_for_factor_name("combo__a"),
+        simulation_strategy_key_for_factor_name("combo__b"),
         lstm_key,
     ]
 
 
 def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
     saved = []
+    trades = []
 
     async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
         saved.append((result["strategy_key"], allow_existing))
@@ -120,12 +129,9 @@ def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch
         "predict_rule_direction",
         lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
     )
-    monkeypatch.setattr(
-        service,
-        "predict_factor_combo_rank_direction",
-        lambda symbol, duration, **kwargs: _prediction(kwargs["result_strategy_key"], symbol=symbol, duration=duration),
-    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", _batch_predictions)
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "create_batch_combo_simulation_trade", lambda settings, result: trades.append(result["strategy_key"]))
     monkeypatch.setattr(service, "prediction_response", lambda result: result)
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
     monkeypatch.setattr(
@@ -138,9 +144,10 @@ def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch
 
     assert saved == [
         (FACTOR_COMBO_STRATEGY_KEY, False),
-        (factor_combo_shadow_strategy_key(2), False),
-        (factor_combo_shadow_strategy_key(3), False),
+        (simulation_strategy_key_for_factor_name("combo__a"), False),
+        (simulation_strategy_key_for_factor_name("combo__b"), False),
     ]
+    assert trades == [simulation_strategy_key_for_factor_name("combo__a"), simulation_strategy_key_for_factor_name("combo__b")]
 
 
 def test_factor_combo_existing_primary_still_saves_lstm_shadow(monkeypatch) -> None:
@@ -162,11 +169,7 @@ def test_factor_combo_existing_primary_still_saves_lstm_shadow(monkeypatch) -> N
         "predict_rule_direction",
         lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
     )
-    monkeypatch.setattr(
-        service,
-        "predict_factor_combo_rank_direction",
-        lambda symbol, duration, **kwargs: _prediction(kwargs["result_strategy_key"], symbol=symbol, duration=duration),
-    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", _batch_predictions)
     monkeypatch.setattr(
         service,
         "predict_lstm_shadow_prediction",
@@ -180,8 +183,8 @@ def test_factor_combo_existing_primary_still_saves_lstm_shadow(monkeypatch) -> N
 
     assert saved == [
         (FACTOR_COMBO_STRATEGY_KEY, False),
-        (factor_combo_shadow_strategy_key(2), False),
-        (factor_combo_shadow_strategy_key(3), False),
+        (simulation_strategy_key_for_factor_name("combo__a"), False),
+        (simulation_strategy_key_for_factor_name("combo__b"), False),
         (lstm_key, False),
     ]
     assert broadcasts == []
@@ -220,7 +223,7 @@ def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
         _settings(HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, duration="10m"),
     ]
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args: _readiness(True))
+    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(True))
     targets = service._prediction_targets()
     keys = {(target.strategy_key, target.duration) for target in targets}
     assert keys == {
@@ -243,7 +246,7 @@ def test_prediction_targets_skip_enabled_empty_ranking_cache(monkeypatch) -> Non
     monkeypatch.setattr(
         service,
         "strategy_prediction_readiness",
-        lambda strategy_key, _symbol, duration: readiness[(strategy_key, duration)],
+        lambda strategy_key, _symbol, duration, **_kwargs: readiness[(strategy_key, duration)],
     )
 
     targets = service._prediction_targets()
@@ -257,7 +260,7 @@ def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_inva
     mixed = [_settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m")]
 
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args: _readiness(False, "ranking_cache_empty"))
+    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(False, "ranking_cache_empty"))
 
     assert service._prediction_targets() == []
 
@@ -267,9 +270,30 @@ def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -
 
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: disabled)
     monkeypatch.setattr(service, "get_auto_trade_settings", lambda _key: _settings(FACTOR_COMBO_STRATEGY_KEY))
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args: _readiness(False, "ranking_cache_empty"))
+    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(False, "ranking_cache_empty"))
 
     assert service._prediction_targets() == []
+
+
+def test_ready_lstm_shadow_due_syncs_snapshot_mismatch(monkeypatch) -> None:
+    calls = []
+    statuses = [
+        {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "combo_snapshot_mismatch"},
+        {"shadowPredictionReady": True, "shadowPredictionBlockedReason": "passed"},
+    ]
+    settings = _settings(FACTOR_COMBO_STRATEGY_KEY)
+
+    monkeypatch.setattr(service, "prediction_exists", lambda **_kwargs: False)
+    monkeypatch.setattr(service, "lstm_model_status", lambda *_args: statuses.pop(0))
+    monkeypatch.setattr(service, "get_cached_combination_ranking", lambda *_args: {"ranking": [{"factorName": "combo__a"}]})
+    monkeypatch.setattr(
+        service,
+        "sync_lstm_model_to_combo_ranking",
+        lambda symbol, duration, *, ranking_report: calls.append((symbol, duration, ranking_report)) or {"status": "trained"},
+    )
+
+    assert service._ready_lstm_shadow_due(settings, ENTRY_OPEN_TIME) is True
+    assert calls == [("BTCUSDT", "10m", {"ranking": [{"factorName": "combo__a"}]})]
 
 
 def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> None:
@@ -334,8 +358,15 @@ def _prediction(strategy_key: str, *, symbol: str, duration: str) -> dict:
         "confidence": 0.55,
         "certainty_label": "FACTOR_COMBO_WAIT",
         "trade_quality_score": 0.5,
-        "trade_quality_passed": False,
+        "trade_quality_passed": True,
     }
+
+
+def _batch_predictions(symbol: str, duration: str, **_kwargs) -> list[dict]:
+    return [
+        _prediction(simulation_strategy_key_for_factor_name("combo__a"), symbol=symbol, duration=duration),
+        _prediction(simulation_strategy_key_for_factor_name("combo__b"), symbol=symbol, duration=duration),
+    ]
 
 
 async def _noop_broadcast(_result: dict) -> None:

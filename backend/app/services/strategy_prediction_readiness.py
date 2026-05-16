@@ -8,29 +8,152 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
+RECOVERABLE_REASONS = {
+    "ranking_cache_missing",
+    "ranking_cache_empty",
+    "ranking_cache_market_data_changed",
+    "ranking_cache_legacy_without_fingerprint",
+}
+FAILURE_LIMIT = 20
+
 
 @dataclass(frozen=True)
 class PredictionReadiness:
     ready: bool
     reason: str
+    recoverable: bool = False
+    recovery_attempted: bool = False
+    recovery_status: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
-def strategy_prediction_readiness(strategy_key: str, symbol: str, duration: str) -> PredictionReadiness:
+def strategy_prediction_readiness(
+    strategy_key: str,
+    symbol: str,
+    duration: str,
+    *,
+    attempt_recovery: bool = False,
+) -> PredictionReadiness:
     if strategy_key == FACTOR_COMBO_STRATEGY_KEY:
-        return _ranking_cache_readiness(get_cached_combination_ranking(symbol, duration))
+        return _readiness_with_recovery(
+            symbol,
+            duration,
+            get_cached_combination_ranking,
+            _recover_factor_combo_ranking,
+            attempt_recovery=attempt_recovery,
+        )
     if strategy_key == HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
-        return _ranking_cache_readiness(get_cached_high_winrate_combo_ranking(symbol, duration))
+        return _readiness_with_recovery(
+            symbol,
+            duration,
+            get_cached_high_winrate_combo_ranking,
+            _recover_high_winrate_ranking,
+            attempt_recovery=attempt_recovery,
+        )
     return PredictionReadiness(True, "ready")
+
+
+def _readiness_with_recovery(
+    symbol: str,
+    duration: str,
+    loader,
+    recovery,
+    *,
+    attempt_recovery: bool,
+) -> PredictionReadiness:
+    initial = _ranking_cache_readiness(loader(symbol, duration))
+    if initial.ready or not attempt_recovery or not initial.recoverable:
+        return initial
+    diagnostics = recovery(symbol, duration)
+    after = _ranking_cache_readiness(loader(symbol, duration))
+    if after.ready:
+        return PredictionReadiness(
+            True,
+            "ready",
+            recoverable=False,
+            recovery_attempted=True,
+            recovery_status="recovered",
+            diagnostics=diagnostics,
+        )
+    return PredictionReadiness(
+        after.ready,
+        after.reason,
+        recoverable=after.recoverable,
+        recovery_attempted=True,
+        recovery_status="failed",
+        diagnostics={**(diagnostics or {}), **(after.diagnostics or {})},
+    )
 
 
 def _ranking_cache_readiness(cache: dict[str, Any] | None) -> PredictionReadiness:
     if cache is None:
-        return PredictionReadiness(False, "ranking_cache_missing")
+        return _not_ready("ranking_cache_missing", {})
     if not cache_is_usable_for_live_signal(cache):
-        return PredictionReadiness(False, f"ranking_cache_{live_signal_cache_reason(cache)}")
+        return _not_ready(f"ranking_cache_{live_signal_cache_reason(cache)}", _cache_diagnostics(cache))
     ranking = cache.get("ranking")
     if not isinstance(ranking, list):
-        return PredictionReadiness(False, "ranking_cache_malformed")
+        return _not_ready("ranking_cache_malformed", _cache_diagnostics(cache))
     if not ranking:
-        return PredictionReadiness(False, "ranking_cache_empty")
+        return _not_ready("ranking_cache_empty", _cache_diagnostics(cache))
     return PredictionReadiness(True, "ready")
+
+
+def _not_ready(reason: str, diagnostics: dict[str, Any]) -> PredictionReadiness:
+    return PredictionReadiness(
+        False,
+        reason,
+        recoverable=reason in RECOVERABLE_REASONS,
+        diagnostics=diagnostics,
+    )
+
+
+def _recover_factor_combo_ranking(symbol: str, duration: str) -> dict[str, Any]:
+    from app.services.factor_combination_background import _refresh_duration_klines
+    from app.services.factor_combination_cache_service import save_cached_combination_ranking
+    from app.services.factor_combination_service import run_factor_combination_ranking
+    from app.services.factor_mined_library import upsert_good_combinations
+
+    sym = symbol.strip().upper()
+    _refresh_duration_klines(sym, duration)
+    report = run_factor_combination_ranking(sym, duration)
+    save_cached_combination_ranking(report)
+    promotion = upsert_good_combinations(report)
+    return _ranking_report_diagnostics(report, promotion)
+
+
+def _recover_high_winrate_ranking(symbol: str, duration: str) -> dict[str, Any]:
+    from app.services.high_winrate_strategy_rotation import refresh_high_winrate_goal
+
+    report = refresh_high_winrate_goal(symbol.strip().upper(), duration)
+    return _ranking_report_diagnostics(report, report.get("promotion"))
+
+
+def _ranking_report_diagnostics(
+    report: dict[str, Any],
+    promotion: dict[str, Any] | None,
+) -> dict[str, Any]:
+    failures = report.get("failures") or []
+    return {
+        "symbol": report.get("symbol"),
+        "duration": report.get("duration"),
+        "rankingTotal": len(report.get("ranking") or []),
+        "testedCombinationCount": report.get("testedCombinationCount"),
+        "baseFactorCount": report.get("baseFactorCount"),
+        "failureCount": report.get("failureCount") or len(failures),
+        "failures": failures[:FAILURE_LIMIT] if isinstance(failures, list) else [],
+        "promotion": promotion or {},
+    }
+
+
+def _cache_diagnostics(cache: dict[str, Any]) -> dict[str, Any]:
+    ranking = cache.get("ranking")
+    failures = cache.get("failures") or []
+    return {
+        "rankingTotal": len(ranking) if isinstance(ranking, list) else None,
+        "testedCombinationCount": cache.get("testedCombinationCount"),
+        "baseFactorCount": cache.get("baseFactorCount"),
+        "failureCount": cache.get("failureCount") or len(failures),
+        "failures": failures[:FAILURE_LIMIT] if isinstance(failures, list) else [],
+        "cacheStatus": cache.get("cacheStatus"),
+        "updatedAt": cache.get("updatedAt"),
+    }

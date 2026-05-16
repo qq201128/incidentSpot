@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+from app.api.factor_combinations import _combination_config
 from app.api.factor_combinations import _stale_combination_ranking
+
+
+def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
+    config = _combination_config(25, "2,3", 400)
+
+    assert config.base_factor_limit == 25
+    assert config.combo_sizes == (2, 3)
+    assert config.result_limit == 400
+    assert config.native_factor_limit == 10
 
 
 def test_stale_combination_ranking_filters_nested_combo_rows() -> None:

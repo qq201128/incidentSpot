@@ -56,8 +56,8 @@ def factor_combination_ranking(
 @router.get("/signals")
 def factor_combination_signals(
     symbol: str = Query(..., min_length=6),
-    limit: int = Query(DEFAULT_COMBO_SIGNAL_LIMIT, gt=0),
-    top_per_duration: int = Query(DEFAULT_COMBO_TOP_PER_DURATION, alias="topPerDuration", gt=0),
+    limit: int | None = Query(None, gt=0),
+    top_per_duration: int | None = Query(None, alias="topPerDuration", gt=0),
 ) -> dict:
     try:
         return build_combination_signal_watchlist(
@@ -181,7 +181,11 @@ def _combination_config(
     try:
         sizes = _parse_combo_sizes(combo_sizes)
         _validate_combo_config_values(base_factor_limit, sizes, result_limit)
-        return CombinationSearchConfig(base_factor_limit, sizes, result_limit)
+        return CombinationSearchConfig(
+            base_factor_limit=base_factor_limit,
+            combo_sizes=sizes,
+            result_limit=result_limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
