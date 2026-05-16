@@ -7,6 +7,32 @@ import numpy as np
 import pandas as pd
 
 EPSILON = 1e-12
+SUPPORTED_AGENT_FORMULA_FUNCTIONS = frozenset(
+    {
+        "ATR",
+        "Abs",
+        "Clip",
+        "Corr",
+        "Delay",
+        "DonchianPos",
+        "EMA",
+        "Log",
+        "Max",
+        "Mean",
+        "Min",
+        "PctChange",
+        "SMA",
+        "Sign",
+        "SignedPower",
+        "Slope",
+        "Std",
+        "Sum",
+        "TsZScore",
+        "VWAP",
+        "VWAPDev",
+        "Where",
+    }
+)
 
 
 def materialize_agent_formula(frame: pd.DataFrame, formula: str) -> pd.Series:
@@ -89,16 +115,80 @@ def _call(node: ast.Call, frame: pd.DataFrame) -> Any:
     args = [_eval_node(arg, frame) for arg in node.args]
     if name == "ATR":
         return _atr(frame, _int_arg(args, name))
-    if name == "TsZScore":
-        return _ts_zscore(_series_arg(args, name), _int_arg(args[1:], name))
-    if name == "Mean":
-        return _mean(_series_arg(args, name), _int_arg(args[1:], name))
-    if name == "SignedPower":
-        return _signed_power(_series_arg(args, name), _float_arg(args[1:], name))
+    if name in {"Abs", "Sign", "Log", "Clip", "SignedPower"}:
+        return _arithmetic_call(name, args)
+    if name in {"TsZScore", "Mean", "Std", "Sum", "Min", "Max", "Delay", "PctChange", "SMA", "EMA"}:
+        return _window_call(name, args)
+    if name in {"Corr", "VWAP", "VWAPDev", "DonchianPos"}:
+        return _multi_series_call(name, args)
     if name == "Where":
         return _where(args)
     if name == "Slope":
         return _slope(_series_arg(args, name), _int_arg(args[1:], name))
+    raise ValueError(f"unsupported formula function: {name}")
+
+
+def _arithmetic_call(name: str, args: list[Any]) -> pd.Series:
+    if name == "Abs":
+        return _series_arg(args, name).abs()
+    if name == "Sign":
+        series = _series_arg(args, name)
+        return pd.Series(np.sign(series), index=series.index)
+    if name == "Log":
+        series = _series_arg(args, name)
+        return np.log(series.where(series > 0.0, np.nan))
+    if name == "Clip":
+        series, low, high = _series_bounds_args(args, name)
+        return series.clip(low, high)
+    return _signed_power(_series_arg(args, name), _float_arg(args[1:], name))
+
+
+def _window_call(name: str, args: list[Any]) -> pd.Series:
+    if name == "TsZScore":
+        return _ts_zscore(_series_arg(args, name), _int_arg(args[1:], name))
+    if name == "Mean":
+        return _mean(_series_arg(args, name), _int_arg(args[1:], name))
+    if name == "Std":
+        series, window = _series_window_args(args, name)
+        return series.rolling(window).std()
+    if name == "Sum":
+        series, window = _series_window_args(args, name)
+        return series.rolling(window).sum()
+    if name == "Min":
+        series, window = _series_window_args(args, name)
+        return series.rolling(window).min()
+    if name == "Max":
+        series, window = _series_window_args(args, name)
+        return series.rolling(window).max()
+    if name == "Delay":
+        series, window = _series_window_args(args, name)
+        return series.shift(window)
+    if name == "PctChange":
+        series, window = _series_window_args(args, name)
+        return series / _nonzero(series.shift(window)) - 1.0
+    if name == "SMA":
+        return _mean(*_series_window_args(args, name))
+    if name == "EMA":
+        series, window = _series_window_args(args, name)
+        return series.ewm(span=window, adjust=False, min_periods=window).mean()
+    raise ValueError(f"unsupported formula function: {name}")
+
+
+def _multi_series_call(name: str, args: list[Any]) -> pd.Series:
+    if name == "Corr":
+        first, second, window = _series_series_window_args(args, name)
+        return first.rolling(window).corr(second)
+    if name == "VWAP":
+        price, volume, window = _series_series_window_args(args, name)
+        return _vwap(price, volume, window)
+    if name == "VWAPDev":
+        price, volume, window = _series_series_window_args(args, name)
+        return price / _nonzero(_vwap(price, volume, window)) - 1.0
+    if name == "DonchianPos":
+        series, window = _series_window_args(args, name)
+        low = series.rolling(window).min()
+        high = series.rolling(window).max()
+        return (series - low) / _nonzero(high - low)
     raise ValueError(f"unsupported formula function: {name}")
 
 
@@ -127,6 +217,12 @@ def _mean(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window).mean()
 
 
+def _vwap(price: pd.Series, volume: pd.Series, window: int) -> pd.Series:
+    numerator = (price * volume).rolling(window).sum()
+    denominator = volume.rolling(window).sum()
+    return numerator / _nonzero(denominator)
+
+
 def _signed_power(series: pd.Series, power: float) -> pd.Series:
     return np.sign(series) * np.power(series.abs(), power)
 
@@ -149,17 +245,49 @@ def _series_arg(args: list[Any], name: str) -> pd.Series:
     return args[0]
 
 
+def _two_series_args(args: list[Any], name: str) -> tuple[pd.Series, pd.Series]:
+    if len(args) != 2 or not isinstance(args[0], pd.Series) or not isinstance(args[1], pd.Series):
+        raise ValueError(f"{name} requires two series arguments")
+    return args[0], args[1]
+
+
+def _series_window_args(args: list[Any], name: str) -> tuple[pd.Series, int]:
+    if len(args) != 2:
+        raise ValueError(f"{name} requires series and window arguments")
+    return _series_arg(args, name), _int_arg(args[1:], name)
+
+
+def _series_bounds_args(args: list[Any], name: str) -> tuple[pd.Series, float, float]:
+    if len(args) != 3:
+        raise ValueError(f"{name} requires series, low, high arguments")
+    low = _float_arg(args[1:2], name)
+    high = _float_arg(args[2:3], name)
+    if low > high:
+        raise ValueError(f"{name} low bound must be <= high bound")
+    return _series_arg(args, name), low, high
+
+
+def _series_series_window_args(args: list[Any], name: str) -> tuple[pd.Series, pd.Series, int]:
+    if len(args) != 3:
+        raise ValueError(f"{name} requires two series and window arguments")
+    first, second = _two_series_args(args[:2], name)
+    return first, second, _int_arg(args[2:], name)
+
+
 def _int_arg(args: list[Any], name: str) -> int:
-    if not args or isinstance(args[0], pd.Series):
+    if len(args) != 1 or isinstance(args[0], pd.Series):
         raise ValueError(f"{name} requires a numeric window argument")
-    value = int(args[0])
+    raw = args[0]
+    value = int(raw)
+    if float(raw) != float(value):
+        raise ValueError(f"{name} window must be an integer")
     if value <= 1:
         raise ValueError(f"{name} window must be greater than 1")
     return value
 
 
 def _float_arg(args: list[Any], name: str) -> float:
-    if not args or isinstance(args[0], pd.Series):
+    if len(args) != 1 or isinstance(args[0], pd.Series):
         raise ValueError(f"{name} requires a numeric argument")
     return float(args[0])
 

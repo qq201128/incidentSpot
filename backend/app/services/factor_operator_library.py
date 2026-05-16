@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from app.services.agent_factor_formula import SUPPORTED_AGENT_FORMULA_FUNCTIONS
+
 OPERATOR_LIBRARY_VERSION = "factor_operator_library_v1"
+EXECUTABLE_OPERATOR_NAMES = SUPPORTED_AGENT_FORMULA_FUNCTIONS
 
 _ROWS: tuple[tuple[str, str, str, str, str], ...] = (
     ("Add", "arithmetic", "x + y", "两个信号线性叠加", "Add(ret_5, vol_z_20)"),
@@ -94,10 +97,15 @@ def factor_operator_payload() -> dict[str, Any]:
 
 def factor_operator_prompt_payload() -> dict[str, Any]:
     payload = factor_operator_payload()
+    operators = [item for item in payload["operators"] if item["name"] in EXECUTABLE_OPERATOR_NAMES]
+    category_counts = Counter(item["category"] for item in operators)
     return {
         "version": payload["version"],
-        "total": payload["total"],
-        "categories": payload["categories"],
+        "total": len(operators),
+        "categories": [
+            {"key": key, "count": category_counts[key]}
+            for key in sorted(category_counts)
+        ],
         "operators": [
             {
                 "name": item["name"],
@@ -105,7 +113,7 @@ def factor_operator_prompt_payload() -> dict[str, Any]:
                 "signature": item["signature"],
                 "example": item["example"],
             }
-            for item in payload["operators"]
+            for item in operators
         ],
     }
 
@@ -119,7 +127,7 @@ def factor_operator_summary() -> dict[str, Any]:
     }
 
 
-def _operator_payload(row: tuple[str, str, str, str, str]) -> dict[str, str]:
+def _operator_payload(row: tuple[str, str, str, str, str]) -> dict[str, Any]:
     name, category, signature, purpose, example = row
     return {
         "name": name,
@@ -127,4 +135,5 @@ def _operator_payload(row: tuple[str, str, str, str, str]) -> dict[str, str]:
         "signature": signature,
         "purpose": purpose,
         "example": example,
+        "executable": name in EXECUTABLE_OPERATOR_NAMES,
     }

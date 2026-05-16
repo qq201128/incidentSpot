@@ -52,6 +52,26 @@ def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_pa
     assert names == [agent_lib.load_agent_factor_library()["factors"][0]["factorName"]]
 
 
+def test_agent_candidate_with_ema_can_materialize_and_reach_backtest(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    result = agent_lib.process_agent_factor_candidates(_memory("EMA(close, 12)"), _frame())
+    record = result["agentCandidatePromotion"]["records"][0]
+
+    assert record["status"] != "failed"
+    assert "unsupported formula function" not in str(record)
+    assert isinstance(record["metrics"], dict)
+
+
+def test_agent_candidate_with_vwap_can_materialize_and_reach_backtest(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    result = agent_lib.process_agent_factor_candidates(_memory("VWAP(close, volume, 20)"), _frame())
+    record = result["agentCandidatePromotion"]["records"][0]
+
+    assert record["status"] != "failed"
+    assert "unsupported formula function" not in str(record)
+    assert isinstance(record["metrics"], dict)
+
+
 def _patch_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(agent_lib, "AGENT_FACTOR_LIBRARY_PATH", tmp_path / "agent_mined_factor_library.json")
     monkeypatch.setattr(agent_lib, "AGENT_CANDIDATE_HISTORY_PATH", tmp_path / "agent_factor_candidate_history.json")
@@ -80,7 +100,7 @@ def _memory(formula: str) -> dict:
 
 def _frame() -> pd.DataFrame:
     idx = np.arange(ROWS, dtype=float)
-    returns = 0.001 * np.sin(idx / 7.0) + 0.0005 * np.cos(idx / 13.0)
+    returns = 0.012 * np.sin(idx / 7.0) + 0.006 * np.cos(idx / 13.0)
     close = 100.0 * np.cumprod(1.0 + returns)
     future = pd.Series(close).pct_change(HORIZON).shift(-HORIZON).fillna(0.0)
     noise = np.random.default_rng(1).normal(0.0, 0.001, ROWS)
@@ -88,6 +108,9 @@ def _frame() -> pd.DataFrame:
         {
             "open_time": np.arange(ROWS) * 60_000,
             "close": close,
+            "high": close * 1.002,
+            "low": close * 0.998,
+            "volume": 100.0 + 20.0 * (1.0 + np.sin(idx / 11.0)),
             "factor_a": future + noise,
         }
     )
