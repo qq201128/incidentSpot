@@ -36,6 +36,9 @@ def test_factor_learning_memory_records_loss_patterns_and_weights() -> None:
     assert memory["factorMining"]["successPatterns"]
     assert memory["factorMining"]["operatorLibrary"]["total"] >= 60
     assert memory["weights"]["factor_a"] > 0
+    assert memory["retrieval"]["blockedFactorNames"]
+    assert memory["retrieval"]["lossPatterns"]
+    assert memory["retrieval"]["topWeights"]
     assert memory["adaptiveLearning"]["algorithmCount"] >= 10
     assert memory["adaptiveLearning"]["overallAccuracy"] == 0.5
     assert memory["minedFactorLibrary"] == {}
@@ -60,6 +63,28 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["factorLearning"]["lossPatternMatches"]
     assert result["qualityPassed"] is False
     assert result["qualityGateReason"] == "factor_learning_filter_blocked"
+
+
+def test_factor_learning_filter_blocks_forbidden_region_member() -> None:
+    frame = _learning_frame()
+    memory = build_factor_learning_memory(
+        frame,
+        _ranking_report(),
+        _settled_predictions(),
+        symbol="BTCUSDT",
+        duration="10m",
+    )
+    memory["lossMemory"]["patterns"] = []
+    memory["factorMining"]["forbiddenRegions"] = [{"members": ["factor_b"]}]
+    payload = _live_payload()
+
+    result = apply_factor_learning_memory(payload, frame, frame.index[-1], memory)
+
+    assert result["factorLearning"]["state"] == "active"
+    assert result["factorLearning"]["blockedMembers"]
+    assert any(item["feature"] == "factor_b" for item in result["factorLearning"]["blockedMembers"])
+    assert result["factorLearning"]["filterPassed"] is False
+    assert result["qualityPassed"] is False
 
 
 def test_good_combo_is_promoted_to_mined_factor_library(monkeypatch: pytest.MonkeyPatch) -> None:

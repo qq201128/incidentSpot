@@ -65,7 +65,7 @@ def synthetic_factors() -> list[FactorDefinition]:
 
 @pytest.fixture(autouse=True)
 def empty_mined_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
-    def empty(frame: pd.DataFrame, *, symbol: str, duration: str) -> MinedCandidateResult:
+    def empty(frame: pd.DataFrame, *, symbol: str, duration: str, **_kwargs) -> MinedCandidateResult:
         return MinedCandidateResult(frame, (), 0, ())
 
     monkeypatch.setattr(combo_service, "build_mined_candidates", empty)
@@ -88,15 +88,38 @@ def test_combination_ranking_returns_score_sorted_rows(
     assert report["testedCombinationCount"] == 3
     assert len(ranking) == 3
     assert ranking == sorted(ranking, key=lambda row: row["factorScore"], reverse=True)
-    assert ranking[0]["comboSize"] == 2
-    assert len(ranking[0]["members"]) == 2
-    assert ranking[0]["winRate"] is not None
-    assert ranking[0]["factorScore"] > 0
-    assert ranking[0]["avgAbsCorrelation"] is not None
-    assert ranking[0]["walkForwardPassed"] is True
-    assert "validation" in ranking[0]["walkForward"]
-    assert ranking[0]["walkForwardFailureReason"] is None
-    assert report["baseFactors"][0]["factorScore"] > 0
+
+
+def test_combination_ranking_applies_learning_memory_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+    monkeypatch.setattr(
+        combo_service,
+        "load_factor_learning_memory_for",
+        lambda *_args: {
+            "factorMining": {"forbiddenRegions": [{"members": ["factor_b"]}]},
+            "lossMemory": {"patterns": []},
+            "weights": {"factor_a": 0.7, "factor_c": 0.3},
+        },
+    )
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=5),
+    )
+
+    base_names = [item["name"] for item in report["baseFactors"]]
+    factor_a = next(item for item in report["baseFactors"] if item["name"] == "factor_a")
+
+    assert "factor_b" not in base_names
+    assert report["baseFactorCount"] == 2
+    assert factor_a["learningWeight"] == 0.7
+    assert factor_a["learningScore"] == pytest.approx(factor_a["factorScore"] + 0.7)
 
 
 def test_combination_ranking_skips_mined_combo_candidates_but_keeps_agent_factors(

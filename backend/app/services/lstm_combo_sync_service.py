@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from app.services.factor_cache_metadata import cache_is_usable
 from app.services.lstm_artifacts import artifact_paths, read_json, required_artifacts_exist
-from app.services.lstm_combo_ranking import resolve_lstm_combo_ranking
+from app.services.lstm_combo_ranking import LSTM_COMBO_SOURCE_PRIMARY, resolve_lstm_combo_ranking
 from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_feature_builder import build_lstm_training_dataset
@@ -40,7 +41,7 @@ def sync_lstm_model_to_combo_ranking(
 
 
 def _resolved_ranking(symbol: str, duration: str, ranking_report: dict[str, Any]) -> dict[str, Any]:
-    if _has_ranking(ranking_report):
+    if _has_ranking(ranking_report) and cache_is_usable(ranking_report):
         return ranking_report
     resolved = resolve_lstm_combo_ranking(
         symbol,
@@ -85,6 +86,8 @@ def _train(
     config = LstmTrainingConfig(symbol=symbol, duration=duration)
     if trainer is not None:
         return trainer(config)
+    if _requires_primary_rebuild(ranking_report):
+        return train_lstm_model(config, artifact_root=artifact_root)
     return train_lstm_model(
         config,
         artifact_root=artifact_root,
@@ -105,3 +108,10 @@ def _dataset_builder_for_ranking(ranking_report: dict[str, Any]):
 def _has_ranking(ranking_report: dict[str, Any]) -> bool:
     rows = ranking_report.get("ranking")
     return bool(isinstance(rows, list) and rows)
+
+
+def _requires_primary_rebuild(ranking_report: dict[str, Any]) -> bool:
+    return (
+        ranking_report.get("lstmComboRankingSource") == LSTM_COMBO_SOURCE_PRIMARY
+        and not cache_is_usable(ranking_report)
+    )

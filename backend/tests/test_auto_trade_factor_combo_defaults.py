@@ -83,6 +83,28 @@ def test_high_winrate_live_trade_allowed_when_tradable(monkeypatch) -> None:
     assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
 
 
+def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:
+    settings = AutoTradeSettings(
+        strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+        enabled=True,
+        symbol="BTCUSDT",
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=False,
+    )
+    monkeypatch.setattr(
+        auto_trade_service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: 1778922000000,
+    )
+
+    assert auto_trade_service._is_fresh_prediction(
+        {"open_time": 1778922000000},
+        settings,
+    ) is True
+
+
 def _auto_trade_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row

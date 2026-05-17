@@ -46,14 +46,22 @@ def materialize_mined_factor_frame(
     *,
     symbol: str,
     duration: str,
+    excluded_factor_names: set[str] | None = None,
 ) -> MinedFrameResult:
-    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    excluded = excluded_factor_names or set()
+    agent = materialize_agent_factor_frame(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        excluded_factor_names=excluded,
+    )
     rows = mined_factor_rows_for_duration(symbol, duration)
     return _materialize_mined_rows(
         agent.frame,
         rows,
         agent.source_count,
         agent.failures,
+        excluded_factor_names=excluded,
     )
 
 
@@ -64,8 +72,15 @@ def materialize_mined_factor_frame_for_rows(
     duration: str,
     target_rows: list[dict[str, Any]],
     source_rows: list[dict[str, Any]] | None = None,
+    excluded_factor_names: set[str] | None = None,
 ) -> MinedFrameResult:
-    agent = materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    excluded = excluded_factor_names or set()
+    agent = materialize_agent_factor_frame(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        excluded_factor_names=excluded,
+    )
     rows = source_rows if source_rows is not None else mined_factor_rows_for_duration(symbol, duration)
     selected = _dependency_rows(target_rows, rows)
     return _materialize_mined_rows(
@@ -74,6 +89,7 @@ def materialize_mined_factor_frame_for_rows(
         agent.source_count,
         agent.failures,
         source_count=len(rows),
+        excluded_factor_names=excluded,
     )
 
 
@@ -83,16 +99,25 @@ def materialize_mined_factor_frame_for_targets(
     symbol: str,
     duration: str,
     target_rows: list[dict[str, Any]],
+    excluded_factor_names: set[str] | None = None,
 ) -> MinedFrameResult:
+    excluded = excluded_factor_names or set()
     source_rows = mined_factor_rows_for_duration(symbol, duration)
     selected = _target_and_dependency_rows(target_rows, source_rows)
-    agent = _materialize_agent_targets(frame, symbol=symbol, duration=duration, target_rows=target_rows)
+    agent = _materialize_agent_targets(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        target_rows=target_rows,
+        excluded_factor_names=excluded,
+    )
     return _materialize_mined_rows(
         agent.frame,
         selected,
         agent.source_count,
         agent.failures,
         source_count=len(source_rows),
+        excluded_factor_names=excluded,
     )
 
 
@@ -102,11 +127,17 @@ def _materialize_agent_targets(
     symbol: str,
     duration: str,
     target_rows: list[dict[str, Any]],
+    excluded_factor_names: set[str] | None = None,
 ) -> Any:
     agent_targets = [row for row in target_rows if str(row.get("source") or row.get("sourceFile")) == AGENT_FACTOR_SOURCE_FILE]
     if not agent_targets:
         return AgentFactorFrameResult(frame, 0, ())
-    return materialize_agent_factor_frame(frame, symbol=symbol, duration=duration)
+    return materialize_agent_factor_frame(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        excluded_factor_names=excluded_factor_names,
+    )
 
 
 def _materialize_mined_rows(
@@ -116,7 +147,9 @@ def _materialize_mined_rows(
     agent_failures: tuple[dict[str, Any], ...],
     *,
     source_count: int | None = None,
+    excluded_factor_names: set[str] | None = None,
 ) -> MinedFrameResult:
+    excluded = excluded_factor_names or set()
     if not rows:
         return MinedFrameResult(frame, agent_count, agent_failures)
     failures: list[dict[str, Any]] = list(agent_failures)
@@ -125,7 +158,9 @@ def _materialize_mined_rows(
     by_name = {str(row.get("factorName")): row for row in rows}
     for row in rows:
         try:
-            _ensure_materialized(frame, pending, row, by_name, materialized, set())
+            if str(row.get("factorName")) in excluded:
+                continue
+            _ensure_materialized(frame, pending, row, by_name, materialized, set(), excluded)
         except Exception as exc:
             failures.append(_failure(row, "materialize_mined_factor", exc))
     working = _frame_with_pending_columns(frame, pending)
@@ -175,12 +210,20 @@ def build_mined_candidates(
     *,
     symbol: str,
     duration: str,
+    excluded_factor_names: set[str] | None = None,
 ) -> MinedCandidateResult:
-    materialized = materialize_mined_factor_frame(frame, symbol=symbol, duration=duration)
+    excluded = excluded_factor_names or set()
+    materialized = materialize_mined_factor_frame(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        excluded_factor_names=excluded,
+    )
     candidates: list[MinedCandidate] = []
     failures = list(materialized.failures)
     for row in mined_factor_rows_for_duration(symbol, duration):
-        if str(row.get("factorName")) not in materialized.frame.columns:
+        factor_name = str(row.get("factorName"))
+        if factor_name in excluded or factor_name not in materialized.frame.columns:
             continue
         try:
             candidate = _candidate_from_row(materialized.frame, row, symbol, duration)
@@ -188,7 +231,14 @@ def build_mined_candidates(
                 candidates.append(candidate)
         except Exception as exc:
             failures.append(_failure(row, "backtest_mined_factor", exc))
-    candidates.extend(build_agent_mined_candidates_from_frame(materialized.frame, symbol=symbol, duration=duration))
+    candidates.extend(
+        build_agent_mined_candidates_from_frame(
+            materialized.frame,
+            symbol=symbol,
+            duration=duration,
+            excluded_factor_names=excluded,
+        )
+    )
     return MinedCandidateResult(
         materialized.frame,
         tuple(candidates),
@@ -204,8 +254,11 @@ def _ensure_materialized(
     by_name: dict[str, dict[str, Any]],
     materialized: set[str],
     visiting: set[str],
+    excluded: set[str],
 ) -> None:
     name = str(row.get("factorName"))
+    if name in excluded:
+        return
     if name in materialized:
         return
     if name in visiting:
@@ -214,7 +267,7 @@ def _ensure_materialized(
     try:
         members = _members(row)
         for member in members:
-            _ensure_member_materialized(frame, pending, member, by_name, materialized, visiting)
+            _ensure_member_materialized(frame, pending, member, by_name, materialized, visiting, excluded)
         pending[name] = combination_score(_score_frame(frame, pending, members), members)
         materialized.add(name)
     finally:
@@ -228,14 +281,17 @@ def _ensure_member_materialized(
     by_name: dict[str, dict[str, Any]],
     materialized: set[str],
     visiting: set[str],
+    excluded: set[str],
 ) -> None:
     member_name = str(member["name"])
+    if member_name in excluded:
+        raise ValueError(f"mined factor blocked by learning memory: {member_name}")
     if member_name in materialized:
         return
     dependency = by_name.get(member_name)
     if dependency is None:
         raise ValueError(f"mined factor missing member column: {member_name}")
-    _ensure_materialized(frame, pending, dependency, by_name, materialized, visiting)
+    _ensure_materialized(frame, pending, dependency, by_name, materialized, visiting, excluded)
 
 
 def _score_frame(

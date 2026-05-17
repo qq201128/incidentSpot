@@ -6,6 +6,7 @@ import os
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.lstm_daily_review import LstmDailyReviewConfig, run_lstm_daily_review
 from app.services.lstm_torch_backend import is_torch_available
 
@@ -13,6 +14,7 @@ logger = logging.getLogger("uvicorn.error")
 
 _DEFAULT_TZ = "Asia/Shanghai"
 _DEFAULT_AT = "02:00"
+_DEFAULT_PROFILE = "full"
 
 
 def lstm_daily_review_enabled() -> bool:
@@ -54,6 +56,11 @@ def _llm_agent_enabled() -> bool:
     return os.getenv("LSTM_DAILY_REVIEW_LLM", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _profile() -> str:
+    raw = os.getenv("LSTM_DAILY_REVIEW_PROFILE", _DEFAULT_PROFILE)
+    return normalize_experiment_profile(raw)
+
+
 def seconds_until_next_lstm_daily_review(
     now: datetime | None = None,
     *,
@@ -77,7 +84,10 @@ def _localized(value: datetime, tz: ZoneInfo) -> datetime:
 
 
 def _review_config() -> LstmDailyReviewConfig:
-    return LstmDailyReviewConfig(run_llm_agent=_llm_agent_enabled())
+    return LstmDailyReviewConfig(
+        experiment_profile=_profile(),
+        run_llm_agent=_llm_agent_enabled(),
+    )
 
 
 async def _sleep_for(stop_event: asyncio.Event, seconds: float) -> None:
@@ -91,12 +101,13 @@ async def lstm_daily_review_loop(stop_event: asyncio.Event) -> None:
     tz = _timezone()
     at = _daily_time()
     logger.info(
-        "lstm daily review scheduled: tz=%s local_time=%02d:%02d torch_installed=%s llm_agent=%s",
+        "lstm daily review scheduled: tz=%s local_time=%02d:%02d torch_installed=%s llm_agent=%s profile=%s",
         str(tz),
         at.hour,
         at.minute,
         is_torch_available(),
         _llm_agent_enabled(),
+        _profile(),
     )
     while not stop_event.is_set():
         await _sleep_for(stop_event, seconds_until_next_lstm_daily_review(zone=tz, daily_at=at))

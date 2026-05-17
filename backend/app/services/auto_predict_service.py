@@ -21,7 +21,6 @@ from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_de
 from app.services.kline_timing import (
     MS_PER_MINUTE,
     current_rule_entry_open_time_for_duration,
-    is_within_entry_grace,
     seconds_until_next_rule_entry_for_duration,
     utc_now_ms,
 )
@@ -69,7 +68,7 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
 
 
 async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
-    due_targets = await asyncio.to_thread(_due_prediction_targets, targets)
+    due_targets = await asyncio.to_thread(_ready_due_prediction_targets, targets)
     if not due_targets:
         return
     await _prepare_prediction_inputs(due_targets)
@@ -241,7 +240,7 @@ def _prediction_failures(
 
 def _prediction_targets() -> list[AutoTradeSettings]:
     settings = list_auto_trade_settings()
-    enabled = _ready_enabled_prediction_targets(settings)
+    enabled = _enabled_prediction_targets(settings)
     if enabled:
         return enabled
     if any(item.enabled for item in settings):
@@ -255,7 +254,7 @@ def _default_prediction_targets() -> list[AutoTradeSettings]:
         default.strategy_key,
         default.symbol,
         default.duration,
-        attempt_recovery=True,
+        attempt_recovery=False,
     )
     if readiness.ready:
         return [default]
@@ -272,54 +271,58 @@ def _default_prediction_targets() -> list[AutoTradeSettings]:
     return []
 
 
-def _ready_enabled_prediction_targets(settings: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
-    targets = []
-    for item in settings:
-        if not item.enabled or not strategy_supports_duration(item.strategy_key, item.duration):
-            continue
-        readiness = strategy_prediction_readiness(
-            item.strategy_key,
-            item.symbol,
-            item.duration,
-            attempt_recovery=True,
-        )
-        if readiness.ready:
-            targets.append(item)
-            continue
-        logger.warning(
-            "predict target skipped strategy=%s symbol=%s duration=%s reason=%s recoveryAttempted=%s recoveryStatus=%s diagnostics=%s",
-            item.strategy_key,
-            item.symbol,
-            item.duration,
-            readiness.reason,
-            readiness.recovery_attempted,
-            readiness.recovery_status,
-            readiness.diagnostics,
-        )
-    return targets
+def _enabled_prediction_targets(settings: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    return [
+        item
+        for item in settings
+        if item.enabled and strategy_supports_duration(item.strategy_key, item.duration)
+    ]
 
 
 def _due_prediction_targets(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
     return [settings for settings in targets if _should_predict_entry(settings)]
 
 
+def _ready_due_prediction_targets(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    ready = []
+    for settings in _due_prediction_targets(targets):
+        readiness = strategy_prediction_readiness(
+            settings.strategy_key,
+            settings.symbol,
+            settings.duration,
+            attempt_recovery=False,
+        )
+        if readiness.ready:
+            ready.append(settings)
+            continue
+        logger.warning(
+            "predict due target skipped strategy=%s symbol=%s duration=%s reason=%s recoveryAttempted=%s recoveryStatus=%s diagnostics=%s",
+            settings.strategy_key,
+            settings.symbol,
+            settings.duration,
+            readiness.reason,
+            readiness.recovery_attempted,
+            readiness.recovery_status,
+            readiness.diagnostics,
+        )
+    return ready
+
+
 def _should_predict_entry(settings: AutoTradeSettings) -> bool:
     bucket = current_rule_entry_open_time_for_duration(settings.duration)
-    if not is_within_entry_grace(
-        bucket,
-        grace_ms=strategy_entry_grace_ms(settings.strategy_key),
-    ):
-        return False
+    if _current_bucket_prediction_exists(settings, bucket):
+        return _factor_combo_sidecar_due(settings, bucket)
     if is_lstm_shadow_strategy(settings.strategy_key):
         return _ready_lstm_strategy_due(settings, bucket)
-    return (
-        not prediction_exists(
-            strategy_key=settings.strategy_key,
-            symbol=settings.symbol,
-            duration=settings.duration,
-            open_time=bucket,
-        )
-        or _factor_combo_sidecar_due(settings, bucket)
+    return True
+
+
+def _current_bucket_prediction_exists(settings: AutoTradeSettings, bucket: int) -> bool:
+    return prediction_exists(
+        strategy_key=settings.strategy_key,
+        symbol=settings.symbol,
+        duration=settings.duration,
+        open_time=bucket,
     )
 
 
@@ -501,8 +504,7 @@ def _next_predict_wait(targets: list[AutoTradeSettings], poll_seconds: int) -> f
     min_wait = float("inf")
     for settings in targets:
         bucket = current_rule_entry_open_time_for_duration(settings.duration, now_ms)
-        grace_ms = strategy_entry_grace_ms(settings.strategy_key)
-        if is_within_entry_grace(bucket, now_ms, grace_ms=grace_ms):
+        if _should_predict_entry(settings):
             min_wait = min(min_wait, float(poll_seconds))
         else:
             min_wait = min(min_wait, seconds_until_next_rule_entry_for_duration(settings.duration, now_ms))

@@ -39,8 +39,8 @@ def factor_score(row: dict[str, Any]) -> float:
         return INVALID_BACKTEST_SCORE
     raw = (
         _clamp01(row.get("winRate")) * WIN_RATE_WEIGHT
-        + _scaled_abs(row.get("sharpe"), SHARPE_SCALE) * SHARPE_WEIGHT
-        + _scaled_abs(row.get("ir"), IR_SCALE) * IR_WEIGHT
+        + _scaled_positive(row.get("sharpe"), SHARPE_SCALE) * SHARPE_WEIGHT
+        + _scaled_positive(row.get("ir"), IR_SCALE) * IR_WEIGHT
         + _profit_factor_score(row.get("profitFactor")) * PROFIT_FACTOR_WEIGHT
         + _clamp01(row.get("contribution")) * CONTRIBUTION_WEIGHT
         + _correlation_score(row.get("avgAbsCorrelation")) * CORRELATION_WEIGHT
@@ -118,11 +118,11 @@ def _profit_factor_score(value: Any) -> float:
     return _clamp01((number - 1.0) / (PROFIT_FACTOR_SCALE - 1.0))
 
 
-def _scaled_abs(value: Any, scale: float) -> float:
+def _scaled_positive(value: Any, scale: float) -> float:
     number = _finite_float(value)
     if number is None:
         return 0.0
-    return _clamp01(abs(number) / scale)
+    return _clamp01(max(number, 0.0) / scale)
 
 
 def _clamp01(value: Any) -> float:

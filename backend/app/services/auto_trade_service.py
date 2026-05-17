@@ -119,7 +119,7 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
         return None
     if not _prediction_matches_current_kline_bucket(prediction, settings):
         return None
-    if not _is_fresh_prediction(prediction, settings.strategy_key):
+    if not _is_fresh_prediction(prediction, settings):
         return None
     if not _is_prediction_tradable(prediction, settings):
         return None
@@ -202,11 +202,15 @@ def _latest_prediction_row(settings: AutoTradeSettings) -> dict[str, Any] | None
         conn.close()
 
 
-def _is_fresh_prediction(prediction: dict[str, Any], strategy_key: str) -> bool:
+def _is_fresh_prediction(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:
     entry_open_time = int(prediction["open_time"])
     now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
+    current_bucket = int(current_rule_entry_open_time_for_duration(settings.duration, now_ms))
+    if entry_open_time == current_bucket:
+        return True
+    now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
     age_ms = now_ms - entry_open_time
-    return 0 <= age_ms <= fresh_prediction_ms_for_strategy(strategy_key)
+    return 0 <= age_ms <= fresh_prediction_ms_for_strategy(settings.strategy_key)
 
 
 def fresh_prediction_ms_for_strategy(strategy_key: str) -> int:

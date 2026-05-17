@@ -39,12 +39,18 @@ class AgentMinedCandidate:
 def process_agent_factor_candidates(memory: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
     ideas = _candidate_ideas(memory)
     rows, records = _evaluate_ideas(memory, frame, ideas)
+    evaluation = _evaluation_summary(records, rows)
+    updated = deepcopy(memory)
+    updated["agentCandidatePromotion"] = _promotion(records)
+    updated["agentCandidateEvaluation"] = evaluation
+    updated["llmAgent"] = _merge_agent_review(updated.get("llmAgent") or {}, evaluation)
     if rows:
         _save_library(_library_with_rows(rows))
     if ideas:
-        _append_history(memory, records)
-    summary = agent_mined_factor_library_summary(str(memory["symbol"]), str(memory["duration"]))
-    return {**memory, "agentMinedFactorLibrary": summary, "agentCandidatePromotion": _promotion(records)}
+        _append_history(updated, records)
+    summary = agent_mined_factor_library_summary(str(updated["symbol"]), str(updated["duration"]))
+    updated["agentMinedFactorLibrary"] = summary
+    return updated
 
 def agent_mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     rows = agent_factor_rows_for_duration(symbol, duration)
@@ -63,12 +69,16 @@ def materialize_agent_factor_frame(
     *,
     symbol: str,
     duration: str,
+    excluded_factor_names: set[str] | None = None,
 ) -> AgentFactorFrameResult:
+    excluded = excluded_factor_names or set()
     rows = agent_factor_rows_for_duration(symbol, duration)
     failures: list[dict[str, Any]] = []
     working = frame
     for row in rows:
         try:
+            if str(row.get("factorName")) in excluded:
+                continue
             working = _with_agent_column(working, row)
         except Exception as exc:
             failures.append(_failure(row, "materialize_agent_factor", exc))
@@ -79,10 +89,13 @@ def build_agent_mined_candidates_from_frame(
     *,
     symbol: str,
     duration: str,
+    excluded_factor_names: set[str] | None = None,
 ) -> tuple[AgentMinedCandidate, ...]:
+    excluded = excluded_factor_names or set()
     candidates = []
     for row in agent_factor_rows_for_duration(symbol, duration):
-        if str(row.get("factorName")) not in frame.columns:
+        factor_name = str(row.get("factorName"))
+        if factor_name in excluded or factor_name not in frame.columns:
             continue
         factor = _factor_definition(row, duration)
         metrics = run_factor_backtest_on_frame(factor, frame, symbol=symbol, duration=duration)
@@ -264,6 +277,30 @@ def _orientation(metrics: dict[str, Any]) -> int:
 
 def _promotion(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {"candidateCount": len(records), "promoted": sum(1 for item in records if item["status"] == "promoted"), "records": records}
+
+
+def _evaluation_summary(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = {"promoted": 0, "duplicate_existing": 0, "rejected_metrics": 0, "failed": 0}
+    for record in records:
+        status = str(record.get("status") or "")
+        if status in counts:
+            counts[status] += 1
+    return {
+        "generatedCount": len(records),
+        "promotedCount": len(rows),
+        "rejectedCount": len(records) - len(rows),
+        "statusCounts": counts,
+        "topPromotedFactors": [row.get("factorName") for row in rows[:8]],
+    }
+
+
+def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    updated = deepcopy(llm_agent)
+    review = updated.get("review") if isinstance(updated.get("review"), dict) else {}
+    review = deepcopy(review)
+    review["evaluation"] = evaluation
+    updated["review"] = review
+    return updated
 
 
 def _duplicate_formula(formula: str, existing: list[dict[str, Any]]) -> bool:

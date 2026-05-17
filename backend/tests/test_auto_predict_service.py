@@ -58,8 +58,7 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 
 
-def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
-    grace_calls = []
+def test_should_predict_entry_backfills_missing_current_bucket_prediction(monkeypatch) -> None:
     existing_calls = []
 
     monkeypatch.setattr(
@@ -67,16 +66,10 @@ def test_should_predict_entry_uses_strategy_entry_grace(monkeypatch) -> None:
         "current_rule_entry_open_time_for_duration",
         lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
     )
-    monkeypatch.setattr(
-        service,
-        "is_within_entry_grace",
-        lambda open_time, *, grace_ms: grace_calls.append((open_time, grace_ms)) or True,
-    )
     monkeypatch.setattr(service, "prediction_exists", lambda **kwargs: existing_calls.append(kwargs) or False)
 
     assert service._should_predict_entry(_settings(FACTOR_COMBO_STRATEGY_KEY))
 
-    assert grace_calls == [(ENTRY_OPEN_TIME, service.strategy_entry_grace_ms(FACTOR_COMBO_STRATEGY_KEY))]
     assert existing_calls[0]["strategy_key"] == FACTOR_COMBO_STRATEGY_KEY
 
 
@@ -89,7 +82,6 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
         "current_rule_entry_open_time_for_duration",
         lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
     )
-    monkeypatch.setattr(service, "is_within_entry_grace", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
     monkeypatch.setattr(
         service,
@@ -223,7 +215,6 @@ def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
         _settings(HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, duration="10m"),
     ]
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(True))
     targets = service._prediction_targets()
     keys = {(target.strategy_key, target.duration) for target in targets}
     assert keys == {
@@ -232,7 +223,7 @@ def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     }
 
 
-def test_prediction_targets_skip_enabled_empty_ranking_cache(monkeypatch) -> None:
+def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> None:
     mixed = [
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m"),
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m"),
@@ -242,14 +233,14 @@ def test_prediction_targets_skip_enabled_empty_ranking_cache(monkeypatch) -> Non
         (FACTOR_COMBO_STRATEGY_KEY, "30m"): _readiness(True),
     }
 
-    monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
     monkeypatch.setattr(
         service,
         "strategy_prediction_readiness",
         lambda strategy_key, _symbol, duration, **_kwargs: readiness[(strategy_key, duration)],
     )
+    monkeypatch.setattr(service, "_due_prediction_targets", lambda targets: targets)
 
-    targets = service._prediction_targets()
+    targets = service._ready_due_prediction_targets(mixed)
 
     assert [(target.strategy_key, target.duration) for target in targets] == [
         (FACTOR_COMBO_STRATEGY_KEY, "30m")
@@ -260,9 +251,8 @@ def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_inva
     mixed = [_settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m")]
 
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(False, "ranking_cache_empty"))
 
-    assert service._prediction_targets() == []
+    assert service._prediction_targets() == mixed
 
 
 def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -> None:

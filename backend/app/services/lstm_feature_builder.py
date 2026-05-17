@@ -17,6 +17,10 @@ from app.services.factor_combo_scoring import combination_score
 from app.services.factor_duration_alignment import duration_entry_rows, duration_entry_source_open_time
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.factor_learning_controls import (
+    learning_blocked_factor_names,
+    load_factor_learning_memory_for,
+)
 from app.services.lstm_combo_ranking import (
     LSTM_COMBO_SOURCE_HIGH_WINRATE,
     LSTM_COMBO_SOURCE_PRIMARY,
@@ -32,6 +36,8 @@ BASE_EXCLUDED_COLUMNS = {
     "open_time", "entry_open_time", "open", "high", "low", "close", "volume",
     "future_return", "label_up", "y",
 }
+RAW_COMBO_PREFIXES = ("combo__", "goal_combo__")
+DERIVED_COMBO_PREFIX = "combo_top"
 MIN_FEATURE_FINITE_RATIO = 0.95
 ROLLING_SCORE_WINDOW = 60
 EPSILON = 1e-12
@@ -57,12 +63,14 @@ def build_lstm_training_dataset(
     *,
     frame_loader: Callable[[str, str], pd.DataFrame] = load_factor_frame,
     ranking_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
+    learning_memory: dict[str, Any] | None = None,
 ) -> LstmDataset:
+    memory = learning_memory if learning_memory is not None else load_factor_learning_memory_for(config.symbol, config.duration)
     frame = _load_enriched_factor_frame(config, frame_loader)
     ranking = _ranking_or_raise(config.symbol, config.duration, ranking_loader)
     featured = add_factor_combo_features(frame, ranking)
     labeled = duration_labeled_frame(featured, config.duration, int(config.horizon_minutes), config.min_move_bps)
-    columns = candidate_feature_columns(labeled)
+    columns = candidate_feature_columns(labeled, learning_memory=memory)
     return windowed_lstm_dataset(
         labeled,
         columns,
@@ -144,10 +152,23 @@ def _assert_live_entry_row(frame: pd.DataFrame, entry_open_time: int, duration: 
         raise LstmDataError(f"missing completed LSTM source row at open_time={source_open_time}")
 
 
-def candidate_feature_columns(frame: pd.DataFrame) -> list[str]:
+def candidate_feature_columns(
+    frame: pd.DataFrame,
+    learning_memory: dict[str, Any] | None = None,
+) -> list[str]:
+    return candidate_feature_columns_for_memory(frame, learning_memory)
+
+
+def candidate_feature_columns_for_memory(
+    frame: pd.DataFrame,
+    learning_memory: dict[str, Any] | None,
+) -> list[str]:
+    blocked = learning_blocked_factor_names(learning_memory)
     columns = []
     for column in frame.columns:
-        if column in BASE_EXCLUDED_COLUMNS:
+        if not _is_candidate_feature_column(column):
+            continue
+        if column in blocked:
             continue
         if pd.api.types.is_numeric_dtype(frame[column]):
             values = frame[column].to_numpy(dtype=np.float32)
@@ -331,3 +352,11 @@ def _assert_columns(frame: pd.DataFrame, columns: list[str]) -> None:
     missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise LstmDataError(f"LSTM feature columns missing: {', '.join(missing[:12])}")
+
+
+def _is_candidate_feature_column(column: str) -> bool:
+    if column in BASE_EXCLUDED_COLUMNS:
+        return False
+    if column.startswith(DERIVED_COMBO_PREFIX):
+        return True
+    return not column.startswith(RAW_COMBO_PREFIXES)

@@ -16,6 +16,7 @@ from app.services.factor_learning_patterns import (
     forbidden_regions,
     success_patterns,
 )
+from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 from app.services.factor_operator_library import factor_operator_summary
 
 
@@ -44,7 +45,7 @@ def build_factor_learning_memory(
         monitoring_report=monitoring_report,
         lstm_shadow=lstm_shadow,
     )
-    return {
+    payload = {
         "version": FACTOR_LEARNING_VERSION,
         "symbol": symbol.strip().upper(),
         "duration": duration,
@@ -70,6 +71,8 @@ def build_factor_learning_memory(
         "agentMinedFactorLibrary": agent_mined_library or {},
         "monitoring": monitoring_report or {},
     }
+    payload["retrieval"] = build_factor_learning_retrieval(payload)
+    return payload
 
 
 def _source_payload(

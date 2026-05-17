@@ -24,6 +24,9 @@ def test_agent_candidate_is_recorded_and_promoted(monkeypatch, tmp_path: Path) -
 
     assert promotion["candidateCount"] == 1
     assert promotion["promoted"] == 1
+    assert result["agentCandidateEvaluation"]["generatedCount"] == 1
+    assert result["agentCandidateEvaluation"]["promotedCount"] == 1
+    assert result["llmAgent"]["review"]["evaluation"]["promotedCount"] == 1
     assert library["factors"][0]["source"] == agent_lib.AGENT_FACTOR_SOURCE_FILE
     assert history["runs"][0]["candidates"][0]["status"] == "promoted"
 

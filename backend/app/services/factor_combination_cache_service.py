@@ -37,6 +37,15 @@ def save_cached_combination_ranking(report: dict[str, Any]) -> None:
     ranking = report.get("ranking")
     if not isinstance(ranking, list):
         raise ValueError("combination ranking report must contain a ranking list")
+    existing = get_cached_combination_ranking(symbol, duration)
+    if not ranking and _cache_has_rows(existing):
+        logger.warning(
+            "skip overwriting non-empty factor combo cache with empty ranking: %s %s existing=%s",
+            symbol,
+            duration,
+            len(existing.get("ranking") or []),
+        )
+        return
     persisted = {**report, "cacheMeta": ranking_cache_metadata(symbol, duration)}
     payload = json.dumps(persisted, ensure_ascii=False)
     config = json.dumps(persisted.get("searchConfig") or {}, ensure_ascii=False)
@@ -76,3 +85,8 @@ def _cache_row(symbol: str, duration: str) -> Any | None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _cache_has_rows(cache: dict[str, Any] | None) -> bool:
+    rows = None if cache is None else cache.get("ranking")
+    return bool(isinstance(rows, list) and rows)

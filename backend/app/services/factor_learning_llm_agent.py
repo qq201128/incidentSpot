@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from app.services.factor_operator_library import factor_operator_prompt_payload
+from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 from app.services.siliconflow_chat_client import SiliconFlowChatClient
 
 AGENT_NAME = "siliconflow_kimi_factor_agent_v1"
@@ -72,6 +73,7 @@ def _system_prompt() -> str:
         "你是量化因子挖掘 LLM Agent。你必须只输出 JSON 对象。"
         "不要编造已验证结果，不要声称真实回测通过；只能基于输入记忆提出候选研究方向。"
         "不要再次提出 doNotSuggestFactorNames 中已经入库的单因子。"
+        "必须优先使用 memory.retrieval 中整理好的成功模式、禁区、亏损模式和权重。"
         "重点学习 FactorMiner 思路：成功模式、禁区、亏损模式、多重过滤、自动权重。"
         "候选必须能落到现有算子库和现有特征列，不可物化的想法直接拒绝。"
         "每个候选都要说明回流到因子库的验证路径、需要检查的列与过滤条件。"
@@ -129,6 +131,7 @@ def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
         "symbol": memory.get("symbol"),
         "duration": memory.get("duration"),
         "source": memory.get("source") or {},
+        "retrieval": build_factor_learning_retrieval(memory),
         "factorMining": memory.get("factorMining") or {},
         "lossMemory": memory.get("lossMemory") or {},
         "filters": memory.get("filters") or {},

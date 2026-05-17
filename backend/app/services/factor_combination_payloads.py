@@ -81,6 +81,8 @@ def base_payload(candidate: Any) -> dict[str, Any]:
         "singleSharpe": candidate.metrics.get("sharpe"),
         "avgAbsCorrelation": candidate.metrics.get("avgAbsCorrelation"),
         "factorScore": candidate.metrics.get("factorScore"),
+        "learningWeight": candidate.metrics.get("learningWeight"),
+        "learningScore": candidate.metrics.get("learningScore"),
     }
 
 

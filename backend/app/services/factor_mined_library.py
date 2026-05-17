@@ -94,6 +94,22 @@ def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     }
 
 
+def regular_library_combination_rows_for_duration(
+    symbol: str,
+    duration: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = [
+        _library_combination_row(row)
+        for row in mined_factor_rows_for_duration(symbol, duration)
+        if _is_regular_combination_name(str(row.get("factorName") or ""))
+    ]
+    selected = [row for row in rows if row is not None]
+    selected.sort(key=_library_combination_rank_key, reverse=True)
+    return selected[:limit]
+
+
 def upsert_good_combinations(report: dict[str, Any]) -> dict[str, Any]:
     candidates = [_library_row(report, row) for row in report.get("ranking") or [] if _is_good_combo(row)]
     candidates = [row for row in candidates if row is not None]
@@ -135,6 +151,35 @@ def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] 
         "firstSeenAt": now,
         "lastSeenAt": now,
         "promotionCount": 1,
+    }
+
+
+def _library_combination_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    factor_name = str(row.get("factorName") or "")
+    members = row.get("members")
+    if not factor_name or not isinstance(members, list) or not members:
+        return None
+    metrics = row.get("metrics") or {}
+    validation = metrics.get("validation") if isinstance(metrics, dict) else None
+    return {
+        "factorName": factor_name,
+        "factorDisplayName": str(row.get("factorDisplayName") or factor_name),
+        "description": str(row.get("description") or row.get("factorDisplayName") or factor_name),
+        "formula": str(row.get("formula") or factor_name),
+        "method": str(row.get("method") or ""),
+        "members": [_member_payload(member) for member in members],
+        "threshold": finite(row.get("threshold")),
+        "minTrades": int(row.get("minTrades") or metrics.get("totalPeriods") or 0),
+        "winRate": finite(metrics.get("winRate")),
+        "profitFactor": finite(metrics.get("profitFactor")),
+        "sharpe": finite(metrics.get("sharpe")),
+        "ir": finite(metrics.get("ir")),
+        "totalPeriods": int(metrics.get("totalPeriods") or 0),
+        "contribution": finite(metrics.get("contribution")),
+        "factorScore": finite(row.get("score")),
+        "source": str(row.get("source") or MINED_FACTOR_SOURCE),
+        "walkForward": validation if isinstance(validation, dict) else None,
+        "walkForwardPassed": _validation_passed(validation),
     }
 
 
@@ -231,6 +276,25 @@ def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
     return (_row_symbol(row), str(row.get("duration")), str(row.get("factorName")))
 
 
+def _is_regular_combination_name(name: str) -> bool:
+    return bool(name) and not name.startswith("goal_combo__")
+
+
+def _library_combination_rank_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        _score_num(row.get("factorScore")),
+        _score_num(row.get("winRate")),
+        _score_num(row.get("profitFactor")),
+        _score_num(row.get("sharpe")),
+    )
+
+
+def _validation_passed(validation: Any) -> bool:
+    if not isinstance(validation, dict):
+        return True
+    return str(validation.get("status") or "") == "passed"
+
+
 def _row_symbol(row: dict[str, Any]) -> str:
     return str(row.get("symbol") or "").strip().upper()
 
@@ -242,3 +306,8 @@ def _library_score(row: dict[str, Any]) -> float:
 
 def _row_score(row: dict[str, Any]) -> float:
     return round_metric(edge_score(row), 6)
+
+
+def _score_num(value: Any) -> float:
+    number = finite(value)
+    return number if number is not None else float("-inf")

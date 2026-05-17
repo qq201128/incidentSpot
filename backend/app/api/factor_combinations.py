@@ -9,22 +9,17 @@ from app.services.factor_combination_background import refresh_symbol_combinatio
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_live_service import build_combination_signal_watchlist
 from app.services.data_coverage_report import CoverageOptions, build_data_coverage_report
+from app.services.experiment_profiles import combination_search_config_for_profile, normalize_experiment_profile
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_strategy_demotion import high_winrate_demotion_status
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
-from app.services.factor_combination_service import (
-    DEFAULT_BASE_FACTOR_LIMIT,
-    DEFAULT_RESULT_LIMIT,
-    MIN_COMBO_SIZE,
-    CombinationSearchConfig,
-)
+from app.services.factor_combination_service import MIN_COMBO_SIZE, CombinationSearchConfig
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 router = APIRouter(prefix="/api/factors/combinations", tags=["factors"])
 logger = logging.getLogger("uvicorn.error")
-DEFAULT_COMBO_SIZE_QUERY = "2,3"
 DEFAULT_COMBO_TOP_PER_DURATION = 3
 DEFAULT_COMBO_SIGNAL_LIMIT = 12
 
@@ -74,18 +69,20 @@ def factor_combination_refresh(
     background_tasks: BackgroundTasks,
     symbol: str = Query(..., min_length=6),
     duration: str | None = Query(None, description="omit to refresh all supported durations"),
-    base_factor_limit: int = Query(DEFAULT_BASE_FACTOR_LIMIT, alias="baseFactorLimit"),
-    combo_sizes: str = Query(DEFAULT_COMBO_SIZE_QUERY, alias="comboSizes"),
-    result_limit: int = Query(DEFAULT_RESULT_LIMIT, alias="resultLimit"),
+    profile: str = Query("full"),
+    base_factor_limit: int | None = Query(None, alias="baseFactorLimit"),
+    combo_sizes: str | None = Query(None, alias="comboSizes"),
+    result_limit: int | None = Query(None, alias="resultLimit"),
 ) -> dict:
     _validate_optional_duration(duration)
     sym_u = symbol.upper()
-    config = _combination_config(base_factor_limit, combo_sizes, result_limit)
+    config = _combination_config(profile, base_factor_limit, combo_sizes, result_limit)
     background_tasks.add_task(_background_refresh_combo_rankings, sym_u, duration, config)
     return {
         "ok": True,
         "symbol": sym_u,
         "duration": duration,
+        "profile": normalize_experiment_profile(profile),
         "searchConfig": _config_response(config),
         "message": "已排队后台重算多因子组合并写入缓存。",
     }
@@ -174,23 +171,27 @@ def _is_combo_name(name: object) -> bool:
 
 
 def _combination_config(
-    base_factor_limit: int,
-    combo_sizes: str,
-    result_limit: int,
+    profile: str,
+    base_factor_limit: int | None,
+    combo_sizes: str | None,
+    result_limit: int | None,
 ) -> CombinationSearchConfig:
     try:
-        sizes = _parse_combo_sizes(combo_sizes)
-        _validate_combo_config_values(base_factor_limit, sizes, result_limit)
-        return CombinationSearchConfig(
+        config = combination_search_config_for_profile(
+            profile,
             base_factor_limit=base_factor_limit,
-            combo_sizes=sizes,
+            combo_sizes=_parse_combo_sizes(combo_sizes) if combo_sizes is not None else None,
             result_limit=result_limit,
         )
+        _validate_combo_config_values(config.base_factor_limit, config.combo_sizes, config.result_limit)
+        return config
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _parse_combo_sizes(value: str) -> tuple[int, ...]:
+def _parse_combo_sizes(value: str | None) -> tuple[int, ...] | None:
+    if value is None:
+        return None
     sizes = tuple(int(part.strip()) for part in value.split(",") if part.strip())
     if not sizes:
         raise ValueError("comboSizes must contain at least one integer")

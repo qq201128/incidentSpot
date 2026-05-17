@@ -9,16 +9,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.lstm_config import LstmTrainingConfig
+from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
 from app.services.lstm_training_service import train_lstm_model
 
 
 def main() -> None:
     args = _parse_args()
+    profile = normalize_experiment_profile(args.profile)
     report = train_lstm_model(
-        LstmTrainingConfig(
-            symbol=args.symbol,
-            duration=args.duration,
+        lstm_training_config_for_profile(
+            args.symbol,
+            args.duration,
+            profile,
             feature_window=args.feature_window,
             epochs=args.epochs,
             batch_size=args.batch_size,
@@ -39,17 +41,18 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train an LSTM shadow strategy model.")
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--duration", default="10m", choices=("10m", "30m", "60m", "1d"))
-    parser.add_argument("--feature-window", type=int, default=64)
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--min-samples", type=int, default=120)
-    parser.add_argument("--learning-rate", type=float, default=0.001)
-    parser.add_argument("--hidden-size", type=int, default=64)
-    parser.add_argument("--num-layers", type=int, default=1)
-    parser.add_argument("--min-move-bps", type=float, default=8.0)
-    parser.add_argument("--train-ratio", type=float, default=0.70)
-    parser.add_argument("--val-ratio", type=float, default=0.15)
-    parser.add_argument("--seed", type=int, default=20260513)
+    parser.add_argument("--profile", default="full", choices=("fast", "full"))
+    parser.add_argument("--feature-window", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--min-samples", type=int, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--hidden-size", type=int, default=None)
+    parser.add_argument("--num-layers", type=int, default=None)
+    parser.add_argument("--min-move-bps", type=float, default=None)
+    parser.add_argument("--train-ratio", type=float, default=None)
+    parser.add_argument("--val-ratio", type=float, default=None)
+    parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
 

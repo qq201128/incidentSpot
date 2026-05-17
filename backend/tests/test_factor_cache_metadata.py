@@ -53,6 +53,33 @@ def test_legacy_combination_cache_is_marked_stale(monkeypatch, tmp_path: Path) -
     assert cached["cacheStatus"]["reason"] == "legacy_without_fingerprint"
 
 
+def test_empty_combination_report_does_not_overwrite_nonempty_cache(monkeypatch, tmp_path: Path) -> None:
+    db_path = _init_db(tmp_path)
+    _patch_cache_db(monkeypatch, db_path)
+    _insert_kline(db_path, "10m", 0)
+
+    factor_combination_cache_service.save_cached_combination_ranking(
+        {
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "ranking": [{"factorName": "combo__a__b"}],
+            "searchConfig": {},
+        }
+    )
+    factor_combination_cache_service.save_cached_combination_ranking(
+        {
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "ranking": [],
+            "searchConfig": {},
+        }
+    )
+
+    cached = factor_combination_cache_service.get_cached_combination_ranking("BTCUSDT", "10m")
+
+    assert [row["factorName"] for row in cached["ranking"]] == ["combo__a__b"]
+
+
 def test_append_only_market_change_is_allowed_for_live_signal() -> None:
     payload = {
         "cacheStatus": {

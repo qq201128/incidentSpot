@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.factor_combo_scoring import oriented_zscore
+from app.services.factor_learning_controls import learning_blocked_factor_names
 from app.services.factor_learning_memory_store import load_factor_learning_memory
 
 SCORE_DECIMALS = 6
@@ -39,11 +40,18 @@ def apply_factor_learning_memory(
     zscore_cache: dict[tuple[str, int], pd.Series] | None = None,
 ) -> dict[str, Any]:
     members = _members(payload)
+    blocked_members = _blocked_member_matches(members, memory)
     weighted = _weighted_member_score(frame, index, members, memory.get("weights") or {}, zscore_cache)
     enriched = _apply_weighted_score(dict(payload), weighted)
     loss_matches = _matched_loss_patterns(frame, index, memory)
     confirmations = _confirmation_count(frame, index, members, enriched["direction"], zscore_cache)
-    filter_passed = _filter_passed(memory.get("filters") or {}, confirmations, len(members), loss_matches)
+    filter_passed = _filter_passed(
+        memory.get("filters") or {},
+        confirmations,
+        len(members),
+        loss_matches,
+        blocked_members,
+    )
     enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
     if payload["qualityPassed"] and not filter_passed:
         enriched["qualityGateReason"] = "factor_learning_filter_blocked"
@@ -53,6 +61,7 @@ def apply_factor_learning_memory(
         weighted,
         confirmations,
         loss_matches,
+        blocked_members,
         filter_passed,
     )
     return enriched
@@ -97,6 +106,7 @@ def _learning_payload(
     weighted: dict[str, Any] | None,
     confirmations: int,
     loss_matches: list[dict[str, Any]],
+    blocked_members: list[dict[str, Any]],
     filter_passed: bool,
 ) -> dict[str, Any]:
     quality_score = _quality_score(float(base_payload["confidence"]), filter_passed)
@@ -115,6 +125,7 @@ def _learning_payload(
             len(_members(base_payload)),
         ),
         "lossPatternMatches": loss_matches,
+        "blockedMembers": blocked_members,
     }
 
 
@@ -219,7 +230,10 @@ def _filter_passed(
     confirmations: int,
     member_count: int,
     loss_matches: list[dict[str, Any]],
+    blocked_members: list[dict[str, Any]],
 ) -> bool:
+    if blocked_members:
+        return False
     max_loss_matches = config.get("lossPatternMaxMatches")
     loss_passed = max_loss_matches is None or len(loss_matches) <= int(max_loss_matches)
     return confirmations >= _required_confirmations(config, member_count) and loss_passed
@@ -245,6 +259,16 @@ def _members(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(members, list) or not members:
         raise ValueError("factor combo signal missing members")
     return [dict(member) for member in members]
+
+
+def _blocked_member_matches(members: list[dict[str, Any]], memory: dict[str, Any]) -> list[dict[str, Any]]:
+    blocked_names = learning_blocked_factor_names(memory)
+    matches = []
+    for member in members:
+        name = str(member.get("name") or "").strip()
+        if name and name in blocked_names:
+            matches.append({"feature": name})
+    return matches
 
 
 def _finite_float(value: Any) -> float | None:

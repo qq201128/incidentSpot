@@ -37,6 +37,22 @@ def test_missing_correlation_does_not_create_score_by_itself() -> None:
     assert factor_score(row) == 0.0
 
 
+def test_negative_sharpe_and_ir_do_not_boost_factor_score() -> None:
+    negative = {
+        "totalPeriods": BACKTEST_MIN_PERIODS,
+        "winRate": 0.18,
+        "sharpe": -4.0,
+        "ir": -1.2,
+        "profitFactor": 0.3,
+        "contribution": 0.8,
+        "avgAbsCorrelation": 0.2,
+    }
+    positive = {**negative, "winRate": 0.55, "sharpe": 1.2, "ir": 0.8, "profitFactor": 1.4}
+
+    assert factor_score(negative) < factor_score(positive)
+    assert factor_score(negative) < 20.0
+
+
 def test_factor_signal_metrics_subtract_roundtrip_cost_from_returns() -> None:
     rows = BACKTEST_MIN_PERIODS + 20
     df = pd.DataFrame(

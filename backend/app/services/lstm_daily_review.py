@@ -10,17 +10,16 @@ from app.services.factor_combination_service import run_factor_combination_ranki
 from app.services.factor_learning_service import refresh_factor_learning_memory
 from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
-from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
-from app.services.lstm_config import (
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_EPOCHS,
-    DEFAULT_FEATURE_WINDOW,
-    DEFAULT_HIDDEN_SIZE,
-    DEFAULT_LEARNING_RATE,
-    DEFAULT_MIN_MOVE_BPS,
-    DEFAULT_NUM_LAYERS,
-    LstmTrainingConfig,
+from app.services.experiment_profiles import (
+    EXPERIMENT_PROFILE_FULL,
+    ShadowGateResult,
+    combination_search_config_for_profile,
+    lstm_training_config_for_profile,
+    normalize_experiment_profile,
+    shadow_gate_for_full_profile,
 )
+from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
+from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_training_service import train_lstm_model
 from app.services.market_context_ingest_service import (
     DEFAULT_CONTEXT_LIMIT,
@@ -34,27 +33,19 @@ BINANCE_KLINE_LIMIT_MAX = 1000
 DEFAULT_TARGET_KLINE_ROWS = 20_000
 DEFAULT_BACKFILL_CHUNK = 1000
 DEFAULT_MAX_BACKFILL_ROUNDS = 200
-DEFAULT_MIN_SAMPLES = 120
 
 
 @dataclass(frozen=True)
 class LstmDailyReviewConfig:
     symbols: tuple[str, ...] = ()
     durations: tuple[str, ...] = BACKTEST_DURATION_ORDER
+    experiment_profile: str = EXPERIMENT_PROFILE_FULL
     kline_limit: int = BINANCE_KLINE_LIMIT_MAX
     target_kline_rows: int = DEFAULT_TARGET_KLINE_ROWS
     backfill_chunk: int = DEFAULT_BACKFILL_CHUNK
     max_backfill_rounds: int = DEFAULT_MAX_BACKFILL_ROUNDS
     context_period: str = DEFAULT_CONTEXT_PERIOD
     context_limit: int = DEFAULT_CONTEXT_LIMIT
-    feature_window: int = DEFAULT_FEATURE_WINDOW
-    epochs: int = DEFAULT_EPOCHS
-    batch_size: int = DEFAULT_BATCH_SIZE
-    min_samples: int = DEFAULT_MIN_SAMPLES
-    learning_rate: float = DEFAULT_LEARNING_RATE
-    hidden_size: int = DEFAULT_HIDDEN_SIZE
-    num_layers: int = DEFAULT_NUM_LAYERS
-    min_move_bps: float = DEFAULT_MIN_MOVE_BPS
     run_llm_agent: bool = False
 
 
@@ -65,7 +56,7 @@ class LstmDailyReviewDependencies:
     count_klines: Callable[[str, str], int]
     oldest_open_time: Callable[[str, str], int | None]
     ingest_market_context: Callable[..., dict[str, Any]]
-    run_combination_ranking: Callable[[str, str], dict[str, Any]]
+    run_combination_ranking: Callable[..., dict[str, Any]]
     save_combination_ranking: Callable[[dict[str, Any]], None]
     promote_combinations: Callable[[dict[str, Any]], dict[str, Any]]
     train_lstm: Callable[[LstmTrainingConfig], dict[str, Any]]
@@ -79,25 +70,28 @@ def run_lstm_daily_review(
     cfg = validated_lstm_daily_review_config(config or LstmDailyReviewConfig())
     active_deps = deps or default_lstm_daily_review_dependencies()
     symbols = [_run_symbol_review(symbol, cfg, active_deps) for symbol in cfg.symbols]
+    status = "blocked" if any(_symbol_report_blocked(report) for report in symbols) else "completed"
     return {
-        "status": "completed",
+        "status": status,
         "runAt": _utc_now(),
         "symbols": symbols,
         "durations": list(cfg.durations),
-        "runLlmAgent": cfg.run_llm_agent,
+        "runLlmAgent": cfg.run_llm_agent and cfg.experiment_profile == EXPERIMENT_PROFILE_FULL,
+        "experimentProfile": cfg.experiment_profile,
     }
 
 
 def validated_lstm_daily_review_config(config: LstmDailyReviewConfig) -> LstmDailyReviewConfig:
     symbols = _normalized_symbols(config.symbols or tuple(factor_ranking_precomputed_symbols()))
     durations = _validated_durations(config.durations)
+    profile = normalize_experiment_profile(config.experiment_profile)
     _validate_positive("kline_limit", config.kline_limit)
     _validate_positive("target_kline_rows", config.target_kline_rows)
     _validate_positive("backfill_chunk", config.backfill_chunk)
     _validate_positive("max_backfill_rounds", config.max_backfill_rounds)
     if config.kline_limit > BINANCE_KLINE_LIMIT_MAX or config.backfill_chunk > BINANCE_KLINE_LIMIT_MAX:
         raise ValueError("Binance kline request limit must be <= 1000")
-    return LstmDailyReviewConfig(**{**config.__dict__, "symbols": symbols, "durations": durations})
+    return LstmDailyReviewConfig(**{**config.__dict__, "symbols": symbols, "durations": durations, "experiment_profile": profile})
 
 
 def default_lstm_daily_review_dependencies() -> LstmDailyReviewDependencies:
@@ -120,9 +114,16 @@ def _run_symbol_review(
     config: LstmDailyReviewConfig,
     deps: LstmDailyReviewDependencies,
 ) -> dict[str, Any]:
-    data_report = _collect_symbol_data(symbol, config, deps)
     duration_reports = [_run_duration_review(symbol, duration, config, deps) for duration in config.durations]
-    return {"symbol": symbol, "data": data_report, "durations": duration_reports}
+    if config.experiment_profile == EXPERIMENT_PROFILE_FULL and any(_blocked_duration(report) for report in duration_reports):
+        return {
+            "symbol": symbol,
+            "profile": config.experiment_profile,
+            "status": "blocked",
+            "durations": duration_reports,
+        }
+    data_report = _collect_symbol_data(symbol, config, deps)
+    return {"symbol": symbol, "profile": config.experiment_profile, "data": data_report, "durations": duration_reports}
 
 
 def _collect_symbol_data(
@@ -172,7 +173,12 @@ def _run_duration_review(
     config: LstmDailyReviewConfig,
     deps: LstmDailyReviewDependencies,
 ) -> dict[str, Any]:
-    ranking = deps.run_combination_ranking(symbol, duration)
+    profile = config.experiment_profile
+    if profile == EXPERIMENT_PROFILE_FULL:
+        gate = shadow_gate_for_full_profile(symbol, duration)
+        if not gate.ready:
+            return _blocked_duration_report(duration, gate, profile)
+    ranking = deps.run_combination_ranking(symbol, duration, combination_search_config_for_profile(profile))
     deps.save_combination_ranking(ranking)
     promotion = deps.promote_combinations(ranking)
     training = deps.train_lstm(_training_config(symbol, duration, config))
@@ -180,9 +186,9 @@ def _run_duration_review(
         symbol,
         duration,
         ranking_report=ranking,
-        run_llm_agent=config.run_llm_agent,
+        run_llm_agent=config.run_llm_agent and profile == EXPERIMENT_PROFILE_FULL,
     )
-    return _duration_report(duration, ranking, promotion, training, learning)
+    return _duration_report(duration, profile, ranking, promotion, training, learning)
 
 
 def _backfill_once(
@@ -207,22 +213,12 @@ def _initial_backfill_end_time(symbol: str, deps: LstmDailyReviewDependencies) -
 
 
 def _training_config(symbol: str, duration: str, config: LstmDailyReviewConfig) -> LstmTrainingConfig:
-    return LstmTrainingConfig(
-        symbol=symbol,
-        duration=duration,
-        feature_window=config.feature_window,
-        epochs=config.epochs,
-        batch_size=config.batch_size,
-        min_samples=config.min_samples,
-        learning_rate=config.learning_rate,
-        hidden_size=config.hidden_size,
-        num_layers=config.num_layers,
-        min_move_bps=config.min_move_bps,
-    )
+    return lstm_training_config_for_profile(symbol, duration, config.experiment_profile)
 
 
 def _duration_report(
     duration: str,
+    profile: str,
     ranking: dict[str, Any],
     promotion: dict[str, Any],
     training: dict[str, Any],
@@ -230,11 +226,34 @@ def _duration_report(
 ) -> dict[str, Any]:
     return {
         "duration": duration,
+        "profile": profile,
         "rankingTotal": len(ranking.get("ranking") or []),
         "promotion": promotion,
         "training": _training_summary(training),
         "learning": _learning_summary(learning),
     }
+
+
+def _blocked_duration_report(duration: str, gate: ShadowGateResult, profile: str) -> dict[str, Any]:
+    return {
+        "duration": duration,
+        "profile": profile,
+        "status": "blocked",
+        "reason": gate.reason,
+        "shadowGate": {"ready": gate.ready, **gate.diagnostics, "reason": gate.reason},
+        "rankingTotal": 0,
+        "promotion": {"promoted": 0, "libraryTotal": 0},
+        "training": {"status": "skipped"},
+        "learning": {"status": "skipped"},
+    }
+
+
+def _blocked_duration(report: dict[str, Any]) -> bool:
+    return str(report.get("status") or "") == "blocked"
+
+
+def _symbol_report_blocked(report: dict[str, Any]) -> bool:
+    return str(report.get("status") or "") == "blocked"
 
 
 def _training_summary(report: dict[str, Any]) -> dict[str, Any]:

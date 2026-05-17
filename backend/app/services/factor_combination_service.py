@@ -25,6 +25,11 @@ from app.services.factor_combination_payloads import (
     member_payloads,
 )
 from app.services.factor_combination_walk_forward import walk_forward_validation
+from app.services.factor_learning_controls import (
+    learning_blocked_factor_names,
+    learning_weight,
+    load_factor_learning_memory_for,
+)
 from app.services.factor_mined_candidates import build_mined_candidates
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
@@ -88,10 +93,18 @@ def run_factor_combination_ranking_on_frame(
     cfg = _validated_config(config)
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    mined = build_mined_candidates(frame, symbol=symbol.upper(), duration=duration)
+    learning_memory = load_factor_learning_memory_for(symbol, duration)
+    blocked_names = learning_blocked_factor_names(learning_memory)
+    search_frame = frame.drop(columns=sorted(blocked_names), errors="ignore") if blocked_names else frame
+    mined = build_mined_candidates(
+        search_frame,
+        symbol=symbol.upper(),
+        duration=duration,
+        excluded_factor_names=blocked_names,
+    )
     base, base_failures = _base_candidates(mined.frame, symbol.upper(), duration)
     base.extend(_mined_base_candidates(mined.candidates))
-    base = _enriched_base_candidates(base, mined.frame)
+    base = _enriched_base_candidates(base, mined.frame, learning_memory)
     selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
     context = _CombinationContext(mined.frame, symbol.upper(), duration)
     ranking, tested_count, combo_failures = _rank_combinations(context, selected, cfg)
@@ -249,12 +262,16 @@ def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:
 def _enriched_base_candidates(
     candidates: list[_BaseCandidate],
     frame: pd.DataFrame,
+    learning_memory: dict[str, Any] | None,
 ) -> list[_BaseCandidate]:
     correlations = factor_avg_abs_correlations(frame, [item.factor.name for item in candidates])
     enriched = []
     for candidate in candidates:
         metrics = {**candidate.metrics, "avgAbsCorrelation": correlations.get(candidate.factor.name)}
         metrics["factorScore"] = factor_score(metrics)
+        weight = learning_weight(learning_memory, candidate.factor.name)
+        metrics["learningWeight"] = round(weight, 6)
+        metrics["learningScore"] = round(metrics["factorScore"] + weight, 6)
         enriched.append(_BaseCandidate(candidate.factor, metrics, candidate.orientation))
     return enriched
 
@@ -280,9 +297,10 @@ def _usable_base_metrics(metrics: dict[str, Any]) -> bool:
     return has_periods and metrics.get("winRate") is not None
 
 
-def _base_rank_key(candidate: _BaseCandidate) -> tuple[float, float, float, int]:
+def _base_rank_key(candidate: _BaseCandidate) -> tuple[float, float, float, float, int]:
     row = candidate.metrics
     return (
+        _num(row.get("learningScore") if row.get("learningScore") is not None else row.get("factorScore")),
         _num(row.get("factorScore")),
         _num(row.get("winRate")),
         _num(row.get("sharpe")),
