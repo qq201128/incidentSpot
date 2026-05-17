@@ -2,6 +2,8 @@
   background: var(--blue);
   color: #06111f;
   min-width: 64px;
+  align-self: start;
+  flex-shrink: 0;
 }
 
 .event-strategy-filter {
@@ -67,6 +69,7 @@
 .event-list li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 10px;
   background:
     linear-gradient(90deg, rgba(63, 211, 166, 0.05), transparent 55%),
@@ -82,7 +85,10 @@
 }
 
 .order-card-head {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
+  gap: 6px;
 }
 
 .order-pair-row,
@@ -120,8 +126,13 @@
 }
 
 .order-time {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   font-size: 12px;
-  text-align: right;
+  line-height: 1.4;
+  text-align: left;
+  max-width: 100%;
 }
 
 .ai-event-meta {
@@ -144,10 +155,6 @@
 @media (max-width: 720px) {
   .event-list li {
     grid-template-columns: 1fr;
-  }
-
-  .order-card-head {
-    display: grid;
   }
 
   .order-time {

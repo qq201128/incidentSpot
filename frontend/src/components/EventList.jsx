@@ -146,9 +146,10 @@ function EventHeader({ item }) {
         <span className={sideTagClass(item.orderSide)}>{sideLabel(item.orderSide)}</span>
         <span className={statusTagClass(item.status)}>{statusLabel(item.status)}</span>
       </div>
-      <span className="order-time">
-        开始 {formatEventTime(item.startTime)} / 到期 {formatEventTime(item.endTime)}
-      </span>
+      <div className="order-time">
+        <span>开始 {formatEventTime(item.startTime)}</span>
+        <span>到期 {formatEventTime(item.endTime)}</span>
+      </div>
     </div>
   );
 }
