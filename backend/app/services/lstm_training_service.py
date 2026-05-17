@@ -39,8 +39,13 @@ def train_lstm_model(
     version = _model_version(cfg)
     staging = artifact_paths_for_root(paths.root / "_staging" / version)
     write_json(paths.attempt, _attempt_payload("training", cfg, version))
+    dataset: LstmDataset | None = None
     try:
         dataset = dataset_builder(cfg)
+        write_json(
+            paths.attempt,
+            _attempt_payload("training", cfg, version, combo_snapshot=dataset.combo_snapshot),
+        )
     except LstmDataError as exc:
         reason = str(exc)
         write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, reason))
@@ -50,7 +55,10 @@ def train_lstm_model(
         return _train_with_dataset(cfg, dataset, paths, staging, backend or TorchLstmBackend(), version)
     except Exception as exc:
         reason = str(exc)
-        write_json(paths.attempt, _attempt_payload("failed", cfg, version, reason))
+        write_json(
+            paths.attempt,
+            _attempt_payload("failed", cfg, version, reason, combo_snapshot=dataset.combo_snapshot if dataset else None),
+        )
         _write_failed_staging_status(staging, cfg, "failed", reason)
         raise
 
@@ -80,7 +88,13 @@ def _train_with_dataset(
         publish_artifacts(staging_paths, active_paths)
     write_json(
         active_paths.attempt,
-        _attempt_payload(report["status"], cfg, version, report.get("validationFailureReason")),
+        _attempt_payload(
+            report["status"],
+            cfg,
+            version,
+            report.get("validationFailureReason"),
+            combo_snapshot=dataset.combo_snapshot,
+        ),
     )
     return report
 
@@ -197,9 +211,13 @@ def _attempt_payload(
     cfg: LstmTrainingConfig,
     model_version: str,
     reason: str | None = None,
+    *,
+    combo_snapshot: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload = _status_payload(status, cfg, reason)
     payload["modelVersion"] = model_version
+    if combo_snapshot is not None:
+        payload["comboSnapshot"] = combo_snapshot
     return payload
 
 

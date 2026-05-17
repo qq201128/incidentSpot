@@ -28,6 +28,7 @@ def test_agent_candidate_is_recorded_and_promoted(monkeypatch, tmp_path: Path) -
     assert result["agentCandidateEvaluation"]["promotedCount"] == 1
     assert result["llmAgent"]["review"]["evaluation"]["promotedCount"] == 1
     assert library["factors"][0]["source"] == agent_lib.AGENT_FACTOR_SOURCE_FILE
+    assert history["runs"][0]["evaluation"]["promotedCount"] == 1
     assert history["runs"][0]["candidates"][0]["status"] == "promoted"
 
 
@@ -41,6 +42,20 @@ def test_existing_agent_factor_is_not_promoted_again(monkeypatch, tmp_path: Path
 
     assert len(library["factors"]) == 1
     assert statuses == ["duplicate_existing"]
+
+
+def test_evaluation_counts_only_current_records(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    _write_existing_library(tmp_path, count=5)
+
+    result = agent_lib.process_agent_factor_candidates(_memory("missing_column"), _frame())
+    evaluation = result["agentCandidateEvaluation"]
+
+    assert evaluation["generatedCount"] == 1
+    assert evaluation["promotedCount"] == 0
+    assert evaluation["rejectedCount"] == 1
+    assert evaluation["statusCounts"]["failed"] == 1
+    assert evaluation["topPromotedFactors"] == []
 
 
 def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
@@ -78,6 +93,30 @@ def test_agent_candidate_with_vwap_can_materialize_and_reach_backtest(monkeypatc
 def _patch_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(agent_lib, "AGENT_FACTOR_LIBRARY_PATH", tmp_path / "agent_mined_factor_library.json")
     monkeypatch.setattr(agent_lib, "AGENT_CANDIDATE_HISTORY_PATH", tmp_path / "agent_factor_candidate_history.json")
+
+
+def _write_existing_library(tmp_path: Path, count: int) -> None:
+    rows = [_existing_library_row(index) for index in range(count)]
+    payload = {"version": agent_lib.AGENT_FACTOR_LIBRARY_VERSION, "factors": rows}
+    path = tmp_path / "agent_mined_factor_library.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _existing_library_row(index: int) -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "factorName": f"existing_{index}",
+        "factorDisplayName": f"Existing {index}",
+        "formula": f"existing_formula_{index}",
+        "source": agent_lib.AGENT_FACTOR_SOURCE_FILE,
+        "idea": {},
+        "metrics": {"winRate": 0.6, "profitFactor": 1.2},
+        "score": 10.0,
+        "firstSeenAt": "2026-05-17T00:00:00+00:00",
+        "lastSeenAt": "2026-05-17T00:00:00+00:00",
+        "promotionCount": 1,
+    }
 
 
 def _memory(formula: str) -> dict:

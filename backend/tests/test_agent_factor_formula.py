@@ -63,6 +63,8 @@ def test_agent_formula_rejects_invalid_window_and_unsupported_function() -> None
 
     with pytest.raises(ValueError, match="window must be greater than 1"):
         materialize_agent_formula(frame, "EMA(close, 1)")
+    with pytest.raises(ValueError, match="PctChange window must be greater than 1"):
+        materialize_agent_formula(frame, "PctChange(close, 1)")
     with pytest.raises(ValueError, match="unsupported formula function: TsRank"):
         materialize_agent_formula(frame, "TsRank(close, 20)")
     with pytest.raises(ValueError, match="formula column not found: missing"):
@@ -77,6 +79,21 @@ def test_operator_prompt_only_exposes_executable_agent_functions() -> None:
     assert names <= SUPPORTED_AGENT_FORMULA_FUNCTIONS
     assert {"EMA", "VWAP", "VWAPDev", "DonchianPos", "Max", "Std", "PctChange"} <= names
     assert "TsRank" not in names
+
+
+def test_operator_prompt_exposes_pct_change_window_constraint() -> None:
+    payload = factor_operator_prompt_payload()
+    pct_change = _operator_by_name(payload, "PctChange")
+
+    assert "PctChange(x, 1) is invalid" in " ".join(payload["formulaRules"])
+    assert "PctChange(x, 1) is invalid" in " ".join(pct_change["constraints"])
+
+
+def _operator_by_name(payload: dict, name: str) -> dict:
+    for item in payload["operators"]:
+        if item["name"] == name:
+            return item
+    raise AssertionError(f"operator not found: {name}")
 
 
 def _frame(rows: int = 120) -> pd.DataFrame:

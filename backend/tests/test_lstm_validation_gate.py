@@ -93,7 +93,9 @@ def test_train_lstm_model_records_failed_attempt_without_active_model(monkeypatc
     assert report["validationGate"]["reason"] == "no_validation_confidence_threshold_met"
     assert report["selectedConfidenceThreshold"] is None
     assert paths.status.exists() is False
-    assert _read_json(paths.attempt)["status"] == "validation_failed"
+    attempt = _read_json(paths.attempt)
+    assert attempt["status"] == "validation_failed"
+    assert attempt["comboSnapshot"] == _combo_snapshot()
     assert staging_status["status"] == "validation_failed"
     assert status["status"] == "untrained"
     assert status["activeModelStatus"] == "untrained"

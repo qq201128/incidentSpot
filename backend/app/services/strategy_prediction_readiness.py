@@ -205,9 +205,12 @@ def _library_factor_combo_report(symbol: str, duration: str) -> dict[str, Any] |
 
 
 def _recover_high_winrate_ranking(symbol: str, duration: str) -> dict[str, Any]:
+    from app.services.factor_combination_background import _refresh_duration_klines
     from app.services.high_winrate_strategy_rotation import refresh_high_winrate_goal
 
-    report = refresh_high_winrate_goal(symbol.strip().upper(), duration)
+    sym = symbol.strip().upper()
+    _refresh_duration_klines(sym, duration)
+    report = refresh_high_winrate_goal(sym, duration)
     return _ranking_report_diagnostics(report, report.get("promotion"))
 
 

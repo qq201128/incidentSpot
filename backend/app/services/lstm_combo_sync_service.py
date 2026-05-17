@@ -14,6 +14,8 @@ from app.services.lstm_training_service import train_lstm_model
 
 LSTM_SYNC_UP_TO_DATE = "up_to_date"
 LSTM_SYNC_TRAINED = "trained"
+LSTM_SYNC_TRAINING = "training"
+LSTM_SYNC_TERMINAL_ATTEMPTS = {"failed", "insufficient_samples", "validation_failed"}
 
 Trainer = Callable[[LstmTrainingConfig], dict[str, Any]]
 
@@ -28,6 +30,31 @@ def sync_lstm_model_to_combo_ranking(
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
     ranking = _resolved_ranking(sym, duration, ranking_report)
+    paths = artifact_paths(sym, duration, artifact_root)
+    snapshot = combo_snapshot_status(
+        sym,
+        duration,
+        ranking_report=ranking,
+        artifact_root=artifact_root,
+    )
+    attempt = read_json(paths.attempt) or {}
+    attempt_status = str(attempt.get("status") or "")
+    if attempt_status == "training":
+        return _attempt_sync_payload(
+            LSTM_SYNC_TRAINING,
+            sym,
+            duration,
+            attempt,
+            snapshot,
+        )
+    if attempt_status in LSTM_SYNC_TERMINAL_ATTEMPTS and _attempt_snapshot_matches(attempt, snapshot):
+        return _attempt_sync_payload(
+            attempt_status,
+            sym,
+            duration,
+            attempt,
+            snapshot,
+        )
     if _trained_artifacts_match(sym, duration, ranking, artifact_root):
         return {"status": LSTM_SYNC_UP_TO_DATE, "symbol": sym, "duration": duration}
     report = _train(sym, duration, ranking, artifact_root=artifact_root, trainer=trainer)
@@ -73,6 +100,28 @@ def _trained_artifacts_match(
         and lstm_validation_block_reason(status, version, report) == "passed"
         and snapshot["matches"]
     )
+
+
+def _attempt_snapshot_matches(attempt: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    trained_snapshot = attempt.get("comboSnapshot")
+    return isinstance(trained_snapshot, list) and trained_snapshot == snapshot["current"]
+
+
+def _attempt_sync_payload(
+    status: str,
+    symbol: str,
+    duration: str,
+    attempt: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "symbol": symbol,
+        "duration": duration,
+        "modelVersion": attempt.get("modelVersion"),
+        "validationFailureReason": attempt.get("validationFailureReason") or attempt.get("reason"),
+        "comboSnapshotReason": snapshot["reason"],
+    }
 
 
 def _train(

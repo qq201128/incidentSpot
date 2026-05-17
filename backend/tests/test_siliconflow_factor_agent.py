@@ -90,6 +90,8 @@ def test_factor_agent_attaches_json_review(monkeypatch: pytest.MonkeyPatch) -> N
     assert client.payload["max_tokens"] == 8192
     assert "factor_a" in client.payload["messages"][1]["content"]
     assert "operator_library" in client.payload["messages"][1]["content"]
+    assert "formula_constraints" in client.payload["messages"][1]["content"]
+    assert "PctChange(x, 1) is invalid" in client.payload["messages"][1]["content"]
     assert "\"retrieval\"" in client.payload["messages"][1]["content"]
     assert "llmAgent" not in memory
 

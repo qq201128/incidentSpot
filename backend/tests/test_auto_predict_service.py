@@ -232,11 +232,13 @@ def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> N
         (FACTOR_COMBO_STRATEGY_KEY, "10m"): _readiness(False, "ranking_cache_empty"),
         (FACTOR_COMBO_STRATEGY_KEY, "30m"): _readiness(True),
     }
+    recovery_flags = []
 
     monkeypatch.setattr(
         service,
         "strategy_prediction_readiness",
-        lambda strategy_key, _symbol, duration, **_kwargs: readiness[(strategy_key, duration)],
+        lambda strategy_key, _symbol, duration, **kwargs: recovery_flags.append(kwargs["attempt_recovery"])
+        or readiness[(strategy_key, duration)],
     )
     monkeypatch.setattr(service, "_due_prediction_targets", lambda targets: targets)
 
@@ -245,6 +247,7 @@ def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> N
     assert [(target.strategy_key, target.duration) for target in targets] == [
         (FACTOR_COMBO_STRATEGY_KEY, "30m")
     ]
+    assert recovery_flags == [True, True]
 
 
 def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_invalid(monkeypatch) -> None:
@@ -257,12 +260,19 @@ def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_inva
 
 def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -> None:
     disabled = [_settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m", enabled=False)]
+    recovery_flags = []
 
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: disabled)
     monkeypatch.setattr(service, "get_auto_trade_settings", lambda _key: _settings(FACTOR_COMBO_STRATEGY_KEY))
-    monkeypatch.setattr(service, "strategy_prediction_readiness", lambda *_args, **_kwargs: _readiness(False, "ranking_cache_empty"))
+    monkeypatch.setattr(
+        service,
+        "strategy_prediction_readiness",
+        lambda *_args, **kwargs: recovery_flags.append(kwargs["attempt_recovery"])
+        or _readiness(False, "ranking_cache_empty"),
+    )
 
     assert service._prediction_targets() == []
+    assert recovery_flags == [True]
 
 
 def test_ready_lstm_shadow_due_syncs_snapshot_mismatch(monkeypatch) -> None:

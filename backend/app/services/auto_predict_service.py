@@ -254,7 +254,7 @@ def _default_prediction_targets() -> list[AutoTradeSettings]:
         default.strategy_key,
         default.symbol,
         default.duration,
-        attempt_recovery=False,
+        attempt_recovery=True,
     )
     if readiness.ready:
         return [default]
@@ -290,7 +290,7 @@ def _ready_due_prediction_targets(targets: list[AutoTradeSettings]) -> list[Auto
             settings.strategy_key,
             settings.symbol,
             settings.duration,
-            attempt_recovery=False,
+            attempt_recovery=True,
         )
         if readiness.ready:
             ready.append(settings)

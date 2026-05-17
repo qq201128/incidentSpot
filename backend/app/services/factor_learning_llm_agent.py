@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from typing import Any, Protocol
 
-from app.services.factor_operator_library import factor_operator_prompt_payload
+from app.services.factor_operator_library import AGENT_FORMULA_RULES, factor_operator_prompt_payload
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 from app.services.siliconflow_chat_client import SiliconFlowChatClient
 
@@ -76,6 +76,7 @@ def _system_prompt() -> str:
         "必须优先使用 memory.retrieval 中整理好的成功模式、禁区、亏损模式和权重。"
         "重点学习 FactorMiner 思路：成功模式、禁区、亏损模式、多重过滤、自动权重。"
         "候选必须能落到现有算子库和现有特征列，不可物化的想法直接拒绝。"
+        "formulaHint 必须遵守 formula_constraints；尤其禁止生成 PctChange(x, 1)。"
         "每个候选都要说明回流到因子库的验证路径、需要检查的列与过滤条件。"
         "所有给交易员看的因子名称、理由、风控建议必须使用中文。"
     )
@@ -86,6 +87,7 @@ def _user_prompt(memory: dict[str, Any]) -> str:
         {
             "task": "review_factor_learning_memory_and_plan_next_factor_mining",
             "required_schema": _required_schema(),
+            "formula_constraints": list(AGENT_FORMULA_RULES),
             "operator_library": factor_operator_prompt_payload(),
             "memory": _compact_memory(memory),
         },

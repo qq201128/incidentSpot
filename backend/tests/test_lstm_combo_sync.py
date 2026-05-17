@@ -134,6 +134,69 @@ def test_sync_lstm_model_skips_when_active_artifacts_pass_but_status_is_failed()
     assert result["status"] == LSTM_SYNC_UP_TO_DATE
 
 
+def test_sync_lstm_model_skips_when_training_attempt_is_in_progress() -> None:
+    artifact_root = _runtime_path("sync-training-attempt")
+    snapshot = _snapshot("combo_current", "factor_a")
+    _write_trained_artifacts(artifact_root, snapshot)
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    write_json(
+        paths.attempt,
+        {
+            "status": "training",
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "modelVersion": "lstm_running",
+            "comboSnapshot": snapshot,
+        },
+    )
+
+    def trainer(_config: LstmTrainingConfig) -> dict[str, Any]:
+        raise AssertionError("trainer should not run while a training attempt is in progress")
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=_ranking("combo_current", "factor_a"),
+        artifact_root=artifact_root,
+        trainer=trainer,
+    )
+
+    assert result["status"] == "training"
+    assert result["modelVersion"] == "lstm_running"
+
+
+def test_sync_lstm_model_skips_when_terminal_attempt_matches_current_snapshot() -> None:
+    artifact_root = _runtime_path("sync-terminal-attempt")
+    snapshot = _snapshot("combo_current", "factor_a")
+    _write_trained_artifacts(artifact_root, snapshot)
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    write_json(
+        paths.attempt,
+        {
+            "status": "validation_failed",
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "reason": "no_validation_confidence_threshold_met",
+            "modelVersion": "lstm_terminal",
+            "comboSnapshot": snapshot,
+        },
+    )
+
+    def trainer(_config: LstmTrainingConfig) -> dict[str, Any]:
+        raise AssertionError("trainer should not run when the last attempt already failed for this snapshot")
+
+    result = sync_lstm_model_to_combo_ranking(
+        "BTCUSDT",
+        "10m",
+        ranking_report=_ranking("combo_current", "factor_a"),
+        artifact_root=artifact_root,
+        trainer=trainer,
+    )
+
+    assert result["status"] == "validation_failed"
+    assert result["modelVersion"] == "lstm_terminal"
+
+
 def test_sync_lstm_model_retrains_when_validation_gate_missing() -> None:
     artifact_root = _runtime_path("sync-missing-gate")
     snapshot = _snapshot("combo_current", "factor_a")

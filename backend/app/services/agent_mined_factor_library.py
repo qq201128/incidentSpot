@@ -10,6 +10,12 @@ from typing import Any
 
 import pandas as pd
 
+from app.services.agent_candidate_reporting import (
+    AGENT_CANDIDATE_HISTORY_PATH,
+    agent_candidate_evaluation_summary,
+    agent_candidate_promotion,
+    append_agent_candidate_history,
+)
 from app.services.agent_factor_formula import materialize_agent_formula
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN, utc_now
@@ -18,10 +24,8 @@ from app.services.factor_metric_enrichment import enrich_factor_results, factor_
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
 AGENT_FACTOR_LIBRARY_VERSION = "agent_mined_factor_library_v1"
-AGENT_CANDIDATE_HISTORY_VERSION = "agent_factor_candidate_history_v1"
 AGENT_FACTOR_SOURCE_FILE = "agent_mined_factor_library.json"
 AGENT_FACTOR_LIBRARY_PATH = FACTOR_LEARNING_DIR / AGENT_FACTOR_SOURCE_FILE
-AGENT_CANDIDATE_HISTORY_PATH = FACTOR_LEARNING_DIR / "agent_factor_candidate_history.json"
 SUMMARY_LIMIT = 12
 
 @dataclass(frozen=True)
@@ -39,15 +43,15 @@ class AgentMinedCandidate:
 def process_agent_factor_candidates(memory: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
     ideas = _candidate_ideas(memory)
     rows, records = _evaluate_ideas(memory, frame, ideas)
-    evaluation = _evaluation_summary(records, rows)
+    evaluation = agent_candidate_evaluation_summary(records)
     updated = deepcopy(memory)
-    updated["agentCandidatePromotion"] = _promotion(records)
+    updated["agentCandidatePromotion"] = agent_candidate_promotion(records)
     updated["agentCandidateEvaluation"] = evaluation
     updated["llmAgent"] = _merge_agent_review(updated.get("llmAgent") or {}, evaluation)
     if rows:
         _save_library(_library_with_rows(rows))
     if ideas:
-        _append_history(updated, records)
+        append_agent_candidate_history(updated, records, evaluation, AGENT_CANDIDATE_HISTORY_PATH)
     summary = agent_mined_factor_library_summary(str(updated["symbol"]), str(updated["duration"]))
     updated["agentMinedFactorLibrary"] = summary
     return updated
@@ -228,18 +232,6 @@ def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]
         by_key[_row_key(row)] = row
     return sorted(by_key.values(), key=lambda row: float(row.get("score") or 0.0), reverse=True)
 
-def _append_history(memory: dict[str, Any], records: list[dict[str, Any]]) -> None:
-    history = _load_history()
-    runs = history.get("runs") or []
-    runs.append({"symbol": memory["symbol"], "duration": memory["duration"], "seenAt": utc_now(), "candidates": records})
-    _save_json(AGENT_CANDIDATE_HISTORY_PATH, {**history, "updatedAt": utc_now(), "runs": runs})
-
-def _load_history() -> dict[str, Any]:
-    if not AGENT_CANDIDATE_HISTORY_PATH.exists():
-        return {"version": AGENT_CANDIDATE_HISTORY_VERSION, "runs": []}
-    with AGENT_CANDIDATE_HISTORY_PATH.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
 def _save_library(payload: dict[str, Any]) -> None:
     _save_json(AGENT_FACTOR_LIBRARY_PATH, payload)
 
@@ -249,49 +241,24 @@ def _save_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
 
-
 def _library_with_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"version": AGENT_FACTOR_LIBRARY_VERSION, "updatedAt": utc_now(), "thresholds": _threshold_payload(), "factors": rows}
-
 
 def _candidate_ideas(memory: dict[str, Any]) -> list[dict[str, Any]]:
     plan = (((memory.get("llmAgent") or {}).get("review") or {}).get("factorMiningPlan") or {})
     return [dict(item) for item in plan.get("candidateFactorIdeas") or []]
 
-
 def _status(metrics: dict[str, Any]) -> str:
     return "promoted" if _promotable(metrics) else "rejected_metrics"
-
 
 def _promotable(metrics: dict[str, Any]) -> bool:
     return _num(metrics.get("winRate")) >= SUCCESS_WIN_RATE_MIN and _num(metrics.get("profitFactor")) >= SUCCESS_PROFIT_FACTOR_MIN
 
-
 def _usable_metrics(metrics: dict[str, Any]) -> bool:
     return int(metrics.get("totalPeriods") or 0) >= BACKTEST_MIN_PERIODS and metrics.get("winRate") is not None
 
-
 def _orientation(metrics: dict[str, Any]) -> int:
     return 1 if _num(metrics.get("ir")) >= 0 else -1
-
-
-def _promotion(records: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"candidateCount": len(records), "promoted": sum(1 for item in records if item["status"] == "promoted"), "records": records}
-
-
-def _evaluation_summary(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
-    counts = {"promoted": 0, "duplicate_existing": 0, "rejected_metrics": 0, "failed": 0}
-    for record in records:
-        status = str(record.get("status") or "")
-        if status in counts:
-            counts[status] += 1
-    return {
-        "generatedCount": len(records),
-        "promotedCount": len(rows),
-        "rejectedCount": len(records) - len(rows),
-        "statusCounts": counts,
-        "topPromotedFactors": [row.get("factorName") for row in rows[:8]],
-    }
 
 
 def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:

@@ -148,6 +148,31 @@ def test_high_winrate_readiness_recovers_missing_cache(monkeypatch) -> None:
     assert recovered == [("BTCUSDT", "10m")]
 
 
+def test_high_winrate_recovery_refreshes_duration_klines_first(monkeypatch) -> None:
+    from app.services import factor_combination_background as combo_background
+    from app.services import high_winrate_strategy_rotation as rotation
+
+    calls = []
+
+    def refresh(symbol: str, duration: str) -> None:
+        calls.append(("refresh", symbol, duration))
+
+    def run_goal(symbol: str, duration: str) -> dict:
+        calls.append(("goal", symbol, duration))
+        return _cache([{"factorName": "goal_combo__a__b"}])
+
+    monkeypatch.setattr(combo_background, "_refresh_duration_klines", refresh)
+    monkeypatch.setattr(rotation, "refresh_high_winrate_goal", run_goal)
+
+    diagnostics = readiness._recover_high_winrate_ranking(" ethusdt ", "10m")
+
+    assert calls == [
+        ("refresh", "ETHUSDT", "10m"),
+        ("goal", "ETHUSDT", "10m"),
+    ]
+    assert diagnostics["rankingTotal"] == 1
+
+
 def test_non_combo_readiness_is_ready() -> None:
     result = readiness.strategy_prediction_readiness("factor_lstm_shadow_10m", "BTCUSDT", "10m")
 

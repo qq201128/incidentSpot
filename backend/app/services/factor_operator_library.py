@@ -7,6 +7,37 @@ from app.services.agent_factor_formula import SUPPORTED_AGENT_FORMULA_FUNCTIONS
 
 OPERATOR_LIBRARY_VERSION = "factor_operator_library_v1"
 EXECUTABLE_OPERATOR_NAMES = SUPPORTED_AGENT_FORMULA_FUNCTIONS
+WINDOW_CONSTRAINT = "window argument must be an integer greater than 1"
+PCT_CHANGE_CONSTRAINT = (
+    "PctChange(x, 1) is invalid; use PctChange(x, n) with n >= 2, "
+    "or use an existing *_chg_1 feature column when available"
+)
+AGENT_FORMULA_RULES = (
+    "formulaHint must use only executable operator names listed in operator_library.operators",
+    "rolling/window/period arguments must be integer values greater than 1",
+    "PctChange(x, 1) is invalid and must not be generated",
+    "arithmetic and comparisons must use symbols: +, -, *, /, >, <, >=, <=",
+)
+WINDOWED_OPERATORS = frozenset(
+    {
+        "ATR",
+        "Corr",
+        "Delay",
+        "DonchianPos",
+        "EMA",
+        "Max",
+        "Mean",
+        "Min",
+        "PctChange",
+        "SMA",
+        "Slope",
+        "Std",
+        "Sum",
+        "TsZScore",
+        "VWAP",
+        "VWAPDev",
+    }
+)
 
 _ROWS: tuple[tuple[str, str, str, str, str], ...] = (
     ("Add", "arithmetic", "x + y", "两个信号线性叠加", "Add(ret_5, vol_z_20)"),
@@ -112,9 +143,11 @@ def factor_operator_prompt_payload() -> dict[str, Any]:
                 "category": item["category"],
                 "signature": item["signature"],
                 "example": item["example"],
+                "constraints": _operator_constraints(item["name"]),
             }
             for item in operators
         ],
+        "formulaRules": list(AGENT_FORMULA_RULES),
     }
 
 
@@ -137,3 +170,12 @@ def _operator_payload(row: tuple[str, str, str, str, str]) -> dict[str, Any]:
         "example": example,
         "executable": name in EXECUTABLE_OPERATOR_NAMES,
     }
+
+
+def _operator_constraints(name: str) -> list[str]:
+    constraints = []
+    if name in WINDOWED_OPERATORS:
+        constraints.append(WINDOW_CONSTRAINT)
+    if name == "PctChange":
+        constraints.append(PCT_CHANGE_CONSTRAINT)
+    return constraints
