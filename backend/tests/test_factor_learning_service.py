@@ -89,13 +89,53 @@ def test_refresh_rebuilds_stale_combination_ranking(monkeypatch: pytest.MonkeyPa
     saved = []
     frame = _learning_frame()
 
+    _patch_refresh_dependencies(
+        monkeypatch,
+        frame=frame,
+        calls=calls,
+        saved=saved,
+        cached={"cacheStatus": {"usable": False, "reason": "market_data_changed"}},
+    )
+
+    payload = factor_learning_service.refresh_factor_learning_memory("btcusdt", "10m")
+
+    assert payload["source"]["rankingRefreshSource"] == "rebuilt_cache"
+    assert payload["memoryPath"] == "memory.json"
+    assert calls == [("rank", True, "10m"), ("cache", "BTCUSDT", "10m")]
+    assert saved[0]["source"]["rankingRefreshSource"] == "rebuilt_cache"
+
+
+def test_refresh_rebuilds_cached_ranking_without_learning_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    saved = []
+    frame = _learning_frame()
+
+    _patch_refresh_dependencies(
+        monkeypatch,
+        frame=frame,
+        calls=calls,
+        saved=saved,
+        cached=_ranking_report_without_learning_metrics(),
+    )
+
+    payload = factor_learning_service.refresh_factor_learning_memory("btcusdt", "10m")
+
+    assert payload["source"]["rankingRefreshSource"] == "rebuilt_cache"
+    assert payload["weights"]["factor_a"] > 0
+    assert calls == [("rank", True, "10m"), ("cache", "BTCUSDT", "10m")]
+
+
+def _patch_refresh_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    frame: pd.DataFrame,
+    calls: list,
+    saved: list,
+    cached: dict,
+) -> None:
     monkeypatch.setattr(factor_learning_service, "load_factor_frame", lambda *_args: frame)
     monkeypatch.setattr(factor_learning_service, "load_factor_learning_memory", lambda *_args: None)
-    monkeypatch.setattr(
-        factor_learning_service,
-        "get_cached_combination_ranking",
-        lambda *_args: {"cacheStatus": {"usable": False, "reason": "market_data_changed"}},
-    )
+    monkeypatch.setattr(factor_learning_service, "get_cached_combination_ranking", lambda *_args: cached)
     monkeypatch.setattr(
         factor_learning_service,
         "run_factor_combination_ranking_on_frame",
@@ -106,11 +146,7 @@ def test_refresh_rebuilds_stale_combination_ranking(monkeypatch: pytest.MonkeyPa
         "save_cached_combination_ranking",
         lambda report: calls.append(("cache", report["symbol"], report["duration"])),
     )
-    monkeypatch.setattr(
-        factor_learning_service,
-        "settle_due_predictions",
-        lambda *_args: {"checked": 0, "settled": 0, "pendingData": 0},
-    )
+    monkeypatch.setattr(factor_learning_service, "settle_due_predictions", lambda *_args: _empty_settlement())
     monkeypatch.setattr(factor_learning_service, "_settled_factor_combo_predictions", lambda *_args: [])
     monkeypatch.setattr(
         factor_learning_service,
@@ -121,18 +157,16 @@ def test_refresh_rebuilds_stale_combination_ranking(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(factor_learning_service, "agent_mined_factor_library_summary", lambda *_args: {})
     monkeypatch.setattr(factor_learning_service, "factor_combo_monitor_report", lambda *_args: {})
     monkeypatch.setattr(factor_learning_service, "lstm_shadow_learning_summary", lambda *_args: {})
-    monkeypatch.setattr(
-        factor_learning_service,
-        "save_factor_learning_memory",
-        lambda payload: saved.append(payload) or Path("memory.json"),
-    )
+    monkeypatch.setattr(factor_learning_service, "save_factor_learning_memory", lambda payload: _save_payload(saved, payload))
 
-    payload = factor_learning_service.refresh_factor_learning_memory("btcusdt", "10m")
 
-    assert payload["source"]["rankingRefreshSource"] == "rebuilt_cache"
-    assert payload["memoryPath"] == "memory.json"
-    assert calls == [("rank", True, "10m"), ("cache", "BTCUSDT", "10m")]
-    assert saved[0]["source"]["rankingRefreshSource"] == "rebuilt_cache"
+def _empty_settlement() -> dict:
+    return {"checked": 0, "settled": 0, "pendingData": 0}
+
+
+def _save_payload(saved: list, payload: dict) -> Path:
+    saved.append(payload)
+    return Path("memory.json")
 
 
 def test_factor_learning_agent_failure_is_written_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,6 +260,28 @@ def _ranking_report() -> dict:
             "members": [
                 {"name": "factor_a", "category": "return", "orientation": 1, "singleWinRate": 0.62},
                 {"name": "factor_b", "category": "return", "orientation": 1, "singleWinRate": 0.58},
+            ],
+        }],
+    }
+
+
+def _ranking_report_without_learning_metrics() -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "total": 1,
+        "baseFactorCount": 0,
+        "baseFactors": [],
+        "cacheStatus": {"usable": True},
+        "ranking": [{
+            "factorName": "combo__combo__factor_a__factor_b__combo__factor_b__factor_c",
+            "factorDisplayName": "组合：嵌套组合",
+            "winRate": 0.63,
+            "profitFactor": 1.12,
+            "totalPeriods": ROWS,
+            "members": [
+                {"name": "combo__factor_a__factor_b", "category": "performance", "orientation": 1},
+                {"name": "combo__factor_b__factor_c", "category": "performance", "orientation": 1},
             ],
         }],
     }

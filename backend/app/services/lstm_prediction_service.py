@@ -13,7 +13,14 @@ from app.services.lstm_artifacts import (
     required_artifacts_exist,
 )
 from app.services.lstm_config import LSTM_RULE_NAME, lstm_shadow_strategy_key
-from app.services.lstm_feature_builder import build_live_feature_window
+from app.services.lstm_feature_builder import (
+    _assert_columns,
+    _load_enriched_factor_frame_symbol,
+    _ranking_or_raise,
+    add_factor_combo_features,
+    build_live_feature_window,
+    duration_feature_frame,
+)
 from app.services.lstm_status_service import (
     active_lstm_status,
     is_lstm_shadow_ready,
@@ -72,6 +79,41 @@ def predict_lstm_shadow_prediction(
     return _prediction_payload(signal)
 
 
+def predict_lstm_shadow_predictions(
+    symbol: str,
+    duration: str,
+    entry_open_times: list[int],
+    *,
+    artifact_root: Path | None = None,
+    backend: Any | None = None,
+) -> list[dict[str, Any]]:
+    entries = sorted({int(item) for item in entry_open_times})
+    if not entries:
+        return []
+    sym = symbol.strip().upper()
+    paths = artifact_paths(sym, duration, artifact_root)
+    _assert_predictable(sym, duration, paths, artifact_root=artifact_root)
+    features = require_json(paths.features, "features")
+    scaler = require_json(paths.scaler, "scaler")
+    version = require_json(paths.version, "version")
+    report = require_json(paths.report, "training report")
+    status = active_lstm_status(sym, duration, artifact_root=artifact_root)
+    windows, metas = _live_feature_windows(
+        sym,
+        duration,
+        list(features["columns"]),
+        int(features["featureWindow"]),
+        entries,
+    )
+    scaled = apply_standardizer(windows, scaler)
+    probabilities = (backend or TorchLstmBackend()).predict(paths.model, scaled)
+    version_payload = _prediction_version_payload(version, report)
+    return [
+        _prediction_payload(_signal_payload(sym, duration, float(prob), meta, features, version_payload, status))
+        for prob, meta in zip(probabilities, metas)
+    ]
+
+
 def _assert_predictable(
     symbol: str,
     duration: str,
@@ -90,6 +132,35 @@ def _assert_predictable(
     validation_reason = lstm_validation_block_reason(status, version, report)
     if validation_reason != "passed":
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {validation_reason}")
+
+
+def _live_feature_windows(
+    symbol: str,
+    duration: str,
+    feature_columns: list[str],
+    feature_window: int,
+    entry_open_times: list[int],
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
+    frame = _load_enriched_factor_frame_symbol(symbol, duration)
+    ranking = _ranking_or_raise(symbol, duration, None)
+    sampled = duration_feature_frame(add_factor_combo_features(frame, ranking), duration)
+    _assert_columns(sampled, feature_columns)
+    by_entry = {int(row["entry_open_time"]): idx for idx, row in sampled.iterrows()}
+    values = sampled[feature_columns].to_numpy(dtype=np.float32)
+    windows, metas = [], []
+    for entry in entry_open_times:
+        idx = by_entry.get(int(entry))
+        if idx is None:
+            raise ValueError(f"missing completed LSTM feature row for entry_open_time={entry}")
+        if idx + 1 < feature_window:
+            raise ValueError(f"insufficient LSTM feature rows before entry_open_time={entry}")
+        window = values[idx - feature_window + 1: idx + 1]
+        if not np.isfinite(window).all():
+            raise ValueError(f"LSTM feature window contains non-finite values at entry_open_time={entry}")
+        row = sampled.iloc[idx]
+        windows.append(window)
+        metas.append({"entryOpenTime": int(row["entry_open_time"]), "entryPrice": float(row["close"])})
+    return np.asarray(windows, dtype=np.float32), metas
 
 
 def _signal_payload(

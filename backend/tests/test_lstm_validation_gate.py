@@ -90,13 +90,18 @@ def test_train_lstm_model_records_failed_attempt_without_active_model(monkeypatc
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
     assert report["status"] == "validation_failed"
+    assert report["candidateStatus"] == "rejected_validation"
+    assert report["promotionReason"] == "no_validation_confidence_threshold_met"
     assert report["validationGate"]["reason"] == "no_validation_confidence_threshold_met"
     assert report["selectedConfidenceThreshold"] is None
     assert paths.status.exists() is False
     attempt = _read_json(paths.attempt)
     assert attempt["status"] == "validation_failed"
+    assert attempt["candidateStatus"] == "rejected_validation"
+    assert attempt["promotionReason"] == "no_validation_confidence_threshold_met"
     assert attempt["comboSnapshot"] == _combo_snapshot()
     assert staging_status["status"] == "validation_failed"
+    assert staging_status["candidateStatus"] == "rejected_validation"
     assert status["status"] == "untrained"
     assert status["activeModelStatus"] == "untrained"
     assert status["lastAttemptStatus"] == "validation_failed"
@@ -138,9 +143,12 @@ def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monke
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
     assert report["status"] == "trained"
+    assert report["candidateStatus"] == "promoted_active"
+    assert report["promotionReason"] == "validation_gate_passed"
     assert paths.model.exists()
     assert status["activeModelStatus"] == "trained"
     assert status["lastAttemptStatus"] == "trained"
+    assert status["candidateStatus"] == "promoted_active"
     assert status["selectedConfidenceThreshold"] is not None
 
 

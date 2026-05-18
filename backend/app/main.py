@@ -24,6 +24,10 @@ from app.services.auto_settlement_service import auto_settlement_loop
 from app.services.auto_trade_service import auto_trade_loop
 from app.services.factor_combination_background import factor_combination_daily_refresh_loop
 from app.services.factor_ranking_background import factor_ranking_refresh_loop
+from app.services.lstm_candidate_retry_background import (
+    lstm_candidate_retry_enabled,
+    lstm_candidate_retry_loop,
+)
 from app.services.lstm_daily_review_background import (
     lstm_daily_review_enabled,
     lstm_daily_review_loop,
@@ -56,6 +60,8 @@ app.state.factor_ranking_task = None
 app.state.factor_ranking_stop_event = None
 app.state.factor_combo_daily_task = None
 app.state.factor_combo_daily_stop_event = None
+app.state.lstm_candidate_retry_task = None
+app.state.lstm_candidate_retry_stop_event = None
 app.state.lstm_daily_review_task = None
 app.state.lstm_daily_review_stop_event = None
 ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
@@ -66,6 +72,7 @@ STOP_EVENT_ATTRS = (
     "trade_stop_event",
     "factor_ranking_stop_event",
     "factor_combo_daily_stop_event",
+    "lstm_candidate_retry_stop_event",
     "lstm_daily_review_stop_event",
 )
 BACKGROUND_TASK_ATTRS = (
@@ -74,6 +81,7 @@ BACKGROUND_TASK_ATTRS = (
     "trade_task",
     "factor_ranking_task",
     "factor_combo_daily_task",
+    "lstm_candidate_retry_task",
     "lstm_daily_review_task",
 )
 
@@ -127,6 +135,11 @@ async def on_startup() -> None:
         lstm_review_stop = asyncio.Event()
         app.state.lstm_daily_review_stop_event = lstm_review_stop
         app.state.lstm_daily_review_task = asyncio.create_task(lstm_daily_review_loop(lstm_review_stop))
+
+    if lstm_candidate_retry_enabled():
+        lstm_retry_stop = asyncio.Event()
+        app.state.lstm_candidate_retry_stop_event = lstm_retry_stop
+        app.state.lstm_candidate_retry_task = asyncio.create_task(lstm_candidate_retry_loop(lstm_retry_stop))
 
 
 @app.on_event("shutdown")

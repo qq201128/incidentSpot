@@ -73,10 +73,25 @@ def test_rejected_metrics_candidate_is_stored(monkeypatch, tmp_path: Path) -> No
     record = result["agentCandidatePromotion"]["records"][0]
     row = library["factors"][0]
     assert record["status"] == "rejected_metrics"
-    assert result["agentMinedFactorLibrary"]["total"] == 1
+    assert result["agentMinedFactorLibrary"]["total"] == 0
+    assert result["agentMinedFactorLibrary"]["candidateTotal"] == 1
+    assert result["agentMinedFactorLibrary"]["rejectedTotal"] == 1
+    assert result["agentMinedFactorLibrary"]["factors"] == []
     assert row["candidateStatus"] == "rejected_metrics"
     assert row["qualityPassed"] is False
     assert row["promotionCount"] == 0
+
+
+def test_agent_library_summary_counts_only_promoted_rows(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    _write_existing_library(tmp_path, count=2, rejected_count=3)
+
+    summary = agent_lib.agent_mined_factor_library_summary("BTCUSDT", "10m")
+
+    assert summary["total"] == 2
+    assert summary["candidateTotal"] == 5
+    assert summary["rejectedTotal"] == 3
+    assert [row["qualityPassed"] for row in summary["factors"]] == [True, True]
 
 
 def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
@@ -89,6 +104,19 @@ def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_pa
 
     assert result.source_count == 1
     assert names == [agent_lib.load_agent_factor_library()["factors"][0]["factorName"]]
+
+
+def test_rejected_agent_factor_does_not_participate_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(agent_lib, "run_factor_backtest_on_frame", _weak_backtest)
+    monkeypatch.setattr(agent_lib, "enrich_factor_results", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(factor_mined_candidates, "mined_factor_rows_for_duration", lambda *_args: [])
+    agent_lib.process_agent_factor_candidates(_memory("factor_a"), _frame())
+
+    result = factor_mined_candidates.build_mined_candidates(_frame(), symbol="BTCUSDT", duration="10m")
+
+    assert result.source_count == 0
+    assert result.candidates == ()
 
 
 def test_agent_candidate_with_ema_can_materialize_and_reach_backtest(monkeypatch, tmp_path: Path) -> None:
@@ -116,8 +144,9 @@ def _patch_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(agent_lib, "AGENT_CANDIDATE_HISTORY_PATH", tmp_path / "agent_factor_candidate_history.json")
 
 
-def _write_existing_library(tmp_path: Path, count: int) -> None:
+def _write_existing_library(tmp_path: Path, count: int, rejected_count: int = 0) -> None:
     rows = [_existing_library_row(index) for index in range(count)]
+    rows.extend(_rejected_library_row(index) for index in range(rejected_count))
     payload = {"version": agent_lib.AGENT_FACTOR_LIBRARY_VERSION, "factors": rows}
     path = tmp_path / "agent_mined_factor_library.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -140,6 +169,19 @@ def _existing_library_row(index: int) -> dict:
         "lastSeenAt": "2026-05-17T00:00:00+00:00",
         "promotionCount": 1,
     }
+
+
+def _rejected_library_row(index: int) -> dict:
+    row = _existing_library_row(index + 100)
+    row["factorName"] = f"rejected_{index}"
+    row["factorDisplayName"] = f"Rejected {index}"
+    row["formula"] = f"rejected_formula_{index}"
+    row["metrics"] = {"winRate": 0.4, "profitFactor": 0.8}
+    row["score"] = 1.0
+    row["candidateStatus"] = "rejected_metrics"
+    row["qualityPassed"] = False
+    row["promotionCount"] = 0
+    return row
 
 
 def _memory(formula: str) -> dict:

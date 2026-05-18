@@ -4,6 +4,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from app.services import lstm_daily_review_background as lstm_bg
+from app.services import lstm_candidate_retry_background as retry_bg
 
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_DAY = 86400
@@ -16,3 +17,14 @@ def test_seconds_until_next_targets_configured_clock() -> None:
     exactly = datetime(2026, 5, 13, 2, 0, tzinfo=tz)
     assert lstm_bg.seconds_until_next_lstm_daily_review(before, zone=tz, daily_at=at) == SECONDS_PER_MINUTE
     assert lstm_bg.seconds_until_next_lstm_daily_review(exactly, zone=tz, daily_at=at) == SECONDS_PER_DAY
+
+
+def test_lstm_candidate_retry_interval_rejects_non_positive_env(monkeypatch) -> None:
+    monkeypatch.setenv("LSTM_CANDIDATE_RETRY_INTERVAL_SECONDS", "0")
+
+    try:
+        retry_bg._retry_interval_seconds()
+    except ValueError as exc:
+        assert "must be positive" in str(exc)
+    else:
+        raise AssertionError("expected invalid retry interval to raise")

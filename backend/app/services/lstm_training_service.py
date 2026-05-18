@@ -26,6 +26,12 @@ from app.services.lstm_validation import (
 
 DatasetBuilder = Callable[[LstmTrainingConfig], LstmDataset]
 
+CANDIDATE_TRAINING = "training"
+CANDIDATE_PROMOTED_ACTIVE = "promoted_active"
+CANDIDATE_REJECTED_VALIDATION = "rejected_validation"
+CANDIDATE_REJECTED_INSUFFICIENT_SAMPLES = "rejected_insufficient_samples"
+CANDIDATE_FAILED = "failed"
+
 
 def train_lstm_model(
     config: LstmTrainingConfig,
@@ -93,6 +99,7 @@ def _train_with_dataset(
             cfg,
             version,
             report.get("validationFailureReason"),
+            promotion_reason=report.get("promotionReason"),
             combo_snapshot=dataset.combo_snapshot,
         ),
     )
@@ -131,6 +138,8 @@ def _training_report(
         "validationGate": gate,
         "selectedConfidenceThreshold": gate.get("minConfidence"),
         "validationFailureReason": validation_failure_reason(gate),
+        "candidateStatus": _candidate_status(status),
+        "promotionReason": _promotion_reason(gate),
         "losses": losses,
         "returnStats": _return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
@@ -189,6 +198,8 @@ def _version_payload(report: dict[str, Any]) -> dict[str, Any]:
         "minMoveBps": report.get("minMoveBps"),
         "validationGate": report.get("validationGate"),
         "selectedConfidenceThreshold": report.get("selectedConfidenceThreshold"),
+        "candidateStatus": report.get("candidateStatus"),
+        "promotionReason": report.get("promotionReason"),
     }
 
 
@@ -203,6 +214,7 @@ def _status_payload(status: str, cfg: LstmTrainingConfig, reason: str | None = N
     }
     if reason:
         payload["reason"] = reason
+    payload["candidateStatus"] = _candidate_status(status)
     return payload
 
 
@@ -212,10 +224,13 @@ def _attempt_payload(
     model_version: str,
     reason: str | None = None,
     *,
+    promotion_reason: str | None = None,
     combo_snapshot: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload = _status_payload(status, cfg, reason)
     payload["modelVersion"] = model_version
+    if promotion_reason:
+        payload["promotionReason"] = promotion_reason
     if combo_snapshot is not None:
         payload["comboSnapshot"] = combo_snapshot
     return payload
@@ -229,6 +244,24 @@ def _write_failed_staging_status(
 ) -> None:
     staging_paths.root.mkdir(parents=True, exist_ok=True)
     write_json(staging_paths.status, _status_payload(status, cfg, reason))
+
+
+def _candidate_status(status: str) -> str:
+    if status == "training":
+        return CANDIDATE_TRAINING
+    if status == "trained":
+        return CANDIDATE_PROMOTED_ACTIVE
+    if status == "validation_failed":
+        return CANDIDATE_REJECTED_VALIDATION
+    if status == "insufficient_samples":
+        return CANDIDATE_REJECTED_INSUFFICIENT_SAMPLES
+    return CANDIDATE_FAILED
+
+
+def _promotion_reason(gate: dict[str, Any]) -> str:
+    if gate.get("status") == "passed":
+        return "validation_gate_passed"
+    return str(gate.get("reason") or "validation_gate_failed")
 
 
 def _return_stats(returns: np.ndarray) -> dict[str, float]:

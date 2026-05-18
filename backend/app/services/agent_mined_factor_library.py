@@ -58,14 +58,17 @@ def process_agent_factor_candidates(memory: dict[str, Any], frame: pd.DataFrame)
 
 def agent_mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     rows = agent_factor_rows_for_duration(symbol, duration)
-    rows.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
+    promoted = _promoted_agent_rows(rows)
+    promoted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
     return {
         "version": AGENT_FACTOR_LIBRARY_VERSION,
         "symbol": symbol.strip().upper(),
         "duration": duration,
-        "total": len(rows),
+        "total": len(promoted),
+        "candidateTotal": len(rows),
+        "rejectedTotal": len(rows) - len(promoted),
         "thresholds": _threshold_payload(),
-        "factors": rows[:SUMMARY_LIMIT],
+        "factors": promoted[:SUMMARY_LIMIT],
     }
 
 def materialize_agent_factor_frame(
@@ -76,7 +79,7 @@ def materialize_agent_factor_frame(
     excluded_factor_names: set[str] | None = None,
 ) -> AgentFactorFrameResult:
     excluded = excluded_factor_names or set()
-    rows = agent_factor_rows_for_duration(symbol, duration)
+    rows = _promoted_agent_rows(agent_factor_rows_for_duration(symbol, duration))
     failures: list[dict[str, Any]] = []
     working = frame
     for row in rows:
@@ -97,7 +100,7 @@ def build_agent_mined_candidates_from_frame(
 ) -> tuple[AgentMinedCandidate, ...]:
     excluded = excluded_factor_names or set()
     candidates = []
-    for row in agent_factor_rows_for_duration(symbol, duration):
+    for row in _promoted_agent_rows(agent_factor_rows_for_duration(symbol, duration)):
         factor_name = str(row.get("factorName"))
         if factor_name in excluded or factor_name not in frame.columns:
             continue
@@ -261,6 +264,17 @@ def _usable_metrics(metrics: dict[str, Any]) -> bool:
 
 def _orientation(metrics: dict[str, Any]) -> int:
     return 1 if _num(metrics.get("ir")) >= 0 else -1
+
+
+def _promoted_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if _row_quality_passed(row)]
+
+
+def _row_quality_passed(row: dict[str, Any]) -> bool:
+    if "qualityPassed" in row:
+        return bool(row.get("qualityPassed"))
+    metrics = row.get("metrics")
+    return isinstance(metrics, dict) and _promotable(metrics)
 
 
 def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:

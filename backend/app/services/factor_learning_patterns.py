@@ -21,6 +21,8 @@ from app.services.factor_learning_common import (
     round_metric,
 )
 
+COMBO_FACTOR_PREFIXES = ("combo__", "goal_combo__")
+
 
 def factor_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
@@ -49,7 +51,7 @@ def success_patterns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def forbidden_regions(frame: pd.DataFrame, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    names = [row["name"] for row in rows if row["name"] in frame.columns][:TOP_FACTOR_LIMIT]
+    names = [row["name"] for row in rows if _eligible_forbidden_region_factor(row["name"], frame)][:TOP_FACTOR_LIMIT]
     if len(names) < 2:
         return []
     corr = frame[names].apply(pd.to_numeric, errors="coerce").corr(method="spearman").abs()
@@ -174,6 +176,10 @@ def _correlation_region_payload(corr: pd.DataFrame, seed: str, peers: list[str])
         "avgAbsCorrelation": round_metric(avg_corr, 4),
         "members": peers[:10],
     }
+
+
+def _eligible_forbidden_region_factor(name: str, frame: pd.DataFrame) -> bool:
+    return name in frame.columns and not name.startswith(COMBO_FACTOR_PREFIXES)
 
 
 def _weight_score(row: dict[str, Any], loss_features: set[str]) -> float:

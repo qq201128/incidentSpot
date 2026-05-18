@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.db.session import get_conn
 from app.services.auto_trade_service import get_auto_trade_settings, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.binance_service import fetch_klines
 from app.services.factor_combo_simulation_keys import (
     simulation_strategy_key_for_factor_name,
 )
@@ -23,7 +21,12 @@ from app.services.kline_timing import (
     seconds_until_next_rule_entry_for_duration,
     utc_now_ms,
 )
-from app.services.lstm_config import is_lstm_shadow_strategy, lstm_shadow_strategy_key
+from app.services.kline_prediction_refresh import refresh_prediction_klines
+from app.services.lstm_config import is_lstm_shadow_strategy
+from app.services.lstm_shadow_backfill_service import (
+    backfill_lstm_shadow_predictions,
+    missing_lstm_shadow_entry_times,
+)
 from app.services.prediction_cache_service import (
     prediction_exists,
     prediction_response,
@@ -47,8 +50,6 @@ logger = logging.getLogger("uvicorn.error")
 _SUBSCRIBERS: dict[tuple[str, str, str], set] = {}
 
 DEFAULT_PREDICT_SECONDS = 1
-REFRESH_KLINE_LIMIT = 5
-INITIAL_KLINE_LIMIT = 1000
 DEFAULT_DURATION = "10m"
 
 
@@ -71,6 +72,7 @@ async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
         return
     await _prepare_prediction_inputs(due_targets)
     await _run_prediction_batch(due_targets)
+    await _backfill_lstm_shadow_predictions(due_targets)
 
 
 async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
@@ -341,30 +343,47 @@ def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
 
 
 def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    if prediction_exists(
-        strategy_key=lstm_shadow_strategy_key(settings.duration),
-        symbol=settings.symbol,
-        duration=settings.duration,
-        open_time=bucket,
-    ):
-        return False
     status = lstm_model_status(settings.symbol, settings.duration)
-    return bool(status.get("shadowPredictionReady"))
+    if not status.get("shadowPredictionReady"):
+        _log_lstm_shadow_skip(settings, status, role="sidecar")
+        return False
+    return bool(missing_lstm_shadow_entry_times(settings.symbol, settings.duration, bucket))
 
 
 def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    if prediction_exists(
-        strategy_key=settings.strategy_key,
-        symbol=settings.symbol,
-        duration=settings.duration,
-        open_time=bucket,
-    ):
-        return False
     status = lstm_model_status(settings.symbol, settings.duration)
     if status.get("shadowPredictionReady"):
-        return True
+        return bool(missing_lstm_shadow_entry_times(settings.symbol, settings.duration, bucket))
     _log_lstm_shadow_skip(settings, status, role="primary")
     return False
+
+
+async def _backfill_lstm_shadow_predictions(settings_list: list[AutoTradeSettings]) -> None:
+    targets = _unique_lstm_shadow_targets(settings_list)
+    if not targets:
+        return
+    summaries = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                backfill_lstm_shadow_predictions,
+                symbol,
+                duration,
+                current_rule_entry_open_time_for_duration(duration),
+            )
+            for symbol, duration in targets
+        )
+    )
+    for summary in summaries:
+        if summary["savedCount"]:
+            logger.info("predict: LSTM shadow backfill summary=%s", summary)
+
+
+def _unique_lstm_shadow_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
+    targets = set()
+    for settings in settings_list:
+        if settings.strategy_key == FACTOR_COMBO_STRATEGY_KEY or is_lstm_shadow_strategy(settings.strategy_key):
+            targets.add((settings.symbol.upper(), settings.duration))
+    return sorted(targets)
 
 
 def _log_lstm_shadow_skip(
@@ -392,74 +411,11 @@ def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tup
 
 
 def _refresh_1m_prediction_input(symbol: str, entry_open_time: int) -> None:
-    latest_open_time = _latest_open_time(symbol, "1m")
-    limit = INITIAL_KLINE_LIMIT if latest_open_time is None else REFRESH_KLINE_LIMIT
-    rows = fetch_klines(symbol, "1m", limit=limit)
-    if not rows:
-        raise ValueError(f"no latest 1m klines returned for {symbol.upper()}")
-    _upsert_klines(symbol, "1m", rows)
-    _assert_interval_input_ready(symbol, "1m", entry_open_time - MS_PER_MINUTE)
+    refresh_prediction_klines(symbol, "1m", entry_open_time - MS_PER_MINUTE)
 
 
 def _refresh_duration_prediction_input(symbol: str, duration: str, entry_open_time: int) -> None:
-    latest_open_time = _latest_open_time(symbol, duration)
-    limit = INITIAL_KLINE_LIMIT if latest_open_time is None else REFRESH_KLINE_LIMIT
-    rows = fetch_klines(symbol, duration, limit=limit)
-    if not rows:
-        raise ValueError(f"no latest {duration} klines returned for {symbol.upper()}")
-    _upsert_klines(symbol, duration, rows)
-    _assert_interval_input_ready(symbol, duration, entry_open_time - _duration_ms(duration))
-
-
-def _assert_interval_input_ready(symbol: str, interval: str, required_open_time: int) -> None:
-    latest_open_time = _latest_open_time(symbol, interval)
-    if latest_open_time is None or latest_open_time < required_open_time:
-        raise ValueError(
-            f"missing completed {interval} kline at {required_open_time} for {symbol.upper()}"
-        )
-
-
-def _latest_open_time(symbol: str, interval: str) -> int | None:
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT MAX(open_time) AS max_open_time FROM klines WHERE symbol = ? AND interval = ?",
-        (symbol.upper(), interval),
-    ).fetchone()
-    conn.close()
-    if row is None or row["max_open_time"] is None:
-        return None
-    return int(row["max_open_time"])
-
-
-def _upsert_klines(symbol: str, interval: str, rows: list[dict]) -> None:
-    conn = get_conn()
-    for item in rows:
-        conn.execute(
-            """
-            INSERT INTO klines(symbol, interval, open_time, open, high, low, close, volume, close_time)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol, interval, open_time) DO UPDATE SET
-              open=excluded.open,
-              high=excluded.high,
-              low=excluded.low,
-              close=excluded.close,
-              volume=excluded.volume,
-              close_time=excluded.close_time
-            """,
-            (
-                symbol.upper(),
-                interval,
-                item["openTime"],
-                item["open"],
-                item["high"],
-                item["low"],
-                item["close"],
-                item["volume"],
-                item["closeTime"],
-            ),
-        )
-    conn.commit()
-    conn.close()
+    refresh_prediction_klines(symbol, duration, entry_open_time - _duration_ms(duration))
 
 
 def _duration_ms(duration: str) -> int:

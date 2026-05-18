@@ -6,6 +6,7 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.auto_trade_service import fresh_prediction_ms_for_strategy, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.position_guard import has_open_position
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.high_winrate_strategy_demotion import high_winrate_demotion_status
@@ -54,6 +55,7 @@ def _prediction_status(
         "createdAt": prediction["created_at"],
         "ageMs": _prediction_age_ms(prediction),
         "freshPredictionMs": fresh_prediction_ms_for_strategy(settings.strategy_key),
+        "fresh": _prediction_is_fresh(prediction, settings),
         "direction": prediction["direction"],
         "probabilityUp": probability_up,
         "bestProbability": max(probability_up, 1 - probability_up),
@@ -81,7 +83,7 @@ def _reason(status: dict[str, Any]) -> str:
     high_winrate_reason = _high_winrate_strategy_reason(status)
     if high_winrate_reason is not None:
         return high_winrate_reason
-    if prediction["ageMs"] > prediction["freshPredictionMs"]:
+    if not prediction["fresh"]:
         return "waiting_fresh_prediction"
     if not prediction["tradePolicyGatesEnabled"]:
         return _ungated_strategy_reason(prediction)
@@ -130,6 +132,16 @@ def _has_open_position(settings: AutoTradeSettings) -> bool:
 def _prediction_age_ms(prediction: dict[str, Any]) -> int:
     now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
     return max(now_ms - int(prediction["open_time"]), 0)
+
+
+def _prediction_is_fresh(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:
+    now_ms = int(datetime.now(timezone.utc).timestamp() * MS_PER_SECOND)
+    entry_open_time = int(prediction["open_time"])
+    current_bucket = current_rule_entry_open_time_for_duration(settings.duration, now_ms)
+    if entry_open_time == current_bucket:
+        return True
+    age_ms = now_ms - entry_open_time
+    return 0 <= age_ms <= fresh_prediction_ms_for_strategy(settings.strategy_key)
 
 
 def _as_bool(value: Any) -> bool | None:

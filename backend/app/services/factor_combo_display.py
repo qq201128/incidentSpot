@@ -30,11 +30,7 @@ def collect_leaf_factor_names(members: list[dict[str, Any]]) -> list[str]:
         name = str(member.get("name") or "").strip()
         if not name:
             continue
-        if _is_combo_name(name):
-            for leaf in parse_combo_member_names(name):
-                _append_unique(leaves, seen, leaf)
-        else:
-            _append_unique(leaves, seen, name)
+        _append_factor_leaves(leaves, seen, name)
     return leaves
 
 
@@ -93,6 +89,18 @@ def _parse_combo_segment_member(segments: list[str], index: int) -> tuple[str, i
 
 def _combo_name_from_members(members: list[str]) -> str:
     return "combo__" + "__".join(members)
+
+
+def _append_factor_leaves(leaves: list[str], seen: set[str], name: str) -> None:
+    if not _is_combo_name(name):
+        _append_unique(leaves, seen, name)
+        return
+    parsed = parse_combo_member_names(name)
+    if parsed == [name]:
+        _append_unique(leaves, seen, name)
+        return
+    for parsed_name in parsed:
+        _append_factor_leaves(leaves, seen, parsed_name)
 
 
 def _is_combo_name(name: str) -> bool:

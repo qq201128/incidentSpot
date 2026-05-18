@@ -44,6 +44,8 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "activeModelStatus": status.get("status"),
         "lastAttemptStatus": attempt.get("status"),
         "lastTrainingAttempt": attempt,
+        "candidateStatus": attempt.get("candidateStatus") or version.get("candidateStatus"),
+        "promotionReason": attempt.get("promotionReason") or version.get("promotionReason"),
         "validationFailureReason": _validation_failure_reason(raw_status, attempt, report),
         "artifactsReady": artifacts_ready,
         "torchAvailable": torch_available,

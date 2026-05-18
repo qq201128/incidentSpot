@@ -8,7 +8,7 @@ import pandas as pd
 from app.services.trade_quality_gate import load_quality_gate, quality_score
 
 MS_PER_DAY = 1000.0 * 60 * 60 * 24
-ROUNDTRIP_COST = 0.001
+ROUNDTRIP_COST = 0.0
 CONFIDENCE_THRESHOLDS = (0.80, 0.85, 0.90, 0.93, 0.95, 0.97, 0.98, 0.99, 0.995, 0.997, 0.999)
 QUALITY_THRESHOLDS = (0.50, 0.60, 0.70, 0.75, 0.78, 0.80, 0.85, 0.90, 0.95, 0.99)
 

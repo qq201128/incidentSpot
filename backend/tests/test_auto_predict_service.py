@@ -58,6 +58,24 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 
 
+def test_refresh_prediction_inputs_request_required_completed_klines(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(
+        service,
+        "refresh_prediction_klines",
+        lambda *args: calls.append(args),
+    )
+
+    service._refresh_1m_prediction_input("btcusdt", ENTRY_OPEN_TIME)
+    service._refresh_duration_prediction_input("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME)
+
+    assert calls == [
+        ("btcusdt", "1m", ENTRY_OPEN_TIME - service.MS_PER_MINUTE),
+        ("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME - service._duration_ms(DEFAULT_DURATION)),
+    ]
+
+
 def test_should_predict_entry_backfills_missing_current_bucket_prediction(monkeypatch) -> None:
     existing_calls = []
 
@@ -75,7 +93,7 @@ def test_should_predict_entry_backfills_missing_current_bucket_prediction(monkey
 
 def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     calls = []
-    lstm_key = lstm_shadow_strategy_key(DEFAULT_DURATION)
+    missing_calls = []
 
     monkeypatch.setattr(
         service,
@@ -91,7 +109,12 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     monkeypatch.setattr(
         service,
         "prediction_exists",
-        lambda **kwargs: calls.append(kwargs["strategy_key"]) or kwargs["strategy_key"] != lstm_key,
+        lambda **kwargs: calls.append(kwargs["strategy_key"]) or True,
+    )
+    monkeypatch.setattr(
+        service,
+        "missing_lstm_shadow_entry_times",
+        lambda symbol, duration, bucket: missing_calls.append((symbol, duration, bucket)) or (ENTRY_OPEN_TIME,),
     )
 
     assert service._should_predict_entry(_settings(FACTOR_COMBO_STRATEGY_KEY))
@@ -99,8 +122,8 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
         FACTOR_COMBO_STRATEGY_KEY,
         simulation_strategy_key_for_factor_name("combo__a"),
         simulation_strategy_key_for_factor_name("combo__b"),
-        lstm_key,
     ]
+    assert missing_calls == [("BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME)]
 
 
 def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
@@ -322,6 +345,33 @@ def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> Non
 
     assert set(started) == {settings.strategy_key for settings in strategy_settings}
     assert set(completed) == {settings.strategy_key for settings in strategy_settings}
+
+
+def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions(monkeypatch) -> None:
+    calls = []
+    targets = [_settings(lstm_shadow_strategy_key(DEFAULT_DURATION))]
+
+    async def run_batch(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("run_batch", [item.strategy_key for item in settings_list]))
+
+    async def backfill(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("backfill", [item.strategy_key for item in settings_list]))
+
+    async def prepare(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("prepare", len(settings_list)))
+
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda items: items)
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
+    monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
+
+    asyncio.run(service._predict_due_entries(targets))
+
+    assert calls == [
+        ("prepare", 1),
+        ("run_batch", [lstm_shadow_strategy_key(DEFAULT_DURATION)]),
+        ("backfill", [lstm_shadow_strategy_key(DEFAULT_DURATION)]),
+    ]
 
 
 def _settings(

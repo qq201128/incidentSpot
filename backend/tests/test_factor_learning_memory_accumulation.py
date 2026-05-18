@@ -35,6 +35,27 @@ def test_factor_learning_memory_accumulates_success_patterns_and_forbidden_regio
     assert regions["correlation_cluster:factor_a"]["support"] > 2
     assert "legacy_factor" in regions["correlation_cluster:factor_a"]["members"]
     assert regions["correlation_cluster:legacy"]["support"] == 2
+    assert "correlation_cluster:combo__factor_a__factor_b" not in regions
+    assert _forbidden_regions_have_no_combo_members(memory)
+
+
+def test_factor_learning_forbidden_regions_skip_combo_factor_columns() -> None:
+    frame = _learning_frame()
+    frame["combo__factor_a__factor_b"] = frame["factor_a"] + frame["factor_b"]
+    report = _ranking_report()
+    report["baseFactors"].append(
+        _base_factor("combo__factor_a__factor_b", "performance", win_rate=0.64, ir=0.90, sharpe=1.30)
+    )
+
+    memory = build_factor_learning_memory(
+        frame,
+        report,
+        _settled_predictions(),
+        symbol="BTCUSDT",
+        duration="10m",
+    )
+
+    assert _forbidden_regions_have_no_combo_members(memory)
 
 
 def _previous_memory() -> dict:
@@ -47,6 +68,11 @@ def _previous_memory() -> dict:
             "forbiddenRegions": [
                 _forbidden_region("correlation_cluster:factor_a", 2, ["legacy_factor"]),
                 _forbidden_region("correlation_cluster:legacy", 2, ["legacy_a", "legacy_b"]),
+                _forbidden_region(
+                    "correlation_cluster:combo__factor_a__factor_b",
+                    2,
+                    ["combo__factor_a__factor_b", "factor_a"],
+                ),
             ],
         }
     }
@@ -73,6 +99,15 @@ def _forbidden_region(region: str, support: int, members: list[str]) -> dict:
         "avgAbsCorrelation": 0.5,
         "members": members,
     }
+
+
+def _forbidden_regions_have_no_combo_members(memory: dict) -> bool:
+    for region in memory["factorMining"]["forbiddenRegions"]:
+        seed = str(region["region"]).removeprefix("correlation_cluster:")
+        names = [seed, *region.get("members", [])]
+        if any(str(name).startswith(("combo__", "goal_combo__")) for name in names):
+            return False
+    return True
 
 
 def _learning_frame() -> pd.DataFrame:

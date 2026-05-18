@@ -20,6 +20,7 @@ export default function FactorLearningStatusBoxes({ memory, refreshing = false, 
 
 function AgentLibraryBox({ library }) {
   const rows = Array.isArray(library.factors) ? library.factors : [];
+  const candidateTotal = library.candidateTotal ?? library.total ?? rows.length;
   return (
     <section
       className="factor-learning-box"
@@ -27,6 +28,9 @@ function AgentLibraryBox({ library }) {
     >
       <BoxTitle title="Agent单因子库" count={library.total ?? 0} />
       <ul>
+        <MetricRow label="总候选" value={candidateTotal} />
+        <MetricRow label="达标" value={library.total ?? 0} />
+        <MetricRow label="未入库" value={library.rejectedTotal ?? "—"} />
         {rows.map((factor) => (
           <li key={factor.factorName}>
             <strong>{factor.factorDisplayName || factorLabel(factor.factorName)}</strong>
@@ -34,7 +38,7 @@ function AgentLibraryBox({ library }) {
           </li>
         ))}
       </ul>
-      {!rows.length ? <p className="factor-learning-empty small">暂无入库单因子</p> : null}
+      {!rows.length ? <p className="factor-learning-empty small">暂无达标入库单因子</p> : null}
     </section>
   );
 }

@@ -23,9 +23,10 @@ from app.services.factor_combo_simulation_keys import (
     factor_combo_simulation_strategy_keys,
     high_winrate_factor_combo_simulation_strategy_keys,
 )
-from app.services.factor_learning_common import utc_now
+from app.services.factor_learning_common import finite, utc_now
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_learning_core import build_factor_learning_memory
+from app.services.factor_learning_patterns import factor_rows
 from app.services.factor_learning_llm_agent import (
     AGENT_NAME,
     AGENT_PROVIDER,
@@ -42,6 +43,9 @@ from app.services.forward_validation_service import settle_due_predictions
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.lstm_shadow_learning import lstm_shadow_learning_summary
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+
+COMBO_FACTOR_PREFIXES = ("combo__", "goal_combo__")
+LEARNING_METRIC_KEYS = ("winRate", "profitFactor", "sharpe", "ir")
 
 
 def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | None:
@@ -190,7 +194,19 @@ def _usable_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
         return None
     if not cache_is_usable(cached):
         return None
+    if not _has_learning_metric_rows(cached):
+        return None
     return cached
+
+
+def _has_learning_metric_rows(report: dict[str, Any]) -> bool:
+    for row in factor_rows(report):
+        name = str(row.get("name") or "")
+        if name.startswith(COMBO_FACTOR_PREFIXES):
+            continue
+        if any(finite(row.get(key)) is not None for key in LEARNING_METRIC_KEYS):
+            return True
+    return False
 
 
 def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[str, Any]]:

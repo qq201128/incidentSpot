@@ -126,8 +126,21 @@ function regexFactorLabel(raw) {
 }
 
 function comboLabel(raw) {
-  const names = raw.split("__").slice(1).map(factorLabel);
+  const names = comboLeafNames(raw).map(factorLabel);
   return `组合：${names.join(" + ")}`;
+}
+
+function comboLeafNames(raw) {
+  const seen = new Set();
+  const names = [];
+  raw.split("__")
+    .filter((part) => part && part !== "combo" && part !== "goal_combo")
+    .forEach((part) => {
+      if (seen.has(part)) return;
+      seen.add(part);
+      names.push(part);
+    });
+  return names;
 }
 
 function tokenizedLabel(raw) {

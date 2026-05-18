@@ -45,6 +45,22 @@ def test_combo_display_name_dedupes_leaf_factors() -> None:
     assert combo_display_name(members) == "组合：ADX(14) + 均线偏离(120) + 盈亏比(60) + MACD"
 
 
+def test_combo_display_name_flattens_combo_encoded_members() -> None:
+    members = [
+        {
+            "name": (
+                "combo__combo__adx_14__rolling_sharpe_60__ma_ratio_60"
+                "__combo__adx_14__profit_factor_60__ma_ratio_60"
+                "__combo__rolling_sharpe_60__combo__adx_14__ret_autocorr_20"
+            )
+        },
+    ]
+
+    assert combo_display_name(members) == (
+        "组合：ADX(14) + 滚动夏普(60) + 均线偏离(60) + 盈亏比(60) + 20周期收益自相关"
+    )
+
+
 def test_collect_leaf_factor_names_preserves_first_seen_order() -> None:
     leaves = collect_leaf_factor_names([
         {"name": "factor_b"},

@@ -19,6 +19,8 @@ from app.services.factor_learning_patterns import (
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 from app.services.factor_operator_library import factor_operator_summary
 
+COMBO_FACTOR_PREFIXES = ("combo__", "goal_combo__")
+
 
 def build_factor_learning_memory(
     frame: pd.DataFrame,
@@ -180,7 +182,8 @@ def _merge_forbidden_regions(
     current: list[dict[str, Any]],
     now: str,
 ) -> list[dict[str, Any]]:
-    previous = _previous_factor_mining_items(previous_memory, "forbiddenRegions")
+    previous = _clean_forbidden_regions(_previous_factor_mining_items(previous_memory, "forbiddenRegions"))
+    current = _clean_forbidden_regions(current)
     by_key = {_forbidden_region_key(item): dict(item) for item in previous if _forbidden_region_key(item)}
     for item in current:
         key = _forbidden_region_key(item)
@@ -237,6 +240,48 @@ def _success_pattern_key(item: dict[str, Any]) -> str:
 
 def _forbidden_region_key(item: dict[str, Any]) -> str:
     return str(item.get("region") or "")
+
+
+def _clean_forbidden_regions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned = []
+    for item in items:
+        row = _clean_forbidden_region(item)
+        if row is not None:
+            cleaned.append(row)
+    return cleaned
+
+
+def _clean_forbidden_region(item: dict[str, Any]) -> dict[str, Any] | None:
+    key = _forbidden_region_key(item)
+    if not key or _is_combo_factor_name(_forbidden_region_seed(key)):
+        return None
+    members = item.get("members")
+    if not isinstance(members, list):
+        return dict(item)
+    filtered = [name for name in _member_names(members) if not _is_combo_factor_name(name)]
+    if not filtered:
+        return None
+    if len(filtered) != len(members) and len(filtered) < 2:
+        return None
+    return {**item, "members": filtered, "support": _cleaned_support(item, filtered)}
+
+
+def _forbidden_region_seed(key: str) -> str:
+    prefix = "correlation_cluster:"
+    return key[len(prefix):] if key.startswith(prefix) else key
+
+
+def _member_names(members: list[Any]) -> list[str]:
+    return [str(member or "").strip() for member in members if str(member or "").strip()]
+
+
+def _is_combo_factor_name(name: str) -> bool:
+    return name.startswith(COMBO_FACTOR_PREFIXES)
+
+
+def _cleaned_support(item: dict[str, Any], members: list[str]) -> int:
+    support = int(item.get("support") or 0)
+    return min(support, len(members)) if support > 0 else len(members)
 
 
 def _weighted_average(

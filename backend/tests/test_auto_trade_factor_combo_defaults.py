@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.db.session import _ensure_auto_trade_strategies
-from app.services import auto_trade_service
+from app.services import auto_trade_service, auto_trade_status
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.high_winrate_strategy_demotion import (
     STATUS_BACKTEST_CANDIDATE,
@@ -105,6 +105,34 @@ def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:
     ) is True
 
 
+def test_status_treats_current_bucket_prediction_as_fresh(monkeypatch) -> None:
+    settings = AutoTradeSettings(
+        strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+        enabled=True,
+        symbol="BTCUSDT",
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=False,
+    )
+    monkeypatch.setattr(
+        auto_trade_status,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: 1778922000000,
+    )
+    prediction = _status_prediction(open_time=1778922000000, quality_passed=False)
+
+    status = {
+        "settings": settings.to_response(),
+        "openPosition": False,
+        "latestPrediction": auto_trade_status._prediction_status(prediction, settings),
+        "highWinrateStatus": None,
+    }
+
+    assert status["latestPrediction"]["fresh"] is True
+    assert auto_trade_status._reason(status) == "signal_condition_not_met"
+
+
 def _auto_trade_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -171,4 +199,22 @@ def _passing_prediction() -> dict:
         "probability_up": 0.8,
         "trade_quality_passed": 1,
         "trade_quality_score": 0.8,
+    }
+
+
+def _status_prediction(*, open_time: int, quality_passed: bool) -> dict:
+    return {
+        "id": 1,
+        "strategy_key": FACTOR_COMBO_STRATEGY_KEY,
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "open_time": open_time,
+        "direction": "up",
+        "probability_up": 0.51,
+        "trade_quality_score": 0.51,
+        "trade_quality_passed": int(quality_passed),
+        "high_winrate_gate": "test_gate",
+        "high_winrate_gate_passed": int(quality_passed),
+        "high_winrate_gate_value": 0.51,
+        "created_at": "2026-05-13T00:00:00+00:00",
     }
