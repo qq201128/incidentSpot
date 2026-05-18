@@ -36,9 +36,13 @@ from app.services.high_winrate_combo_goal_payloads import (
 from app.services.high_winrate_combo_goal_search import (
     COMBO_SIZES,
     EXCLUDED_COLUMNS,
+    GoalSearchConfig,
     NEXT_ENTRY_HORIZON_BARS,
     SEARCH_CANDIDATE_LIMIT,
     SIGNAL_THRESHOLDS,
+    THRESHOLD_MAX,
+    THRESHOLD_MIN,
+    THRESHOLD_STEP,
     TARGET_COUNT,
     TARGET_WIN_RATE,
     ZSCORE_CLIP,
@@ -50,6 +54,8 @@ from app.services.high_winrate_combo_goal_search import (
 
 REPORT_PATH = BACKEND_ROOT / "reports" / "factor_backtests" / "high_winrate_factor_combo_goal.json"
 LIBRARY_PATH = BACKEND_ROOT / "models" / "factor_learning" / "high_winrate_factor_combo_goal_library.json"
+DEFAULT_PRIMARY_DURATIONS = ("10m", "60m")
+DEFAULT_PARALLEL_WORKERS = 2
 
 _best_combo_hit = goal_search.best_combo_hit
 _combo_hit = goal_search.combo_hit
@@ -80,12 +86,14 @@ def run_goal(
     target_count: int,
     output: Path,
     library: Path,
+    search_config: GoalSearchConfig | None = None,
 ) -> dict[str, Any]:
+    cfg = goal_search.validated_search_config(search_config)
     load_backend_env_file()
     frame = load_factor_frame(symbol, duration)
     search_frame = _search_frame(frame, duration)
     score_search = _oriented_score_search(search_frame)
-    ranked_search = _ranked_hit_search(search_frame, score_search.scores)
+    ranked_search = _ranked_hit_search(search_frame, score_search.scores, cfg)
     validation = validate_goal_combo_hits(search_frame, ranked_search.hits, duration)
     selected = _selected_hits(validation.passed, target_count)
     payload = _report_payload(
@@ -97,6 +105,7 @@ def run_goal(
         ranked_search,
         selected,
         validation.payload,
+        cfg,
     )
     if not payload["ranking"]:
         _write_json(output, payload)
@@ -119,10 +128,15 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Find high-win-rate factor combos and paper-live signals.")
     parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument("--duration", default="30m")
-    parser.add_argument("--durations", help="Comma-separated durations, e.g. 10m,30m,60m,1d")
+    parser.add_argument("--duration", help="Run one duration instead of the primary multi-duration set")
+    parser.add_argument("--durations", default=",".join(DEFAULT_PRIMARY_DURATIONS))
     parser.add_argument("--target-count", type=int, default=TARGET_COUNT)
     parser.add_argument("--min-trades", type=int, default=BACKTEST_MIN_PERIODS)
+    parser.add_argument("--candidate-limit", type=int, default=SEARCH_CANDIDATE_LIMIT)
+    parser.add_argument("--threshold-min", type=float, default=THRESHOLD_MIN)
+    parser.add_argument("--threshold-max", type=float, default=THRESHOLD_MAX)
+    parser.add_argument("--threshold-step", type=float, default=THRESHOLD_STEP)
+    parser.add_argument("--parallel-workers", type=int, default=DEFAULT_PARALLEL_WORKERS)
     parser.add_argument("--output", type=Path, default=REPORT_PATH)
     parser.add_argument("--library", type=Path, default=LIBRARY_PATH)
     return parser.parse_args()
@@ -130,14 +144,41 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    goal_search.set_target_min_trades(args.min_trades)
-    durations = parse_durations(args.durations)
+    search_config = _search_config_from_args(args)
+    durations = [] if args.duration else parse_durations(args.durations)
     if durations:
-        report = run_multi_duration_goal(args.symbol, durations, args.target_count, args.output, args.library, run_goal)
+        report = run_multi_duration_goal(
+            args.symbol,
+            durations,
+            args.target_count,
+            args.output,
+            args.library,
+            lambda symbol, duration, target_count, output, library: run_goal(
+                symbol,
+                duration,
+                target_count,
+                output,
+                library,
+                search_config,
+            ),
+            parallel_workers=args.parallel_workers,
+        )
         print(json.dumps(_multi_duration_stdout(args, report), ensure_ascii=False, indent=2))
         return
-    report = run_goal(args.symbol, args.duration, args.target_count, args.output, args.library)
+    duration = args.duration or DEFAULT_PRIMARY_DURATIONS[0]
+    report = run_goal(args.symbol, duration, args.target_count, args.output, args.library, search_config)
     print(json.dumps(_single_duration_stdout(args, report), ensure_ascii=False, indent=2))
+
+
+def _search_config_from_args(args: argparse.Namespace) -> GoalSearchConfig:
+    thresholds = goal_search.signal_thresholds(args.threshold_min, args.threshold_max, args.threshold_step)
+    return goal_search.validated_search_config(
+        GoalSearchConfig(
+            candidate_limit=args.candidate_limit,
+            signal_thresholds=thresholds,
+            min_trades=args.min_trades,
+        )
+    )
 
 
 def _multi_duration_stdout(args: argparse.Namespace, report: dict[str, Any]) -> dict[str, Any]:

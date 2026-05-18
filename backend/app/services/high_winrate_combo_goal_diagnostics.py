@@ -4,7 +4,7 @@ from typing import Any
 
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
 
-DEFAULT_SEARCH_CANDIDATE_LIMIT = 30
+DEFAULT_SEARCH_CANDIDATE_LIMIT = 80
 
 
 def candidate_diagnostics(
@@ -35,10 +35,13 @@ def top_rejected_candidate_payloads(rejected: list[tuple[str, int]]) -> list[dic
     return [{"name": name, "validPairs": valid_pairs} for name, valid_pairs in top]
 
 
-def ranked_search_diagnostics(names: list[str]) -> dict[str, Any]:
+def ranked_search_diagnostics(
+    names: list[str],
+    search_candidate_limit: int = DEFAULT_SEARCH_CANDIDATE_LIMIT,
+) -> dict[str, Any]:
     return {
         "stage": "combo_threshold_gates",
-        "searchCandidateLimit": DEFAULT_SEARCH_CANDIDATE_LIMIT,
+        "searchCandidateLimit": int(search_candidate_limit),
         "selectedCandidateFactors": len(names),
         "testedCombinations": 0,
         "testedThresholdEvaluations": 0,

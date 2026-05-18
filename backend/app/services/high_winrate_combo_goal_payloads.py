@@ -24,14 +24,16 @@ def report_payload(
     ranked_search: search.RankedSearch,
     selected: list[search.ComboHit],
     validation_gate: dict[str, Any] | None = None,
+    search_config: search.GoalSearchConfig | None = None,
 ) -> dict[str, Any]:
-    ranking = [ranking_row(index, row) for index, row in enumerate(selected, start=1)]
+    cfg = search.validated_search_config(search_config)
+    ranking = [ranking_row(index, row, cfg) for index, row in enumerate(selected, start=1)]
     return {
         "version": "high_winrate_factor_combo_goal_v1",
         "updatedAt": utc_now(),
         "symbol": symbol.strip().upper(),
         "duration": duration,
-        "target": target_payload(target_count),
+        "target": target_payload(target_count, cfg),
         "onlineResearchSources": list(ONLINE_RESEARCH_SOURCES),
         "search": search_payload(frame, score_search.scores, ranked_search.diagnostics),
         "candidateDiagnostics": score_search.diagnostics,
@@ -39,17 +41,22 @@ def report_payload(
         "validationGate": validation_gate,
         "rankingFailure": ranking_failure_payload(ranking, score_search, ranked_search, validation_gate),
         "ranking": ranking,
-        "paperLiveSimulation": [paper_signal(frame, index, row, duration) for index, row in enumerate(selected, start=1)],
+        "paperLiveSimulation": [paper_signal(frame, index, row, duration, cfg) for index, row in enumerate(selected, start=1)],
     }
 
 
-def target_payload(target_count: int) -> dict[str, Any]:
+def target_payload(
+    target_count: int,
+    search_config: search.GoalSearchConfig | None = None,
+) -> dict[str, Any]:
+    cfg = search.validated_search_config(search_config)
     return {
         "targetCount": target_count,
         "minWinRate": search.TARGET_WIN_RATE,
         "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
-        "minTrades": search.TARGET_MIN_TRADES,
-        "thresholds": list(search.SIGNAL_THRESHOLDS),
+        "minTrades": cfg.min_trades,
+        "thresholds": list(cfg.signal_thresholds),
+        "searchCandidateLimit": cfg.candidate_limit,
         "method": "oriented_expanding_zscore_pair_threshold_v1",
     }
 
@@ -107,7 +114,12 @@ def _validation_gate_failed(validation_gate: dict[str, Any] | None) -> bool:
     )
 
 
-def ranking_row(rank: int, hit: search.ComboHit) -> dict[str, Any]:
+def ranking_row(
+    rank: int,
+    hit: search.ComboHit,
+    search_config: search.GoalSearchConfig | None = None,
+) -> dict[str, Any]:
+    cfg = search.validated_search_config(search_config)
     member_names = "__".join(hit.members)
     name = f"goal_combo__{member_names}"
     members = [member_payload(member, orientation) for member, orientation in zip(hit.members, hit.orientations)]
@@ -126,7 +138,7 @@ def ranking_row(rank: int, hit: search.ComboHit) -> dict[str, Any]:
         "profitFactor": round(hit.profit_factor, 4),
         "trades": hit.trades,
         "totalPeriods": hit.trades,
-        "minTrades": search.TARGET_MIN_TRADES,
+        "minTrades": cfg.min_trades,
         "avgReturn": round(hit.avg_return, 8),
     }
 
@@ -136,15 +148,23 @@ def member_payload(name: str, orientation: int) -> dict[str, Any]:
 
 
 def combo_display_name(members: list[dict[str, Any]]) -> str:
-    return "组合：" + " + ".join(str(member["displayName"]) for member in members)
+    from app.services.factor_combo_display import combo_display_name as build_combo_display_name
+
+    return build_combo_display_name(members)
 
 
-def paper_signal(frame: pd.DataFrame, rank: int, hit: search.ComboHit, duration: str) -> dict[str, Any]:
+def paper_signal(
+    frame: pd.DataFrame,
+    rank: int,
+    hit: search.ComboHit,
+    duration: str,
+    search_config: search.GoalSearchConfig | None = None,
+) -> dict[str, Any]:
     index = live_duration_entry_index(frame, duration)
     score = float(hit.score.loc[index])
     direction = "up" if score >= hit.threshold else "down" if score <= -hit.threshold else "wait"
     return {
-        **ranking_row(rank, hit),
+        **ranking_row(rank, hit, search_config),
         "simulationMode": "paper_live",
         "simulationStrategyKey": f"high_winrate_factor_combo_goal_top{rank}",
         "sourceOpenTime": int(frame.at[index, "open_time"]),

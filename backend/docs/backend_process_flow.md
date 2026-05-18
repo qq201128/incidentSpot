@@ -249,7 +249,7 @@ sequenceDiagram
 flowchart LR
     K[Binance K线与扩展特征] --> R[单因子排名缓存]
     R --> C[多因子组合重算]
-    C --> M[挖掘因子库]
+    C --> M[组合回灌因子库]
     C --> L[因子学习记忆]
     S[已结算预测] --> L
     M --> L
@@ -278,10 +278,12 @@ flowchart LR
 1. 拉最新 K 线并补齐缺失区间
 2. 运行多因子组合排名
 3. 写入组合缓存
-4. 把达标组合晋升到 `mined_factor_library`
+4. 把达标组合晋升到组合回灌因子库 `mined_factor_library`
 5. 同步 LSTM shadow 模型与组合排名快照
 6. 刷新因子学习记忆
 7. 刷新组合信号 watchlist 缓存
+
+`mined_factor_library` 不是 Agent 挖出来的单因子库。它保存的是历史表现达标的多因子组合，并把这些组合包装成下一轮组合搜索可复用的候选基础因子。
 
 ### 6.3 因子学习记忆
 
@@ -289,11 +291,13 @@ flowchart LR
 
 - 当前组合排名
 - 已结算预测
-- 挖掘因子库
-- Agent 挖掘库
+- 组合回灌因子库
+- Agent 单因子库
 - 组合监控报告
 - LSTM shadow 结果
 - 亏损模式和过滤规则
+
+其中“成功模式”和“禁区”会读取上一版 memory 后做历史合并：新出现的项写入，重复出现的项累加 `support` 并更新聚合指标，旧项不会因为本次窗口没出现就被删除。
 
 记忆文件落在：
 
@@ -303,7 +307,7 @@ flowchart LR
 
 `POST /api/factor-learning/refresh?runAgent=true` 或 `POST /api/factor-learning/agent/review` 会触发 Agent 复盘。
 
-Agent 的输出不会直接当成事实，它只是进一步候选化，随后会进入：
+Agent 的输出不会直接当成事实，它提出的是候选单因子公式，随后会进入：
 
 - `process_agent_factor_candidates`
 - `agent_mined_factor_library`
@@ -315,8 +319,8 @@ Agent 的输出不会直接当成事实，它只是进一步候选化，随后�
 
 下一轮组合搜索会继续读取：
 
-- `mined_factor_library`
-- `agent_mined_factor_library`
+- `mined_factor_library`：组合回灌因子
+- `agent_mined_factor_library`：Agent 单因子
 - 当前因子学习记忆
 - 已结算预测和监控结果
 
@@ -435,4 +439,3 @@ LSTM 相关流程分成三层：
 - `backend/app/db/session.py`
 - `backend/docs/factor_learning_closed_loop.md`
 - `backend/docs/quant_factor_research.md`
-

@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from app.services.factor_combo_display import combo_display_name
 from app.services.factor_learning_common import (
     SUCCESS_PROFIT_FACTOR_MIN,
     SUCCESS_WIN_RATE_MIN,
@@ -63,12 +64,13 @@ def mined_factor_definition(row: dict[str, Any]) -> FactorDefinition:
 
 def mined_factor_payload(row: dict[str, Any]) -> dict[str, Any]:
     metrics = row.get("metrics") or {}
+    display_name = _combo_display_name_for_row(row)
     return {
         "name": str(row["factorName"]),
         "category": "performance",
         "categoryName": "绩效因子",
-        "displayName": str(row.get("factorDisplayName") or row["factorName"]),
-        "description": str(row.get("description") or row.get("factorDisplayName") or row["factorName"]),
+        "displayName": display_name,
+        "description": display_name,
         "formula": str(row.get("formula") or row["factorName"]),
         "sourceFile": MINED_FACTOR_SOURCE_FILE,
         "timeframes": [str(row.get("duration"))] if row.get("duration") else [],
@@ -84,14 +86,26 @@ def mined_factor_payload(row: dict[str, Any]) -> dict[str, Any]:
 def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     rows = mined_factor_rows_for_duration(symbol, duration)
     rows.sort(key=_library_score, reverse=True)
-    return {
-        "version": MINED_FACTOR_LIBRARY_VERSION,
-        "symbol": symbol.strip().upper(),
-        "duration": duration,
-        "total": len(rows),
-        "thresholds": _threshold_payload(),
-        "factors": rows[:SUMMARY_FACTOR_LIMIT],
-    }
+    return enrich_mined_factor_library_summary(
+        {
+            "version": MINED_FACTOR_LIBRARY_VERSION,
+            "symbol": symbol.strip().upper(),
+            "duration": duration,
+            "total": len(rows),
+            "thresholds": _threshold_payload(),
+            "factors": rows[:SUMMARY_FACTOR_LIMIT],
+        }
+    )
+
+
+def enrich_mined_factor_library_summary(library: dict[str, Any]) -> dict[str, Any]:
+    if not library:
+        return library
+    enriched = deepcopy(library)
+    factors = enriched.get("factors")
+    if isinstance(factors, list):
+        enriched["factors"] = [_enriched_summary_row(row) for row in factors]
+    return enriched
 
 
 def regular_library_combination_rows_for_duration(
@@ -133,17 +147,19 @@ def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] 
     if not factor_name or not isinstance(members, list) or not members:
         return None
     now = utc_now()
+    members_payload = [_member_payload(member) for member in members]
+    display_name = combo_display_name(members_payload)
     return {
         "symbol": str(report["symbol"]).strip().upper(),
         "duration": str(report["duration"]),
         "factorName": factor_name,
-        "factorDisplayName": str(row.get("factorDisplayName") or row.get("description") or factor_name),
-        "description": str(row.get("description") or row.get("factorDisplayName") or factor_name),
+        "factorDisplayName": display_name,
+        "description": display_name,
         "formula": str(row.get("formula") or factor_name),
         "method": str(row.get("method") or ""),
         "category": "performance",
         "source": MINED_FACTOR_SOURCE,
-        "members": [_member_payload(member) for member in members],
+        "members": members_payload,
         "threshold": finite(row.get("threshold")),
         "minTrades": int(row.get("minTrades") or row.get("totalPeriods") or 0),
         "metrics": _metric_payload(row),
@@ -161,13 +177,15 @@ def _library_combination_row(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     metrics = row.get("metrics") or {}
     validation = metrics.get("validation") if isinstance(metrics, dict) else None
+    members_payload = [_member_payload(member) for member in members]
+    display_name = combo_display_name(members_payload)
     return {
         "factorName": factor_name,
-        "factorDisplayName": str(row.get("factorDisplayName") or factor_name),
-        "description": str(row.get("description") or row.get("factorDisplayName") or factor_name),
+        "factorDisplayName": display_name,
+        "description": display_name,
         "formula": str(row.get("formula") or factor_name),
         "method": str(row.get("method") or ""),
-        "members": [_member_payload(member) for member in members],
+        "members": members_payload,
         "threshold": finite(row.get("threshold")),
         "minTrades": int(row.get("minTrades") or metrics.get("totalPeriods") or 0),
         "winRate": finite(metrics.get("winRate")),
@@ -206,6 +224,21 @@ def _is_good_combo(row: dict[str, Any]) -> bool:
         and win_rate >= SUCCESS_WIN_RATE_MIN
         and profit_factor >= SUCCESS_PROFIT_FACTOR_MIN
     )
+
+
+def _combo_display_name_for_row(row: dict[str, Any]) -> str:
+    members = row.get("members")
+    if isinstance(members, list) and len(members) >= 2:
+        return combo_display_name([_member_payload(member) for member in members])
+    return str(row.get("factorDisplayName") or row.get("description") or row["factorName"])
+
+
+def _enriched_summary_row(row: dict[str, Any]) -> dict[str, Any]:
+    enriched = deepcopy(row)
+    display_name = _combo_display_name_for_row(enriched)
+    enriched["factorDisplayName"] = display_name
+    enriched["description"] = display_name
+    return enriched
 
 
 def _member_payload(member: dict[str, Any]) -> dict[str, Any]:

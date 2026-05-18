@@ -38,6 +38,9 @@ def test_catalog_uses_symbol_duration_for_mined_backtest_definition(monkeypatch:
     assert factor.source_file == "mined_factor_library.json"
     assert factor.parameters["members"] == ["factor_a", "factor_b"]
 
+    payload = factor_catalog.get_factor_payload_by_name("goal_combo__factor_a__factor_b")
+    assert payload["displayName"] == "组合：factor a + factor b"
+
 
 def test_mined_factor_backtest_materializes_combo(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = pd.DataFrame(
@@ -70,8 +73,8 @@ def _library() -> dict:
                 "symbol": "BTCUSDT",
                 "duration": "10m",
                 "factorName": "goal_combo__factor_a__factor_b",
-                "factorDisplayName": "组合：factor_a + factor_b",
-                "description": "组合：factor_a + factor_b",
+                "factorDisplayName": "legacy name",
+                "description": "legacy name",
                 "formula": "oriented_zscore_pair_threshold_v1(factor_a, factor_b)",
                 "category": "performance",
                 "source": "factor_combo_ranking",

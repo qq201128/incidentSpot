@@ -91,7 +91,7 @@ def combination_definition(
     return FactorDefinition(
         name="combo__" + "__".join(names),
         category=FactorCategory.PERFORMANCE,
-        description="组合因子：" + " + ".join(member.factor.description for member in members),
+        description=combo_display_name(member_payloads(members)),
         formula=f"{COMBINATION_METHOD}(" + ", ".join(names) + ")",
         source_file=COMBO_SOURCE_FILE,
         timeframes=(duration,),

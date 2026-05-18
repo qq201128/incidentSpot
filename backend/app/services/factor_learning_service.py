@@ -37,7 +37,7 @@ from app.services.factor_learning_memory_store import (
     save_factor_learning_memory,
 )
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
-from app.services.factor_mined_library import mined_factor_library_summary
+from app.services.factor_mined_library import enrich_mined_factor_library_summary, mined_factor_library_summary
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.lstm_shadow_learning import lstm_shadow_learning_summary
@@ -46,7 +46,10 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | None:
     _validate_duration(duration)
-    return load_factor_learning_memory(symbol, duration)
+    memory = load_factor_learning_memory(symbol, duration)
+    if memory is None:
+        return None
+    return _enrich_learning_memory(memory)
 
 
 def refresh_factor_learning_memory(
@@ -58,6 +61,7 @@ def refresh_factor_learning_memory(
 ) -> dict[str, Any]:
     _validate_duration(duration)
     sym = symbol.strip().upper()
+    previous_memory = load_factor_learning_memory(sym, duration)
     base_frame = load_factor_frame(sym, duration)
     report = ranking_report or _current_ranking_report(sym, duration, base_frame)
     settlement = settle_due_predictions(sym, duration)
@@ -75,6 +79,7 @@ def refresh_factor_learning_memory(
         agent_mined_library=agent_mined_factor_library_summary(sym, duration),
         monitoring_report=factor_combo_monitor_report(sym, duration),
         lstm_shadow=lstm_shadow_learning_summary(sym, duration),
+        previous_memory=previous_memory,
     )
     if run_llm_agent:
         return _attach_agent_review_and_save(memory)
@@ -105,6 +110,14 @@ def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
     if memory is None:
         raise ValueError(f"factor learning memory not found for {symbol.upper()} {duration}")
     return _attach_agent_review_and_save(memory)
+
+
+def _enrich_learning_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    enriched = deepcopy(memory)
+    library = enriched.get("minedFactorLibrary")
+    if isinstance(library, dict):
+        enriched["minedFactorLibrary"] = enrich_mined_factor_library_summary(library)
+    return enriched
 
 
 def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:

@@ -11,6 +11,16 @@ import pandas as pd
 from app.services.factor_duration_alignment import duration_entry_rows
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
+from app.services.high_winrate_combo_goal_config import (
+    GoalSearchConfig,
+    SEARCH_CANDIDATE_LIMIT,
+    SIGNAL_THRESHOLDS,
+    THRESHOLD_MAX,
+    THRESHOLD_MIN,
+    THRESHOLD_STEP,
+    signal_thresholds,
+    validated_search_config as _validated_search_config,
+)
 from app.services import high_winrate_combo_goal_diagnostics as diag
 
 TARGET_WIN_RATE = 0.70
@@ -18,9 +28,7 @@ TARGET_COUNT = 5
 TARGET_MIN_TRADES = BACKTEST_MIN_PERIODS
 NEXT_ENTRY_HORIZON_BARS = 1
 ZSCORE_CLIP = 4.0
-SIGNAL_THRESHOLDS = (0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00)
 COMBO_SIZES = (2, 3, 4)
-SEARCH_CANDIDATE_LIMIT = 30
 EXCLUDED_COLUMNS = frozenset({"open_time", "open", "high", "low", "close", "volume", "fwd_ret"})
 
 
@@ -113,17 +121,26 @@ def expanding_zscore(series: pd.Series) -> pd.Series:
     return ((series - mean) / std.replace(0.0, np.nan)).clip(-ZSCORE_CLIP, ZSCORE_CLIP)
 
 
-def ranked_hits(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> list[ComboHit]:
-    return ranked_hit_search(frame, scores).hits
+def ranked_hits(
+    frame: pd.DataFrame,
+    scores: dict[str, OrientedScore],
+    config: GoalSearchConfig | None = None,
+) -> list[ComboHit]:
+    return ranked_hit_search(frame, scores, config).hits
 
 
-def ranked_hit_search(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> RankedSearch:
+def ranked_hit_search(
+    frame: pd.DataFrame,
+    scores: dict[str, OrientedScore],
+    config: GoalSearchConfig | None = None,
+) -> RankedSearch:
     hits: dict[tuple[str, ...], ComboHit] = {}
-    names = search_candidate_names(frame, scores)
-    payload = diag.ranked_search_diagnostics(names)
+    cfg = validated_search_config(config)
+    names = search_candidate_names(frame, scores, cfg)
+    payload = diag.ranked_search_diagnostics(names, cfg.candidate_limit)
     for size in COMBO_SIZES:
         for members in combinations(names, size):
-            best = best_combo_hit_with_diagnostics(frame, members, scores, payload)
+            best = best_combo_hit_with_diagnostics(frame, members, scores, payload, cfg)
             if best is not None:
                 hits[best.members] = best
     rows = list(hits.values())
@@ -139,13 +156,18 @@ def ranked_hit_search(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> 
     return RankedSearch(rows, payload)
 
 
-def search_candidate_names(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> list[str]:
+def search_candidate_names(
+    frame: pd.DataFrame,
+    scores: dict[str, OrientedScore],
+    config: GoalSearchConfig | None = None,
+) -> list[str]:
+    cfg = validated_search_config(config)
     hits = [
-        row for row in (best_combo_hit(frame, (name,), scores, min_win_rate=0.0) for name in scores)
+        row for row in (best_combo_hit(frame, (name,), scores, min_win_rate=0.0, config=cfg) for name in scores)
         if row is not None
     ]
     hits.sort(key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), reverse=True)
-    return [row.members[0] for row in hits[:SEARCH_CANDIDATE_LIMIT]]
+    return [row.members[0] for row in hits[: cfg.candidate_limit]]
 
 
 def best_combo_hit(
@@ -154,12 +176,14 @@ def best_combo_hit(
     scores: dict[str, OrientedScore],
     *,
     min_win_rate: float = TARGET_WIN_RATE,
+    config: GoalSearchConfig | None = None,
 ) -> ComboHit | None:
+    cfg = validated_search_config(config)
     combo_score = sum(scores[name].score for name in members) / len(members)
     orientations = tuple(scores[name].orientation for name in members)
     candidates = [
-        combo_hit(frame, members, orientations, combo_score, threshold, min_win_rate=min_win_rate)
-        for threshold in SIGNAL_THRESHOLDS
+        combo_hit(frame, members, orientations, combo_score, threshold, min_win_rate=min_win_rate, min_trades=cfg.min_trades)
+        for threshold in cfg.signal_thresholds
     ]
     valid = [row for row in candidates if row is not None]
     return max(valid, key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), default=None)
@@ -170,13 +194,15 @@ def best_combo_hit_with_diagnostics(
     members: tuple[str, ...],
     scores: dict[str, OrientedScore],
     diagnostics: dict[str, Any],
+    config: GoalSearchConfig | None = None,
 ) -> ComboHit | None:
+    cfg = validated_search_config(config)
     diagnostics["testedCombinations"] += 1
     combo_score = sum(scores[name].score for name in members) / len(members)
     orientations = tuple(scores[name].orientation for name in members)
     candidates = []
-    for threshold in SIGNAL_THRESHOLDS:
-        hit, rejected = combo_hit_result(frame, members, orientations, combo_score, threshold)
+    for threshold in cfg.signal_thresholds:
+        hit, rejected = combo_hit_result(frame, members, orientations, combo_score, threshold, cfg)
         diagnostics["testedThresholdEvaluations"] += 1
         diag.record_combo_gate_result(diagnostics, hit, rejected)
         if hit is not None:
@@ -190,11 +216,13 @@ def combo_hit_result(
     orientations: tuple[int, ...],
     score: pd.Series,
     threshold: float,
+    config: GoalSearchConfig | None = None,
 ) -> tuple[ComboHit | None, dict[str, Any] | None]:
+    cfg = validated_search_config(config)
     signal = pd.Series(np.where(score >= threshold, 1.0, np.where(score <= -threshold, -1.0, np.nan)), index=frame.index)
     returns = (signal * frame["fwd_ret"]).replace([np.inf, -np.inf], np.nan).dropna()
     metrics = combo_return_metrics(returns)
-    if metrics["trades"] < TARGET_MIN_TRADES:
+    if metrics["trades"] < cfg.min_trades:
         return None, combo_rejection(members, threshold, "min_trades_below_min", metrics)
     if metrics["winRate"] < TARGET_WIN_RATE:
         return None, combo_rejection(members, threshold, "win_rate_below_min", metrics)
@@ -221,10 +249,11 @@ def combo_hit(
     threshold: float,
     *,
     min_win_rate: float = TARGET_WIN_RATE,
+    min_trades: int = TARGET_MIN_TRADES,
 ) -> ComboHit | None:
     signal = pd.Series(np.where(score >= threshold, 1.0, np.where(score <= -threshold, -1.0, np.nan)), index=frame.index)
     returns = (signal * frame["fwd_ret"]).replace([np.inf, -np.inf], np.nan).dropna()
-    if len(returns) < TARGET_MIN_TRADES:
+    if len(returns) < int(min_trades):
         return None
     win_rate = float((returns > 0).mean())
     factor = profit_factor(returns)
@@ -257,6 +286,10 @@ def profit_factor(returns: pd.Series) -> float:
     gains = float(returns[returns > 0].sum())
     losses = abs(float(returns[returns < 0].sum()))
     return gains / losses if losses > 0 else math.inf
+
+
+def validated_search_config(config: GoalSearchConfig | None = None) -> GoalSearchConfig:
+    return _validated_search_config(config, TARGET_MIN_TRADES)
 
 
 def selected_hits(hits: list[ComboHit], target_count: int) -> list[ComboHit]:

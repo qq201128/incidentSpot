@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,15 +27,37 @@ def run_multi_duration_goal(
     output: Path,
     library: Path,
     run_single_goal: RunGoal,
+    parallel_workers: int = 1,
 ) -> dict[str, Any]:
-    reports = [
-        _run_duration_goal(symbol, duration, target_count, output, library, run_single_goal)
-        for duration in durations
-    ]
+    reports = _duration_reports(symbol, durations, target_count, output, library, run_single_goal, parallel_workers)
     payload = _multi_duration_payload(symbol, durations, reports)
     _write_json(output, payload)
     _write_json(library, _multi_duration_library_payload(payload))
     return payload
+
+
+def _duration_reports(
+    symbol: str,
+    durations: list[str],
+    target_count: int,
+    output: Path,
+    library: Path,
+    run_single_goal: RunGoal,
+    parallel_workers: int,
+) -> list[dict[str, Any]]:
+    if parallel_workers <= 1 or len(durations) <= 1:
+        return [
+            _run_duration_goal(symbol, duration, target_count, output, library, run_single_goal)
+            for duration in durations
+        ]
+    workers = min(int(parallel_workers), len(durations))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(
+            executor.map(
+                lambda duration: _run_duration_goal(symbol, duration, target_count, output, library, run_single_goal),
+                durations,
+            )
+        )
 
 
 def _run_duration_goal(

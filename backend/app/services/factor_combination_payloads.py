@@ -6,6 +6,7 @@ from typing import Any
 
 from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
+from app.services.factor_combo_display import combo_display_name as build_combo_display_name
 from app.services.factor_registry import factor_payload
 
 MINED_FACTOR_SOURCE_FILE = "mined_factor_library.json"
@@ -71,7 +72,7 @@ def member_avg_correlation(members: tuple[Any, ...]) -> float | None:
 
 
 def combo_display_name(members: list[dict[str, Any]]) -> str:
-    return "组合：" + " + ".join(str(member["displayName"]) for member in members)
+    return build_combo_display_name(members)
 
 
 def base_payload(candidate: Any) -> dict[str, Any]:
