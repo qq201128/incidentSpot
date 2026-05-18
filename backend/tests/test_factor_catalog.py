@@ -8,6 +8,7 @@ from app.services import (
     factor_backtest_service,
     factor_catalog,
     factor_mined_library,
+    factor_ranking_calculation,
     factor_registry,
 )
 
@@ -106,6 +107,24 @@ def test_agent_factor_backtest_materializes_formula(monkeypatch: pytest.MonkeyPa
     assert result["factorName"] == "agent__factor_a"
     assert result["category"] == "statistic"
     assert result["totalPeriods"] > 0
+
+
+def test_factor_ranking_includes_materialized_agent_factor(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = pd.DataFrame(
+        {
+            "open_time": [idx * 60_000 for idx in range(130)],
+            "close": [100 + idx for idx in range(130)],
+            "factor_a": [idx / 100 for idx in range(130)],
+        }
+    )
+    monkeypatch.setattr(agent_mined_factor_library, "load_agent_factor_library", lambda *_args: _agent_library())
+    monkeypatch.setattr(factor_ranking_calculation, "load_factor_frame", lambda *_args: frame)
+
+    ranking = factor_backtest_service.run_factor_ranking("BTCUSDT", "10m")
+
+    assert "agent__factor_a" in {row["factorName"] for row in ranking}
+    agent_row = next(row for row in ranking if row["factorName"] == "agent__factor_a")
+    assert agent_row["sourceFile"] == "agent_mined_factor_library.json"
 
 
 def _library() -> dict:

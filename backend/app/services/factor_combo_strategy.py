@@ -217,6 +217,8 @@ def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
         f"method={signal['method']}",
         f"historical_win_rate={signal['historicalWinRate']}",
         f"historical_profit_factor={signal['historicalProfitFactor']}",
+        f"walk_forward_passed={signal.get('walkForwardPassed')}",
+        f"walk_forward_failure={signal.get('walkForwardFailureReason')}",
         f"score={signal['score']}",
         f"signal_threshold={signal.get('signalThreshold')}",
         f"signal_threshold_passed={signal.get('qualityThresholdPassed')}",

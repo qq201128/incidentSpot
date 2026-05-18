@@ -390,6 +390,36 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
 
 
+def test_live_signal_requires_walk_forward_for_regular_combo(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    row = {
+        "factorName": "combo__factor_a",
+        "factorDisplayName": "组合：factor_a",
+        "members": [{"name": "factor_a", "category": "return", "orientation": 1}],
+        "method": "test",
+        "threshold": 0.0,
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": ROWS,
+    }
+
+    missing = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
+    failed = build_live_signal_from_ranking(
+        synthetic_frame,
+        {**row, "walkForwardPassed": False, "walkForwardFailureReason": "test_win_rate_below_min"},
+        symbol="BTCUSDT",
+        duration="10m",
+    )
+
+    assert missing["qualityPassed"] is False
+    assert missing["qualityGateReason"] == "walk_forward_missing"
+    assert failed["qualityPassed"] is False
+    assert failed["qualityGateReason"] == "test_win_rate_below_min"
+
+
 def test_live_signal_requires_thresholded_score_for_trade_quality(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
@@ -405,6 +435,7 @@ def test_live_signal_requires_thresholded_score_for_trade_quality(
         "winRate": 0.70,
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
+        "walkForwardPassed": True,
     }
 
     signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
@@ -470,6 +501,28 @@ def test_live_signal_direction_uses_score_below_historical_median(
     assert signal["probabilityUp"] == 0.3
 
 
+def test_goal_combo_live_direction_uses_threshold_sign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _median_direction_frame(130)
+    scores = pd.Series([-2.0] * 129 + [-1.5], index=frame.index)
+    monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
+    row = {
+        **_median_direction_row(),
+        "factorName": "goal_combo__factor_signal",
+        "threshold": 1.0,
+    }
+
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["score"] == -1.5
+    assert signal["historicalMedianScore"] == -2.0
+    assert signal["direction"] == "down"
+    assert signal["probabilityUp"] == 0.3
+    assert signal["qualityPassed"] is True
+
+
 def test_live_signal_direction_requires_historical_median(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -525,6 +578,7 @@ def test_live_signal_blocks_non_kline_close_members(
         "winRate": 0.70,
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
+        "walkForwardPassed": True,
     }
 
     signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
@@ -735,6 +789,7 @@ def _median_direction_row() -> dict[str, Any]:
         "winRate": 0.70,
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
+        "walkForwardPassed": True,
     }
 
 

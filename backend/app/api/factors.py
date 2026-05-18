@@ -122,6 +122,8 @@ def factor_ranking(
         "updatedAt": cached["updatedAt"],
         "source": "cache",
         "precomputedSymbols": precomputed,
+        "rankingDiagnostics": cached.get("rankingDiagnostics") or {},
+        "rankingFailures": cached.get("rankingFailures") or [],
     }
 
 

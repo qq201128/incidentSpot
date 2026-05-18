@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
-from app.services.index_price_tick_service import nearest_available_index_price_tick, nearest_index_price_tick
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 
-MAX_SETTLEMENT_TICK_DRIFT_MS = 2_500
-SETTLEMENT_SOURCE = "premiumIndex.tick.nearest_endTime"
 LIVE_SETTLEMENT_SOURCE = "premiumIndex.rest.current"
-FALLBACK_SETTLEMENT_SOURCE = "premiumIndex.tick.nearest_available"
-FALLBACK_AFTER_LIVE_FAILURE_SOURCE = "premiumIndex.tick.nearest_available.after_live_failure"
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -78,25 +71,7 @@ def _assert_event_due(event, now_ms: int) -> None:
 
 def _fetch_settlement_quote(event) -> SettlementQuote:
     end_time_ms = parse_event_end_time_ms(event["end_time"])
-    try:
-        return _quote_from_premium_index(fetch_premium_index(event["symbol"]), end_time_ms)
-    except Exception as exc:
-        logger.warning(
-            "live settlement quote failed for event symbol=%s",
-            event["symbol"],
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
-        return _fetch_stored_settlement_quote(event["symbol"], end_time_ms, FALLBACK_AFTER_LIVE_FAILURE_SOURCE)
-
-
-def _fetch_stored_settlement_quote(symbol: str, end_time_ms: int, fallback_source: str) -> SettlementQuote:
-    row = nearest_index_price_tick(symbol, end_time_ms, MAX_SETTLEMENT_TICK_DRIFT_MS)
-    if row is None:
-        row = nearest_available_index_price_tick(symbol, end_time_ms)
-        if row is None:
-            raise ValueError(_missing_tick_message(symbol, end_time_ms))
-        return _quote_from_tick(row, end_time_ms, fallback_source)
-    return _quote_from_tick(row, end_time_ms, SETTLEMENT_SOURCE)
+    return _quote_from_premium_index(fetch_premium_index(event["symbol"]), end_time_ms)
 
 
 def _quote_from_premium_index(row: dict, end_time_ms: int) -> SettlementQuote:
@@ -106,22 +81,6 @@ def _quote_from_premium_index(row: dict, end_time_ms: int) -> SettlementQuote:
         raise ValueError("premium index settlement response is invalid")
     drift_ms = abs(quote_time - int(end_time_ms))
     return SettlementQuote(price, quote_time, f"{LIVE_SETTLEMENT_SOURCE};driftMs={drift_ms}")
-
-
-def _quote_from_tick(row, end_time_ms: int, source: str) -> SettlementQuote:
-    price = float(row["index_price"] or 0)
-    if price <= 0:
-        raise ValueError("stored index price tick is invalid")
-    quote_time = int(row["quote_time"])
-    drift_ms = abs(quote_time - int(end_time_ms))
-    return SettlementQuote(price, quote_time, f"{source};driftMs={drift_ms}")
-
-
-def _missing_tick_message(symbol: str, end_time_ms: int) -> str:
-    return (
-        f"no stored index price tick for {symbol.upper()} within "
-        f"{MAX_SETTLEMENT_TICK_DRIFT_MS}ms of endTime={end_time_ms}"
-    )
 
 
 def _settle_orders(conn, event_id: int, result: str) -> None:

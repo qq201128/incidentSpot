@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_combo_scoring import combination_score
+from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_combination_service import COMBINATION_METHOD
 from app.services.factor_duration_alignment import live_duration_entry_index
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
@@ -15,7 +16,8 @@ from app.services.factor_learning_signal_filter import MEMORY_NOT_PROVIDED, enri
 from app.services.factor_signal_timing import FactorSignalTiming, combination_kline_close_timing
 from app.services.kline_timing import is_within_entry_grace
 
-LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
+STRICT_LIVE_MIN_WIN_RATE = 0.60
+LIVE_MIN_WIN_RATE = max(SUCCESS_WIN_RATE_MIN, STRICT_LIVE_MIN_WIN_RATE)
 LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
 LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4
@@ -127,7 +129,7 @@ def _combo_signal_at_duration_entry(
     _require_member_columns(frame, members)
     index = live_duration_entry_index(frame, duration, entry_open_time)
     score_series = _combo_score_series(frame, members, zscore_cache)
-    return _combo_direction_from_expanding_median(score_series, index, row.get("factorName"), duration)
+    return _combo_direction_from_row_rule(score_series, index, row, duration)
 
 
 def _combo_score_series(
@@ -141,12 +143,13 @@ def _combo_score_series(
     return pd.concat(scores, axis=1).mean(axis=1).replace([float("inf"), float("-inf")], float("nan"))
 
 
-def _combo_direction_from_expanding_median(
+def _combo_direction_from_row_rule(
     score_series: pd.Series,
     index: Any,
-    factor_name: Any,
+    row: dict[str, Any],
     duration: str,
 ) -> _ComboSignal:
+    factor_name = row.get("factorName")
     score = _finite_float(_series_value_at(score_series, index))
     if score is None:
         raise ValueError(f"combination signal has no finite score at {duration} entry: {factor_name}")
@@ -154,8 +157,18 @@ def _combo_direction_from_expanding_median(
     historical_median = _finite_float(_series_value_at(median_series, index))
     if historical_median is None:
         raise ValueError(f"combination signal has insufficient historical median at {duration} entry: {factor_name}")
-    direction = "up" if score >= historical_median else "down"
+    direction = _live_direction(row, score, historical_median)
     return _ComboSignal(score=score, historical_median=historical_median, direction=direction, index=index)
+
+
+def _live_direction(row: dict[str, Any], score: float, historical_median: float) -> str:
+    threshold = _signal_threshold(row)
+    if is_high_winrate_combo_name(str(row.get("factorName") or "")) and threshold > 0:
+        if score >= threshold:
+            return "up"
+        if score <= -threshold:
+            return "down"
+    return "up" if score >= historical_median else "down"
 
 
 def _combo_score_at_index(
@@ -219,6 +232,8 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "historicalSharpe": ctx.row.get("sharpe"),
         "historicalIr": ctx.row.get("ir"),
         "historicalTotalPeriods": ctx.row.get("totalPeriods"),
+        "walkForwardPassed": ctx.row.get("walkForwardPassed"),
+        "walkForwardFailureReason": ctx.row.get("walkForwardFailureReason"),
         "qualityPassed": ctx.quality["passed"],
         "qualityMetricsPassed": ctx.quality["metricsPassed"],
         "qualityThresholdPassed": ctx.quality["thresholdPassed"],
@@ -275,7 +290,21 @@ def _quality_metric_reason(row: dict[str, Any], confidence: float) -> str:
         return "total_periods_missing"
     if total_periods < min_periods:
         return "total_periods_below_min"
+    walk_forward_reason = _walk_forward_reason(row)
+    if walk_forward_reason is not None:
+        return walk_forward_reason
     return "passed"
+
+
+def _walk_forward_reason(row: dict[str, Any]) -> str | None:
+    if is_high_winrate_combo_name(str(row.get("factorName") or "")):
+        return None
+    passed = row.get("walkForwardPassed")
+    if passed is True or passed == 1:
+        return None
+    if passed is False or passed == 0:
+        return str(row.get("walkForwardFailureReason") or "walk_forward_failed")
+    return "walk_forward_missing"
 
 
 def _min_total_periods(row: dict[str, Any]) -> float:

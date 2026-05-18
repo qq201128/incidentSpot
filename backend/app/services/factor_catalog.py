@@ -18,6 +18,7 @@ from app.services.factor_registry import (
     factor_payload,
     get_factor,
     list_factor_categories,
+    list_factors,
     list_factor_payloads,
 )
 
@@ -26,6 +27,17 @@ AGENT_FACTOR_SOURCE_FILE = "agent_mined_factor_library.json"
 
 def list_single_factor_payloads(category: str | None = None) -> list[dict[str, Any]]:
     return [*list_factor_payloads(category), *list_agent_factor_payloads(category)]
+
+
+def list_single_factor_definitions(
+    category: str | None = None,
+    *,
+    symbol: str | None = None,
+    duration: str | None = None,
+) -> list[FactorDefinition]:
+    cat = FactorCategory(category) if category else None
+    agent = list_agent_factor_definitions(category, symbol=symbol, duration=duration)
+    return [*list_factors(cat), *agent]
 
 
 def list_combo_factor_payloads() -> list[dict[str, Any]]:
@@ -87,6 +99,20 @@ def list_agent_factor_payloads(category: str | None = None) -> list[dict[str, An
     if not _includes_agent_category(category):
         return []
     return [agent_factor_payload(row) for row in _latest_agent_rows_by_name()]
+
+
+def list_agent_factor_definitions(
+    category: str | None = None,
+    *,
+    symbol: str | None = None,
+    duration: str | None = None,
+) -> list[FactorDefinition]:
+    if not _includes_agent_category(category):
+        return []
+    if symbol is not None and duration is not None:
+        rows = _agent_factor_rows_for_duration(symbol, duration)
+        return [agent_factor_definition(row) for row in rows]
+    return [agent_factor_definition(row) for row in _latest_agent_rows_by_name()]
 
 
 def agent_factor_payload(row: dict[str, Any]) -> dict[str, Any]:

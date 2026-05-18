@@ -17,7 +17,7 @@ def _norm_symbol(symbol: str) -> str:
 
 
 def get_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
-    """Return { ranking, total, updatedAt, cacheStatus } or None if no row."""
+    """Return ranking cache payload or None if no row."""
     sym = _norm_symbol(symbol)
     conn = get_conn()
     try:
@@ -38,7 +38,7 @@ def get_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         logger.warning("factor_ranking_cache corrupt JSON for %s %s", sym, duration)
         return None
-    ranking, cache_meta = _ranking_payload(payload)
+    ranking, cache_meta, diagnostics, failures = _ranking_payload(payload)
     if not isinstance(ranking, list):
         return None
     return {
@@ -47,15 +47,26 @@ def get_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
         "updatedAt": str(row["updated_at"]),
         "cacheMeta": cache_meta,
         "cacheStatus": cache_status(cache_meta, sym),
+        "rankingDiagnostics": diagnostics,
+        "rankingFailures": failures,
     }
 
 
-def save_cached_ranking(symbol: str, duration: str, ranking: list[dict[str, Any]]) -> None:
+def save_cached_ranking(
+    symbol: str,
+    duration: str,
+    ranking: list[dict[str, Any]],
+    *,
+    diagnostics: dict[str, Any] | None = None,
+    failures: list[dict[str, Any]] | None = None,
+) -> None:
     sym = _norm_symbol(symbol)
     payload = json.dumps(
         {
             "ranking": ranking,
             "cacheMeta": ranking_cache_metadata(sym, duration),
+            "rankingDiagnostics": diagnostics or {},
+            "rankingFailures": failures or [],
         },
         ensure_ascii=False,
     )
@@ -87,9 +98,16 @@ def factor_ranking_precomputed_symbols() -> list[str]:
     return parts or ["BTCUSDT"]
 
 
-def _ranking_payload(payload: Any) -> tuple[Any, dict[str, Any] | None]:
+def _ranking_payload(payload: Any) -> tuple[Any, dict[str, Any] | None, dict[str, Any], list[dict[str, Any]]]:
     if isinstance(payload, list):
-        return payload, None
+        return payload, None, {}, []
     if not isinstance(payload, dict):
-        return None, None
-    return payload.get("ranking"), payload.get("cacheMeta")
+        return None, None, {}, []
+    diagnostics = payload.get("rankingDiagnostics")
+    failures = payload.get("rankingFailures")
+    return (
+        payload.get("ranking"),
+        payload.get("cacheMeta"),
+        diagnostics if isinstance(diagnostics, dict) else {},
+        failures if isinstance(failures, list) else [],
+    )

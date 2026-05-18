@@ -5,7 +5,7 @@ import logging
 import os
 from typing import Any
 
-from app.services.factor_backtest_service import run_factor_ranking
+from app.services.factor_backtest_service import run_factor_ranking_report
 from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
     save_cached_ranking,
@@ -32,8 +32,14 @@ def _initial_delay_seconds() -> float:
 def refresh_ranking_for_symbol_duration(symbol: str, duration: str) -> None:
     """Synchronous: compute full ranking (all categories) and persist."""
     sym = symbol.strip().upper()
-    ranking = run_factor_ranking(sym, duration, None)
-    save_cached_ranking(sym, duration, ranking)
+    report = run_factor_ranking_report(sym, duration, None)
+    save_cached_ranking(
+        sym,
+        duration,
+        report["ranking"],
+        diagnostics=report["rankingDiagnostics"],
+        failures=report["rankingFailures"],
+    )
 
 
 def refresh_symbol_rankings(symbol: str, duration: str | None = None) -> None:

@@ -158,6 +158,23 @@ def test_empty_ranking_exposes_combo_gate_failures(monkeypatch: pytest.MonkeyPat
     assert payload["rankingDiagnostics"]["bestRejected"]["reason"] == "win_rate_below_min"
 
 
+def test_validation_rejects_goal_combo_when_oos_win_rate_falls_below_target() -> None:
+    score = _score()
+    frame = _frame()
+    fwd_ret = np.where(score > 0, 0.01, -0.01)
+    fwd_ret[-30:] *= -1
+    frame = frame.assign(fwd_ret=fwd_ret)
+    hit = goal.ComboHit(("factor_a", "factor_b"), (1, -1), 1.0, 0.75, 2.0, ROWS, 0.01, score)
+
+    validation = goal.validate_goal_combo_hits(frame, [hit], "30m")
+
+    assert validation.passed == []
+    rejection = validation.payload["rejections"][0]
+    assert rejection["status"] == "rejected"
+    assert any("winRate" in reason and "< 0.7" in reason for reason in rejection["reasons"])
+    assert validation.payload["thresholds"]["recomputedMinWinRate"] == goal.TARGET_WIN_RATE
+
+
 def test_empty_candidate_factors_expose_filter_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = pd.DataFrame(
         {

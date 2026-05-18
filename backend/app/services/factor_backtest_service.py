@@ -24,11 +24,8 @@ from app.services.factor_metric_enrichment import backtest_validity, enrich_fact
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
 from app.services.factor_registry import (
-    FactorCategory,
     FactorDefinition,
     factor_payload,
-    get_factor,
-    list_factors,
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
@@ -98,31 +95,19 @@ def run_factor_ranking(
     duration: str = "10m",
     category: str | None = None,
 ) -> list[dict[str, Any]]:
-    if duration not in SUPPORTED_RULE_DURATIONS:
-        raise ValueError(f"unsupported duration: {duration}")
+    from app.services.factor_ranking_calculation import run_factor_ranking as run_ranking
 
-    feature_frame = load_factor_frame(symbol, duration)
+    return run_ranking(symbol, duration, category)
 
-    factors = list_factors()
-    if category:
-        cat = FactorCategory(category)
-        factors = [f for f in factors if f.category == cat]
 
-    results = []
-    for factor_def in factors:
-        if factor_def.name not in feature_frame.columns:
-            continue
-        result = run_factor_backtest_on_frame(
-            factor_def,
-            feature_frame,
-            symbol=symbol,
-            duration=duration,
-        )
-        results.append(result)
+def run_factor_ranking_report(
+    symbol: str,
+    duration: str = "10m",
+    category: str | None = None,
+) -> dict[str, Any]:
+    from app.services.factor_ranking_calculation import run_factor_ranking_report as run_report
 
-    enrich_factor_results(results, frame=feature_frame)
-    results.sort(key=lambda x: x.get("factorScore") or 0.0, reverse=True)
-    return results
+    return run_report(symbol, duration, category)
 
 
 def _compute_factor_metrics(
@@ -262,6 +247,7 @@ def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) 
         "categoryName": factor_payload(factor_def)["categoryName"],
         "description": factor_def.description,
         "formula": factor_def.formula,
+        "sourceFile": factor_def.source_file,
         "direction": factor_def.direction.value,
         "totalPeriods": result.total_periods,
         "icMean": _round_or_none(result.ic_mean, 6),

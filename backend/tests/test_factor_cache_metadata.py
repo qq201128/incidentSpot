@@ -40,6 +40,25 @@ def test_factor_ranking_cache_becomes_stale_when_market_data_changes(
     assert cached["cacheStatus"]["reason"] == "market_data_changed"
 
 
+def test_factor_ranking_cache_preserves_diagnostics(monkeypatch, tmp_path: Path) -> None:
+    db_path = _init_db(tmp_path)
+    _patch_cache_db(monkeypatch, db_path)
+    _insert_kline(db_path, "10m", 0)
+
+    factor_ranking_cache_service.save_cached_ranking(
+        "BTCUSDT",
+        "10m",
+        [{"factorName": "factor_a", "totalPeriods": 100}],
+        diagnostics={"factorDefinitionCount": 2, "failureCount": 1},
+        failures=[{"factorName": "agent_a", "error": "formula column not found: missing"}],
+    )
+
+    cached = factor_ranking_cache_service.get_cached_ranking("BTCUSDT", "10m")
+
+    assert cached["rankingDiagnostics"]["failureCount"] == 1
+    assert cached["rankingFailures"][0]["factorName"] == "agent_a"
+
+
 def test_legacy_combination_cache_is_marked_stale(monkeypatch, tmp_path: Path) -> None:
     db_path = _init_db(tmp_path)
     _patch_cache_db(monkeypatch, db_path)

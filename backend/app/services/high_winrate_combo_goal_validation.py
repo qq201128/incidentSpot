@@ -9,9 +9,9 @@ import pandas as pd
 
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
-from app.services.high_winrate_combo_goal_search import ComboHit
+from app.services.high_winrate_combo_goal_search import ComboHit, TARGET_WIN_RATE
 
-RECOMPUTED_MIN_WIN_RATE = 0.52
+RECOMPUTED_MIN_WIN_RATE = TARGET_WIN_RATE
 MIN_OOS_TRADES = 20
 WINDOW_COUNT = 3
 OOS_RATIO = 0.20
