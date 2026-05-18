@@ -63,7 +63,7 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["qualityGateReason"] == "factor_learning_filter_blocked"
 
 
-def test_factor_learning_filter_blocks_forbidden_region_member() -> None:
+def test_factor_learning_filter_ignores_mining_forbidden_region_member() -> None:
     frame = _learning_frame()
     memory = build_factor_learning_memory(
         frame,
@@ -79,10 +79,9 @@ def test_factor_learning_filter_blocks_forbidden_region_member() -> None:
     result = apply_factor_learning_memory(payload, frame, frame.index[-1], memory)
 
     assert result["factorLearning"]["state"] == "active"
-    assert result["factorLearning"]["blockedMembers"]
-    assert any(item["feature"] == "factor_b" for item in result["factorLearning"]["blockedMembers"])
-    assert result["factorLearning"]["filterPassed"] is False
-    assert result["qualityPassed"] is False
+    assert result["factorLearning"]["blockedMembers"] == []
+    assert result["factorLearning"]["filterPassed"] is True
+    assert result["qualityPassed"] is True
 
 
 def test_refresh_rebuilds_stale_combination_ranking(monkeypatch: pytest.MonkeyPatch) -> None:

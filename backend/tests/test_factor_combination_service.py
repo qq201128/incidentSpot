@@ -26,7 +26,6 @@ from app.services.factor_mined_candidates import MINED_FACTOR_SOURCE_FILE
 from app.services.factor_mined_candidates import MinedCandidateResult, MinedFrameResult
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
-from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 ROWS = 1300
 HORIZON = 1
@@ -90,7 +89,7 @@ def test_combination_ranking_returns_score_sorted_rows(
     assert ranking == sorted(ranking, key=lambda row: row["factorScore"], reverse=True)
 
 
-def test_combination_ranking_applies_learning_memory_filters(
+def test_combination_ranking_applies_loss_memory_filters(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
     synthetic_factors: list[FactorDefinition],
@@ -100,8 +99,8 @@ def test_combination_ranking_applies_learning_memory_filters(
         combo_service,
         "load_factor_learning_memory_for",
         lambda *_args: {
-            "factorMining": {"forbiddenRegions": [{"members": ["factor_b"]}]},
-            "lossMemory": {"patterns": []},
+            "factorMining": {"forbiddenRegions": []},
+            "lossMemory": {"patterns": [{"feature": "factor_b"}]},
             "weights": {"factor_a": 0.7, "factor_c": 0.3},
         },
     )
@@ -120,6 +119,35 @@ def test_combination_ranking_applies_learning_memory_filters(
     assert report["baseFactorCount"] == 2
     assert factor_a["learningWeight"] == 0.7
     assert factor_a["learningScore"] == pytest.approx(factor_a["factorScore"] + 0.7)
+
+
+def test_combination_ranking_ignores_mining_forbidden_regions(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+    monkeypatch.setattr(
+        combo_service,
+        "load_factor_learning_memory_for",
+        lambda *_args: {
+            "factorMining": {"forbiddenRegions": [{"members": ["factor_b"]}]},
+            "lossMemory": {"patterns": []},
+            "weights": {},
+        },
+    )
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=5),
+    )
+
+    base_names = [item["name"] for item in report["baseFactors"]]
+
+    assert "factor_b" in base_names
+    assert report["baseFactorCount"] == 3
 
 
 def test_combination_ranking_skips_mined_combo_candidates_but_keeps_agent_factors(
@@ -186,20 +214,20 @@ def test_live_signal_uses_cached_combo_members(
     assert signal["source"] == "factor_combination_ranking"
 
 
-def test_walk_forward_validation_uses_cost_adjusted_returns() -> None:
-    factor = _factor("factor_a", "成本测试因子", FactorDirection.HIGHER_BETTER)
-    losing_frame = pd.DataFrame(
+def test_walk_forward_validation_fails_when_median_split_has_no_edge() -> None:
+    factor = _factor("factor_a", "弱边缘因子", FactorDirection.HIGHER_BETTER)
+    flat_edge_frame = pd.DataFrame(
         {
-            "factor_a": np.arange(400, dtype=float),
-            "fwd_ret": np.full(400, ROUNDTRIP_COST_RATE / 2, dtype=float),
+            "factor_a": np.tile([0.0, 1.0], 200),
+            "fwd_ret": np.full(400, 0.001, dtype=float),
         }
     )
 
-    result = walk_forward_validation(losing_frame, factor, "10m")
+    result = walk_forward_validation(flat_edge_frame, factor, "10m")
 
     assert result.passed is False
     assert result.failure_reason == "validation_win_rate_below_min"
-    assert result.payload["validation"]["winRate"] == 0.0
+    assert result.payload["validation"]["winRate"] == pytest.approx(0.5, abs=0.05)
 
 
 def test_neutral_base_candidate_flips_low_winrate_orientation() -> None:

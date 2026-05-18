@@ -155,7 +155,7 @@ def _library_factor_combo_report(symbol: str, duration: str) -> dict[str, Any] |
     from app.services.factor_combination_payloads import config_payload
     from app.services.experiment_profiles import EXPERIMENT_PROFILE_FAST, combination_search_config_for_profile
     from app.services.factor_frame_service import load_factor_frame
-    from app.services.factor_learning_controls import learning_blocked_factor_names, load_factor_learning_memory_for
+    from app.services.factor_learning_controls import learning_risk_blocked_factor_names, load_factor_learning_memory_for
     from app.services.factor_mined_candidates import materialize_mined_factor_frame_for_rows
     from app.services.factor_mined_library import (
         mined_factor_rows_for_duration,
@@ -178,7 +178,7 @@ def _library_factor_combo_report(symbol: str, duration: str) -> dict[str, Any] |
         duration=duration,
         target_rows=ranking,
         source_rows=source_rows,
-        excluded_factor_names=learning_blocked_factor_names(learning_memory),
+        excluded_factor_names=learning_risk_blocked_factor_names(learning_memory),
     )
     available = {str(column) for column in materialized.frame.columns}
     ranking = [row for row in ranking if str(row.get("factorName")) in available]

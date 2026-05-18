@@ -18,7 +18,7 @@ from app.services.factor_duration_alignment import duration_entry_rows, duration
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.factor_learning_controls import (
-    learning_blocked_factor_names,
+    learning_risk_blocked_factor_names,
     load_factor_learning_memory_for,
 )
 from app.services.lstm_combo_ranking import (
@@ -163,7 +163,7 @@ def candidate_feature_columns_for_memory(
     frame: pd.DataFrame,
     learning_memory: dict[str, Any] | None,
 ) -> list[str]:
-    blocked = learning_blocked_factor_names(learning_memory)
+    blocked = learning_risk_blocked_factor_names(learning_memory)
     columns = []
     for column in frame.columns:
         if not _is_candidate_feature_column(column):

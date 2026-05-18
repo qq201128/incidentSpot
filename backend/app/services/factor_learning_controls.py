@@ -10,12 +10,22 @@ def load_factor_learning_memory_for(symbol: str, duration: str) -> dict[str, Any
 
 
 def learning_blocked_factor_names(memory: dict[str, Any] | None) -> set[str]:
+    return learning_risk_blocked_factor_names(memory)
+
+
+def learning_risk_blocked_factor_names(memory: dict[str, Any] | None) -> set[str]:
     if not isinstance(memory, dict):
         return set()
-    names = set()
-    names.update(_forbidden_region_members(memory.get("factorMining") or {}))
-    names.update(_loss_pattern_features(memory.get("lossMemory") or {}))
-    return names
+    return _loss_pattern_features(memory.get("lossMemory") or {})
+
+
+def learning_mining_excluded_factor_names(memory: dict[str, Any] | None) -> set[str]:
+    if not isinstance(memory, dict):
+        return set()
+    return (
+        _forbidden_region_members(memory.get("factorMining") or {})
+        | _loss_pattern_features(memory.get("lossMemory") or {})
+    )
 
 
 def learning_weight(memory: dict[str, Any] | None, name: str) -> float:

@@ -106,7 +106,7 @@ def test_factor_combo_recovery_prefers_library_rows(monkeypatch) -> None:
     )
     monkeypatch.setattr(factor_frame_service, "load_factor_frame", lambda *_args: pd.DataFrame({"close": []}))
     monkeypatch.setattr(factor_learning_controls, "load_factor_learning_memory_for", lambda *_args: None)
-    monkeypatch.setattr(factor_learning_controls, "learning_blocked_factor_names", lambda *_args: set())
+    monkeypatch.setattr(factor_learning_controls, "learning_risk_blocked_factor_names", lambda *_args: set())
     monkeypatch.setattr(
         factor_mined_candidates,
         "materialize_mined_factor_frame_for_rows",

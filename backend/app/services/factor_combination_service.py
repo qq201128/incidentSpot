@@ -27,7 +27,7 @@ from app.services.factor_combination_payloads import (
     build_combination_ranking_report,
 )
 from app.services.factor_learning_controls import (
-    learning_blocked_factor_names,
+    learning_risk_blocked_factor_names,
     learning_weight,
     load_factor_learning_memory_for,
 )
@@ -100,7 +100,7 @@ def run_factor_combination_ranking_on_frame(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
     learning_memory = load_factor_learning_memory_for(symbol, duration)
-    blocked_names = learning_blocked_factor_names(learning_memory)
+    blocked_names = learning_risk_blocked_factor_names(learning_memory)
     search_frame = frame.drop(columns=sorted(blocked_names), errors="ignore") if blocked_names else frame
     mined = build_mined_candidates(
         search_frame,

@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.factor_combo_scoring import oriented_zscore
-from app.services.factor_learning_controls import learning_blocked_factor_names
+from app.services.factor_learning_controls import learning_risk_blocked_factor_names
 from app.services.factor_learning_memory_store import load_factor_learning_memory
 
 SCORE_DECIMALS = 6
@@ -262,7 +262,7 @@ def _members(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _blocked_member_matches(members: list[dict[str, Any]], memory: dict[str, Any]) -> list[dict[str, Any]]:
-    blocked_names = learning_blocked_factor_names(memory)
+    blocked_names = learning_risk_blocked_factor_names(memory)
     matches = []
     for member in members:
         name = str(member.get("name") or "").strip()

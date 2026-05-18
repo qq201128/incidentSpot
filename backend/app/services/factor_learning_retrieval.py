@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.factor_learning_controls import learning_blocked_factor_names
+from app.services.factor_learning_controls import (
+    learning_mining_excluded_factor_names,
+    learning_risk_blocked_factor_names,
+)
 
 RETRIEVAL_LIMIT = 8
 
@@ -17,7 +20,8 @@ def build_factor_learning_retrieval(memory: dict[str, Any] | None) -> dict[str, 
     forbidden_regions = _limited_items(factor_mining.get("forbiddenRegions") or [])
     loss_patterns = _limited_items(loss_memory.get("patterns") or [])
     return {
-        "blockedFactorNames": sorted(learning_blocked_factor_names(memory)),
+        "blockedFactorNames": sorted(learning_risk_blocked_factor_names(memory)),
+        "miningExcludedFactorNames": sorted(learning_mining_excluded_factor_names(memory)),
         "successPatterns": success_patterns,
         "forbiddenRegions": forbidden_regions,
         "lossPatterns": loss_patterns,
@@ -34,6 +38,7 @@ def build_factor_learning_retrieval(memory: dict[str, Any] | None) -> dict[str, 
 def _empty_retrieval() -> dict[str, Any]:
     return {
         "blockedFactorNames": [],
+        "miningExcludedFactorNames": [],
         "successPatterns": [],
         "forbiddenRegions": [],
         "lossPatterns": [],

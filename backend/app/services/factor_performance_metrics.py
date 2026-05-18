@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 
 from app.services.factor_registry import FactorDefinition
-from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 BACKTEST_MIN_PERIODS = 100
 
@@ -33,7 +32,7 @@ def signal_returns(df: pd.DataFrame, factor_def: FactorDefinition) -> pd.Series:
     signal = pd.Series(np.where(factor >= median, 1.0, -1.0), index=df.index)
     if factor_def.direction.value == "lower_better":
         signal = -signal
-    returns = (signal * df["fwd_ret"].astype(float) - ROUNDTRIP_COST_RATE).replace([np.inf, -np.inf], np.nan)
+    returns = (signal * df["fwd_ret"].astype(float)).replace([np.inf, -np.inf], np.nan)
     return returns.loc[returns.index.isin(median.dropna().index)].dropna()
 
 

@@ -59,7 +59,7 @@ def test_candidate_feature_columns_exclude_raw_combo_library_features() -> None:
     assert "goal_combo__legacy_factor" not in columns
 
 
-def test_build_lstm_training_dataset_excludes_learning_blocked_features(monkeypatch) -> None:
+def test_build_lstm_training_dataset_excludes_loss_memory_features(monkeypatch) -> None:
     frame = _training_frame()
     monkeypatch.setattr(lstm_feature_builder, "load_factor_frame", lambda *_args: frame)
     monkeypatch.setattr(
@@ -91,7 +91,7 @@ def test_build_lstm_training_dataset_excludes_learning_blocked_features(monkeypa
     )
 
     assert "factor_a" in dataset.feature_columns
-    assert "factor_b" not in dataset.feature_columns
+    assert "factor_b" in dataset.feature_columns
     assert "factor_c" not in dataset.feature_columns
 
 
