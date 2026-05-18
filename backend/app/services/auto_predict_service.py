@@ -15,7 +15,6 @@ from app.services.factor_combo_batch_predictions import (
     predict_eligible_factor_combo_rows,
 )
 from app.services.factor_combo_batch_simulation_service import create_batch_combo_simulation_trade
-from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_demotion
 from app.services.kline_timing import (
@@ -25,7 +24,6 @@ from app.services.kline_timing import (
     utc_now_ms,
 )
 from app.services.lstm_config import is_lstm_shadow_strategy, lstm_shadow_strategy_key
-from app.services.lstm_combo_sync_service import sync_lstm_model_to_combo_ranking
 from app.services.prediction_cache_service import (
     prediction_exists,
     prediction_response,
@@ -190,8 +188,6 @@ async def _save_lstm_shadow_prediction(
     if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return
     status = await asyncio.to_thread(lstm_model_status, settings.symbol, settings.duration)
-    if status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch":
-        status = await asyncio.to_thread(_sync_and_reload_lstm_status, settings)
     if not status.get("shadowPredictionReady"):
         _log_lstm_shadow_skip(settings, status, role="sidecar")
         return
@@ -353,8 +349,6 @@ def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
     ):
         return False
     status = lstm_model_status(settings.symbol, settings.duration)
-    if status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch":
-        status = _sync_and_reload_lstm_status(settings)
     return bool(status.get("shadowPredictionReady"))
 
 
@@ -367,8 +361,6 @@ def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
     ):
         return False
     status = lstm_model_status(settings.symbol, settings.duration)
-    if status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch":
-        status = _sync_and_reload_lstm_status(settings)
     if status.get("shadowPredictionReady"):
         return True
     _log_lstm_shadow_skip(settings, status, role="primary")
@@ -393,29 +385,6 @@ def _log_lstm_shadow_skip(
         status.get("artifactsReady"),
         status.get("comboSnapshotReason"),
     )
-
-
-def _sync_and_reload_lstm_status(settings: AutoTradeSettings) -> dict:
-    ranking = get_cached_combination_ranking(settings.symbol, settings.duration)
-    if ranking is None:
-        raise RuntimeError(f"cannot sync LSTM without combo ranking: {settings.symbol} {settings.duration}")
-    sync = sync_lstm_model_to_combo_ranking(
-        settings.symbol,
-        settings.duration,
-        ranking_report=ranking,
-    )
-    status = lstm_model_status(settings.symbol, settings.duration)
-    logger.info(
-        "predict: LSTM combo snapshot recovery strategy=%s symbol=%s duration=%s syncStatus=%s model=%s ready=%s reason=%s",
-        settings.strategy_key,
-        settings.symbol,
-        settings.duration,
-        sync.get("status"),
-        sync.get("modelVersion"),
-        status.get("shadowPredictionReady"),
-        status.get("shadowPredictionBlockedReason"),
-    )
-    return {**status, "lstmSync": sync}
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:

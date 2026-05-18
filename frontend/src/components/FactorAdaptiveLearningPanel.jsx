@@ -40,6 +40,7 @@ export default function FactorAdaptiveLearningPanel({ learning, lstm, lstmStatus
 
 function LstmShadowCard({ lstm, statusText }) {
   const shadow = lstm?.shadow || lstm || {};
+  const ready = predictionReady(shadow);
   return (
     <div className={`factor-lstm-card ${statusClass(shadow.status)}`}>
       <div className="factor-lstm-card-head">
@@ -51,8 +52,9 @@ function LstmShadowCard({ lstm, statusText }) {
         <span>{shadow.strategyKey || "factor_lstm_shadow"}</span>
       </div>
       <div className="factor-lstm-grid">
-        <Metric label="预测状态" value={readinessLabel(shadow)} strong={shadow.shadowPredictionReady} />
-        <Metric label="阻断原因" value={blockedReasonLabel(shadow.shadowPredictionBlockedReason)} />
+        <Metric label="预测状态" value={readinessLabel(shadow)} strong={ready} />
+        <Metric label="运行闸门" value={gateLabel(shadow)} strong={ready} />
+        <Metric label="组合状态" value={comboStatusLabel(shadow.comboSnapshotReason)} />
         <Metric label="Active状态" value={lstmStatusLabel(shadow.activeModelStatus || shadow.status)} />
         <Metric label="最近尝试" value={lstmStatusLabel(shadow.lastAttemptStatus)} />
         <Metric label="验证失败" value={shadow.validationFailureReason || "—"} />
@@ -124,9 +126,22 @@ function lstmStatusLabel(status) {
 }
 
 function readinessLabel(shadow) {
-  if (shadow.shadowPredictionReady) return "可模拟下单";
+  if (predictionReady(shadow)) return "可模拟下单";
   if (!shadow.status || shadow.status === "untrained") return "未就绪";
   return "已阻断";
+}
+
+function gateLabel(shadow) {
+  if (predictionReady(shadow)) return "未阻断";
+  return blockedReasonLabel(shadow.shadowPredictionBlockedReason);
+}
+
+function predictionReady(shadow) {
+  return Boolean(shadow.shadowPredictionReady || isComboDriftOnly(shadow));
+}
+
+function isComboDriftOnly(shadow) {
+  return shadow.shadowPredictionBlockedReason === "combo_snapshot_mismatch";
 }
 
 function blockedReasonLabel(reason) {
@@ -138,7 +153,18 @@ function blockedReasonLabel(reason) {
     trained_combo_snapshot_incomplete: "训练组合不足Top3",
     current_combo_snapshot_missing: "当前组合排名缺失",
     current_combo_snapshot_incomplete: "当前组合不足Top3",
-    combo_snapshot_mismatch: "组合排名已变化",
+  };
+  return labels[reason] || reason || "—";
+}
+
+function comboStatusLabel(reason) {
+  const labels = {
+    passed: "一致",
+    trained_combo_snapshot_missing: "训练快照缺失",
+    trained_combo_snapshot_incomplete: "训练快照不足",
+    current_combo_snapshot_missing: "当前排名缺失",
+    current_combo_snapshot_incomplete: "当前排名不足",
+    combo_snapshot_mismatch: "已变化，继续学习",
   };
   return labels[reason] || reason || "—";
 }

@@ -26,7 +26,6 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         version,
         report,
         artifacts_ready,
-        snapshot,
         torch_available,
     )
     return {
@@ -186,7 +185,6 @@ def _shadow_prediction_ready_reason(
     version: dict[str, Any],
     report: dict[str, Any],
     artifacts_ready: bool,
-    snapshot: dict[str, Any],
     torch_available: bool,
 ) -> str:
     if not torch_available:
@@ -198,6 +196,4 @@ def _shadow_prediction_ready_reason(
     validation_reason = lstm_validation_block_reason(status, version, report)
     if validation_reason != "passed":
         return validation_reason
-    if not snapshot["matches"]:
-        return str(snapshot["reason"])
     return "passed"

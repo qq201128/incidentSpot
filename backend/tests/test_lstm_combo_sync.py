@@ -4,6 +4,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from app.services import factor_combination_background as combo_background
 from app.services import lstm_combo_sync_service as combo_sync
 from app.services import lstm_combo_snapshot, lstm_prediction_service
@@ -26,6 +28,11 @@ def test_lstm_model_status_marks_stale_combo_snapshot(monkeypatch) -> None:
         "get_cached_combination_ranking",
         lambda *_args: _ranking("combo_new", "factor_b"),
     )
+    monkeypatch.setattr(
+        lstm_status_service,
+        "torch_availability",
+        lambda: {"available": True, "error": None},
+    )
 
     status = lstm_prediction_service.lstm_model_status(
         "BTCUSDT",
@@ -35,7 +42,29 @@ def test_lstm_model_status_marks_stale_combo_snapshot(monkeypatch) -> None:
 
     assert status["comboSnapshotMatches"] is False
     assert status["comboSnapshotReason"] == "combo_snapshot_mismatch"
-    assert status["shadowPredictionReady"] is False
+    assert status["shadowPredictionReady"] is True
+    assert status["shadowPredictionBlockedReason"] == "passed"
+
+
+def test_lstm_prediction_allows_current_combo_drift(monkeypatch) -> None:
+    artifact_root = _runtime_path("predict-stale")
+    _write_trained_artifacts(artifact_root, _snapshot("combo_old", "factor_a"))
+    monkeypatch.setattr(
+        lstm_combo_ranking,
+        "get_cached_combination_ranking",
+        lambda *_args: _ranking("combo_new", "factor_b"),
+    )
+    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
+
+    signal = lstm_prediction_service.predict_lstm_signal(
+        "BTCUSDT",
+        "10m",
+        artifact_root=artifact_root,
+        backend=_PredictOnlyBackend(),
+    )
+
+    assert signal["strategyKey"] == "factor_lstm_shadow_10m"
+    assert signal["direction"] == "up"
 
 
 def test_lstm_model_status_exposes_torch_blocker(monkeypatch) -> None:
@@ -380,6 +409,16 @@ def _promotion(report: dict[str, Any]) -> dict[str, Any]:
         "promoted": 1,
         "libraryTotal": 1,
     }
+
+
+class _PredictOnlyBackend:
+    def predict(self, _model_path, x):
+        return np.asarray([0.7], dtype=np.float32)
+
+
+def _live_window(*_args, **kwargs):
+    assert "combo_snapshot" not in kwargs
+    return np.ones((1, 4, 1), dtype=np.float32), {"entryOpenTime": 1778121600000, "entryPrice": 100.0}
 
 
 def _runtime_path(name: str) -> Path:

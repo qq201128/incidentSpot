@@ -12,7 +12,6 @@ from app.services.lstm_artifacts import (
     require_json,
     required_artifacts_exist,
 )
-from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import LSTM_RULE_NAME, lstm_shadow_strategy_key
 from app.services.lstm_feature_builder import build_live_feature_window
 from app.services.lstm_status_service import (
@@ -49,7 +48,6 @@ def predict_lstm_signal(
         list(features["columns"]),
         int(features["featureWindow"]),
         entry_open_time,
-        combo_snapshot=features.get("comboSnapshot"),
     )
     scaled = apply_standardizer(window, scaler)
     probability_up = float((backend or TorchLstmBackend()).predict(paths.model, scaled)[0])
@@ -92,9 +90,6 @@ def _assert_predictable(
     validation_reason = lstm_validation_block_reason(status, version, report)
     if validation_reason != "passed":
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {validation_reason}")
-    snapshot = combo_snapshot_status(symbol, duration, artifact_root=artifact_root)
-    if not snapshot["matches"]:
-        raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {snapshot['reason']}")
 
 
 def _signal_payload(
@@ -187,4 +182,3 @@ def _prediction_version_payload(version: dict[str, Any], report: dict[str, Any])
         "validationGate": gate,
         "selectedConfidenceThreshold": threshold,
     }
-

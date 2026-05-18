@@ -220,8 +220,16 @@ function memoryStatus(data) {
 function lstmStatusText(data) {
   const label = data?.status || "untrained";
   const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
-  const ready = data?.shadowPredictionReady ? " · 可模拟下单" : ` · 阻断：${lstmBlockedReasonLabel(data?.shadowPredictionBlockedReason)}`;
+  const ready = lstmReadyStatusText(data);
   return `LSTM：${label}${version}${ready}`;
+}
+
+function lstmReadyStatusText(data) {
+  if (data?.shadowPredictionReady || data?.shadowPredictionBlockedReason === "combo_snapshot_mismatch") {
+    const combo = data?.comboSnapshotReason === "combo_snapshot_mismatch" ? " · 组合变化继续学习" : "";
+    return ` · 可模拟下单${combo}`;
+  }
+  return ` · 阻断：${lstmBlockedReasonLabel(data?.shadowPredictionBlockedReason)}`;
 }
 
 function lstmBlockedReasonLabel(reason) {
@@ -232,7 +240,6 @@ function lstmBlockedReasonLabel(reason) {
     trained_combo_snapshot_incomplete: "训练组合不足Top3",
     current_combo_snapshot_missing: "当前组合排名缺失",
     current_combo_snapshot_incomplete: "当前组合不足Top3",
-    combo_snapshot_mismatch: "组合排名已变化",
   };
   return labels[reason] || reason || "未知原因";
 }

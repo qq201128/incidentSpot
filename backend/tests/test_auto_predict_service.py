@@ -275,25 +275,20 @@ def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -
     assert recovery_flags == [True]
 
 
-def test_ready_lstm_shadow_due_syncs_snapshot_mismatch(monkeypatch) -> None:
-    calls = []
-    statuses = [
-        {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "combo_snapshot_mismatch"},
-        {"shadowPredictionReady": True, "shadowPredictionBlockedReason": "passed"},
-    ]
+def test_ready_lstm_shadow_due_does_not_sync_snapshot_mismatch(monkeypatch) -> None:
     settings = _settings(FACTOR_COMBO_STRATEGY_KEY)
 
     monkeypatch.setattr(service, "prediction_exists", lambda **_kwargs: False)
-    monkeypatch.setattr(service, "lstm_model_status", lambda *_args: statuses.pop(0))
-    monkeypatch.setattr(service, "get_cached_combination_ranking", lambda *_args: {"ranking": [{"factorName": "combo__a"}]})
     monkeypatch.setattr(
         service,
-        "sync_lstm_model_to_combo_ranking",
-        lambda symbol, duration, *, ranking_report: calls.append((symbol, duration, ranking_report)) or {"status": "trained"},
+        "lstm_model_status",
+        lambda *_args: {
+            "shadowPredictionReady": False,
+            "shadowPredictionBlockedReason": "combo_snapshot_mismatch",
+        },
     )
 
-    assert service._ready_lstm_shadow_due(settings, ENTRY_OPEN_TIME) is True
-    assert calls == [("BTCUSDT", "10m", {"ranking": [{"factorName": "combo__a"}]})]
+    assert service._ready_lstm_shadow_due(settings, ENTRY_OPEN_TIME) is False
 
 
 def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> None:
