@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api", tags=["market"])
 ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
 BINANCE_KLINE_LIMIT = 1000
 PREDICTION_MIN_REFRESH_LIMIT = 400
+DISPLAY_KLINE_REQUEST_OPTIONS = {"max_attempts": 2, "timeout": (3, 6)}
 
 def _upsert_klines(symbol: str, interval: str, rows: list[dict]) -> None:
     conn = get_conn()
@@ -123,7 +124,12 @@ def get_index_klines(
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail=f"unsupported interval: {interval}")
     try:
-        return fetch_index_price_klines(symbol.upper(), interval, limit=limit)
+        return fetch_index_price_klines(
+            symbol.upper(),
+            interval,
+            limit=limit,
+            request_options=DISPLAY_KLINE_REQUEST_OPTIONS,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"failed to fetch index klines: {exc}") from exc
 

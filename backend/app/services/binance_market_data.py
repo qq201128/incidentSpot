@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.services.binance_http import FAPI_BASE_URL, SHORT_TIMEOUT, retry_get
+from app.services.binance_http import FAPI_BASE_URL, retry_get
 from app.services.index_price_tick_service import persist_index_price_tick
 from app.services.orderbook_feature_service import OrderbookSnapshotRequest, build_orderbook_snapshot
 
@@ -13,6 +13,8 @@ MIN_DISPLAY_DEPTH = 5
 MAX_DISPLAY_DEPTH = 1000
 MIN_AGG_TRADE_LIMIT = 1
 BINANCE_DEPTH_LIMITS = (5, 10, 20, 50, 100, 500, 1000)
+DISPLAY_MAX_ATTEMPTS = 2
+DISPLAY_TIMEOUT = (3, 6)
 
 LAST_ORDERBOOK: dict[str, dict[str, Any]] = {}
 LAST_TICKER: dict[str, dict[str, Any]] = {}
@@ -20,11 +22,7 @@ LAST_FUNDING_RATE: dict[str, float | None] = {}
 
 
 def fetch_premium_index(symbol: str) -> dict:
-    data = retry_get(
-        f"{FAPI_BASE_URL}/fapi/v1/premiumIndex",
-        {"symbol": symbol.upper()},
-        timeout=SHORT_TIMEOUT,
-    )
+    data = _display_retry_get("/fapi/v1/premiumIndex", {"symbol": symbol.upper()})
     row = _premium_index_row(data)
     result = {
         "symbol": row.get("symbol"),
@@ -41,7 +39,7 @@ def fetch_premium_index(symbol: str) -> dict:
 def fetch_orderbook(symbol: str, limit: int = 500) -> dict:
     sym = symbol.upper()
     params = {"symbol": sym, "limit": limit}
-    data = retry_get(f"{FAPI_BASE_URL}/fapi/v1/depth", params, timeout=SHORT_TIMEOUT)
+    data = _display_retry_get("/fapi/v1/depth", params)
     return build_orderbook_snapshot(
         OrderbookSnapshotRequest(
             symbol=sym,
@@ -59,7 +57,8 @@ def fetch_agg_trades_display(symbol: str, limit: int = 50) -> list[dict[str, Any
     rows = retry_get(
         f"{FAPI_BASE_URL}/fapi/v1/aggTrades",
         {"symbol": sym, "limit": bounded_limit},
-        timeout=SHORT_TIMEOUT,
+        max_attempts=DISPLAY_MAX_ATTEMPTS,
+        timeout=DISPLAY_TIMEOUT,
     )
     if not isinstance(rows, list):
         return []
@@ -71,10 +70,9 @@ def fetch_agg_trades_display(symbol: str, limit: int = 50) -> list[dict[str, Any
 def fetch_orderbook_depth_display(symbol: str, levels: int = 20) -> dict[str, Any]:
     sym = symbol.upper()
     bounded_levels = max(MIN_DISPLAY_DEPTH, min(int(levels), MAX_DISPLAY_DEPTH))
-    data = retry_get(
-        f"{FAPI_BASE_URL}/fapi/v1/depth",
+    data = _display_retry_get(
+        "/fapi/v1/depth",
         {"symbol": sym, "limit": _binance_depth_fetch_limit(bounded_levels)},
-        timeout=SHORT_TIMEOUT,
     )
     snapshot = _orderbook_snapshot(sym, data)
     bids = [[float(bid[0]), float(bid[1])] for bid in (data.get("bids") or [])[:bounded_levels]]
@@ -96,7 +94,7 @@ def fetch_orderbook_depth_display(symbol: str, levels: int = 20) -> dict[str, An
 
 def fetch_24h_ticker(symbol: str) -> dict:
     sym = symbol.upper()
-    data = retry_get(f"{FAPI_BASE_URL}/fapi/v1/ticker/24hr", {"symbol": sym}, timeout=SHORT_TIMEOUT)
+    data = _display_retry_get("/fapi/v1/ticker/24hr", {"symbol": sym})
     result = {
         "symbol": data.get("symbol"),
         "priceChange": float(data.get("priceChange", 0)),
@@ -117,7 +115,7 @@ def fetch_24h_ticker(symbol: str) -> dict:
 
 def fetch_funding_rate(symbol: str) -> float | None:
     sym = symbol.upper()
-    data = retry_get(f"{FAPI_BASE_URL}/fapi/v1/fundingRate", {"symbol": sym, "limit": 1}, timeout=SHORT_TIMEOUT)
+    data = _display_retry_get("/fapi/v1/fundingRate", {"symbol": sym, "limit": 1})
     if data and isinstance(data, list):
         rate = float(data[0].get("fundingRate", 0))
         LAST_FUNDING_RATE[sym] = rate
@@ -135,6 +133,15 @@ def get_cached_ticker(symbol: str) -> dict | None:
 
 def get_cached_funding_rate(symbol: str) -> float | None:
     return LAST_FUNDING_RATE.get(symbol.upper())
+
+
+def _display_retry_get(endpoint: str, params: dict[str, Any]) -> dict | list:
+    return retry_get(
+        f"{FAPI_BASE_URL}{endpoint}",
+        params,
+        max_attempts=DISPLAY_MAX_ATTEMPTS,
+        timeout=DISPLAY_TIMEOUT,
+    )
 
 
 def _premium_index_row(data: dict | list) -> dict[str, Any]:

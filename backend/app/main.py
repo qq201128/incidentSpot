@@ -59,6 +59,23 @@ app.state.factor_combo_daily_stop_event = None
 app.state.lstm_daily_review_task = None
 app.state.lstm_daily_review_stop_event = None
 ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
+BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+STOP_EVENT_ATTRS = (
+    "settlement_stop_event",
+    "predict_stop_event",
+    "trade_stop_event",
+    "factor_ranking_stop_event",
+    "factor_combo_daily_stop_event",
+    "lstm_daily_review_stop_event",
+)
+BACKGROUND_TASK_ATTRS = (
+    "settlement_task",
+    "predict_task",
+    "trade_task",
+    "factor_ranking_task",
+    "factor_combo_daily_task",
+    "lstm_daily_review_task",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,32 +131,38 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    for attr in (
-        "settlement_stop_event",
-        "predict_stop_event",
-        "trade_stop_event",
-        "factor_ranking_stop_event",
-        "factor_combo_daily_stop_event",
-        "lstm_daily_review_stop_event",
-    ):
+    for attr in STOP_EVENT_ATTRS:
         ev = getattr(app.state, attr, None)
         if ev:
             ev.set()
-    for attr in (
-        "settlement_task",
-        "predict_task",
-        "trade_task",
-        "factor_ranking_task",
-        "factor_combo_daily_task",
-        "lstm_daily_review_task",
-    ):
+    await _cancel_background_tasks(_background_tasks())
+
+
+def _background_tasks() -> list[asyncio.Task]:
+    tasks = []
+    for attr in BACKGROUND_TASK_ATTRS:
         task = getattr(app.state, attr, None)
-        if task:
-            await task
+        if task and not task.done():
+            tasks.append(task)
+    return tasks
+
+
+async def _cancel_background_tasks(tasks: list[asyncio.Task]) -> None:
+    if not tasks:
+        return
+    for task in tasks:
+        task.cancel()
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("background task shutdown timed out after %ss", BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS)
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
     return {"ok": True}
 
 

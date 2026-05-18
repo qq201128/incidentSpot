@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Any
 
+from app.services.background_threads import run_blocking_daemon
 from app.services.factor_backtest_service import run_factor_ranking_report
 from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
@@ -85,7 +86,7 @@ async def factor_ranking_refresh_loop(stop_event: asyncio.Event) -> None:
         await _sleep_for(stop_event, initial)
     while not stop_event.is_set():
         try:
-            await asyncio.to_thread(refresh_all_configured_rankings)
+            await run_blocking_daemon(refresh_all_configured_rankings)
         except Exception:
             logger.exception("factor ranking background batch failed")
         await _sleep_for(stop_event, interval)

@@ -7,6 +7,10 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from app.services.factor_backtest_batch_service import run_all_factor_backtests
 from app.services.factor_backtest_service import run_factor_backtest
 from app.services.factor_cache_metadata import cache_is_usable
+from app.services.factor_catalog_summaries import (
+    list_combo_factor_summaries,
+    list_single_factor_summaries,
+)
 from app.services.factor_ranking_background import refresh_symbol_rankings
 from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
@@ -14,9 +18,7 @@ from app.services.factor_ranking_cache_service import (
 )
 from app.services.factor_catalog import (
     get_factor_payload_by_name,
-    list_combo_factor_payloads,
     list_single_factor_categories,
-    list_single_factor_payloads,
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
@@ -39,8 +41,8 @@ def list_factors(
     category: str | None = None,
 ) -> dict:
     try:
-        factors = list_single_factor_payloads(category)
-        combo_factors = list_combo_factor_payloads()
+        factors = list_single_factor_summaries(category)
+        combo_factors = list_combo_factor_summaries()
         categories = list_single_factor_categories()
         return {
             "factors": factors,

@@ -21,6 +21,10 @@ import { strategyLabel } from "./utils/strategyLabels";
 import { useLatestPrediction } from "./hooks/useLatestPrediction";
 import { mergeKlineCandle, normalizeChartCandle } from "./utils/klineCandles";
 
+const PRICE_POLL_MS = 2000;
+const TRADES_POLL_MS = 3000;
+const EVENTS_POLL_MS = 5000;
+
 export default function App() {
   const [appView, setAppView] = useState("trade");
   const [symbol, setSymbol] = useState("BTCUSDT");
@@ -87,42 +91,43 @@ export default function App() {
   useEffect(() => {
     let timer;
     let stopped = false;
-    const tick = () => {
+    const tick = async () => {
       if (stopped) return;
-      fetchLastPrice(symbol)
-        .then((p) => {
-          if (!stopped) setTickerPrice(p);
-        })
-        .catch((err) => {
-          console.error("最新指数价加载失败", err);
-          if (!stopped) setStatus(`最新指数价加载失败：${err.message}`);
-        });
+      try {
+        const p = await fetchLastPrice(symbol);
+        if (!stopped) setTickerPrice(p);
+      } catch (err) {
+        console.error("最新指数价加载失败", err);
+        if (!stopped) setStatus(`最新指数价加载失败：${err.message}`);
+      } finally {
+        if (!stopped) timer = window.setTimeout(tick, PRICE_POLL_MS);
+      }
     };
-    tick();
-    timer = window.setInterval(tick, 2000);
+    void tick();
     return () => {
       stopped = true;
-      if (timer) clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [symbol]);
 
   useEffect(() => {
     let stopped = false;
-    const poll = () => {
-      fetchAggTrades(symbol, 40)
-        .then((rows) => {
-          if (!stopped) setAggTrades(Array.isArray(rows) ? rows : []);
-        })
-        .catch((err) => {
-          console.error("近期成交加载失败", err);
-          if (!stopped) setStatus(`近期成交加载失败：${err.message}`);
-        });
+    const poll = async () => {
+      try {
+        const rows = await fetchAggTrades(symbol, 40);
+        if (!stopped) setAggTrades(Array.isArray(rows) ? rows : []);
+      } catch (err) {
+        console.error("近期成交加载失败", err);
+        if (!stopped) setStatus(`近期成交加载失败：${err.message}`);
+      } finally {
+        if (!stopped) timer = window.setTimeout(poll, TRADES_POLL_MS);
+      }
     };
-    poll();
-    const timer = window.setInterval(poll, 2000);
+    let timer;
+    void poll();
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
     };
   }, [symbol]);
 
@@ -180,10 +185,16 @@ export default function App() {
       }
     };
 
-    timer = window.setInterval(tick, 3000);
+    const schedule = () => {
+      timer = window.setTimeout(async () => {
+        await tick();
+        if (!stopped) schedule();
+      }, EVENTS_POLL_MS);
+    };
+    schedule();
     return () => {
       stopped = true;
-      if (timer) clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

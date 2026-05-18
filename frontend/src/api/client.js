@@ -7,6 +7,8 @@ import axios from "axios";
  * - `npm run build`：使用 .env.production 或构建环境的 VITE_API_BASE_URL。
  */
 const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+const MARKET_REQUEST_TIMEOUT_MS = 12_000;
+const LOCAL_REQUEST_TIMEOUT_MS = 8_000;
 
 const DIRECT_IN_DEV =
   import.meta.env.VITE_DIRECT_API === "1" ||
@@ -62,6 +64,7 @@ export async function fetchHistory(symbol, interval, limit = 500, { live = false
 export async function fetchLatestPrice(symbol) {
   const { data } = await axios.get(`${BASE_URL}/api/last-price`, {
     params: { symbol },
+    timeout: MARKET_REQUEST_TIMEOUT_MS,
   });
   const p = Number(data?.indexPrice);
   if (!Number.isFinite(p) || p <= 0) {
@@ -80,6 +83,7 @@ export async function fetchIndexKlines(symbol, interval, limit = 500) {
   const safeInterval = normalizeInterval(interval);
   const { data } = await axios.get(`${BASE_URL}/api/index-klines`, {
     params: { symbol, interval: safeInterval, limit },
+    timeout: MARKET_REQUEST_TIMEOUT_MS,
   });
   return data;
 }
@@ -96,6 +100,7 @@ export async function fetchIndexPrice(symbol) {
 export async function fetchOrderbookDepth(symbol, limit = 20) {
   const { data } = await axios.get(`${BASE_URL}/api/depth`, {
     params: { symbol, limit },
+    timeout: MARKET_REQUEST_TIMEOUT_MS,
   });
   return data;
 }
@@ -104,6 +109,7 @@ export async function fetchOrderbookDepth(symbol, limit = 20) {
 export async function fetchAggTrades(symbol, limit = 40) {
   const { data } = await axios.get(`${BASE_URL}/api/agg-trades`, {
     params: { symbol, limit },
+    timeout: MARKET_REQUEST_TIMEOUT_MS,
   });
   return data;
 }
@@ -129,7 +135,9 @@ export async function settleEvent(eventId) {
 }
 
 export async function fetchEvents() {
-  const { data } = await axios.get(`${BASE_URL}/api/events`);
+  const { data } = await axios.get(`${BASE_URL}/api/events`, {
+    timeout: LOCAL_REQUEST_TIMEOUT_MS,
+  });
   return data;
 }
 

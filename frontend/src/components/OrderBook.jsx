@@ -67,6 +67,8 @@ export default function OrderBook({ symbol, lastTrade = null }) {
   useEffect(() => {
     let cancelled = false;
 
+    let timer;
+
     async function tick() {
       try {
         const data = await fetchOrderbookDepth(symbol, DEPTH_LEVELS_PER_SIDE);
@@ -78,14 +80,17 @@ export default function OrderBook({ symbol, lastTrade = null }) {
         if (!cancelled) {
           setError(String(e?.response?.data?.detail || e?.message || "加载失败"));
         }
+      } finally {
+        if (!cancelled) {
+          timer = window.setTimeout(tick, POLL_MS);
+        }
       }
     }
 
     void tick();
-    const id = window.setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      if (timer) window.clearTimeout(timer);
     };
   }, [symbol]);
 

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from app.services.background_threads import run_blocking_daemon
 from app.services.binance_service import fetch_klines
 from app.services.factor_backtest_batch_service import BACKTEST_DURATION_ORDER
 from app.db.session import get_conn
@@ -41,6 +42,7 @@ def refresh_combination_ranking_for_symbol_duration(
     config: CombinationSearchConfig | None = None,
     *,
     refresh_signal_cache: bool = True,
+    run_learning_agent: bool = True,
 ) -> None:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
@@ -61,7 +63,7 @@ def refresh_combination_ranking_for_symbol_duration(
         sym,
         duration,
         ranking_report=report,
-        run_llm_agent=True,
+        run_llm_agent=run_learning_agent,
     )
     if refresh_signal_cache:
         _refresh_signal_watchlist_cache(sym)
@@ -125,9 +127,16 @@ def refresh_symbol_combination_rankings(
     symbol: str,
     duration: str | None = None,
     config: CombinationSearchConfig | None = None,
+    *,
+    run_learning_agent: bool = True,
 ) -> None:
     if duration is not None:
-        refresh_combination_ranking_for_symbol_duration(symbol, duration, config)
+        refresh_combination_ranking_for_symbol_duration(
+            symbol,
+            duration,
+            config,
+            run_learning_agent=run_learning_agent,
+        )
         return
     sym = symbol.strip().upper()
     for dur in _refresh_durations():
@@ -136,6 +145,7 @@ def refresh_symbol_combination_rankings(
             dur,
             config,
             refresh_signal_cache=False,
+            run_learning_agent=run_learning_agent,
         )
     _refresh_signal_watchlist_cache(sym)
 
@@ -162,7 +172,12 @@ def refresh_stale_configured_combination_rankings(
             if not _ranking_cache_needs_refresh(symbol, duration):
                 continue
             try:
-                refresh_combination_ranking_for_symbol_duration(symbol, duration, config)
+                refresh_combination_ranking_for_symbol_duration(
+                    symbol,
+                    duration,
+                    config,
+                    run_learning_agent=False,
+                )
                 logger.info("stale factor combo ranking cache updated: %s %s", symbol, duration)
             except Exception:
                 logger.exception("stale factor combo ranking cache failed: %s %s", symbol, duration)
@@ -202,24 +217,14 @@ async def factor_combination_daily_refresh_loop(stop_event: asyncio.Event) -> No
         "factor combo daily review: symbols=%s at=00:30 timezone=Asia/Shanghai",
         factor_ranking_precomputed_symbols(),
     )
-    await _refresh_stale_on_startup(stop_event)
     while not stop_event.is_set():
         await _sleep_for(stop_event, seconds_until_next_daily_refresh())
         if stop_event.is_set():
             return
         try:
-            await asyncio.to_thread(refresh_all_configured_combination_rankings)
+            await run_blocking_daemon(refresh_all_configured_combination_rankings)
         except Exception:
             logger.exception("factor combo daily refresh batch failed")
-
-
-async def _refresh_stale_on_startup(stop_event: asyncio.Event) -> None:
-    if stop_event.is_set():
-        return
-    try:
-        await asyncio.to_thread(refresh_stale_configured_combination_rankings)
-    except Exception:
-        logger.exception("factor combo startup stale refresh failed")
 
 
 def _refresh_durations() -> tuple[str, ...]:
