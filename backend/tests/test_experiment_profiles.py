@@ -13,12 +13,14 @@ def test_fast_profile_uses_smaller_combo_and_lstm_configs() -> None:
     combo = profiles.combination_search_config_for_profile(profiles.EXPERIMENT_PROFILE_FAST)
     lstm = profiles.lstm_training_config_for_profile("btcusdt", "10m", profiles.EXPERIMENT_PROFILE_FAST)
 
-    assert combo.base_factor_limit == 8
-    assert combo.native_factor_limit == 6
-    assert combo.mined_factor_limit == 2
+    assert combo.base_factor_limit == 16
+    assert combo.native_factor_limit == 10
+    assert combo.mined_factor_limit == 4
     assert combo.agent_factor_limit == 1
     assert combo.combo_sizes == (2,)
     assert combo.result_limit == 50
+    assert combo.prefilter_limit == 120
+    assert combo.parallel_workers == 2
     assert lstm.feature_window == 32
     assert lstm.epochs == 2
     assert lstm.batch_size == 64

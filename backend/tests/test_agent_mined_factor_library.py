@@ -28,6 +28,8 @@ def test_agent_candidate_is_recorded_and_promoted(monkeypatch, tmp_path: Path) -
     assert result["agentCandidateEvaluation"]["promotedCount"] == 1
     assert result["llmAgent"]["review"]["evaluation"]["promotedCount"] == 1
     assert library["factors"][0]["source"] == agent_lib.AGENT_FACTOR_SOURCE_FILE
+    assert library["factors"][0]["candidateStatus"] == "promoted"
+    assert library["factors"][0]["qualityPassed"] is True
     assert history["runs"][0]["evaluation"]["promotedCount"] == 1
     assert history["runs"][0]["candidates"][0]["status"] == "promoted"
 
@@ -56,6 +58,25 @@ def test_evaluation_counts_only_current_records(monkeypatch, tmp_path: Path) -> 
     assert evaluation["rejectedCount"] == 1
     assert evaluation["statusCounts"]["failed"] == 1
     assert evaluation["topPromotedFactors"] == []
+    assert evaluation["engineSupportBacklog"][0]["formula"] == "missing_column"
+    assert "formula column not found" in evaluation["engineSupportBacklog"][0]["error"]
+
+
+def test_rejected_metrics_candidate_is_stored(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(agent_lib, "run_factor_backtest_on_frame", _weak_backtest)
+    monkeypatch.setattr(agent_lib, "enrich_factor_results", lambda *_args, **_kwargs: None)
+
+    result = agent_lib.process_agent_factor_candidates(_memory("factor_a"), _frame())
+    library = agent_lib.load_agent_factor_library()
+
+    record = result["agentCandidatePromotion"]["records"][0]
+    row = library["factors"][0]
+    assert record["status"] == "rejected_metrics"
+    assert result["agentMinedFactorLibrary"]["total"] == 1
+    assert row["candidateStatus"] == "rejected_metrics"
+    assert row["qualityPassed"] is False
+    assert row["promotionCount"] == 0
 
 
 def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
@@ -113,6 +134,8 @@ def _existing_library_row(index: int) -> dict:
         "idea": {},
         "metrics": {"winRate": 0.6, "profitFactor": 1.2},
         "score": 10.0,
+        "candidateStatus": "promoted",
+        "qualityPassed": True,
         "firstSeenAt": "2026-05-17T00:00:00+00:00",
         "lastSeenAt": "2026-05-17T00:00:00+00:00",
         "promotionCount": 1,
@@ -156,3 +179,7 @@ def _frame() -> pd.DataFrame:
             "factor_a": future + noise,
         }
     )
+
+
+def _weak_backtest(*_args, **_kwargs) -> dict:
+    return {"winRate": 0.2, "profitFactor": 0.4, "totalPeriods": ROWS, "ir": -0.1}

@@ -5,12 +5,13 @@ from app.api.factor_combinations import _stale_combination_ranking
 
 
 def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
-    config = _combination_config(25, "2,3", 400)
+    config = _combination_config("full", 25, "2,3", 400)
 
     assert config.base_factor_limit == 25
     assert config.combo_sizes == (2, 3)
     assert config.result_limit == 400
-    assert config.native_factor_limit == 10
+    assert config.native_factor_limit == 32
+    assert config.prefilter_limit == 800
 
 
 def test_stale_combination_ranking_filters_nested_combo_rows() -> None:
@@ -35,5 +36,7 @@ def test_stale_combination_ranking_filters_nested_combo_rows() -> None:
 
     assert payload["source"] == "stale_cache"
     assert payload["total"] == 1
+    assert payload["rawTotal"] == 2
+    assert payload["nestedComboFilteredCount"] == 1
     assert payload["ranking"] == [cached["ranking"][0] | {"strategyBucket": "regular_combo"}]
     assert payload["cacheStatus"]["reason"] == "market_data_changed"

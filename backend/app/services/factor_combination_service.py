@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
 from math import isfinite
 from typing import Any
 
@@ -10,37 +9,41 @@ import pandas as pd
 from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_candidate_selection import select_base_candidates
-from app.services.factor_combo_scoring import combination_score
+from app.services.factor_combination_ranker import (
+    COMBINATION_METHOD,
+    combo_backtest_frame,
+    combination_definition,
+    combination_result,
+    enriched_combo_result,
+    rank_combinations,
+)
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_metric_enrichment import (
-    enrich_factor_results,
     factor_avg_abs_correlations,
     factor_score,
 )
 from app.services.factor_combination_payloads import (
     CombinationRankingReportPayload,
     build_combination_ranking_report,
-    combo_display_name,
-    member_avg_correlation,
-    member_payloads,
 )
-from app.services.factor_combination_walk_forward import walk_forward_validation
 from app.services.factor_learning_controls import (
     learning_blocked_factor_names,
     learning_weight,
     load_factor_learning_memory_for,
 )
 from app.services.factor_mined_candidates import build_mined_candidates
-from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection, list_factors
+from app.services.factor_registry import FactorDefinition, FactorDirection, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
-COMBINATION_METHOD = "expanding_oriented_zscore_mean_v1"
-COMBO_SOURCE_FILE = "factor_combination_service.py"
-DEFAULT_BASE_FACTOR_LIMIT = 16
-DEFAULT_NATIVE_FACTOR_LIMIT = 10
-DEFAULT_MINED_FACTOR_LIMIT = 4
-DEFAULT_AGENT_FACTOR_LIMIT = 2
+DEFAULT_BASE_FACTOR_LIMIT = 48
+DEFAULT_NATIVE_FACTOR_LIMIT = 32
+DEFAULT_MINED_FACTOR_LIMIT = 12
+DEFAULT_AGENT_FACTOR_LIMIT = 4
 DEFAULT_RESULT_LIMIT = 200
+DEFAULT_PREFILTER_LIMIT = 800
+DEFAULT_BEAM_WIDTH = 800
+DEFAULT_PARALLEL_WORKERS = 4
+BASE_DIRECTION_SPLIT = 0.50
 MIN_COMBO_SIZE = 2
 DEFAULT_MAX_COMBO_SIZE = 3
 DEFAULT_COMBO_SIZES = (MIN_COMBO_SIZE, DEFAULT_MAX_COMBO_SIZE)
@@ -53,6 +56,9 @@ class CombinationSearchConfig:
     agent_factor_limit: int = DEFAULT_AGENT_FACTOR_LIMIT
     combo_sizes: tuple[int, ...] = DEFAULT_COMBO_SIZES
     result_limit: int = DEFAULT_RESULT_LIMIT
+    prefilter_limit: int = DEFAULT_PREFILTER_LIMIT
+    beam_width: int = DEFAULT_BEAM_WIDTH
+    parallel_workers: int = DEFAULT_PARALLEL_WORKERS
     method: str = COMBINATION_METHOD
 
 @dataclass(frozen=True)
@@ -107,18 +113,19 @@ def run_factor_combination_ranking_on_frame(
     base = _enriched_base_candidates(base, mined.frame, learning_memory)
     selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
     context = _CombinationContext(mined.frame, symbol.upper(), duration)
-    ranking, tested_count, combo_failures = _rank_combinations(context, selected, cfg)
-    failures = [*base_failures, *mined.failures, *combo_failures]
+    rank_result = _rank_combinations_with_diagnostics(context, selected, cfg)
+    failures = [*base_failures, *mined.failures, *rank_result.failures]
     return build_combination_ranking_report(
         CombinationRankingReportPayload(
             symbol=symbol,
             duration=duration,
             config=cfg,
             selected=selected,
-            ranking=ranking,
-            tested_count=tested_count,
+            ranking=rank_result.ranking,
+            tested_count=rank_result.tested_count,
             failures=failures,
             mined_source_count=mined.source_count,
+            search_diagnostics=rank_result.diagnostics,
         )
     )
 
@@ -147,108 +154,22 @@ def _rank_combinations(
     candidates: list[_BaseCandidate],
     config: CombinationSearchConfig,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
-    rows: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
-    attempted = 0
-    for size in config.combo_sizes:
-        for members in combinations(candidates, size):
-            attempted += 1
-            result, failure = _combination_result(context, members)
-            if result is not None:
-                rows.append(result)
-            if failure is not None:
-                failures.append(failure)
-    enrich_factor_results(rows)
-    failures.extend(_walk_forward_failures(rows))
-    ranking = [row for row in rows if row["walkForwardPassed"]]
-    ranking.sort(key=_combo_rank_key, reverse=True)
-    if rows and not ranking:
-        failures.append({"stage": "walk_forward", "error": "no_walk_forward_combo_passed"})
-    return ranking[: config.result_limit], attempted, failures
+    result = _rank_combinations_with_diagnostics(context, candidates, config)
+    return result.ranking, result.tested_count, result.failures
 
 
-def _combination_result(
+def _rank_combinations_with_diagnostics(
     context: _CombinationContext,
-    members: tuple[_BaseCandidate, ...],
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    factor_def = _combination_definition(members, context.duration)
-    try:
-        combo_frame = _combo_backtest_frame(context.frame, members, factor_def.name)
-        result = run_factor_backtest_on_frame(
-            factor_def,
-            combo_frame,
-            symbol=context.symbol,
-            duration=context.duration,
-        )
-        return _enriched_combo_result(result, members, combo_frame, factor_def), None
-    except Exception as exc:
-        failure = {"factorName": factor_def.name, "stage": "combination", "error": str(exc)}
-        return None, failure
+    candidates: list[_BaseCandidate],
+    config: CombinationSearchConfig,
+):
+    return rank_combinations(context, candidates, config, result_func=_combination_result)
 
 
-def _combo_backtest_frame(
-    frame: pd.DataFrame,
-    members: tuple[_BaseCandidate, ...],
-    combo_name: str,
-) -> pd.DataFrame:
-    out = frame[["close"]].copy()
-    if "open_time" in frame.columns:
-        out["open_time"] = frame["open_time"]
-    out[combo_name] = combination_score(frame, member_payloads(members))
-    return out
-
-
-def _combination_definition(
-    members: tuple[_BaseCandidate, ...],
-    duration: str,
-) -> FactorDefinition:
-    names = [member.factor.name for member in members]
-    return FactorDefinition(
-        name="combo__" + "__".join(names),
-        category=FactorCategory.PERFORMANCE,
-        description="组合因子：" + " + ".join(member.factor.description for member in members),
-        formula=f"{COMBINATION_METHOD}(" + ", ".join(names) + ")",
-        source_file=COMBO_SOURCE_FILE,
-        timeframes=(duration,),
-        direction=FactorDirection.HIGHER_BETTER,
-        parameters={"members": names, "method": COMBINATION_METHOD},
-    )
-
-
-def _enriched_combo_result(
-    result: dict[str, Any],
-    members: tuple[_BaseCandidate, ...],
-    combo_frame: pd.DataFrame,
-    factor_def: FactorDefinition,
-) -> dict[str, Any]:
-    member_rows = member_payloads(members)
-    walk_forward = walk_forward_validation(combo_frame, factor_def, factor_def.timeframes[0])
-    payload = {
-        **result,
-        "comboSize": len(members),
-        "method": COMBINATION_METHOD,
-        "members": member_rows,
-        "avgAbsCorrelation": member_avg_correlation(members),
-        "walkForward": walk_forward.payload,
-        "walkForwardPassed": walk_forward.passed,
-        "walkForwardFailureReason": walk_forward.failure_reason,
-    }
-    payload["factorDisplayName"] = combo_display_name(member_rows)
-    payload["description"] = payload["factorDisplayName"]
-    payload["factorScore"] = factor_score(payload)
-    return payload
-
-
-def _walk_forward_failures(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "factorName": row["factorName"],
-            "stage": "walk_forward",
-            "error": row["walkForwardFailureReason"],
-        }
-        for row in rows
-        if not row["walkForwardPassed"]
-    ]
+_combination_result = combination_result
+_combo_backtest_frame = combo_backtest_frame
+_combination_definition = combination_definition
+_enriched_combo_result = enriched_combo_result
 
 
 def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:
@@ -281,6 +202,11 @@ def _factor_orientation(factor: FactorDefinition, metrics: dict[str, Any]) -> in
         return -1
     if factor.direction == FactorDirection.HIGHER_BETTER:
         return 1
+    win_rate = _finite_float(metrics.get("winRate"))
+    if win_rate is not None and win_rate < BASE_DIRECTION_SPLIT:
+        return -1
+    if win_rate is not None and win_rate > BASE_DIRECTION_SPLIT:
+        return 1
     return 1 if _metric_sign(metrics) >= 0 else -1
 
 
@@ -300,21 +226,19 @@ def _usable_base_metrics(metrics: dict[str, Any]) -> bool:
 def _base_rank_key(candidate: _BaseCandidate) -> tuple[float, float, float, float, int]:
     row = candidate.metrics
     return (
+        _directional_win_rate(candidate),
         _num(row.get("learningScore") if row.get("learningScore") is not None else row.get("factorScore")),
         _num(row.get("factorScore")),
         _num(row.get("winRate")),
-        _num(row.get("sharpe")),
         int(row.get("totalPeriods") or 0),
     )
 
 
-def _combo_rank_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
-    return (
-        _num(row.get("factorScore")),
-        _num(row.get("winRate")),
-        _num(row.get("profitFactor")),
-        _num(row.get("sharpe")),
-    )
+def _directional_win_rate(candidate: _BaseCandidate) -> float:
+    win_rate = _finite_float(candidate.metrics.get("winRate"))
+    if win_rate is None:
+        return float("-inf")
+    return win_rate if candidate.orientation == 1 else 1.0 - win_rate
 
 
 def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfig:
@@ -327,6 +251,8 @@ def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfi
         raise ValueError("result_limit must be > 0 and combo sizes must be >= 2")
     if min(config.native_factor_limit, config.mined_factor_limit, config.agent_factor_limit) < 0:
         raise ValueError("factor source limits must be >= 0")
+    if min(config.prefilter_limit, config.beam_width, config.parallel_workers) <= 0:
+        raise ValueError("prefilter_limit, beam_width, and parallel_workers must be > 0")
     return CombinationSearchConfig(
         base_factor_limit=int(config.base_factor_limit),
         native_factor_limit=int(config.native_factor_limit),
@@ -334,6 +260,9 @@ def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfi
         agent_factor_limit=int(config.agent_factor_limit),
         combo_sizes=sizes,
         result_limit=int(config.result_limit),
+        prefilter_limit=int(config.prefilter_limit),
+        beam_width=int(config.beam_width),
+        parallel_workers=int(config.parallel_workers),
         method=config.method,
     )
 

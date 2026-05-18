@@ -2,7 +2,8 @@ import axios from "axios";
 import { API_BASE_URL } from "./client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const REFRESH_TIMEOUT_MS = 90_000;
+const AGENT_QUEUE_TIMEOUT_MS = 15_000;
+const LOCAL_REFRESH_TIMEOUT_MS = 90_000;
 
 export async function fetchFactorLearningMemory(symbol, duration = "10m", options = {}) {
   const { data } = await axios.get(`${API_BASE_URL}/api/factor-learning/memory`, {
@@ -33,7 +34,7 @@ export async function fetchLstmStatus(symbol, duration = "10m", options = {}) {
 export async function requestFactorLearningRefresh(symbol, duration = "10m", runAgent = true) {
   const { data } = await axios.post(`${API_BASE_URL}/api/factor-learning/refresh`, null, {
     params: { symbol, duration, runAgent },
-    timeout: REFRESH_TIMEOUT_MS,
+    timeout: runAgent ? AGENT_QUEUE_TIMEOUT_MS : LOCAL_REFRESH_TIMEOUT_MS,
   });
   return data;
 }

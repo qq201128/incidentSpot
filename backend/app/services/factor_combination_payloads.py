@@ -23,6 +23,7 @@ class CombinationRankingReportPayload:
     tested_count: int
     failures: list[dict[str, Any]]
     mined_source_count: int
+    search_diagnostics: dict[str, Any]
 
 
 def build_combination_ranking_report(payload: CombinationRankingReportPayload) -> dict[str, Any]:
@@ -40,6 +41,7 @@ def build_combination_ranking_report(payload: CombinationRankingReportPayload) -
         "testedCombinationCount": payload.tested_count,
         "failureCount": len(payload.failures),
         "failures": payload.failures[:REPORT_FAILURE_LIMIT],
+        "searchDiagnostics": payload.search_diagnostics,
     }
 
 
@@ -77,6 +79,7 @@ def base_payload(candidate: Any) -> dict[str, Any]:
         **factor_payload(candidate.factor),
         "orientation": candidate.orientation,
         "singleWinRate": candidate.metrics.get("winRate"),
+        "directionalWinRate": directional_win_rate(candidate),
         "singleIr": candidate.metrics.get("ir"),
         "singleSharpe": candidate.metrics.get("sharpe"),
         "avgAbsCorrelation": candidate.metrics.get("avgAbsCorrelation"),
@@ -102,9 +105,19 @@ def config_payload(config: Any) -> dict[str, Any]:
         "agentFactorLimit": config.agent_factor_limit,
         "comboSizes": list(config.combo_sizes),
         "resultLimit": config.result_limit,
+        "prefilterLimit": config.prefilter_limit,
+        "beamWidth": config.beam_width,
+        "parallelWorkers": config.parallel_workers,
         "method": config.method,
         "minPeriods": BACKTEST_MIN_PERIODS,
     }
+
+
+def directional_win_rate(candidate: Any) -> float | None:
+    value = _finite_float(candidate.metrics.get("winRate"))
+    if value is None:
+        return None
+    return value if int(candidate.orientation) == 1 else round(1.0 - value, 6)
 
 
 def _finite_float(value: Any) -> float | None:

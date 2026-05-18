@@ -29,6 +29,7 @@ def agent_candidate_evaluation_summary(records: list[dict[str, Any]]) -> dict[st
         "rejectedCount": len(records) - promoted,
         "statusCounts": counts,
         "topPromotedFactors": _promoted_factor_names(records),
+        "engineSupportBacklog": _engine_support_backlog(records),
     }
 
 
@@ -67,6 +68,22 @@ def _promoted_factor_names(records: list[dict[str, Any]]) -> list[str]:
         if record.get("status") == "promoted" and record.get("factorName"):
             names.append(str(record["factorName"]))
     return names[:8]
+
+
+def _engine_support_backlog(records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items = []
+    for record in records:
+        if record.get("status") == "failed":
+            items.append(_engine_support_item(record))
+    return items[:12]
+
+
+def _engine_support_item(record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "factorName": str(record.get("factorName") or ""),
+        "formula": str(record.get("formula") or ""),
+        "error": str(record.get("error") or ""),
+    }
 
 
 def _save_json(path: Path, payload: dict[str, Any]) -> None:

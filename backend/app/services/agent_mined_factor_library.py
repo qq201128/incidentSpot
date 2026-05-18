@@ -133,8 +133,8 @@ def _evaluate_ideas(
     library = load_agent_factor_library()
     existing = library.get("factors") or []
     records = [_record_for_idea(memory, frame, idea, existing) for idea in ideas]
-    promoted = [_library_row(record) for record in records if record["status"] == "promoted"]
-    rows = _merged_rows(existing, [row for row in promoted if row is not None])
+    library_rows = [_library_row(record) for record in records]
+    rows = _merged_rows(existing, [row for row in library_rows if row is not None])
     return rows, records
 
 def _record_for_idea(
@@ -175,9 +175,11 @@ def _library_row(record: dict[str, Any]) -> dict[str, Any] | None:
         **_library_identity(record),
         "metrics": metrics,
         "score": factor_score(metrics),
+        "candidateStatus": str(record.get("status") or "unknown"),
+        "qualityPassed": _promotable(metrics),
         "firstSeenAt": now,
         "lastSeenAt": now,
-        "promotionCount": 1,
+        "promotionCount": 1 if record.get("status") == "promoted" else 0,
     }
 
 def _library_identity(row: dict[str, Any]) -> dict[str, Any]:
@@ -228,7 +230,7 @@ def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]
         previous = by_key.get(_row_key(row))
         if previous:
             row["firstSeenAt"] = previous.get("firstSeenAt") or row["firstSeenAt"]
-            row["promotionCount"] = int(previous.get("promotionCount") or 0) + 1
+            row["promotionCount"] = int(previous.get("promotionCount") or 0) + int(row["qualityPassed"])
         by_key[_row_key(row)] = row
     return sorted(by_key.values(), key=lambda row: float(row.get("score") or 0.0), reverse=True)
 

@@ -38,9 +38,9 @@ def save_cached_combination_ranking(report: dict[str, Any]) -> None:
     if not isinstance(ranking, list):
         raise ValueError("combination ranking report must contain a ranking list")
     existing = get_cached_combination_ranking(symbol, duration)
-    if not ranking and _cache_has_rows(existing):
+    if not ranking and _cache_has_rows(existing) and not _has_search_diagnostics(report):
         logger.warning(
-            "skip overwriting non-empty factor combo cache with empty ranking: %s %s existing=%s",
+            "skip overwriting non-empty factor combo cache with legacy empty ranking: %s %s existing=%s",
             symbol,
             duration,
             len(existing.get("ranking") or []),
@@ -90,3 +90,7 @@ def _utc_now() -> str:
 def _cache_has_rows(cache: dict[str, Any] | None) -> bool:
     rows = None if cache is None else cache.get("ranking")
     return bool(isinstance(rows, list) and rows)
+
+
+def _has_search_diagnostics(report: dict[str, Any]) -> bool:
+    return isinstance(report.get("searchDiagnostics"), dict)

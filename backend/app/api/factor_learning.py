@@ -6,7 +6,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.services.factor_learning_service import (
     get_factor_learning_memory,
+    mark_factor_learning_agent_failed,
     mark_factor_learning_agent_pending,
+    mark_factor_learning_refresh_queued,
     run_factor_learning_llm_agent,
     refresh_factor_learning_memory,
 )
@@ -73,15 +75,24 @@ def _queue_factor_learning_agent(
     symbol: str,
     duration: str,
 ) -> dict:
-    memory = refresh_factor_learning_memory(symbol, duration, run_llm_agent=False)
-    queued = mark_factor_learning_agent_pending(memory)
-    background_tasks.add_task(_background_factor_learning_agent_review, symbol, duration)
+    queued = mark_factor_learning_refresh_queued(symbol, duration)
+    background_tasks.add_task(_background_factor_learning_refresh_and_agent, symbol, duration)
     return {
         **queued,
         "ok": True,
         "agentQueued": True,
         "message": "Kimi 因子挖掘已排队，完成后会写回因子学习记忆。",
     }
+
+
+def _background_factor_learning_refresh_and_agent(symbol: str, duration: str) -> None:
+    try:
+        memory = refresh_factor_learning_memory(symbol, duration, run_llm_agent=False)
+        mark_factor_learning_agent_pending(memory)
+        run_factor_learning_llm_agent(symbol, duration)
+    except Exception as exc:
+        mark_factor_learning_agent_failed(symbol, duration, str(exc))
+        logger.exception("background factor learning refresh failed: %s %s", symbol, duration)
 
 
 def _background_factor_learning_agent_review(symbol: str, duration: str) -> None:

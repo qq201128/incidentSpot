@@ -202,6 +202,24 @@ def test_walk_forward_validation_uses_cost_adjusted_returns() -> None:
     assert result.payload["validation"]["winRate"] == 0.0
 
 
+def test_neutral_base_candidate_flips_low_winrate_orientation() -> None:
+    factor = _factor("inverse_alpha", "反向信号", FactorDirection.NEUTRAL)
+    metrics = {"winRate": 0.18, "ir": 0.2, "totalPeriods": ROWS}
+
+    orientation = combo_service._factor_orientation(factor, metrics)
+
+    assert orientation == -1
+
+
+def test_base_rank_key_uses_directional_winrate() -> None:
+    weak_direct = _base_candidate("weak_direct", 0.54, 10.0, 1)
+    strong_inverse = _base_candidate("strong_inverse", 0.18, 9.0, -1)
+
+    ranked = sorted([weak_direct, strong_inverse], key=combo_service._base_rank_key, reverse=True)
+
+    assert [item.factor.name for item in ranked] == ["strong_inverse", "weak_direct"]
+
+
 def test_rank_combinations_excludes_walk_forward_failures(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
@@ -248,6 +266,70 @@ def test_rank_combinations_returns_empty_when_no_walk_forward_combo_passes(
         "validation_win_rate_below_min",
         "no_walk_forward_combo_passed",
     ]
+
+
+def test_combination_search_reports_prefilter_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    candidates = [_rank_filter_candidate(name) for name in ("factor_a", "factor_b", "factor_c", "factor_d")]
+    seen = []
+
+    def fake_result(_context, members):
+        seen.append(tuple(member.factor.name for member in members))
+        return _rank_filter_row("__".join(member.factor.name for member in members), True), None
+
+    monkeypatch.setattr(combo_service, "_combination_result", fake_result)
+    result = combo_service._rank_combinations_with_diagnostics(
+        combo_service._CombinationContext(synthetic_frame, "BTCUSDT", "10m"),
+        candidates,
+        CombinationSearchConfig(
+            base_factor_limit=4,
+            combo_sizes=(2,),
+            result_limit=5,
+            prefilter_limit=2,
+            beam_width=10,
+            parallel_workers=1,
+        ),
+    )
+
+    diagnostics = result.diagnostics
+
+    assert result.tested_count == 2
+    assert len(seen) == 2
+    assert diagnostics["mode"] == "targeted_layered_parallel_v1"
+    assert diagnostics["fullCombinationEstimate"] == 6
+    assert diagnostics["generatedCombinationCount"] == 6
+    assert diagnostics["prefilteredCombinationCount"] == 4
+    assert diagnostics["parallelWorkers"] == 1
+
+
+def test_combination_ranking_report_includes_search_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(
+            base_factor_limit=3,
+            combo_sizes=(2,),
+            result_limit=5,
+            prefilter_limit=3,
+            beam_width=3,
+            parallel_workers=1,
+        ),
+    )
+
+    assert report["searchConfig"]["prefilterLimit"] == 3
+    assert report["searchConfig"]["beamWidth"] == 3
+    assert report["searchConfig"]["parallelWorkers"] == 1
+    assert report["searchDiagnostics"]["evaluatedCombinationCount"] == 3
+    assert "failureReasonCounts" in report["searchDiagnostics"]
 
 
 def test_live_signal_requires_profitable_combo_for_sim_candidate(
@@ -638,6 +720,21 @@ def _rank_filter_candidate(name: str):
     )
     metrics = {"factorScore": 10.0, "winRate": 0.70, "sharpe": 1.0, "totalPeriods": ROWS}
     return combo_service._BaseCandidate(factor, metrics, 1)
+
+
+def _base_candidate(name: str, win_rate: float, score: float, orientation: int):
+    factor = FactorDefinition(
+        name=name,
+        category=FactorCategory.RETURN,
+        description=name,
+        formula=name,
+        direction=FactorDirection.NEUTRAL,
+    )
+    return combo_service._BaseCandidate(
+        factor,
+        {"factorScore": score, "winRate": win_rate, "sharpe": 1.0, "totalPeriods": ROWS},
+        orientation,
+    )
 
 
 def _rank_filter_row(name: str, passed: bool) -> dict[str, Any]:

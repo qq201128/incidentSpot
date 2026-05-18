@@ -38,12 +38,14 @@ def factor_combination_ranking(
     if not cache_is_usable(cached):
         return {**_stale_combination_ranking(sym_u, duration, cached), **high_winrate_view}
     ranking = regular_ranking_view(_regular_ranking_rows(cached))
+    visibility = _ranking_visibility(cached, ranking)
     return {
         **cached,
         "ranking": ranking,
         "regularRanking": ranking,
         "total": len(ranking),
         "source": "cache",
+        **visibility,
         **high_winrate_view,
     }
 
@@ -96,6 +98,9 @@ def _empty_combination_ranking(symbol: str, duration: str) -> dict:
         "total": 0,
         "updatedAt": None,
         "source": "none",
+        "rawTotal": 0,
+        "regularTotal": 0,
+        "nestedComboFilteredCount": 0,
         "precomputedSymbols": factor_ranking_precomputed_symbols(),
         "hint": "多因子组合排名尚无缓存；可使用 POST /api/factors/combinations/refresh 排队重算。",
     }
@@ -103,6 +108,7 @@ def _empty_combination_ranking(symbol: str, duration: str) -> dict:
 
 def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict:
     ranking = regular_ranking_view(_regular_ranking_rows(cached))
+    visibility = _ranking_visibility(cached, ranking)
     return {
         "symbol": symbol,
         "duration": duration,
@@ -112,6 +118,7 @@ def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict
         "updatedAt": cached.get("updatedAt"),
         "source": "stale_cache",
         "cacheStatus": cached.get("cacheStatus"),
+        **visibility,
         "precomputedSymbols": factor_ranking_precomputed_symbols(),
         "hint": "多因子组合缓存对应的历史数据已变化或缺少数据指纹；当前展示旧缓存，请刷新重算后再用于实盘判断。",
     }
@@ -151,6 +158,15 @@ def _missing_feature_sources(tables: list[dict]) -> list[dict]:
 
 def _regular_ranking_rows(cached: dict) -> list[dict]:
     return [row for row in _ranking_rows(cached) if not _has_combo_member(row)]
+
+
+def _ranking_visibility(cached: dict, ranking: list[dict]) -> dict[str, int]:
+    raw_rows = _ranking_rows(cached)
+    return {
+        "rawTotal": len(raw_rows),
+        "regularTotal": len(ranking),
+        "nestedComboFilteredCount": max(len(raw_rows) - len(ranking), 0),
+    }
 
 
 def _ranking_rows(cached: dict) -> list[dict]:
@@ -214,6 +230,9 @@ def _config_response(config: CombinationSearchConfig) -> dict:
         "baseFactorLimit": config.base_factor_limit,
         "comboSizes": list(config.combo_sizes),
         "resultLimit": config.result_limit,
+        "prefilterLimit": config.prefilter_limit,
+        "beamWidth": config.beam_width,
+        "parallelWorkers": config.parallel_workers,
         "method": config.method,
     }
 

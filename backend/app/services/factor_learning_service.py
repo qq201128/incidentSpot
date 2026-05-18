@@ -32,6 +32,7 @@ from app.services.factor_learning_llm_agent import (
     attach_llm_agent_review,
 )
 from app.services.factor_learning_memory_store import (
+    FACTOR_LEARNING_VERSION,
     load_factor_learning_memory,
     save_factor_learning_memory,
 )
@@ -84,6 +85,20 @@ def mark_factor_learning_agent_pending(memory: dict[str, Any]) -> dict[str, Any]
     return _save_factor_learning_agent_status(memory, "pending")
 
 
+def mark_factor_learning_refresh_queued(symbol: str, duration: str) -> dict[str, Any]:
+    _validate_duration(duration)
+    sym = symbol.strip().upper()
+    memory = load_factor_learning_memory(sym, duration) or _queued_memory(sym, duration)
+    return _save_factor_learning_agent_status(memory, "pending")
+
+
+def mark_factor_learning_agent_failed(symbol: str, duration: str, error: str) -> dict[str, Any]:
+    _validate_duration(duration)
+    sym = symbol.strip().upper()
+    memory = load_factor_learning_memory(sym, duration) or _queued_memory(sym, duration)
+    return _save_factor_learning_agent_status(memory, "failed", error)
+
+
 def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
     _validate_duration(duration)
     memory = load_factor_learning_memory(symbol, duration)
@@ -123,6 +138,16 @@ def _agent_status_payload(status: str, error: str | None) -> dict[str, Any]:
     if error:
         payload["error"] = error
     return payload
+
+
+def _queued_memory(symbol: str, duration: str) -> dict[str, Any]:
+    return {
+        "version": FACTOR_LEARNING_VERSION,
+        "symbol": symbol,
+        "duration": duration,
+        "updatedAt": utc_now(),
+        "source": {"status": "queued"},
+    }
 
 
 def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:

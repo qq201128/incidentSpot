@@ -7,8 +7,11 @@ from app.services.factor_combination_service import (
     CombinationSearchConfig,
     DEFAULT_AGENT_FACTOR_LIMIT,
     DEFAULT_BASE_FACTOR_LIMIT,
+    DEFAULT_BEAM_WIDTH,
     DEFAULT_MINED_FACTOR_LIMIT,
     DEFAULT_NATIVE_FACTOR_LIMIT,
+    DEFAULT_PARALLEL_WORKERS,
+    DEFAULT_PREFILTER_LIMIT,
     DEFAULT_RESULT_LIMIT,
 )
 from app.services.high_winrate_strategy_demotion import (
@@ -35,12 +38,15 @@ EXPERIMENT_PROFILE_FULL = "full"
 EXPERIMENT_PROFILES = (EXPERIMENT_PROFILE_FAST, EXPERIMENT_PROFILE_FULL)
 
 FAST_COMBINATION_CONFIG = CombinationSearchConfig(
-    base_factor_limit=8,
-    native_factor_limit=6,
-    mined_factor_limit=2,
+    base_factor_limit=16,
+    native_factor_limit=10,
+    mined_factor_limit=4,
     agent_factor_limit=1,
     combo_sizes=(2,),
     result_limit=50,
+    prefilter_limit=120,
+    beam_width=120,
+    parallel_workers=2,
 )
 FULL_COMBINATION_CONFIG = CombinationSearchConfig(
     base_factor_limit=DEFAULT_BASE_FACTOR_LIMIT,
@@ -49,6 +55,9 @@ FULL_COMBINATION_CONFIG = CombinationSearchConfig(
     agent_factor_limit=DEFAULT_AGENT_FACTOR_LIMIT,
     combo_sizes=(2, 3),
     result_limit=DEFAULT_RESULT_LIMIT,
+    prefilter_limit=DEFAULT_PREFILTER_LIMIT,
+    beam_width=DEFAULT_BEAM_WIDTH,
+    parallel_workers=DEFAULT_PARALLEL_WORKERS,
 )
 
 FAST_LSTM_CONFIG = {
@@ -114,6 +123,9 @@ def combination_search_config_for_profile(
         agent_factor_limit=agent_factor_limit if agent_factor_limit is not None else selected.agent_factor_limit,
         combo_sizes=combo_sizes if combo_sizes is not None else selected.combo_sizes,
         result_limit=result_limit if result_limit is not None else selected.result_limit,
+        prefilter_limit=selected.prefilter_limit,
+        beam_width=selected.beam_width,
+        parallel_workers=selected.parallel_workers,
     )
 
 

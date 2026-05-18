@@ -7,32 +7,39 @@ from app.services.agent_factor_formula import SUPPORTED_AGENT_FORMULA_FUNCTIONS
 
 OPERATOR_LIBRARY_VERSION = "factor_operator_library_v1"
 EXECUTABLE_OPERATOR_NAMES = SUPPORTED_AGENT_FORMULA_FUNCTIONS
-WINDOW_CONSTRAINT = "window argument must be an integer greater than 1"
-PCT_CHANGE_CONSTRAINT = (
-    "PctChange(x, 1) is invalid; use PctChange(x, n) with n >= 2, "
-    "or use an existing *_chg_1 feature column when available"
-)
+WINDOW_CONSTRAINT = "rolling window argument must be an integer greater than 1"
+LAG_CONSTRAINT = "lag argument must be a positive integer"
 AGENT_FORMULA_RULES = (
     "formulaHint must use only executable operator names listed in operator_library.operators",
-    "rolling/window/period arguments must be integer values greater than 1",
-    "PctChange(x, 1) is invalid and must not be generated",
-    "arithmetic and comparisons must use symbols: +, -, *, /, >, <, >=, <=",
+    "rolling window arguments must be integer values greater than 1",
+    "lag arguments for Delay, Delta, PctChange, Acceleration, AutoCorr may be 1",
+    "arithmetic and comparisons may use functions or symbols: Add/Sub/Mul/Div, >, <, >=, <=, ==",
 )
 WINDOWED_OPERATORS = frozenset(
     {
         "ATR",
+        "ADX",
+        "Acceleration",
+        "AutoCorr",
         "Corr",
         "Delay",
+        "Delta",
         "DonchianPos",
         "EMA",
+        "EWMStd",
+        "FundingZ",
+        "LongShortRatioZ",
         "Max",
         "Mean",
         "Min",
+        "OpenInterestZ",
         "PctChange",
         "SMA",
         "Slope",
         "Std",
         "Sum",
+        "TsQuantile",
+        "TsRank",
         "TsZScore",
         "VWAP",
         "VWAPDev",
@@ -176,6 +183,6 @@ def _operator_constraints(name: str) -> list[str]:
     constraints = []
     if name in WINDOWED_OPERATORS:
         constraints.append(WINDOW_CONSTRAINT)
-    if name == "PctChange":
-        constraints.append(PCT_CHANGE_CONSTRAINT)
+    if name in {"Delay", "Delta", "PctChange", "Acceleration", "AutoCorr"}:
+        constraints.append(LAG_CONSTRAINT)
     return constraints
