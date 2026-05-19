@@ -3,11 +3,20 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models" / "lstm"
+LOCK_BYTE_COUNT = 1
+LOCK_FILE_PREFIX = "."
+LOCK_FILE_SUFFIX = ".lock"
+_PROCESS_LOCKS_GUARD = threading.Lock()
+_PROCESS_LOCKS: dict[Path, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -50,6 +59,30 @@ def artifact_paths_for_root(root: Path) -> LstmArtifactPaths:
 
 
 def read_json(path: Path) -> dict[str, Any] | None:
+    if not path.parent.exists():
+        return None
+    with _json_artifact_lock(path):
+        return _read_json_unlocked(path)
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _json_artifact_lock(path):
+        _write_json_unlocked(path, payload)
+
+
+def update_json(
+    path: Path,
+    updater: Callable[[dict[str, Any] | None], dict[str, Any]],
+) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _json_artifact_lock(path):
+        payload = updater(_read_json_unlocked(path))
+        _write_json_unlocked(path, payload)
+        return payload
+
+
+def _read_json_unlocked(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8") as handle:
@@ -59,13 +92,73 @@ def read_json(path: Path) -> dict[str, Any] | None:
     return payload
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+def _write_json_unlocked(path: Path, payload: dict[str, Any]) -> None:
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     with tmp.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
     os.replace(tmp, path)
+
+
+@contextmanager
+def _json_artifact_lock(path: Path) -> Iterator[None]:
+    lock_path = _lock_path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    process_lock = _process_lock(lock_path)
+    with process_lock:
+        with lock_path.open("a+b") as handle:
+            _ensure_lock_byte(handle)
+            _lock_file(handle)
+            try:
+                yield
+            finally:
+                _unlock_file(handle)
+
+
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f"{LOCK_FILE_PREFIX}{path.name}{LOCK_FILE_SUFFIX}")
+
+
+def _process_lock(lock_path: Path) -> threading.RLock:
+    key = lock_path.resolve()
+    with _PROCESS_LOCKS_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _PROCESS_LOCKS[key] = lock
+        return lock
+
+
+def _ensure_lock_byte(handle) -> None:
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() > 0:
+        return
+    handle.write(b"\0")
+    handle.flush()
+
+
+def _lock_file(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, LOCK_BYTE_COUNT)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, LOCK_BYTE_COUNT)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def publish_artifacts(staging: LstmArtifactPaths, active: LstmArtifactPaths) -> None:

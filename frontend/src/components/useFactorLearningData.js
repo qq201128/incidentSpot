@@ -3,6 +3,7 @@ import {
   fetchFactorLearningMemory,
   fetchFactorLearningOperators,
   fetchLstmStatus,
+  requestLstmCandidateSearch,
   requestFactorLearningRefresh,
 } from "../api/factorLearning";
 
@@ -13,15 +14,23 @@ export function useFactorLearningData(symbol, duration) {
   const [memoryState, setMemoryState] = useState({ data: null, status: "" });
   const [operatorState, setOperatorState] = useState({ data: null, status: "" });
   const [lstmState, setLstmState] = useState({ data: null, status: "" });
+  const [lstmSearchState, setLstmSearchState] = useState({ status: "idle" });
   const [queueing, setQueueing] = useState(false);
   const loadData = useDataLoader({ duration, normalizedSymbol, setLstmState, setMemoryState, setOperatorState });
 
   useInitialLoad(loadData);
   useLearningTaskPoll({ data: memoryState.data, duration, setMemoryState, symbol: normalizedSymbol });
+  useLstmTaskPoll({ data: lstmState.data, duration, setLstmState, symbol: normalizedSymbol });
 
   const refresh = useRefreshQueue({ duration, normalizedSymbol, setMemoryState, setQueueing });
+  const startLstmSearch = useStartLstmSearch({
+    duration,
+    normalizedSymbol,
+    setLstmSearchState,
+    setLstmState,
+  });
   const refreshing = queueing || hasActiveLearningTask(memoryState.data);
-  return { memoryState, operatorState, lstmState, refresh, refreshing };
+  return { memoryState, operatorState, lstmState, lstmSearchState, refresh, refreshing, startLstmSearch };
 }
 
 function useDataLoader({ duration, normalizedSymbol, setLstmState, setMemoryState, setOperatorState }) {
@@ -89,6 +98,31 @@ function useLearningTaskPoll({ data, duration, setMemoryState, symbol }) {
   }, [active, duration, setMemoryState, symbol]);
 }
 
+function useLstmTaskPoll({ data, duration, setLstmState, symbol }) {
+  const active = ["queued", "running"].includes(data?.candidateSearchProgress?.status);
+  useEffect(() => {
+    if (!active || !isValidSymbol(symbol)) return undefined;
+    const ac = new AbortController();
+    let timer;
+    const poll = async () => {
+      try {
+        const next = await fetchLstmStatus(symbol, duration, { signal: ac.signal });
+        if (!ac.signal.aborted) setLstmState({ data: next, status: lstmStatusText(next) });
+        if (!ac.signal.aborted && ["queued", "running"].includes(next?.candidateSearchProgress?.status)) {
+          timer = window.setTimeout(poll, TASK_POLL_MS);
+        }
+      } catch (error) {
+        if (!isCanceled(error, ac.signal)) setLstmState((state) => ({ ...state, status: `LSTM状态轮询失败：${errorMessage(error)}` }));
+      }
+    };
+    timer = window.setTimeout(poll, TASK_POLL_MS);
+    return () => {
+      ac.abort();
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [active, duration, setLstmState, symbol]);
+}
+
 async function loadMemory({ symbol, duration, signal, setState }) {
   try {
     const data = await fetchFactorLearningMemory(symbol, duration, { signal });
@@ -117,6 +151,24 @@ async function loadLstmStatus({ symbol, duration, signal, setState }) {
   } catch (error) {
     if (!isCanceled(error, signal)) setState({ data: null, status: `LSTM状态失败：${errorMessage(error)}` });
   }
+}
+
+function useStartLstmSearch({ duration, normalizedSymbol, setLstmSearchState, setLstmState }) {
+  return useCallback(async () => {
+    if (!isValidSymbol(normalizedSymbol)) {
+      setLstmState({ data: null, status: "请输入有效交易对" });
+      return;
+    }
+    setLstmSearchState({ status: "running" });
+    try {
+      const data = await requestLstmCandidateSearch(normalizedSymbol, duration);
+      setLstmState({ data, status: lstmStatusText(data) });
+    } catch (error) {
+      setLstmState((state) => ({ ...state, status: `LSTM候选搜索失败：${errorMessage(error)}` }));
+    } finally {
+      setLstmSearchState({ status: "idle" });
+    }
+  }, [duration, normalizedSymbol, setLstmSearchState, setLstmState]);
 }
 
 export function memoryStatus(data) {
@@ -167,7 +219,14 @@ function hasActiveLearningTask(data) {
 function lstmStatusText(data) {
   const label = lstmStatusLabel(data?.status);
   const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
-  return `LSTM：${label}${version}${lstmReadyStatusText(data)}`;
+  return `LSTM：${label}${version}${lstmProgressText(data)}${lstmReadyStatusText(data)}`;
+}
+
+function lstmProgressText(data) {
+  const progress = data?.candidateSearchProgress;
+  if (!["queued", "running"].includes(progress?.status)) return "";
+  const label = progress.status === "queued" ? "排队中" : "进行中";
+  return ` · 候选搜索${label} ${progress.completed ?? 0}/${progress.total ?? 0}`;
 }
 
 function lstmReadyStatusText(data) {
@@ -201,6 +260,7 @@ function lstmStatusLabel(status) {
     promoted_trade_active: "已发布交易",
     rejected_validation: "验证拒绝",
     rejected_insufficient_samples: "样本拒绝",
+    queued: "排队中",
     training: "训练中",
     trained: "已训练",
     validation_failed: "验证失败",

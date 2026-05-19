@@ -28,6 +28,8 @@ export default function FactorLearningPanel({ symbol, duration }) {
         learning={learning.memoryState.data?.adaptiveLearning}
         lstm={learning.lstmState.data || learning.memoryState.data?.lstmShadow}
         lstmStatus={learning.lstmState.status}
+        onSearchCandidates={() => void learning.startLstmSearch()}
+        searchStatus={learning.lstmSearchState.status}
       />
       <FactorLearningCandidateIdeas memory={learning.memoryState.data} />
       <FactorLearningMemoryGrid memory={learning.memoryState.data} />

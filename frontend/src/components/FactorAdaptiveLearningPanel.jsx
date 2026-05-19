@@ -1,6 +1,12 @@
 import "./FactorAdaptiveLearningPanel.css";
 
-export default function FactorAdaptiveLearningPanel({ learning, lstm, lstmStatus }) {
+export default function FactorAdaptiveLearningPanel({
+  learning,
+  lstm,
+  lstmStatus,
+  onSearchCandidates,
+  searchStatus,
+}) {
   const algorithms = Array.isArray(learning?.algorithms) ? learning.algorithms : [];
   const activeCount = learning?.activeAlgorithmCount ?? 0;
   return (
@@ -19,7 +25,12 @@ export default function FactorAdaptiveLearningPanel({ learning, lstm, lstmStatus
         <Metric label="学习样本" value={learning?.sampleCount ?? "—"} />
       </div>
 
-      <LstmShadowCard lstm={lstm} statusText={lstmStatus} />
+      <LstmShadowCard
+        lstm={lstm}
+        statusText={lstmStatus}
+        onSearchCandidates={onSearchCandidates}
+        searchStatus={searchStatus}
+      />
 
       <div className="factor-adaptive-insight">
         <strong>智能学习洞察：</strong>
@@ -38,9 +49,17 @@ export default function FactorAdaptiveLearningPanel({ learning, lstm, lstmStatus
   );
 }
 
-function LstmShadowCard({ lstm, statusText }) {
+function LstmShadowCard({ lstm, statusText, onSearchCandidates, searchStatus }) {
   const shadow = lstm?.shadow || lstm || {};
   const ready = predictionReady(shadow);
+  const progress = shadow.candidateSearchProgress || {};
+  const searchActive = ["queued", "running"].includes(progress.status) || searchStatus === "running";
+  const searchLabel =
+    searchStatus === "running" || progress.status === "queued"
+      ? "排队中"
+      : progress.status === "running"
+        ? "搜索中"
+        : "开始搜索";
   return (
     <div className={`factor-lstm-card ${statusClass(shadow.status)}`}>
       <div className="factor-lstm-card-head">
@@ -49,8 +68,19 @@ function LstmShadowCard({ lstm, statusText }) {
           <h4>{lstmStatusLabel(shadow.status)}</h4>
           <p>{statusText || shadow.reason || "等待模型训练状态。"}</p>
         </div>
-        <span>{shadow.strategyKey || "factor_lstm_shadow"}</span>
+        <div className="factor-lstm-card-actions">
+          <span>{shadow.strategyKey || "factor_lstm_shadow"}</span>
+          <button
+            type="button"
+            className="factor-lstm-search-button"
+            disabled={searchActive || !onSearchCandidates}
+            onClick={onSearchCandidates}
+          >
+            {searchLabel}
+          </button>
+        </div>
       </div>
+      <LstmCandidateProgress progress={progress} />
       <div className="factor-lstm-grid">
         <Metric label="预测状态" value={readinessLabel(shadow)} strong={ready} />
         <Metric label="运行闸门" value={gateLabel(shadow)} strong={ready} />
@@ -68,6 +98,33 @@ function LstmShadowCard({ lstm, statusText }) {
         <Metric label="最近胜率" value={formatPct(shadow.recentWinRate, 1)} />
       </div>
       <LstmComparison rows={shadow.comparison} />
+    </div>
+  );
+}
+
+function LstmCandidateProgress({ progress }) {
+  if (!progress || progress.status === "idle") return null;
+  const pct = Math.round(Number(progress.percent || 0) * 100);
+  const counts = progress.counts || {};
+  const active = ["queued", "running"].includes(progress.status);
+  return (
+    <div className={`factor-lstm-progress ${active ? "is-running" : ""}`}>
+      <div className="factor-lstm-progress-head">
+        <span>{progress.status === "queued" ? "候选搜索排队中" : progress.status === "running" ? "候选搜索进行中" : "最近候选搜索"}</span>
+        <b>{progress.completed ?? 0}/{progress.total ?? 0} · {pct}%</b>
+      </div>
+      <div className="factor-lstm-progress-bar" aria-label={`候选搜索进度 ${pct}%`}>
+        <i style={{ width: `${pct}%` }} />
+      </div>
+      <div className="factor-lstm-progress-meta">
+        <span>并发 {progress.parallelWorkers ?? "—"}</span>
+        <span>交易 {counts.tradeActive ?? 0}</span>
+        <span>影子 {counts.shadowActive ?? 0}</span>
+        <span>未过 {counts.validationFailed ?? 0}</span>
+      </div>
+      {progress.latestCompleted ? (
+        <p>{candidateText(progress.latestCompleted)}</p>
+      ) : null}
     </div>
   );
 }
@@ -100,6 +157,11 @@ function AlgorithmRow({ algorithm }) {
   );
 }
 
+function candidateText(candidate) {
+  const cfg = candidate.config || {};
+  return `最近：${lstmStatusLabel(candidate.status)} · w${cfg.featureWindow ?? "—"} · ${cfg.minMoveBps ?? "—"}bp · ${cfg.epochs ?? "—"}轮`;
+}
+
 function Metric({ label, value, strong = false }) {
   return (
     <span className={`factor-adaptive-metric${strong ? " strong" : ""}`}>
@@ -123,6 +185,7 @@ function lstmStatusLabel(status) {
   if (status === "promoted_trade_active") return "已发布交易";
   if (status === "rejected_validation") return "验证拒绝";
   if (status === "rejected_insufficient_samples") return "样本拒绝";
+  if (status === "queued") return "排队中";
   if (status === "training") return "训练中";
   if (status === "trained") return "已训练";
   if (status === "validation_failed") return "验证失败";

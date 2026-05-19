@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -18,6 +19,11 @@ from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.kline_timing import MS_PER_MINUTE, current_rule_entry_open_time_for_duration
 from app.services.lstm_candidate_library import attempted_search_keys, record_lstm_candidate
 from app.services.lstm_candidate_keys import search_key_for_config
+from app.services.lstm_candidate_progress import (
+    complete_lstm_candidate_progress,
+    finish_lstm_candidate_progress,
+    start_lstm_candidate_progress,
+)
 from app.services.lstm_candidate_search import (
     LstmCandidateSearchConfig,
     LstmCandidateSearchRequest,
@@ -29,7 +35,7 @@ from app.services.lstm_prediction_service import lstm_model_status
 from app.services.lstm_training_service import publish_lstm_staged_model, train_lstm_model
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
-DEFAULT_RETRY_DURATIONS = ("10m", "30m", "60m")
+DEFAULT_RETRY_DURATIONS = ("10m", "60m")
 RETRY_TRAIN_STATUSES = {"untrained", "validation_failed", "failed", "insufficient_samples"}
 TRAINED_STATUSES = {"trained", "shadow_active", "trade_active"}
 
@@ -40,6 +46,7 @@ class LstmCandidateRetryConfig:
     durations: tuple[str, ...] = DEFAULT_RETRY_DURATIONS
     profile: str = EXPERIMENT_PROFILE_FAST
     search: LstmCandidateSearchConfig = LstmCandidateSearchConfig()
+    manual_trigger: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,9 @@ class LstmCandidateRetryDependencies:
     attempted_keys: Callable[[str, str], frozenset[str]] = attempted_search_keys
     record_candidate: Callable[[LstmTrainingConfig, str, dict[str, Any]], dict[str, Any]] = record_lstm_candidate
     publish_trade_candidate: Callable[[LstmTrainingConfig, dict[str, Any]], None] = publish_lstm_staged_model
+    start_progress: Callable[..., dict[str, Any]] = start_lstm_candidate_progress
+    complete_progress: Callable[..., dict[str, Any]] = complete_lstm_candidate_progress
+    finish_progress: Callable[..., dict[str, Any]] = finish_lstm_candidate_progress
 
 
 @dataclass(frozen=True)
@@ -84,7 +94,13 @@ def validated_lstm_candidate_retry_config(config: LstmCandidateRetryConfig) -> L
     symbols = _normalized_symbols(config.symbols or tuple(factor_ranking_precomputed_symbols()))
     durations = _validated_durations(config.durations)
     profile = normalize_experiment_profile(config.profile)
-    return LstmCandidateRetryConfig(symbols=symbols, durations=durations, profile=profile, search=config.search)
+    return LstmCandidateRetryConfig(
+        symbols=symbols,
+        durations=durations,
+        profile=profile,
+        search=config.search,
+        manual_trigger=config.manual_trigger,
+    )
 
 
 def default_lstm_candidate_retry_dependencies() -> LstmCandidateRetryDependencies:
@@ -105,23 +121,41 @@ def _retry_symbol_duration(
     deps: LstmCandidateRetryDependencies,
 ) -> dict[str, Any]:
     status = deps.lstm_status(symbol, duration)
-    decision = _retry_decision(status)
+    decision = _retry_decision(status, manual_trigger=config.manual_trigger)
     if not decision["shouldTrain"]:
         return _skipped_result(symbol, duration, status, decision)
     configs = _next_search_configs(symbol, duration, config, deps)
     if not configs:
         return _search_exhausted_result(symbol, duration, status, decision, config)
-    _refresh_inputs(symbol, duration, deps)
-    ranking = deps.run_combination_ranking(symbol, duration, combination_search_config_for_profile(config.profile))
-    deps.save_combination_ranking(ranking)
-    promotion = deps.promote_combinations(ranking)
-    trainings = _train_candidates(configs, config.profile, config.search.parallel_workers, deps)
-    _publish_best_trade_candidate(trainings, deps)
-    reports = [item.report for item in trainings]
-    return _trained_result(symbol, duration, status, decision, ranking, promotion, reports)
+    search_total = search_space_size(config.search)
+    deps.start_progress(
+        symbol=symbol,
+        duration=duration,
+        profile=config.profile,
+        total=len(configs),
+        search_space_total=search_total,
+        parallel_workers=config.search.parallel_workers,
+    )
+    try:
+        _refresh_inputs(symbol, duration, deps)
+        ranking = deps.run_combination_ranking(symbol, duration, combination_search_config_for_profile(config.profile))
+        deps.save_combination_ranking(ranking)
+        promotion = deps.promote_combinations(ranking)
+        trainings = _train_candidates(configs, config.profile, config.search.parallel_workers, deps)
+        if not config.manual_trigger:
+            _publish_best_trade_candidate(trainings, deps)
+        reports = [item.report for item in trainings]
+        result = _trained_result(symbol, duration, status, decision, ranking, promotion, reports)
+        deps.finish_progress(symbol=symbol, duration=duration, status=result["status"])
+        return result
+    except Exception:
+        deps.finish_progress(symbol=symbol, duration=duration, status="failed")
+        raise
 
 
-def _retry_decision(status: dict[str, Any]) -> dict[str, Any]:
+def _retry_decision(status: dict[str, Any], *, manual_trigger: bool = False) -> dict[str, Any]:
+    if manual_trigger:
+        return {"shouldTrain": True, "reason": "manual_candidate_search"}
     if str(status.get("lastAttemptStatus") or "") == "training":
         return {"shouldTrain": False, "reason": "training_in_progress"}
     active_status = str(status.get("activeModelStatus") or status.get("status") or "")
@@ -160,9 +194,17 @@ def _train_candidates(
     workers: int,
     deps: LstmCandidateRetryDependencies,
 ) -> list[CandidateTrainingResult]:
-    trained = _train_candidate_reports(configs, profile, workers, deps)
-    for item in trained:
+    trained = []
+    for item in _train_candidate_reports(configs, profile, workers, deps):
+        trained.append(item)
         deps.record_candidate(item.config, profile, item.report)
+        deps.complete_progress(
+            config=item.config,
+            profile=profile,
+            report=item.report,
+            completed=len(trained),
+            total=len(configs),
+        )
     return trained
 
 
@@ -171,12 +213,16 @@ def _train_candidate_reports(
     profile: str,
     workers: int,
     deps: LstmCandidateRetryDependencies,
-) -> list[CandidateTrainingResult]:
+) -> Iterator[CandidateTrainingResult]:
     if workers <= 1 or len(configs) <= 1:
-        return [_train_candidate(config, profile, deps) for config in configs]
+        for config in configs:
+            yield _train_candidate(config, profile, deps)
+        return
     max_workers = min(int(workers), len(configs))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(lambda candidate: _train_candidate(candidate, profile, deps), configs))
+        futures = [executor.submit(_train_candidate, candidate, profile, deps) for candidate in configs]
+        for future in as_completed(futures):
+            yield future.result()
 
 
 def _train_candidate(

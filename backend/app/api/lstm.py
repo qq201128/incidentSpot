@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
+from app.services.lstm_candidate_progress import finish_lstm_candidate_progress, queue_lstm_candidate_progress
+from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm_candidate_retry
+from app.services.lstm_candidate_search import LstmCandidateSearchConfig, search_space_size
 from app.services.lstm_prediction_service import lstm_model_status, predict_lstm_signal
 from app.services.lstm_shadow_learning import lstm_shadow_learning_summary
 from app.services.lstm_training_service import train_lstm_model
 
 router = APIRouter(prefix="/api/lstm", tags=["lstm"])
+logger = logging.getLogger("uvicorn.error")
 
 
 @router.get("/status")
@@ -58,6 +64,37 @@ def lstm_train(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/candidate-search")
+def lstm_candidate_search(
+    background_tasks: BackgroundTasks,
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+    profile: str = Query("full"),
+) -> dict:
+    try:
+        sym_u = symbol.upper()
+        selected_profile = normalize_experiment_profile(profile)
+        search_config = LstmCandidateSearchConfig()
+        search_total = search_space_size(search_config)
+        queued = queue_lstm_candidate_progress(
+            symbol=sym_u,
+            duration=duration,
+            profile=selected_profile,
+            total=search_total,
+            search_space_total=search_total,
+            parallel_workers=search_config.parallel_workers,
+        )
+        background_tasks.add_task(_background_lstm_candidate_search, sym_u, duration, selected_profile)
+        status = lstm_model_status(sym_u, duration)
+        return {
+            **status,
+            "candidateSearchProgress": status["candidateSearchProgress"] or queued,
+            "message": "LSTM候选搜索已排队。",
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/predict")
 def lstm_predict(
     symbol: str = Query(..., min_length=6),
@@ -70,3 +107,20 @@ def lstm_predict(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ImportError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _background_lstm_candidate_search(symbol: str, duration: str, profile: str) -> None:
+    config = LstmCandidateRetryConfig(
+        symbols=(symbol,),
+        durations=(duration,),
+        profile=profile,
+        manual_trigger=True,
+    )
+    try:
+        report = run_lstm_candidate_retry(config)
+        if str(report.get("status") or "") == "skipped":
+            finish_lstm_candidate_progress(symbol=symbol, duration=duration, status="skipped")
+    except Exception:
+        finish_lstm_candidate_progress(symbol=symbol, duration=duration, status="failed")
+        logger.exception("lstm candidate search failed: %s %s", symbol, duration)
+        raise

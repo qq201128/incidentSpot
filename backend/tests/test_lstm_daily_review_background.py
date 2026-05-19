@@ -50,3 +50,17 @@ def test_lstm_candidate_retry_background_accepts_limited_search_env(monkeypatch)
 
     assert config.candidates_per_duration == 10
     assert config.parallel_workers == 3
+
+
+def test_lstm_candidate_retry_background_defaults_to_10m_and_60m_with_parallel_10(monkeypatch) -> None:
+    monkeypatch.delenv("LSTM_CANDIDATE_FEATURE_WINDOWS", raising=False)
+    monkeypatch.delenv("LSTM_CANDIDATE_MIN_MOVE_BPS", raising=False)
+    monkeypatch.delenv("LSTM_CANDIDATE_EPOCHS", raising=False)
+    monkeypatch.delenv("LSTM_CANDIDATE_SEEDS", raising=False)
+    monkeypatch.delenv("LSTM_CANDIDATE_PER_DURATION", raising=False)
+    monkeypatch.delenv("LSTM_CANDIDATE_PARALLEL_WORKERS", raising=False)
+
+    config = retry_bg._retry_config()
+
+    assert config.durations == ("10m", "60m")
+    assert config.search.parallel_workers == 10

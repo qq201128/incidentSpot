@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.services.lstm_artifacts import artifact_paths, read_json, write_json
+from app.services.lstm_artifacts import artifact_paths, read_json, update_json
 from app.services.lstm_candidate_keys import search_key_for_config
 from app.services.lstm_config import LstmTrainingConfig
 
@@ -53,17 +53,24 @@ def record_lstm_candidate(
     *,
     artifact_root: Path | None = None,
 ) -> dict[str, Any]:
-    library = read_lstm_candidate_library(config.symbol, config.duration, artifact_root=artifact_root)
+    path = candidate_library_path(config.symbol, config.duration, artifact_root=artifact_root)
     record = _candidate_record(config, profile, report)
-    records = _replace_record(library["records"], record)
-    payload = {
-        "symbol": config.symbol.strip().upper(),
-        "duration": config.duration,
-        "updatedAt": _utc_now(),
-        "total": len(records),
-        "records": records,
-    }
-    write_json(candidate_library_path(config.symbol, config.duration, artifact_root=artifact_root), payload)
+
+    def _updater(payload: dict[str, Any] | None) -> dict[str, Any]:
+        library = payload or _empty_library(config.symbol, config.duration)
+        records = library.get("records")
+        if not isinstance(records, list):
+            raise ValueError(f"LSTM candidate library records must be a list: {path}")
+        next_records = _replace_record(records, record)
+        return {
+            "symbol": config.symbol.strip().upper(),
+            "duration": config.duration,
+            "updatedAt": _utc_now(),
+            "total": len(next_records),
+            "records": next_records,
+        }
+
+    update_json(path, _updater)
     return record
 
 

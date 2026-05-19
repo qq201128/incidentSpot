@@ -115,6 +115,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 - `GET /api/lstm/status`
 - `POST /api/lstm/train`
+- `POST /api/lstm/candidate-search`
 - `GET /api/lstm/predict`
 
 ### `/api/auto-trade`

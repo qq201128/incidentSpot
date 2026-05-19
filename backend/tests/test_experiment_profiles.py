@@ -116,6 +116,75 @@ def test_lstm_train_route_uses_profile_defaults_and_overrides(monkeypatch) -> No
     assert config.num_layers == 1
 
 
+def test_lstm_candidate_search_route_queues_background(monkeypatch) -> None:
+    queued = {}
+
+    def _fake_queue(**kwargs):
+        queued.update(kwargs)
+        return {
+            "status": "queued",
+            "symbol": kwargs["symbol"],
+            "duration": kwargs["duration"],
+            "total": kwargs["total"],
+            "completed": 0,
+            "percent": 0.0,
+            "parallelWorkers": kwargs["parallel_workers"],
+        }
+
+    monkeypatch.setattr(lstm_api, "queue_lstm_candidate_progress", _fake_queue)
+    monkeypatch.setattr(lstm_api, "search_space_size", lambda _config: 225)
+    monkeypatch.setattr(
+        lstm_api,
+        "lstm_model_status",
+        lambda *_args, **_kwargs: {
+            "status": "shadow_active",
+            "candidateSearchProgress": {
+                "status": "queued",
+                "completed": 0,
+                "total": 225,
+                "parallelWorkers": 10,
+            },
+            "shadow": {"status": "shadow_active"},
+        },
+    )
+
+    tasks = BackgroundTasks()
+    report = lstm_api.lstm_candidate_search(tasks, symbol="btcusdt", duration="10m", profile="full")
+
+    assert report["message"] == "LSTM候选搜索已排队。"
+    assert report["candidateSearchProgress"]["status"] == "queued"
+    assert tasks.tasks[0].func == lstm_api._background_lstm_candidate_search
+    assert tasks.tasks[0].args == ("BTCUSDT", "10m", "full")
+    assert queued["symbol"] == "BTCUSDT"
+    assert queued["total"] == 225
+    assert queued["parallel_workers"] == 10
+
+
+def test_lstm_candidate_search_background_finishes_skipped(monkeypatch) -> None:
+    configs = []
+    finished = []
+
+    def _fake_retry(config):
+        configs.append(config)
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(lstm_api, "run_lstm_candidate_retry", _fake_retry)
+    monkeypatch.setattr(
+        lstm_api,
+        "finish_lstm_candidate_progress",
+        lambda **kwargs: finished.append(kwargs),
+    )
+
+    lstm_api._background_lstm_candidate_search("BTCUSDT", "10m", "full")
+
+    assert configs[0].symbols == ("BTCUSDT",)
+    assert configs[0].durations == ("10m",)
+    assert configs[0].manual_trigger is True
+    assert finished[0]["symbol"] == "BTCUSDT"
+    assert finished[0]["duration"] == "10m"
+    assert finished[0]["status"] == "skipped"
+
+
 def test_factor_combination_refresh_route_uses_profile_defaults_and_aliases() -> None:
     background_tasks = BackgroundTasks()
 

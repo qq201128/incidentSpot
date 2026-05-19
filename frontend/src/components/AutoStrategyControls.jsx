@@ -263,6 +263,13 @@ function demotionReason(demotion) {
   if (demotion?.reason === "consecutive_losses") return `连续亏损 ${losses} 次`;
   if (demotion?.reason === "rotated_after_candidate_failed") return "上一候选未达标，切换后重新观察";
   if (demotion?.reason === "candidate_pool_exhausted_refreshing") return "候选已用尽，正在刷新榜单";
+  if (demotion?.reason === "candidate_pool_exhausted_refresh_failed") {
+    const refresh = demotion?.refreshReport || {};
+    const failure = refresh.rankingFailure || {};
+    const validation = refresh.validationGate || {};
+    const detail = failure.reason || failure.stage || validation.failureReason || "暂无可用候选";
+    return `候选已用尽，刷新后仍无新榜单（${detail}）`;
+  }
   if (demotion?.reason === "insufficient_settled_samples") {
     return `样本 ${metrics.sampleCount ?? 0}，当前胜率 ${winRate}，满 ${demotion.thresholds?.activeSampleCount ?? 20} 单再判定`;
   }

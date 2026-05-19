@@ -108,6 +108,20 @@ def test_train_lstm_model_records_failed_attempt_without_active_model(monkeypatc
     assert status["validationFailureReason"] == "no_validation_confidence_threshold_met"
 
 
+def test_train_lstm_model_records_failed_attempt_when_dataset_builder_crashes() -> None:
+    artifact_root = _runtime_path("dataset-builder-crash")
+    config = LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, epochs=1)
+
+    with pytest.raises(RuntimeError, match="dataset builder crashed"):
+        train_lstm_model(config, artifact_root=artifact_root, dataset_builder=_crashing_dataset)
+
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    attempt = _read_json(paths.attempt)
+
+    assert attempt["status"] == "failed"
+    assert attempt["reason"] == "dataset builder crashed"
+
+
 def test_train_lstm_model_promotes_shadow_active_when_trade_gate_fails(monkeypatch) -> None:
     artifact_root = _runtime_path("shadow-active")
     report = train_lstm_model(
@@ -281,6 +295,10 @@ def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
     times = np.arange(sample_count, dtype=np.int64) * 600_000
     frame = pd.DataFrame({"entry_open_time": times})
     return LstmDataset(x, y, returns, times, ["signal", "noise"], frame, _combo_snapshot())
+
+
+def _crashing_dataset(_config: LstmTrainingConfig) -> LstmDataset:
+    raise RuntimeError("dataset builder crashed")
 
 
 def _weighted_dataset(config: LstmTrainingConfig) -> LstmDataset:

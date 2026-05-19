@@ -289,9 +289,23 @@ function StatusLine({ data }) {
   const winRate = formatPct(data.winRate ?? metrics.winRate, 1);
   return (
     <p>
-      High-winrate：{data.status || "unknown"} · settled {settled}/{required} · winRate {winRate} · {data.reason || "no_reason"}
+      High-winrate：{data.status || "unknown"} · settled {settled}/{required} · winRate {winRate} · {highWinrateReasonText(data)}
     </p>
   );
+}
+
+function highWinrateReasonText(data) {
+  if (data?.reason === "candidate_pool_exhausted_refresh_failed") {
+    const refresh = data.refreshReport || {};
+    const failure = refresh.rankingFailure || {};
+    const validation = refresh.validationGate || {};
+    const detail = failure.reason || failure.stage || validation.failureReason || "暂无可用候选";
+    return `候选已用尽，刷新后仍无新榜单（${detail}）`;
+  }
+  if (data?.reason === "candidate_pool_exhausted_refreshing") {
+    return "候选已用尽，正在刷新榜单";
+  }
+  return data?.reason || "no_reason";
 }
 
 function CoverageLine({ data }) {

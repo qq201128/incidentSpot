@@ -40,6 +40,7 @@ STATUS_PAUSED = "paused"
 STATUS_ACTIVE = STATUS_TRADABLE
 STATUS_COLLECTING = STATUS_PAPER_LIVE_COLLECTING
 REASON_OFFLINE_PROMOTION = "offline_promotion"
+RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
 RECENT_SAMPLE_LIMIT = 30
 DEFAULT_QTY = 5.0
 
@@ -79,7 +80,18 @@ def evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any]
     finally:
         conn.close()
     if refresh_required:
-        refresh_high_winrate_goal(sym, duration)
+        report = refresh_high_winrate_goal(sym, duration)
+        if _has_rankings(report):
+            return high_winrate_demotion_status(sym, duration)
+        payload = _refresh_failed_payload(payload, report)
+        conn = get_conn()
+        try:
+            ensure_high_winrate_status_table(conn)
+            _sync_strategy_slot_for_status(conn, sym, duration, payload["status"])
+            _write_status(conn, sym, duration, payload)
+            conn.commit()
+        finally:
+            conn.close()
         return high_winrate_demotion_status(sym, duration)
     return {"symbol": sym, "duration": duration, **payload}
 
@@ -177,6 +189,36 @@ def _status_payload(
     if extra:
         payload.update(extra)
     return payload
+
+
+def _refresh_failed_payload(payload: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "status": STATUS_DEMOTED,
+        "reason": RANKING_REFRESH_FAILED_REASON,
+        "evaluatedAt": _utc_now(),
+        "refreshReport": _refresh_report_summary(report),
+    }
+
+
+def _refresh_report_summary(report: dict[str, Any]) -> dict[str, Any]:
+    ranking = report.get("ranking") if isinstance(report.get("ranking"), list) else []
+    summary = {
+        "updatedAt": report.get("updatedAt"),
+        "rankingTotal": len(ranking),
+        "rankingFailure": report.get("rankingFailure"),
+        "validationGate": report.get("validationGate"),
+        "candidateDiagnostics": report.get("candidateDiagnostics"),
+        "rankingDiagnostics": report.get("rankingDiagnostics"),
+        "promotion": report.get("promotion"),
+        "target": report.get("target"),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _has_rankings(report: dict[str, Any]) -> bool:
+    ranking = report.get("ranking")
+    return isinstance(ranking, list) and bool(ranking)
 
 
 def _write_status(conn: Any, symbol: str, duration: str, payload: dict[str, Any]) -> None:

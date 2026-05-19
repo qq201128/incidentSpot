@@ -65,6 +65,12 @@ def train_lstm_model(
             write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, reason))
         _write_failed_staging_status(staging, cfg, "insufficient_samples", reason)
         raise
+    except Exception as exc:
+        reason = str(exc)
+        if write_attempt:
+            write_json(paths.attempt, _attempt_payload("failed", cfg, version, reason))
+        _write_failed_staging_status(staging, cfg, "failed", reason)
+        raise
     try:
         return _train_with_dataset(
             cfg,

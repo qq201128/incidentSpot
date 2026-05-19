@@ -114,7 +114,13 @@
   font-size: 12px;
 }
 
-.factor-lstm-card-head > span {
+.factor-lstm-card-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.factor-lstm-card-actions > span {
   padding: 5px 8px;
   border-radius: 6px;
   background: rgba(236, 187, 73, 0.16);
@@ -123,10 +129,78 @@
   white-space: nowrap;
 }
 
+.factor-lstm-search-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(22, 119, 255, 0.42);
+  border-radius: 6px;
+  background: rgba(22, 119, 255, 0.16);
+  color: #9fc6ff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.factor-lstm-search-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .factor-lstm-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
+}
+
+.factor-lstm-progress {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(7, 10, 18, 0.58);
+}
+
+.factor-lstm-progress.is-running {
+  outline: 1px solid rgba(22, 119, 255, 0.36);
+}
+
+.factor-lstm-progress-head,
+.factor-lstm-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.factor-lstm-progress-head b {
+  color: #9fc6ff;
+}
+
+.factor-lstm-progress-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(22, 119, 255, 0.18);
+}
+
+.factor-lstm-progress-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1677ff, #3fd3a6);
+}
+
+.factor-lstm-progress-meta {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.factor-lstm-progress p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
 }
 
 .factor-lstm-grid .factor-adaptive-metric {
