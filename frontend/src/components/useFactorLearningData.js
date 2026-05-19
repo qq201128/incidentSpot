@@ -165,7 +165,7 @@ function hasActiveLearningTask(data) {
 }
 
 function lstmStatusText(data) {
-  const label = data?.status || "untrained";
+  const label = lstmStatusLabel(data?.status);
   const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
   return `LSTM：${label}${version}${lstmReadyStatusText(data)}`;
 }
@@ -180,14 +180,35 @@ function lstmReadyStatusText(data) {
 
 function lstmBlockedReasonLabel(reason) {
   const labels = {
+    passed: "—",
     torch_unavailable: "Torch不可用",
     artifacts_incomplete: "模型文件不完整",
+    model_status_untrained: "模型未训练",
+    no_validation_confidence_threshold_met: "未达到交易验证门槛",
     trained_combo_snapshot_missing: "训练组合快照缺失",
     trained_combo_snapshot_incomplete: "训练组合不足Top3",
     current_combo_snapshot_missing: "当前组合排名缺失",
     current_combo_snapshot_incomplete: "当前组合不足Top3",
   };
   return labels[reason] || reason || "未知原因";
+}
+
+function lstmStatusLabel(status) {
+  const labels = {
+    shadow_active: "影子激活",
+    trade_active: "交易激活",
+    promoted_shadow_active: "已发布影子",
+    promoted_trade_active: "已发布交易",
+    rejected_validation: "验证拒绝",
+    rejected_insufficient_samples: "样本拒绝",
+    training: "训练中",
+    trained: "已训练",
+    validation_failed: "验证失败",
+    insufficient_samples: "样本不足",
+    failed: "训练失败",
+    untrained: "未训练",
+  };
+  return labels[status] || "未训练";
 }
 
 function isValidSymbol(value) {

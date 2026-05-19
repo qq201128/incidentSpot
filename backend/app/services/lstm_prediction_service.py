@@ -18,6 +18,7 @@ from app.services.lstm_feature_builder import (
     build_live_feature_window,
     duration_feature_frame,
 )
+from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, trade_active_status
 from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import (
     active_lstm_status,
@@ -122,11 +123,13 @@ def _assert_predictable(
     version = read_json(paths.version) or {}
     report = read_json(paths.report) or {}
     status = active_lstm_status(symbol, duration, artifact_root=artifact_root)
-    if status["status"] != "trained":
+    if not _shadow_predictable_status(status):
         reason = status.get("reason") or "model is not trained"
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {reason}")
     if not required_artifacts_exist(paths):
         raise ValueError(f"LSTM model artifacts are incomplete for {symbol} {duration}: {paths.root}")
+    if status.get("status") != LSTM_STATUS_LEGACY_TRAINED:
+        return
     validation_reason = lstm_validation_block_reason(status, version, report)
     if validation_reason != "passed":
         raise ValueError(f"LSTM model is not ready for {symbol} {duration}: {validation_reason}")
@@ -172,7 +175,7 @@ def _signal_payload(
     direction = "up" if prob >= 0.5 else "down"
     confidence = prob if direction == "up" else 1.0 - prob
     min_confidence = _selected_confidence_threshold(version)
-    gate_passed = confidence >= min_confidence
+    gate_passed = _trade_gate_passed(confidence, min_confidence, status, version)
     return {
         "symbol": symbol,
         "strategyKey": lstm_shadow_strategy_key(duration),
@@ -227,14 +230,32 @@ def _expected_return(probability_up: float, version: dict[str, Any]) -> float:
     return float(np.round(probability_up * up_mean + (1.0 - probability_up) * down_mean, 8))
 
 
-def _selected_confidence_threshold(version: dict[str, Any]) -> float:
+def _selected_confidence_threshold(version: dict[str, Any]) -> float | None:
     threshold = version.get("selectedConfidenceThreshold")
     if threshold is None:
         gate = version.get("validationGate") or {}
         threshold = gate.get("minConfidence")
     if threshold is None:
-        raise ValueError("LSTM model version missing selected confidence threshold")
+        return None
     return float(threshold)
+
+
+def _trade_gate_passed(
+    confidence: float,
+    threshold: float | None,
+    status: dict[str, Any],
+    version: dict[str, Any],
+) -> bool:
+    if threshold is None or not trade_active_status(status.get("status")):
+        return False
+    gate = version.get("validationGate") or {}
+    if gate.get("status") != "passed":
+        return False
+    return bool(confidence >= threshold)
+
+
+def _shadow_predictable_status(status: dict[str, Any]) -> bool:
+    return status.get("status") in {"shadow_active", "trade_active", LSTM_STATUS_LEGACY_TRAINED}
 
 
 def _prediction_version_payload(version: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:

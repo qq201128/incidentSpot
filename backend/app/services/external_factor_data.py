@@ -144,8 +144,12 @@ def _load_table(sql: str, params: tuple, columns: tuple[str, ...]) -> pd.DataFra
 def _merge_asof_if_present(base_df: pd.DataFrame, feature_df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
     if feature_df.empty:
         return base_df
-    left = base_df.sort_values("open_time").reset_index(drop=True)
-    right = feature_df[["open_time", *columns]].sort_values("open_time")
+    left = base_df.copy()
+    right = feature_df[["open_time", *columns]].copy()
+    left["open_time"] = pd.to_numeric(left["open_time"], errors="raise").astype("int64")
+    right["open_time"] = pd.to_numeric(right["open_time"], errors="raise").astype("int64")
+    left = left.sort_values("open_time").reset_index(drop=True)
+    right = right.sort_values("open_time").reset_index(drop=True)
     return pd.merge_asof(left, right, on="open_time", direction="backward")
 
 
@@ -153,10 +157,10 @@ def _add_positioning_derivatives(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     if "open_interest" not in out:
         return out
-    out["open_interest_chg_1"] = out["open_interest"].pct_change(1)
-    out["open_interest_value_chg_1"] = out["open_interest_value"].pct_change(1)
+    out["open_interest_chg_1"] = out["open_interest"].pct_change(1, fill_method=None)
+    out["open_interest_value_chg_1"] = out["open_interest_value"].pct_change(1, fill_method=None)
     out["open_interest_z_20"] = _zscore(out["open_interest"], 20)
-    out["long_short_ratio_chg_1"] = out["long_short_ratio"].pct_change(1)
+    out["long_short_ratio_chg_1"] = out["long_short_ratio"].pct_change(1, fill_method=None)
     total_taker = (out["taker_buy_vol"] + out["taker_sell_vol"]).replace(0, np.nan)
     out["taker_buy_share"] = out["taker_buy_vol"] / total_taker
     return out

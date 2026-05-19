@@ -6,6 +6,13 @@ from typing import Any
 from app.services.lstm_artifacts import artifact_paths, read_json, required_artifacts_exist
 from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import lstm_shadow_strategy_key
+from app.services.lstm_lifecycle import (
+    LSTM_STATUS_LEGACY_TRAINED,
+    LSTM_STATUS_SHADOW_ACTIVE,
+    LSTM_STATUS_TRADE_ACTIVE,
+    shadow_predictable_status,
+    trade_active_status,
+)
 from app.services.lstm_torch_backend import torch_availability
 
 
@@ -28,6 +35,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         artifacts_ready,
         torch_available,
     )
+    trade_reason = _trade_prediction_ready_reason(status, version, report, artifacts_ready, torch_available)
     return {
         **status,
         "strategyKey": lstm_shadow_strategy_key(duration),
@@ -56,6 +64,8 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "comboSnapshotTrained": snapshot["trained"],
         "shadowPredictionReady": ready_reason == "passed",
         "shadowPredictionBlockedReason": ready_reason,
+        "tradePredictionReady": trade_reason == "passed",
+        "tradePredictionBlockedReason": trade_reason,
     }
 
 
@@ -87,7 +97,11 @@ def lstm_validation_block_reason(
     version: dict[str, Any],
     report: dict[str, Any],
 ) -> str:
-    if status.get("status") != "trained":
+    active_status = status.get("status")
+    if active_status == LSTM_STATUS_SHADOW_ACTIVE:
+        gate = validation_gate_payload(version, report)
+        return str(gate.get("reason") or "validation_gate_failed")
+    if not trade_active_status(active_status):
         return status.get("reason") or f"model_status_{status.get('status') or 'unknown'}"
     gate = validation_gate_payload(version, report)
     if not gate:
@@ -140,12 +154,12 @@ def _active_status(
     report: dict[str, Any],
     artifacts_ready: bool,
 ) -> dict[str, Any]:
-    if status.get("status") == "trained":
+    if shadow_predictable_status(status.get("status")):
         return status
     if not _active_artifacts_pass_validation(status, version, report, artifacts_ready):
         return status
     return {
-        "status": "trained",
+        "status": LSTM_STATUS_TRADE_ACTIVE,
         "symbol": status.get("symbol") or symbol.strip().upper(),
         "duration": status.get("duration") or duration,
         "featureWindow": report.get("featureWindow"),
@@ -163,7 +177,7 @@ def _active_artifacts_pass_validation(
     return (
         status.get("status") != "untrained"
         and artifacts_ready
-        and lstm_validation_block_reason({"status": "trained"}, version, report) == "passed"
+        and lstm_validation_block_reason({"status": LSTM_STATUS_TRADE_ACTIVE}, version, report) == "passed"
     )
 
 
@@ -191,11 +205,24 @@ def _shadow_prediction_ready_reason(
 ) -> str:
     if not torch_available:
         return "torch_unavailable"
-    if status.get("status") != "trained":
+    if not shadow_predictable_status(status.get("status")):
         return status.get("reason") or f"model_status_{status.get('status') or 'unknown'}"
     if not artifacts_ready:
         return "artifacts_incomplete"
-    validation_reason = lstm_validation_block_reason(status, version, report)
-    if validation_reason != "passed":
-        return validation_reason
+    if status.get("status") == LSTM_STATUS_LEGACY_TRAINED:
+        return lstm_validation_block_reason(status, version, report)
     return "passed"
+
+
+def _trade_prediction_ready_reason(
+    status: dict[str, Any],
+    version: dict[str, Any],
+    report: dict[str, Any],
+    artifacts_ready: bool,
+    torch_available: bool,
+) -> str:
+    if not torch_available:
+        return "torch_unavailable"
+    if not artifacts_ready:
+        return "artifacts_incomplete"
+    return lstm_validation_block_reason(status, version, report)

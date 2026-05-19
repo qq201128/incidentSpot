@@ -41,7 +41,7 @@ def test_trained_artifacts_missing_validation_gate_block_prediction(monkeypatch)
     artifact_root = _runtime_path("missing-gate")
     _write_legacy_trained_artifacts(artifact_root)
     _patch_combo_ranking(monkeypatch)
-    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window)
+    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window_two_features)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
@@ -108,6 +108,37 @@ def test_train_lstm_model_records_failed_attempt_without_active_model(monkeypatc
     assert status["validationFailureReason"] == "no_validation_confidence_threshold_met"
 
 
+def test_train_lstm_model_promotes_shadow_active_when_trade_gate_fails(monkeypatch) -> None:
+    artifact_root = _runtime_path("shadow-active")
+    report = train_lstm_model(
+        LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
+        artifact_root=artifact_root,
+        backend=_ModerateBackend(),
+        dataset_builder=_weighted_dataset,
+    )
+    paths = artifact_paths("BTCUSDT", "10m", artifact_root)
+    _patch_combo_ranking(monkeypatch)
+    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window_two_features)
+
+    status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
+    signal = lstm_prediction_service.predict_lstm_signal(
+        "BTCUSDT",
+        "10m",
+        artifact_root=artifact_root,
+        backend=_PredictOnlyBackend(),
+    )
+
+    assert report["status"] == "shadow_active"
+    assert report["candidateStatus"] == "promoted_shadow_active"
+    assert report["promotionReason"] == "shadow_quality_passed"
+    assert _read_json(paths.status)["status"] == "shadow_active"
+    assert status["shadowPredictionReady"] is True
+    assert status["tradePredictionReady"] is False
+    assert status["tradePredictionBlockedReason"] == "no_validation_confidence_threshold_met"
+    assert signal["modelStatus"] == "shadow_active"
+    assert signal["validationGatePassed"] is False
+
+
 def test_train_lstm_model_keeps_old_active_model_when_validation_fails(monkeypatch) -> None:
     artifact_root = _runtime_path("old-active-validation-failed")
     _write_report_gate_artifacts(artifact_root)
@@ -142,14 +173,15 @@ def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monke
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
-    assert report["status"] == "trained"
-    assert report["candidateStatus"] == "promoted_active"
+    assert report["status"] == "trade_active"
+    assert report["candidateStatus"] == "promoted_trade_active"
     assert report["promotionReason"] == "validation_gate_passed"
     assert paths.model.exists()
-    assert status["activeModelStatus"] == "trained"
-    assert status["lastAttemptStatus"] == "trained"
-    assert status["candidateStatus"] == "promoted_active"
+    assert status["activeModelStatus"] == "trade_active"
+    assert status["lastAttemptStatus"] == "trade_active"
+    assert status["candidateStatus"] == "promoted_trade_active"
     assert status["selectedConfidenceThreshold"] is not None
+    assert status["tradePredictionReady"] is True
 
 
 def _staging_status(root: Path, model_version: str) -> dict:
@@ -178,6 +210,13 @@ class _HighConfidenceBackend(_LowConfidenceBackend):
         return probs.astype(np.float32)
 
 
+class _ModerateBackend(_LowConfidenceBackend):
+    def predict(self, _model_path, x):
+        correct = x[:, 0, 1] > 0.0
+        prob = np.where(x[:, 0, 0] > 0.0, 0.55, 0.45)
+        return np.where(correct, prob, 1.0 - prob).astype(np.float32)
+
+
 def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
     sample_count = 400
     y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
@@ -187,6 +226,19 @@ def _fake_dataset(config: LstmTrainingConfig) -> LstmDataset:
     times = np.arange(sample_count, dtype=np.int64) * 600_000
     frame = pd.DataFrame({"entry_open_time": times})
     return LstmDataset(x, y, returns, times, ["signal", "noise"], frame, _combo_snapshot())
+
+
+def _weighted_dataset(config: LstmTrainingConfig) -> LstmDataset:
+    sample_count = 400
+    y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
+    correct = (np.arange(sample_count) % 10) < 6
+    x = np.zeros((sample_count, config.feature_window, 2), dtype=np.float32)
+    x[:, :, 0] = np.where(y[:, None] > 0, 1.0, -1.0)
+    x[:, :, 1] = np.where(correct[:, None], 1.0, -1.0)
+    returns = np.where(y > 0, 0.02, -0.01).astype(np.float32)
+    times = np.arange(sample_count, dtype=np.int64) * 600_000
+    frame = pd.DataFrame({"entry_open_time": times})
+    return LstmDataset(x, y, returns, times, ["signal", "correct"], frame, _combo_snapshot())
 
 
 def _combo_snapshot() -> list[dict]:
@@ -211,6 +263,10 @@ def _patch_combo_ranking(monkeypatch) -> None:
 
 def _live_window(*_args, **_kwargs):
     return np.ones((1, 4, 1), dtype=np.float32), {"entryOpenTime": ENTRY_OPEN_TIME, "entryPrice": 100.0}
+
+
+def _live_window_two_features(*_args, **_kwargs):
+    return np.ones((1, 4, 2), dtype=np.float32), {"entryOpenTime": ENTRY_OPEN_TIME, "entryPrice": 100.0}
 
 
 def _write_validation_failed_artifacts(root: Path) -> None:

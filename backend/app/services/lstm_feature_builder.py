@@ -29,7 +29,8 @@ RAW_COMBO_PREFIXES = ("combo__", "goal_combo__")
 DERIVED_COMBO_PREFIX = "combo_top"
 BASE_EXCLUDED_COLUMNS = {
     "open_time", "entry_open_time", "open", "high", "low", "close", "volume",
-    "future_return", "label_up", "y",
+    "future_return", "future_return_bps", "future_return_abs_bps", "label_threshold_bps",
+    "label_up", "y",
 }
 
 
@@ -103,10 +104,12 @@ def duration_labeled_frame(
     horizon_minutes: int,
     min_move_bps: float,
 ) -> pd.DataFrame:
-    out = frame.sort_values("open_time").reset_index(drop=True).copy()
-    out["future_return"] = out["close"].shift(-1) / out["close"] - 1.0
-    out["label_up"] = _label_series(out["future_return"], min_move_bps)
-    sampled = duration_feature_frame(out, duration)
+    sampled = duration_feature_frame(frame, duration).sort_values("open_time").reset_index(drop=True).copy()
+    sampled["future_return"] = sampled["close"].shift(-1) / sampled["close"] - 1.0
+    sampled["future_return_bps"] = sampled["future_return"] * 10_000.0
+    sampled["future_return_abs_bps"] = sampled["future_return_bps"].abs()
+    sampled["label_threshold_bps"] = _label_threshold_bps(sampled, min_move_bps)
+    sampled["label_up"] = _label_series(sampled["future_return"], sampled["label_threshold_bps"] / 10_000.0)
     return sampled.dropna(subset=["future_return", "label_up"]).reset_index(drop=True)
 
 
@@ -238,8 +241,8 @@ def _horizon_minutes(config: LstmTrainingConfig) -> int:
     return int(config.horizon_minutes or horizon_minutes_for_duration(config.duration))
 
 
-def _label_series(future_return: pd.Series, min_move_bps: float) -> pd.Series:
-    threshold = float(min_move_bps) / 10_000.0
+def _label_series(future_return: pd.Series, threshold: float | pd.Series) -> pd.Series:
+    threshold = threshold if isinstance(threshold, pd.Series) else float(threshold)
     labels = pd.Series(np.nan, index=future_return.index)
     labels = labels.mask(future_return > threshold, 1.0)
     labels = labels.mask(future_return <= -threshold, 0.0)
@@ -272,6 +275,10 @@ def _window_arrays(
 def _column_is_finite_enough(values: pd.Series) -> bool:
     finite = np.isfinite(values.to_numpy(dtype=np.float32)).mean()
     return float(finite) >= MIN_FEATURE_FINITE_RATIO
+
+
+def _label_threshold_bps(frame: pd.DataFrame, min_move_bps: float) -> pd.Series:
+    return pd.Series(float(min_move_bps), index=frame.index, dtype=np.float32)
 
 
 def _valid_sample(window: np.ndarray, label: float, future_return: float) -> bool:

@@ -9,6 +9,7 @@ from app.services.lstm_combo_ranking import LSTM_COMBO_SOURCE_PRIMARY, resolve_l
 from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_feature_builder import build_lstm_training_dataset
+from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, shadow_predictable_status
 from app.services.lstm_prediction_service import active_lstm_status, lstm_validation_block_reason
 from app.services.lstm_training_service import train_lstm_model
 
@@ -95,11 +96,16 @@ def _trained_artifacts_match(
         artifact_root=artifact_root,
     )
     return (
-        status.get("status") == "trained"
+        _snapshot_model_ready(status, version, report)
         and required_artifacts_exist(paths)
-        and lstm_validation_block_reason(status, version, report) == "passed"
         and snapshot["matches"]
     )
+
+
+def _snapshot_model_ready(status: dict[str, Any], version: dict[str, Any], report: dict[str, Any]) -> bool:
+    if status.get("status") == LSTM_STATUS_LEGACY_TRAINED:
+        return lstm_validation_block_reason(status, version, report) == "passed"
+    return shadow_predictable_status(status.get("status"))
 
 
 def _attempt_snapshot_matches(attempt: dict[str, Any], snapshot: dict[str, Any]) -> bool:

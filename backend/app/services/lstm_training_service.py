@@ -15,6 +15,12 @@ from app.services.lstm_artifacts import (
 )
 from app.services.lstm_config import LSTM_RULE_NAME, LstmTrainingConfig, validated_lstm_config
 from app.services.lstm_feature_builder import LstmDataError, LstmDataset, build_lstm_training_dataset
+from app.services.lstm_lifecycle import (
+    candidate_status,
+    lifecycle_status,
+    promotion_reason,
+    publishes_active_artifacts,
+)
 from app.services.lstm_torch_backend import TorchLstmBackend, TorchLstmOptions
 from app.services.lstm_training_gate import validation_failure_reason, validation_gate
 from app.services.lstm_validation import (
@@ -25,12 +31,6 @@ from app.services.lstm_validation import (
 )
 
 DatasetBuilder = Callable[[LstmTrainingConfig], LstmDataset]
-
-CANDIDATE_TRAINING = "training"
-CANDIDATE_PROMOTED_ACTIVE = "promoted_active"
-CANDIDATE_REJECTED_VALIDATION = "rejected_validation"
-CANDIDATE_REJECTED_INSUFFICIENT_SAMPLES = "rejected_insufficient_samples"
-CANDIDATE_FAILED = "failed"
 
 
 def train_lstm_model(
@@ -90,7 +90,7 @@ def _train_with_dataset(
     )
     report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version)
     _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
-    if report["status"] == "trained":
+    if publishes_active_artifacts(report["status"]):
         publish_artifacts(staging_paths, active_paths)
     write_json(
         active_paths.attempt,
@@ -120,7 +120,7 @@ def _training_report(
     val_metrics = binary_classification_metrics(split.val_y, val_prob, split.val_returns)
     test_metrics = binary_classification_metrics(split.test_y, test_prob, split.test_returns)
     gate = validation_gate(val_metrics, test_metrics)
-    status = "trained" if gate["status"] == "passed" else "validation_failed"
+    status = lifecycle_status(gate, val_metrics, test_metrics)
     return _finite_payload({
         "status": status,
         "modelVersion": version,
@@ -138,8 +138,8 @@ def _training_report(
         "validationGate": gate,
         "selectedConfidenceThreshold": gate.get("minConfidence"),
         "validationFailureReason": validation_failure_reason(gate),
-        "candidateStatus": _candidate_status(status),
-        "promotionReason": _promotion_reason(gate),
+        "candidateStatus": candidate_status(status),
+        "promotionReason": promotion_reason(status, gate),
         "losses": losses,
         "returnStats": _return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
@@ -215,7 +215,7 @@ def _status_payload(status: str, cfg: LstmTrainingConfig, reason: str | None = N
     }
     if reason:
         payload["reason"] = reason
-    payload["candidateStatus"] = _candidate_status(status)
+    payload["candidateStatus"] = candidate_status(status)
     return payload
 
 
@@ -245,24 +245,6 @@ def _write_failed_staging_status(
 ) -> None:
     staging_paths.root.mkdir(parents=True, exist_ok=True)
     write_json(staging_paths.status, _status_payload(status, cfg, reason))
-
-
-def _candidate_status(status: str) -> str:
-    if status == "training":
-        return CANDIDATE_TRAINING
-    if status == "trained":
-        return CANDIDATE_PROMOTED_ACTIVE
-    if status == "validation_failed":
-        return CANDIDATE_REJECTED_VALIDATION
-    if status == "insufficient_samples":
-        return CANDIDATE_REJECTED_INSUFFICIENT_SAMPLES
-    return CANDIDATE_FAILED
-
-
-def _promotion_reason(gate: dict[str, Any]) -> str:
-    if gate.get("status") == "passed":
-        return "validation_gate_passed"
-    return str(gate.get("reason") or "validation_gate_failed")
 
 
 def _return_stats(returns: np.ndarray) -> dict[str, float]:

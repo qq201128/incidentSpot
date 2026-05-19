@@ -117,6 +117,12 @@ function statusLabel(status) {
 }
 
 function lstmStatusLabel(status) {
+  if (status === "shadow_active") return "影子激活";
+  if (status === "trade_active") return "交易激活";
+  if (status === "promoted_shadow_active") return "已发布影子";
+  if (status === "promoted_trade_active") return "已发布交易";
+  if (status === "rejected_validation") return "验证拒绝";
+  if (status === "rejected_insufficient_samples") return "样本拒绝";
   if (status === "training") return "训练中";
   if (status === "trained") return "已训练";
   if (status === "validation_failed") return "验证失败";
@@ -170,7 +176,9 @@ function comboStatusLabel(reason) {
 }
 
 function statusClass(status) {
-  return status === "trained" ? "is-trained" : status === "failed" ? "is-failed" : "";
+  if (["shadow_active", "trade_active", "trained"].includes(status)) return "is-trained";
+  if (["failed", "validation_failed", "rejected_validation"].includes(status)) return "is-failed";
+  return "";
 }
 
 function compareLabel(strategyKey) {

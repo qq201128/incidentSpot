@@ -23,6 +23,7 @@ from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIO
 
 DEFAULT_RETRY_DURATIONS = ("10m",)
 RETRY_TRAIN_STATUSES = {"untrained", "validation_failed", "failed", "insufficient_samples"}
+TRAINED_STATUSES = {"trained", "shadow_active", "trade_active"}
 
 
 @dataclass(frozen=True)
@@ -160,14 +161,17 @@ def _trained_result(
 
 
 def _training_summary(report: dict[str, Any]) -> dict[str, Any]:
-    keys = ("status", "modelVersion", "trainedAt", "sampleCounts", "validationFailureReason")
+    keys = (
+        "status", "modelVersion", "trainedAt", "sampleCounts",
+        "candidateStatus", "promotionReason", "validationFailureReason",
+    )
     return {key: report.get(key) for key in keys if key in report}
 
 
 def _summary_status(results: list[dict[str, Any]]) -> str:
-    if any(result.get("status") not in {"skipped", "trained"} for result in results):
+    if any(result.get("status") not in {"skipped", *TRAINED_STATUSES} for result in results):
         return "completed_with_rejections"
-    if any(result.get("status") == "trained" for result in results):
+    if any(result.get("status") in TRAINED_STATUSES for result in results):
         return "trained"
     return "skipped"
 

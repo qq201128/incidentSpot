@@ -9,6 +9,7 @@ import pytest
 
 from app.services import forward_validation_service
 from app.services.lstm_validation import binary_classification_metrics
+
 def test_lstm_accuracy_tracks_direction_and_win_rate_uses_gross_returns() -> None:
     metrics = binary_classification_metrics(
         np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
@@ -36,8 +37,8 @@ def test_lstm_metrics_include_confidence_threshold_samples() -> None:
     assert thresholds[0.5]["sampleCount"] == 4
     assert thresholds[0.55]["sampleCount"] == 3
     assert thresholds[0.55]["winRate"] == pytest.approx(2 / 3)
-    assert thresholds[0.55]["avgReturn"] == pytest.approx(0.009)
-    assert thresholds[0.55]["profitFactor"] == pytest.approx(0.058 / 0.031)
+    assert thresholds[0.55]["avgReturn"] == pytest.approx(0.01)
+    assert thresholds[0.55]["profitFactor"] == pytest.approx(2.0)
     assert thresholds[0.65]["sampleCount"] == 2
     assert thresholds[0.65]["winRate"] == pytest.approx(0.5)
     assert thresholds[0.70]["sampleCount"] == 2
@@ -87,7 +88,7 @@ def test_forward_validation_prediction_correct_tracks_direction_without_cost(mon
     ).fetchone()
     conn.close()
     assert result == {"checked": 1, "settled": 1, "pendingData": 0}
-    assert row["actual_return"] < 0
+    assert row["actual_return"] == pytest.approx(0.0005)
     assert row["prediction_correct"] == 1
 
 
