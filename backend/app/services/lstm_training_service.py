@@ -11,11 +11,13 @@ from app.services.lstm_artifacts import (
     artifact_paths,
     artifact_paths_for_root,
     publish_artifacts,
+    require_json,
     write_json,
 )
 from app.services.lstm_config import LSTM_RULE_NAME, LstmTrainingConfig, validated_lstm_config
 from app.services.lstm_feature_builder import LstmDataError, LstmDataset, build_lstm_training_dataset
 from app.services.lstm_lifecycle import (
+    LSTM_STATUS_SHADOW_ACTIVE,
     candidate_status,
     lifecycle_status,
     promotion_reason,
@@ -39,32 +41,55 @@ def train_lstm_model(
     artifact_root: Path | None = None,
     backend: Any | None = None,
     dataset_builder: DatasetBuilder = build_lstm_training_dataset,
+    publish_shadow_active: bool = True,
+    publish_trade_active: bool = True,
+    write_attempt: bool = True,
 ) -> dict[str, Any]:
     cfg = validated_lstm_config(config)
     paths = artifact_paths(cfg.symbol, cfg.duration, artifact_root)
     version = _model_version(cfg)
     staging = artifact_paths_for_root(paths.root / "_staging" / version)
-    write_json(paths.attempt, _attempt_payload("training", cfg, version))
+    if write_attempt:
+        write_json(paths.attempt, _attempt_payload("training", cfg, version))
     dataset: LstmDataset | None = None
     try:
         dataset = dataset_builder(cfg)
-        write_json(
-            paths.attempt,
-            _attempt_payload("training", cfg, version, combo_snapshot=dataset.combo_snapshot),
-        )
+        if write_attempt:
+            write_json(
+                paths.attempt,
+                _attempt_payload("training", cfg, version, combo_snapshot=dataset.combo_snapshot),
+            )
     except LstmDataError as exc:
         reason = str(exc)
-        write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, reason))
+        if write_attempt:
+            write_json(paths.attempt, _attempt_payload("insufficient_samples", cfg, version, reason))
         _write_failed_staging_status(staging, cfg, "insufficient_samples", reason)
         raise
     try:
-        return _train_with_dataset(cfg, dataset, paths, staging, backend or TorchLstmBackend(), version)
+        return _train_with_dataset(
+            cfg,
+            dataset,
+            paths,
+            staging,
+            backend or TorchLstmBackend(),
+            version,
+            publish_shadow_active=publish_shadow_active,
+            publish_trade_active=publish_trade_active,
+            write_attempt=write_attempt,
+        )
     except Exception as exc:
         reason = str(exc)
-        write_json(
-            paths.attempt,
-            _attempt_payload("failed", cfg, version, reason, combo_snapshot=dataset.combo_snapshot if dataset else None),
-        )
+        if write_attempt:
+            write_json(
+                paths.attempt,
+                _attempt_payload(
+                    "failed",
+                    cfg,
+                    version,
+                    reason,
+                    combo_snapshot=dataset.combo_snapshot if dataset else None,
+                ),
+            )
         _write_failed_staging_status(staging, cfg, "failed", reason)
         raise
 
@@ -76,6 +101,10 @@ def _train_with_dataset(
     staging_paths,
     trainer: Any,
     version: str,
+    *,
+    publish_shadow_active: bool,
+    publish_trade_active: bool,
+    write_attempt: bool,
 ) -> dict[str, Any]:
     split = chronological_split(dataset.x, dataset.y, dataset.future_returns, cfg.train_ratio, cfg.val_ratio)
     scaler = fit_standardizer(split.train_x)
@@ -90,20 +119,66 @@ def _train_with_dataset(
     )
     report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version)
     _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
-    if publishes_active_artifacts(report["status"]):
+    if _should_publish_active_artifacts(report["status"], publish_shadow_active, publish_trade_active):
         publish_artifacts(staging_paths, active_paths)
-    write_json(
-        active_paths.attempt,
-        _attempt_payload(
-            report["status"],
-            cfg,
-            version,
-            report.get("validationFailureReason"),
-            promotion_reason=report.get("promotionReason"),
-            combo_snapshot=dataset.combo_snapshot,
-        ),
-    )
+    if write_attempt:
+        _write_attempt_from_report(active_paths, cfg, dataset, report, version)
     return report
+
+
+def publish_lstm_staged_model(
+    config: LstmTrainingConfig,
+    report: dict[str, Any],
+    *,
+    artifact_root: Path | None = None,
+) -> None:
+    cfg = validated_lstm_config(config)
+    paths = artifact_paths(cfg.symbol, cfg.duration, artifact_root)
+    version = str(report["modelVersion"])
+    staging = artifact_paths_for_root(paths.root / "_staging" / version)
+    publish_artifacts(staging, paths)
+    staged_report = require_json(staging.report, "LSTM staged training report")
+    write_json(paths.attempt, _attempt_payload_from_report(cfg, staged_report, version))
+
+
+def _should_publish_active_artifacts(
+    status: str,
+    publish_shadow_active: bool,
+    publish_trade_active: bool,
+) -> bool:
+    if status == LSTM_STATUS_SHADOW_ACTIVE:
+        return publish_shadow_active
+    if publishes_active_artifacts(status):
+        return publish_trade_active
+    return False
+
+
+def _write_attempt_from_report(
+    active_paths,
+    cfg: LstmTrainingConfig,
+    dataset: LstmDataset,
+    report: dict[str, Any],
+    version: str,
+) -> None:
+    payload = _attempt_payload_from_report(cfg, report, version, combo_snapshot=dataset.combo_snapshot)
+    write_json(active_paths.attempt, payload)
+
+
+def _attempt_payload_from_report(
+    cfg: LstmTrainingConfig,
+    report: dict[str, Any],
+    version: str,
+    *,
+    combo_snapshot: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return _attempt_payload(
+        str(report["status"]),
+        cfg,
+        version,
+        report.get("validationFailureReason"),
+        promotion_reason=report.get("promotionReason"),
+        combo_snapshot=combo_snapshot,
+    )
 
 
 def _training_report(
@@ -258,9 +333,9 @@ def _return_stats(returns: np.ndarray) -> dict[str, float]:
 
 
 def _model_version(cfg: LstmTrainingConfig) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     bps = f"{cfg.min_move_bps:g}".replace(".", "p")
-    return f"lstm_{cfg.symbol}_{cfg.duration}_w{cfg.feature_window}_m{bps}_{stamp}"
+    return f"lstm_{cfg.symbol}_{cfg.duration}_w{cfg.feature_window}_m{bps}_e{cfg.epochs}_s{cfg.seed}_{stamp}"
 
 
 def _utc_now() -> str:

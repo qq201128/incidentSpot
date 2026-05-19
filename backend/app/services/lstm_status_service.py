@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.lstm_artifacts import artifact_paths, read_json, required_artifacts_exist
+from app.services.lstm_candidate_library import lstm_candidate_library_summary
 from app.services.lstm_combo_snapshot import combo_snapshot_status
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.lstm_lifecycle import (
@@ -62,6 +63,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "comboSnapshotReason": snapshot["reason"],
         "comboSnapshotCurrent": snapshot["current"],
         "comboSnapshotTrained": snapshot["trained"],
+        "candidateLibrary": lstm_candidate_library_summary(sym, duration, artifact_root=artifact_root),
         "shadowPredictionReady": ready_reason == "passed",
         "shadowPredictionBlockedReason": ready_reason,
         "tradePredictionReady": trade_reason == "passed",

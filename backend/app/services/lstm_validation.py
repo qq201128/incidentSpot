@@ -9,7 +9,7 @@ import numpy as np
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 EPSILON = 1e-12
-CONFIDENCE_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70)
+CONFIDENCE_THRESHOLDS = (0.55, 0.60, 0.65, 0.70)
 
 
 @dataclass(frozen=True)
