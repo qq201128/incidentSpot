@@ -46,6 +46,7 @@ def test_candidate_feature_columns_exclude_raw_combo_library_features() -> None:
         "open_time": np.arange(5),
         "close": 100 + np.arange(5, dtype=float),
         "feature_a": np.arange(5, dtype=float),
+        "factor_learning_top_weight_sum": np.ones(5),
         "combo__legacy_factor": np.arange(5, dtype=float),
         "goal_combo__legacy_factor": np.arange(5, dtype=float),
         "combo_top1_score": np.arange(5, dtype=float),
@@ -54,27 +55,27 @@ def test_candidate_feature_columns_exclude_raw_combo_library_features() -> None:
     columns = candidate_feature_columns(frame)
 
     assert "feature_a" in columns
-    assert "combo_top1_score" in columns
+    assert "factor_learning_top_weight_sum" in columns
+    assert "combo_top1_score" not in columns
     assert "combo__legacy_factor" not in columns
     assert "goal_combo__legacy_factor" not in columns
 
 
 def test_build_lstm_training_dataset_excludes_loss_memory_features(monkeypatch) -> None:
     frame = _training_frame()
-    monkeypatch.setattr(lstm_feature_builder, "load_factor_frame", lambda *_args: frame)
     monkeypatch.setattr(
         lstm_feature_builder,
         "load_factor_learning_memory_for",
         lambda *_args: {
-            "factorMining": {"forbiddenRegions": [{"members": ["factor_b"]}]},
-            "lossMemory": {"patterns": [{"feature": "factor_c"}]},
-            "weights": {"factor_a": 0.8},
+            "factorMining": {"forbiddenRegions": [{"members": ["momentum_10"]}]},
+            "lossMemory": {"patterns": [{"feature": "momentum_10"}]},
+            "weights": {"ret_1": 0.8},
         },
     )
     monkeypatch.setattr(
         lstm_feature_builder,
-        "materialize_mined_factor_frame",
-        lambda base, **_kwargs: type("Result", (), {"frame": base, "source_count": 0, "failures": ()})(),
+        "build_lstm_market_feature_frame",
+        lambda *_args, **_kwargs: frame,
     )
     monkeypatch.setattr(lstm_feature_builder, "resolve_lstm_combo_ranking", lambda *_args, **_kwargs: _combo_ranking())
 
@@ -90,9 +91,11 @@ def test_build_lstm_training_dataset_excludes_loss_memory_features(monkeypatch) 
         frame_loader=lambda *_args: frame,
     )
 
-    assert "factor_a" in dataset.feature_columns
-    assert "factor_b" in dataset.feature_columns
-    assert "factor_c" not in dataset.feature_columns
+    assert "ret_1" in dataset.feature_columns
+    assert "vol_std_20" in dataset.feature_columns
+    assert "factor_learning_top_weight_sum" in dataset.feature_columns
+    assert "momentum_10" not in dataset.feature_columns
+    assert "combo_top1_score" not in dataset.feature_columns
 
 
 def test_train_lstm_model_writes_separate_artifacts() -> None:
@@ -234,10 +237,16 @@ def _training_frame() -> pd.DataFrame:
     base = np.arange(rows, dtype=float)
     return pd.DataFrame({
         "open_time": np.arange(rows) * 600_000,
+        "open": 100 + base * 0.5,
+        "high": 100.4 + base * 0.5,
+        "low": 99.6 + base * 0.5,
         "close": 100 + base * 0.5,
-        "factor_a": np.sin(base / 5.0),
-        "factor_b": np.cos(base / 7.0),
-        "factor_c": np.sin(base / 11.0) + 0.2,
+        "volume": 1000 + base,
+        "ret_1": np.sin(base / 5.0),
+        "momentum_10": np.cos(base / 7.0),
+        "vol_std_20": np.sin(base / 11.0) + 0.2,
+        "factor_learning_top_weight_sum": np.ones(rows),
+        "combo_top1_score": np.arange(rows, dtype=float),
     })
 
 

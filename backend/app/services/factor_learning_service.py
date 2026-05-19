@@ -94,11 +94,8 @@ def mark_factor_learning_agent_pending(memory: dict[str, Any]) -> dict[str, Any]
     return _save_factor_learning_agent_status(memory, "pending")
 
 
-def mark_factor_learning_refresh_queued(symbol: str, duration: str) -> dict[str, Any]:
-    _validate_duration(duration)
-    sym = symbol.strip().upper()
-    memory = load_factor_learning_memory(sym, duration) or _queued_memory(sym, duration)
-    return _save_factor_learning_agent_status(memory, "pending")
+def mark_factor_learning_agent_running(memory: dict[str, Any]) -> dict[str, Any]:
+    return _save_factor_learning_agent_status(memory, "running")
 
 
 def mark_factor_learning_agent_failed(symbol: str, duration: str, error: str) -> dict[str, Any]:

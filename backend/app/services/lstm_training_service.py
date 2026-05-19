@@ -186,6 +186,7 @@ def _feature_payload(cfg: LstmTrainingConfig, dataset: LstmDataset) -> dict[str,
         "minMoveBps": cfg.min_move_bps,
         "columns": dataset.feature_columns,
         "comboSnapshot": dataset.combo_snapshot,
+        "learningContext": dataset.learning_context or {},
         "count": len(dataset.feature_columns),
     }
 

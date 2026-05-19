@@ -7,30 +7,9 @@ from app.api import factor_learning
 
 def test_factor_learning_refresh_queues_agent(monkeypatch) -> None:
     calls = []
-
-    def fake_refresh(symbol: str, duration: str, *, run_llm_agent: bool) -> dict:
-        calls.append(("refresh", symbol, duration, run_llm_agent))
-        return {"symbol": symbol, "duration": duration, "updatedAt": "now"}
-
-    def fake_queued(symbol: str, duration: str) -> dict:
-        calls.append(("queued", symbol, duration, None))
-        return {"symbol": symbol, "duration": duration, "llmAgent": {"status": "pending"}}
-
-    def fake_pending(memory: dict) -> dict:
-        calls.append(("pending", memory["symbol"], memory["duration"], None))
-        return {**memory, "llmAgent": {"status": "pending"}}
-
-    def fake_agent(symbol: str, duration: str) -> dict:
-        calls.append(("agent", symbol, duration, None))
-        return {"symbol": symbol, "duration": duration}
-
-    monkeypatch.setattr(factor_learning, "refresh_factor_learning_memory", fake_refresh)
-    monkeypatch.setattr(factor_learning, "mark_factor_learning_refresh_queued", fake_queued)
-    monkeypatch.setattr(factor_learning, "mark_factor_learning_agent_pending", fake_pending)
-    monkeypatch.setattr(factor_learning, "run_factor_learning_llm_agent", fake_agent)
+    _patch_background_hooks(monkeypatch, calls)
 
     tasks = BackgroundTasks()
-
     response = factor_learning.factor_learning_refresh(
         tasks,
         symbol="btcusdt",
@@ -38,16 +17,49 @@ def test_factor_learning_refresh_queues_agent(monkeypatch) -> None:
         run_agent=True,
     )
 
-    assert calls == [("queued", "BTCUSDT", "10m", None)]
+    assert response["agentQueued"] is True
+    assert response["refreshQueued"] is True
+    assert response["llmAgent"]["status"] == "pending"
+    assert calls == [("queued", "BTCUSDT", "10m", True), ("agent_pending", "BTCUSDT", "10m", None)]
+
     tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
 
-    assert response["agentQueued"] is True
-    assert response["llmAgent"]["status"] == "pending"
     assert calls == [
-        ("queued", "BTCUSDT", "10m", None),
+        ("queued", "BTCUSDT", "10m", True),
+        ("agent_pending", "BTCUSDT", "10m", None),
+        ("running", "BTCUSDT", "10m", True),
         ("refresh", "BTCUSDT", "10m", False),
-        ("pending", "BTCUSDT", "10m", None),
+        ("completed", "BTCUSDT", "10m", True),
+        ("agent_running", "BTCUSDT", "10m", None),
         ("agent", "BTCUSDT", "10m", None),
+    ]
+
+
+def test_factor_learning_refresh_local_queues_background(monkeypatch) -> None:
+    calls = []
+    _patch_background_hooks(monkeypatch, calls)
+
+    tasks = BackgroundTasks()
+    response = factor_learning.factor_learning_refresh(
+        tasks,
+        symbol="btcusdt",
+        duration="10m",
+        run_agent=False,
+    )
+
+    assert response["agentQueued"] is False
+    assert response["refreshQueued"] is True
+    assert response["refreshTask"]["status"] == "queued"
+    assert len(tasks.tasks) == 1
+    assert calls == [("queued", "BTCUSDT", "10m", False)]
+
+    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
+
+    assert calls == [
+        ("queued", "BTCUSDT", "10m", False),
+        ("running", "BTCUSDT", "10m", False),
+        ("refresh", "BTCUSDT", "10m", False),
+        ("completed", "BTCUSDT", "10m", False),
     ]
 
 
@@ -58,39 +70,86 @@ def test_background_agent_refresh_marks_failure(monkeypatch) -> None:
         calls.append(("refresh", symbol, duration, run_llm_agent))
         raise RuntimeError("network stalled")
 
-    def fake_failed(symbol: str, duration: str, error: str) -> dict:
-        calls.append(("failed", symbol, duration, error))
-        return {"symbol": symbol, "duration": duration}
-
     monkeypatch.setattr(factor_learning, "refresh_factor_learning_memory", fake_refresh)
-    monkeypatch.setattr(factor_learning, "mark_factor_learning_agent_failed", fake_failed)
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_refresh_running",
+        lambda symbol, duration, *, run_agent: calls.append(("running", symbol, duration, run_agent)),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_refresh_failed",
+        lambda symbol, duration, error, *, run_agent: calls.append(("refresh_failed", symbol, duration, error)),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_agent_failed",
+        lambda symbol, duration, error: calls.append(("agent_failed", symbol, duration, error)),
+    )
 
-    factor_learning._background_factor_learning_refresh_and_agent("BTCUSDT", "10m")
+    factor_learning._background_factor_learning_refresh("BTCUSDT", "10m", True)
 
     assert calls == [
+        ("running", "BTCUSDT", "10m", True),
         ("refresh", "BTCUSDT", "10m", False),
-        ("failed", "BTCUSDT", "10m", "network stalled"),
+        ("refresh_failed", "BTCUSDT", "10m", "network stalled"),
+        ("agent_failed", "BTCUSDT", "10m", "network stalled"),
     ]
 
 
-def test_factor_learning_refresh_local_stays_synchronous(monkeypatch) -> None:
-    calls = []
-
-    def fake_refresh(symbol: str, duration: str, *, run_llm_agent: bool) -> dict:
-        calls.append((symbol, duration, run_llm_agent))
-        return {"symbol": symbol, "duration": duration}
-
-    monkeypatch.setattr(factor_learning, "refresh_factor_learning_memory", fake_refresh)
-
-    tasks = BackgroundTasks()
-
-    response = factor_learning.factor_learning_refresh(
-        tasks,
-        symbol="btcusdt",
-        duration="10m",
-        run_agent=False,
+def _patch_background_hooks(monkeypatch, calls: list) -> None:
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_refresh_queued",
+        lambda symbol, duration, *, run_agent: _task(calls, "queued", symbol, duration, run_agent),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_refresh_running",
+        lambda symbol, duration, *, run_agent: _task(calls, "running", symbol, duration, run_agent),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_refresh_completed",
+        lambda memory, *, run_agent: _completed(calls, memory, run_agent),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_agent_pending",
+        lambda memory: _agent(calls, "agent_pending", memory),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "mark_factor_learning_agent_running",
+        lambda memory: _agent(calls, "agent_running", memory),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "refresh_factor_learning_memory",
+        lambda symbol, duration, *, run_llm_agent: _refresh(calls, symbol, duration, run_llm_agent),
+    )
+    monkeypatch.setattr(
+        factor_learning,
+        "run_factor_learning_llm_agent",
+        lambda symbol, duration: calls.append(("agent", symbol, duration, None)) or {},
     )
 
-    assert response["agentQueued"] is False
-    assert tasks.tasks == []
-    assert calls == [("BTCUSDT", "10m", False)]
+
+def _task(calls: list, action: str, symbol: str, duration: str, run_agent: bool) -> dict:
+    calls.append((action, symbol, duration, run_agent))
+    return {"symbol": symbol, "duration": duration, "refreshTask": {"status": action, "runAgent": run_agent}}
+
+
+def _completed(calls: list, memory: dict, run_agent: bool) -> dict:
+    calls.append(("completed", memory["symbol"], memory["duration"], run_agent))
+    return {**memory, "refreshTask": {"status": "completed", "runAgent": run_agent}}
+
+
+def _agent(calls: list, action: str, memory: dict) -> dict:
+    calls.append((action, memory["symbol"], memory["duration"], None))
+    return {**memory, "llmAgent": {"status": action.removeprefix("agent_")}}
+
+
+def _refresh(calls: list, symbol: str, duration: str, run_llm_agent: bool) -> dict:
+    calls.append(("refresh", symbol, duration, run_llm_agent))
+    return {"symbol": symbol, "duration": duration}

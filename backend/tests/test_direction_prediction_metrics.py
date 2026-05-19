@@ -9,10 +9,7 @@ import pytest
 
 from app.services import forward_validation_service
 from app.services.lstm_validation import binary_classification_metrics
-from app.services.trading_costs import ROUNDTRIP_COST_RATE
-
-
-def test_lstm_accuracy_tracks_direction_while_win_rate_uses_cost() -> None:
+def test_lstm_accuracy_tracks_direction_and_win_rate_uses_gross_returns() -> None:
     metrics = binary_classification_metrics(
         np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
         np.asarray([0.6, 0.4, 0.7], dtype=np.float32),
@@ -20,8 +17,8 @@ def test_lstm_accuracy_tracks_direction_while_win_rate_uses_cost() -> None:
     )
 
     assert metrics["accuracy"] == pytest.approx(2 / 3)
-    assert metrics["winRate"] == pytest.approx(0.0)
-    assert metrics["avgReturn"] == pytest.approx((-0.0005 - 0.0005 - 0.0015) / 3)
+    assert metrics["winRate"] == pytest.approx(2 / 3)
+    assert metrics["avgReturn"] == pytest.approx(0.0005 / 3)
 
 
 def test_lstm_metrics_include_confidence_threshold_samples() -> None:
@@ -46,18 +43,18 @@ def test_lstm_metrics_include_confidence_threshold_samples() -> None:
     assert thresholds[0.70]["sampleCount"] == 2
 
 
-def test_lstm_confidence_threshold_metrics_subtract_cost_from_small_wins() -> None:
+def test_lstm_confidence_threshold_metrics_count_small_gross_wins() -> None:
     metrics = binary_classification_metrics(
         np.asarray([1.0, 0.0], dtype=np.float32),
         np.asarray([0.7, 0.3], dtype=np.float32),
-        np.asarray([ROUNDTRIP_COST_RATE / 2, -ROUNDTRIP_COST_RATE / 2], dtype=np.float32),
+        np.asarray([0.0001, -0.0001], dtype=np.float32),
     )
 
     threshold = {row["minConfidence"]: row for row in metrics["confidenceThresholds"]}[0.7]
     assert metrics["accuracy"] == pytest.approx(1.0)
-    assert metrics["winRate"] == pytest.approx(0.0)
-    assert threshold["winRate"] == pytest.approx(0.0)
-    assert threshold["profitFactor"] == pytest.approx(0.0)
+    assert metrics["winRate"] == pytest.approx(1.0)
+    assert threshold["winRate"] == pytest.approx(1.0)
+    assert threshold["profitFactor"] == pytest.approx(float("inf"))
 
 
 def test_lstm_confidence_threshold_metrics_handles_empty_buckets() -> None:

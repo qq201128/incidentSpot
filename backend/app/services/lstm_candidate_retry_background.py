@@ -11,7 +11,7 @@ from app.services.lstm_torch_backend import is_torch_available
 logger = logging.getLogger("uvicorn.error")
 
 DEFAULT_RETRY_INTERVAL_SECONDS = 1800
-DEFAULT_RETRY_PROFILE = "fast"
+DEFAULT_RETRY_PROFILE = "full"
 DEFAULT_RETRY_DURATIONS = "10m"
 
 

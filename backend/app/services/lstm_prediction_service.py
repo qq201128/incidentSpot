@@ -15,12 +15,10 @@ from app.services.lstm_artifacts import (
 from app.services.lstm_config import LSTM_RULE_NAME, lstm_shadow_strategy_key
 from app.services.lstm_feature_builder import (
     _assert_columns,
-    _load_enriched_factor_frame_symbol,
-    _ranking_or_raise,
-    add_factor_combo_features,
     build_live_feature_window,
     duration_feature_frame,
 )
+from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import (
     active_lstm_status,
     is_lstm_shadow_ready,
@@ -141,9 +139,7 @@ def _live_feature_windows(
     feature_window: int,
     entry_open_times: list[int],
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    frame = _load_enriched_factor_frame_symbol(symbol, duration)
-    ranking = _ranking_or_raise(symbol, duration, None)
-    sampled = duration_feature_frame(add_factor_combo_features(frame, ranking), duration)
+    sampled = duration_feature_frame(load_lstm_market_frame(symbol, duration), duration)
     _assert_columns(sampled, feature_columns)
     by_entry = {int(row["entry_open_time"]): idx for idx, row in sampled.iterrows()}
     values = sampled[feature_columns].to_numpy(dtype=np.float32)

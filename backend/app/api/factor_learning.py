@@ -8,9 +8,15 @@ from app.services.factor_learning_service import (
     get_factor_learning_memory,
     mark_factor_learning_agent_failed,
     mark_factor_learning_agent_pending,
-    mark_factor_learning_refresh_queued,
+    mark_factor_learning_agent_running,
     run_factor_learning_llm_agent,
     refresh_factor_learning_memory,
+)
+from app.services.factor_learning_refresh_tasks import (
+    mark_factor_learning_refresh_completed,
+    mark_factor_learning_refresh_failed,
+    mark_factor_learning_refresh_queued,
+    mark_factor_learning_refresh_running,
 )
 from app.services.factor_mined_library import mined_factor_library_summary
 from app.services.factor_operator_library import factor_operator_payload
@@ -46,14 +52,9 @@ def factor_learning_refresh(
 ) -> dict:
     sym_u = symbol.upper()
     try:
-        if run_agent:
-            return _queue_factor_learning_agent(background_tasks, sym_u, duration)
-        memory = refresh_factor_learning_memory(sym_u, duration, run_llm_agent=False)
-        return {**memory, "ok": True, "agentQueued": False}
+        return _queue_factor_learning_refresh(background_tasks, sym_u, duration, run_agent)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/agent/review")
@@ -70,36 +71,44 @@ def factor_learning_agent_review(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-def _queue_factor_learning_agent(
+def _queue_factor_learning_refresh(
     background_tasks: BackgroundTasks,
     symbol: str,
     duration: str,
+    run_agent: bool,
 ) -> dict:
-    queued = mark_factor_learning_refresh_queued(symbol, duration)
-    background_tasks.add_task(_background_factor_learning_refresh_and_agent, symbol, duration)
+    queued = mark_factor_learning_refresh_queued(symbol, duration, run_agent=run_agent)
+    if run_agent:
+        queued = mark_factor_learning_agent_pending(queued)
+    background_tasks.add_task(_background_factor_learning_refresh, symbol, duration, run_agent)
     return {
         **queued,
         "ok": True,
-        "agentQueued": True,
-        "message": "Kimi 因子挖掘已排队，完成后会写回因子学习记忆。",
+        "agentQueued": run_agent,
+        "refreshQueued": True,
+        "message": _refresh_queue_message(run_agent),
     }
 
 
-def _background_factor_learning_refresh_and_agent(symbol: str, duration: str) -> None:
+def _background_factor_learning_refresh(symbol: str, duration: str, run_agent: bool) -> None:
     try:
+        mark_factor_learning_refresh_running(symbol, duration, run_agent=run_agent)
         memory = refresh_factor_learning_memory(symbol, duration, run_llm_agent=False)
-        mark_factor_learning_agent_pending(memory)
-        run_factor_learning_llm_agent(symbol, duration)
+        completed = mark_factor_learning_refresh_completed(memory, run_agent=run_agent)
+        if run_agent:
+            mark_factor_learning_agent_running(completed)
+            run_factor_learning_llm_agent(symbol, duration)
     except Exception as exc:
-        mark_factor_learning_agent_failed(symbol, duration, str(exc))
+        mark_factor_learning_refresh_failed(symbol, duration, str(exc), run_agent=run_agent)
+        if run_agent:
+            mark_factor_learning_agent_failed(symbol, duration, str(exc))
         logger.exception("background factor learning refresh failed: %s %s", symbol, duration)
 
 
-def _background_factor_learning_agent_review(symbol: str, duration: str) -> None:
-    try:
-        run_factor_learning_llm_agent(symbol, duration)
-    except Exception:
-        logger.exception("background factor learning agent failed: %s %s", symbol, duration)
+def _refresh_queue_message(run_agent: bool) -> str:
+    if run_agent:
+        return "因子学习复盘和 Kimi 因子挖掘已排队，完成后会写回记忆。"
+    return "本地因子学习复盘已排队，完成后会写回记忆。"
 
 
 @router.get("/operators")
