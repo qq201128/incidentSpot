@@ -23,12 +23,12 @@ from app.services.model_family_candidates import (
     start_model_candidate_progress,
 )
 from app.services.model_family_candidate_process import train_candidate_in_process
+from app.services.model_family_candidate_publisher import publish_best_model_candidate
 from app.services.model_family_config import ModelFamilyTrainingConfig, normalize_model_family
 from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_training_rules,
 )
-from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
 
 PROCESS_EXECUTOR_FAMILIES = frozenset({"xgboost"})
@@ -97,9 +97,9 @@ def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, 
         for result in _train_candidate_reports(candidates, cfg.profile, cfg.parallel_workers, dataset_cache.build):
             trainings.append(result)
             complete_model_candidate_progress(result.config, cfg.profile, result.report, len(trainings), len(candidates))
-        _publish_best_trade_candidate(trainings)
+        published = publish_best_model_candidate(trainings)
         reports = [item.report for item in trainings]
-        status = _batch_status(reports)
+        status = _batch_status(reports, published)
         finish_model_candidate_progress(cfg.family, symbol=cfg.symbol, duration=cfg.duration, status=status)
         return {"status": status, "family": cfg.family, "reports": reports, "trainingRules": model_family_training_rules(cfg.family)}
     except Exception:
@@ -222,7 +222,9 @@ def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig
     )
 
 
-def _batch_status(reports: list[dict[str, Any]]) -> str:
+def _batch_status(reports: list[dict[str, Any]], published: dict[str, Any] | None = None) -> str:
+    if published is not None:
+        return str(published.get("status") or "failed")
     if any(str(item.get("status")) in {"trade_active", "trained"} for item in reports):
         return "trade_active"
     if any(str(item.get("status")) == "shadow_active" for item in reports):
@@ -239,31 +241,6 @@ def _preserve_exhausted_progress(progress: dict[str, Any]) -> bool:
     status = str(progress.get("status") or "")
     completed = int(progress.get("completed") or 0)
     return completed > 0 and status not in {"failed", "idle", "queued", "running"}
-
-
-def _publish_best_trade_candidate(trainings: list[CandidateTrainingResult]) -> None:
-    selected = _best_trade_candidate(trainings)
-    if selected is not None:
-        train_model_family(selected.config)
-
-
-def _best_trade_candidate(trainings: list[CandidateTrainingResult]) -> CandidateTrainingResult | None:
-    eligible = [
-        item
-        for item in trainings
-        if str(item.report.get("status") or "") in {"trade_active", "trained"}
-    ]
-    return max(eligible, key=lambda item: _trade_candidate_score(item.report)) if eligible else None
-
-
-def _trade_candidate_score(report: dict[str, Any]) -> tuple[float, float, int]:
-    validation = report.get("validation") or {}
-    test = report.get("test") or {}
-    return (
-        min(float(validation.get("winRate") or 0.0), float(test.get("winRate") or 0.0)),
-        min(float(validation.get("profitFactor") or 0.0), float(test.get("profitFactor") or 0.0)),
-        int((report.get("sampleCounts") or {}).get("test") or 0),
-    )
 
 
 def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Exception) -> dict[str, Any]:

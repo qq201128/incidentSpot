@@ -2,8 +2,10 @@ export function statusLabel(status) {
   const labels = {
     shadow_active: "影子激活",
     trade_active: "交易激活",
+    initial_baseline: "初始基线",
     promoted_shadow_active: "已发布影子",
     promoted_trade_active: "已发布交易",
+    promoted_initial_baseline: "已发布基线",
     rejected_validation: "验证拒绝",
     rejected_insufficient_samples: "样本拒绝",
     queued: "排队中",
@@ -68,7 +70,7 @@ export function statusClass(status) {
 }
 
 export function isTrainedStatus(status) {
-  return ["shadow_active", "trade_active", "trained"].includes(status);
+  return ["initial_baseline", "shadow_active", "trade_active", "trained"].includes(status);
 }
 
 export function compareLabel(strategyKey) {

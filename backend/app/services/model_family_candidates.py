@@ -272,7 +272,8 @@ def _counts_from_records(records: list[dict]) -> dict[str, int]:
 
 def _count_key(status: Any) -> str:
     labels = {"trade_active": "tradeActive", "trained": "tradeActive", "shadow_active": "shadowActive",
-              "validation_failed": "validationFailed", "insufficient_samples": "insufficientSamples"}
+              "initial_baseline": "initialBaseline", "validation_failed": "validationFailed",
+              "insufficient_samples": "insufficientSamples"}
     return labels.get(str(status or "failed"), "failed")
 
 def _progress_record(record: dict) -> dict:
@@ -289,7 +290,14 @@ def _empty_progress(family: str, symbol: str, duration: str) -> dict:
 
 
 def _empty_counts() -> dict[str, int]:
-    return {"tradeActive": 0, "shadowActive": 0, "validationFailed": 0, "insufficientSamples": 0, "failed": 0}
+    return {
+        "tradeActive": 0,
+        "shadowActive": 0,
+        "initialBaseline": 0,
+        "validationFailed": 0,
+        "insufficientSamples": 0,
+        "failed": 0,
+    }
 
 
 def _percent(completed: int, total: int) -> float:

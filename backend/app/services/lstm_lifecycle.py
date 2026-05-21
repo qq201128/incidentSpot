@@ -6,6 +6,7 @@ LSTM_STATUS_TRAINING = "training"
 LSTM_STATUS_TRADE_ACTIVE = "trade_active"
 LSTM_STATUS_SHADOW_ACTIVE = "shadow_active"
 LSTM_STATUS_LEGACY_TRAINED = "trained"
+LSTM_STATUS_INITIAL_BASELINE = "initial_baseline"
 LSTM_STATUS_VALIDATION_FAILED = "validation_failed"
 LSTM_STATUS_INSUFFICIENT_SAMPLES = "insufficient_samples"
 LSTM_STATUS_FAILED = "failed"
@@ -13,6 +14,7 @@ LSTM_STATUS_FAILED = "failed"
 CANDIDATE_TRAINING = "training"
 CANDIDATE_PROMOTED_TRADE_ACTIVE = "promoted_trade_active"
 CANDIDATE_PROMOTED_SHADOW_ACTIVE = "promoted_shadow_active"
+CANDIDATE_PROMOTED_INITIAL_BASELINE = "promoted_initial_baseline"
 CANDIDATE_REJECTED_VALIDATION = "rejected_validation"
 CANDIDATE_REJECTED_INSUFFICIENT_SAMPLES = "rejected_insufficient_samples"
 CANDIDATE_FAILED = "failed"
@@ -45,6 +47,8 @@ def candidate_status(status: str) -> str:
         return CANDIDATE_PROMOTED_TRADE_ACTIVE
     if status == LSTM_STATUS_SHADOW_ACTIVE:
         return CANDIDATE_PROMOTED_SHADOW_ACTIVE
+    if status == LSTM_STATUS_INITIAL_BASELINE:
+        return CANDIDATE_PROMOTED_INITIAL_BASELINE
     if status == LSTM_STATUS_VALIDATION_FAILED:
         return CANDIDATE_REJECTED_VALIDATION
     if status == LSTM_STATUS_INSUFFICIENT_SAMPLES:
@@ -57,15 +61,27 @@ def promotion_reason(status: str, gate: dict[str, Any]) -> str:
         return "validation_gate_passed"
     if status == LSTM_STATUS_SHADOW_ACTIVE:
         return "shadow_quality_passed"
+    if status == LSTM_STATUS_INITIAL_BASELINE:
+        return "initial_baseline_seed_model"
     return str(gate.get("reason") or "validation_gate_failed")
 
 
 def publishes_active_artifacts(status: str) -> bool:
-    return status in {LSTM_STATUS_SHADOW_ACTIVE, LSTM_STATUS_TRADE_ACTIVE, LSTM_STATUS_LEGACY_TRAINED}
+    return status in {
+        LSTM_STATUS_INITIAL_BASELINE,
+        LSTM_STATUS_SHADOW_ACTIVE,
+        LSTM_STATUS_TRADE_ACTIVE,
+        LSTM_STATUS_LEGACY_TRAINED,
+    }
 
 
 def shadow_predictable_status(status: str | None) -> bool:
-    return status in {LSTM_STATUS_SHADOW_ACTIVE, LSTM_STATUS_TRADE_ACTIVE, LSTM_STATUS_LEGACY_TRAINED}
+    return status in {
+        LSTM_STATUS_INITIAL_BASELINE,
+        LSTM_STATUS_SHADOW_ACTIVE,
+        LSTM_STATUS_TRADE_ACTIVE,
+        LSTM_STATUS_LEGACY_TRAINED,
+    }
 
 
 def trade_active_status(status: str | None) -> bool:

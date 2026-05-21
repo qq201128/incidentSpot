@@ -36,6 +36,7 @@ from app.services.model_family_config import (
     validated_model_family_config,
 )
 from app.services.model_family_joblib_backend import JoblibModelBackend, JoblibModelOptions
+from app.services.model_family_training_reports import initial_baseline_report, return_stats
 from app.services.model_family_torch_backend import TorchSequenceBackend, TorchSequenceOptions
 
 DatasetBuilder = Callable[[ModelFamilyTrainingConfig], LstmDataset]
@@ -50,6 +51,7 @@ def train_model_family(
     publish_trade_active: bool = True,
     write_attempt: bool = True,
     persist_artifacts: bool = True,
+    publish_initial_baseline: bool = False,
 ) -> dict[str, Any]:
     cfg = validated_model_family_config(config)
     paths = artifact_paths(cfg.symbol, cfg.duration, artifact_root, family=cfg.family)
@@ -79,6 +81,7 @@ def train_model_family(
             publish_trade_active=publish_trade_active,
             write_attempt=write_attempt,
             persist_artifacts=persist_artifacts,
+            publish_initial_baseline=publish_initial_baseline,
         )
     except Exception as exc:
         if write_attempt:
@@ -112,6 +115,7 @@ def _train_with_dataset(
     publish_trade_active: bool,
     write_attempt: bool,
     persist_artifacts: bool,
+    publish_initial_baseline: bool,
 ) -> dict[str, Any]:
     split = chronological_split(dataset.x, dataset.y, dataset.future_returns, cfg.train_ratio, cfg.val_ratio)
     scaler = fit_standardizer(split.train_x)
@@ -126,6 +130,7 @@ def _train_with_dataset(
         persist_model=persist_artifacts,
     )
     report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version)
+    report = initial_baseline_report(report, publish_initial_baseline)
     should_publish = _should_publish(report["status"], publish_shadow_active, publish_trade_active)
     if persist_artifacts or should_publish:
         _write_training_artifacts(staging_paths, cfg, dataset, scaler, report)
@@ -163,10 +168,11 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version) 
         "candidateStatus": candidate_status(status),
         "promotionReason": promotion_reason(status, gate),
         "losses": losses,
-        "returnStats": _return_stats(dataset.future_returns),
+        "returnStats": return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
         "params": cfg.params,
     })
+
 
 def _write_training_artifacts(paths, cfg, dataset, scaler: dict, report: dict[str, Any]) -> None:
     write_json(paths.scaler, scaler)
@@ -269,12 +275,6 @@ def _sample_counts(split) -> dict[str, int]:
     return {"train": len(split.train_x), "validation": len(split.val_x), "test": len(split.test_x)}
 
 
-def _return_stats(returns: np.ndarray) -> dict[str, float]:
-    up = returns[returns > 0]
-    down = returns[returns <= 0]
-    return {"mean": _mean(returns), "upMean": _mean(up), "downMean": _mean(down)}
-
-
 def _model_version(cfg) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     bps = f"{cfg.min_move_bps:g}".replace(".", "p")
@@ -283,10 +283,6 @@ def _model_version(cfg) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _mean(values: np.ndarray) -> float:
-    return 0.0 if len(values) == 0 else float(np.mean(values))
 
 
 def _finite_payload(value: Any) -> Any:

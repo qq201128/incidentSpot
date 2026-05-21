@@ -130,6 +130,7 @@ function CandidateProgress({ progress }) {
         <span>并发 {progress.parallelWorkers ?? "—"}</span>
         <span>交易 {counts.tradeActive ?? 0}</span>
         <span>影子 {counts.shadowActive ?? 0}</span>
+        <span>基线 {counts.initialBaseline ?? 0}</span>
         <span>未过 {counts.validationFailed ?? 0}</span>
       </div>
       {progress.latestCompleted ? <p>{candidateText(progress.latestCompleted)}</p> : null}

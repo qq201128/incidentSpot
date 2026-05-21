@@ -62,7 +62,7 @@ def model_train(
             num_layers=num_layers,
             min_move_bps=min_move_bps,
         )
-        return train_model_family(config)
+        return train_model_family(config, publish_initial_baseline=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ImportError as exc:

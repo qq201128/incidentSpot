@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
@@ -64,3 +65,22 @@ def test_lstm_candidate_retry_background_defaults_to_10m_and_60m_with_parallel_1
 
     assert config.durations == ("10m", "60m")
     assert config.search.parallel_workers == 10
+
+
+def test_lstm_candidate_retry_loop_waits_before_first_retry(monkeypatch) -> None:
+    calls = []
+
+    async def fake_sleep(stop_event: asyncio.Event, seconds: float) -> None:
+        calls.append(("sleep", seconds))
+        stop_event.set()
+
+    async def fake_run_retry_once(_config) -> None:
+        calls.append(("run", None))
+
+    monkeypatch.setattr(retry_bg, "_retry_interval_seconds", lambda: 30.0)
+    monkeypatch.setattr(retry_bg, "_sleep_for", fake_sleep)
+    monkeypatch.setattr(retry_bg, "_run_retry_once", fake_run_retry_once)
+
+    asyncio.run(retry_bg.lstm_candidate_retry_loop(asyncio.Event()))
+
+    assert calls == [("sleep", 30.0)]

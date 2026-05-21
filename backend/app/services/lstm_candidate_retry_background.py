@@ -136,7 +136,9 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
     interval_seconds = _retry_interval_seconds()
     config = _retry_config()
     logger.info(
-        "lstm candidate retry scheduled: intervalSeconds=%s torch_installed=%s profile=%s durations=%s search=%s",
+        "lstm candidate retry scheduled: intervalSeconds=%s firstRunDelaySeconds=%s "
+        "torch_installed=%s profile=%s durations=%s search=%s",
+        interval_seconds,
         interval_seconds,
         is_torch_available(),
         config.profile,
@@ -144,8 +146,10 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
         config.search,
     )
     while not stop_event.is_set():
-        await _run_retry_once(config)
         await _sleep_for(stop_event, interval_seconds)
+        if stop_event.is_set():
+            return
+        await _run_retry_once(config)
 
 
 async def _run_retry_once(config: LstmCandidateRetryConfig) -> None:

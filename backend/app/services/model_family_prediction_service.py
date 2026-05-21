@@ -12,7 +12,7 @@ from app.services.lstm_feature_builder import (
     build_live_feature_window,
     duration_feature_frame,
 )
-from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, trade_active_status
+from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, shadow_predictable_status, trade_active_status
 from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import validation_gate_payload, validation_threshold
 from app.services.lstm_validation import apply_standardizer
@@ -98,7 +98,7 @@ def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artif
     version = read_json(paths.version) or {}
     report = read_json(paths.report) or {}
     status = active_model_family_status(family, symbol, duration, artifact_root=artifact_root)
-    if not status.get("status") in {"shadow_active", "trade_active", LSTM_STATUS_LEGACY_TRAINED}:
+    if not shadow_predictable_status(status.get("status")):
         raise ValueError(f"{family} model is not ready for {symbol} {duration}: {status.get('reason') or status.get('status')}")
     if not required_artifacts_exist(paths):
         raise ValueError(f"{family} model artifacts are incomplete for {symbol} {duration}: {paths.root}")
