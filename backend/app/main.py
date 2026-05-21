@@ -13,8 +13,8 @@ from app.api.factor_learning import router as factor_learning_router
 from app.api.factor_combinations import router as factor_combinations_router
 from app.api.factor_combo_positions import router as factor_combo_positions_router
 from app.api.factors import router as factors_router
-from app.api.lstm import router as lstm_router
 from app.api.market import router as market_router
+from app.api.models import router as models_router
 from app.api.rules import router as rules_router
 from app.api.stream import router as stream_router
 from app.config.env_file import load_backend_env_file
@@ -102,7 +102,7 @@ app.include_router(factors_router)
 app.include_router(factor_combinations_router)
 app.include_router(factor_combo_positions_router)
 app.include_router(factor_learning_router)
-app.include_router(lstm_router)
+app.include_router(models_router)
 
 
 @app.on_event("startup")

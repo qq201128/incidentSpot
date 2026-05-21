@@ -10,8 +10,29 @@ export const STRATEGY_LABELS = {
 };
 
 export function strategyLabel(key) {
-  if (key?.startsWith("factor_lstm_shadow_")) {
-    return `LSTM影子策略·${key.replace("factor_lstm_shadow_", "")}`;
+  const model = modelShadowLabel(key);
+  if (model) {
+    return model;
   }
   return STRATEGY_LABELS[key] || key || STRATEGY_LABELS.manual;
+}
+
+function modelShadowLabel(key) {
+  const families = {
+    lstm: "LSTM",
+    gru: "GRU",
+    cnn: "CNN",
+    transformer: "Transformer",
+    random_forest: "RandomForest",
+    xgboost: "XGBoost",
+    svm: "SVM",
+    bayesian: "Bayesian",
+    knn: "KNN",
+    rl_strategy: "RL策略",
+  };
+  for (const [family, label] of Object.entries(families)) {
+    const prefix = `factor_${family}_shadow_`;
+    if (key?.startsWith(prefix)) return `${label}影子策略·${key.replace(prefix, "")}`;
+  }
+  return "";
 }

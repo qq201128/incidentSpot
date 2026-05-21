@@ -9,7 +9,7 @@
 - 行情数据：Binance 指数价、指数 K 线、订单簿、近期成交
 - 事件合约：手动事件、快速事件、订单、结算
 - 因子体系：单因子排名、多因子组合排名、挖掘因子库、学习记忆
-- 策略执行：规则预测、自动交易、LSTM 训练/预测、每日复盘
+- 策略执行：规则预测、自动交易、多模型族训练/预测、每日复盘
 
 整体原则是：
 
@@ -111,12 +111,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `GET /api/factor-learning/operators`
 - `GET /api/factor-learning/mined-library`
 
-### `/api/lstm`
+### `/api/models/{family}`
 
-- `GET /api/lstm/status`
-- `POST /api/lstm/train`
-- `POST /api/lstm/candidate-search`
-- `GET /api/lstm/predict`
+- `GET /api/models/{family}/status`
+- `POST /api/models/{family}/train`
+- `POST /api/models/{family}/candidate-search`
+- `GET /api/models/{family}/predict`
 
 ### `/api/auto-trade`
 
@@ -327,7 +327,7 @@ Agent 的输出不会直接当成事实，它提出的是候选单因子公式�
 
 也就是说，这条链路是闭环而不是单次离线分析。
 
-## 7. LSTM 闭环
+## 7. 多模型族闭环
 
 LSTM 相关流程分成三层：
 
@@ -337,12 +337,14 @@ LSTM 相关流程分成三层：
 
 ### 7.1 手动训练
 
-`POST /api/lstm/train` 会根据 `profile` 和参数生成训练配置，再调用 `train_lstm_model()`。
+`POST /api/models/{family}/train` 会根据 `profile`、模型族和参数生成训练配置，再调用统一模型族训练服务。
+
+SVM 模型族使用可扩展 hinge-loss 实现：线性核走 `SGDClassifier(loss="hinge")`，RBF 核走 `RBFSampler + SGDClassifier`。这样候选搜索仍执行真实 SVM 决策函数训练，但不会在全量序列窗口上被精确核求解器长时间阻塞。
 
 ### 7.2 预测与状态
 
-- `GET /api/lstm/predict`：输出预测结果
-- `GET /api/lstm/status`：输出模型状态和 shadow 复盘摘要
+- `GET /api/models/{family}/predict`：输出预测结果
+- `GET /api/models/{family}/status`：输出模型状态、候选库和 shadow 阻断原因
 
 ### 7.3 组合快照同步
 
@@ -388,6 +390,8 @@ LSTM 相关流程分成三层：
 - 根据方向决定 BUY 或 SELL
 - 构造 quick-trade payload
 - 写入本地事件和订单记录
+
+模型族 shadow 策略默认启用 `10m` 和 `60m` 模拟实盘槽位，覆盖 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、SVM、RL、Bayesian、KNN。后端会强制这些模型族策略保持 `live_trading_enabled = false`，只写本地模拟事件/订单；预测结算会进入学习记忆和后续训练输入。
 
 `GET /api/auto-trade/status` 会把每个策略的：
 

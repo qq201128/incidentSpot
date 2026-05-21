@@ -6,13 +6,13 @@ from app.services.factor_combo_strategy import (
     predict_factor_combo_direction,
     predict_high_winrate_factor_combo_direction,
 )
-from app.services.lstm_prediction_service import predict_lstm_shadow_prediction
+from app.services.model_family_config import parse_model_family_strategy
+from app.services.model_family_prediction_service import predict_model_family_shadow_prediction
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-    is_lstm_shadow_strategy,
     strategy_definition,
 )
 
@@ -48,7 +48,7 @@ def _predict_strategy(
     entry_open_time: int | None,
     entry_grace_ms: int,
 ) -> dict[str, Any]:
-    for resolver in (_predict_lstm, _predict_factor_combo):
+    for resolver in (_predict_model_family, _predict_factor_combo):
         result = resolver(
             strategy_key,
             symbol=symbol,
@@ -61,7 +61,7 @@ def _predict_strategy(
     raise ValueError(f"unsupported strategy for live prediction: {strategy_key}")
 
 
-def _predict_lstm(
+def _predict_model_family(
     strategy_key: str,
     *,
     symbol: str,
@@ -70,9 +70,13 @@ def _predict_lstm(
     entry_grace_ms: int,
 ) -> dict[str, Any] | None:
     del entry_grace_ms
-    if not is_lstm_shadow_strategy(strategy_key):
+    parsed = parse_model_family_strategy(strategy_key)
+    if parsed is None:
         return None
-    return predict_lstm_shadow_prediction(symbol, duration, entry_open_time=entry_open_time)
+    family, _strategy_duration = parsed
+    if family == "lstm":
+        return predict_lstm_shadow_prediction(symbol, duration, entry_open_time=entry_open_time)
+    return predict_model_family_shadow_prediction(family, symbol, duration, entry_open_time=entry_open_time)
 
 
 def _predict_factor_combo(
@@ -98,3 +102,7 @@ def _predict_factor_combo(
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,
     )
+
+
+def predict_lstm_shadow_prediction(symbol: str, duration: str, *, entry_open_time: int | None = None) -> dict[str, Any]:
+    return predict_model_family_shadow_prediction("lstm", symbol, duration, entry_open_time=entry_open_time)

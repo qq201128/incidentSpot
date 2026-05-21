@@ -7,7 +7,7 @@ from typing import Any
 from app.services.lstm_artifacts import artifact_paths, read_json, update_json, write_json
 from app.services.lstm_config import LstmTrainingConfig
 
-PROGRESS_FILE = "candidate_search_progress.json"
+PROGRESS_FILE = "lstm_candidate_search_progress.json"
 RECENT_LIMIT = 8
 
 

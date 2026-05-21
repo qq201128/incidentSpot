@@ -9,6 +9,13 @@ from app.services.lstm_config import (
     lstm_strategy_duration,
 )
 from app.services.kline_timing import KLINE_ENTRY_GRACE_MS
+from app.services.model_family_config import (
+    MODEL_FAMILIES,
+    is_model_family_shadow_strategy,
+    model_family_rule_name,
+    model_family_strategy_key,
+    parse_model_family_strategy,
+)
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
@@ -17,7 +24,7 @@ HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY = "high_winrate_factor_combo_v1"
 HIGH_WINRATE_FACTOR_COMBO_RULE_NAME = "high_winrate_factor_combo_goal_v1"
 DEFAULT_STRATEGY_KEY = FACTOR_COMBO_STRATEGY_KEY
 MANUAL_STRATEGY_KEY = "manual"
-LSTM_SHADOW_DURATIONS = tuple(DURATION_TO_MINUTES)
+MODEL_SHADOW_DURATIONS = tuple(DURATION_TO_MINUTES)
 
 
 @dataclass(frozen=True)
@@ -96,8 +103,8 @@ def strategy_definition(strategy_key: str | None) -> StrategyDefinition:
         return _factor_combo_shadow_strategy_definition(key)
     if key.startswith(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top"):
         return _high_winrate_combo_shadow_strategy_definition(key)
-    if is_lstm_shadow_strategy(key):
-        return _lstm_shadow_strategy_definition(key)
+    if is_model_family_shadow_strategy(key):
+        return _model_family_shadow_strategy_definition(key)
     raise ValueError(f"unsupported strategy: {key}")
 
 
@@ -161,6 +168,26 @@ def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
     )
 
 
+def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
+    parsed = parse_model_family_strategy(strategy_key)
+    if parsed is None:
+        raise ValueError(f"not a model family shadow strategy: {strategy_key}")
+    family, duration = parsed
+    label = family.upper() if family != "random_forest" else "RandomForest"
+    return StrategyDefinition(
+        key=strategy_key,
+        name=f"{label}模拟实盘·{duration}",
+        description=f"{family} 候选算法可开启模拟实盘下单，每个算法族独立训练、预测和缓存。",
+        requires_vegas_confirmation=False,
+        signal_source=f"factor_{family}_shadow",
+        rule_names=(model_family_rule_name(family),),
+        tradable=True,
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+        supported_durations=frozenset({duration}),
+    )
+
+
 def strategy_payloads() -> list[dict]:
     return [
         _strategy_payload(strategy)
@@ -170,11 +197,12 @@ def strategy_payloads() -> list[dict]:
 
 def _tradable_strategy_definitions() -> tuple[StrategyDefinition, ...]:
     static = tuple(strategy for strategy in STRATEGIES if strategy.tradable)
-    lstm = tuple(
-        _lstm_shadow_strategy_definition(lstm_shadow_strategy_key(duration))
-        for duration in LSTM_SHADOW_DURATIONS
+    model_families = tuple(
+        _model_family_shadow_strategy_definition(model_family_strategy_key(family, duration))
+        for family in MODEL_FAMILIES
+        for duration in MODEL_SHADOW_DURATIONS
     )
-    return (*static, *lstm)
+    return (*static, *model_families)
 
 
 def _strategy_payload(strategy: StrategyDefinition) -> dict:

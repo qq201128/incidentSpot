@@ -22,10 +22,14 @@ from app.services.kline_timing import (
     utc_now_ms,
 )
 from app.services.kline_prediction_refresh import refresh_prediction_klines
-from app.services.lstm_config import is_lstm_shadow_strategy
-from app.services.lstm_shadow_backfill_service import (
-    backfill_lstm_shadow_predictions,
-    missing_lstm_shadow_entry_times,
+from app.services.model_family_config import (
+    MODEL_FAMILIES,
+    is_model_family_shadow_strategy,
+    parse_model_family_strategy,
+)
+from app.services.model_family_shadow_backfill_service import (
+    backfill_model_family_shadow_predictions,
+    missing_model_family_shadow_entry_times,
 )
 from app.services.prediction_cache_service import (
     prediction_exists,
@@ -41,9 +45,11 @@ from app.services.strategy_registry import (
     strategy_supports_duration,
 )
 from app.services.strategy_prediction_readiness import strategy_prediction_readiness
-from app.services.lstm_prediction_service import (
-    lstm_model_status,
-    predict_lstm_shadow_prediction,
+from app.services.model_family_prediction_service import (
+    predict_model_family_shadow_prediction,
+)
+from app.services.model_family_status_service import (
+    model_family_status,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -159,7 +165,7 @@ async def _save_factor_combo_sidecar_predictions(
     write_lock: asyncio.Lock,
 ) -> None:
     await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
-    await _save_lstm_shadow_prediction(settings, entry_open_time, write_lock)
+    await _save_model_family_shadow_predictions(settings, entry_open_time, write_lock)
 
 
 async def _save_factor_combo_shadow_predictions(
@@ -182,21 +188,43 @@ async def _save_factor_combo_shadow_predictions(
             await asyncio.to_thread(create_batch_combo_simulation_trade, settings, result)
 
 
-async def _save_lstm_shadow_prediction(
+async def _save_model_family_shadow_predictions(
     settings: AutoTradeSettings,
     entry_open_time: int,
     write_lock: asyncio.Lock,
 ) -> None:
     if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return
-    status = await asyncio.to_thread(lstm_model_status, settings.symbol, settings.duration)
+    for family in MODEL_FAMILIES:
+        if family == "lstm":
+            status = await asyncio.to_thread(lstm_model_status, settings.symbol, settings.duration)
+        else:
+            status = await asyncio.to_thread(model_family_status, family, settings.symbol, settings.duration)
+        if not status.get("shadowPredictionReady"):
+            _log_model_family_shadow_skip(settings, family, status, role="sidecar")
+            continue
+        result = await asyncio.to_thread(
+            predict_lstm_shadow_prediction if family == "lstm" else predict_model_family_shadow_prediction,
+            *((settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)),
+            entry_open_time=entry_open_time,
+        )
+        await _save_prediction(result, write_lock)
+
+
+async def _save_lstm_shadow_prediction(settings, entry_open_time, write_lock) -> None:
+    await _save_one_model_family_shadow_prediction("lstm", settings, entry_open_time, write_lock)
+
+
+async def _save_one_model_family_shadow_prediction(family, settings, entry_open_time, write_lock) -> None:
+    status_loader = lstm_model_status if family == "lstm" else model_family_status
+    status_args = (settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)
+    status = await asyncio.to_thread(status_loader, *status_args)
     if not status.get("shadowPredictionReady"):
-        _log_lstm_shadow_skip(settings, status, role="sidecar")
+        _log_model_family_shadow_skip(settings, family, status, role="sidecar")
         return
     result = await asyncio.to_thread(
-        predict_lstm_shadow_prediction,
-        settings.symbol,
-        settings.duration,
+        predict_lstm_shadow_prediction if family == "lstm" else predict_model_family_shadow_prediction,
+        *((settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)),
         entry_open_time=entry_open_time,
     )
     await _save_prediction(result, write_lock)
@@ -310,8 +338,8 @@ def _should_predict_entry(settings: AutoTradeSettings) -> bool:
     bucket = current_rule_entry_open_time_for_duration(settings.duration)
     if _current_bucket_prediction_exists(settings, bucket):
         return _factor_combo_sidecar_due(settings, bucket)
-    if is_lstm_shadow_strategy(settings.strategy_key):
-        return _ready_lstm_strategy_due(settings, bucket)
+    if is_model_family_shadow_strategy(settings.strategy_key):
+        return _ready_model_family_strategy_due(settings, bucket)
     return True
 
 
@@ -327,7 +355,7 @@ def _current_bucket_prediction_exists(settings: AutoTradeSettings, bucket: int) 
 def _factor_combo_sidecar_due(settings: AutoTradeSettings, bucket: int) -> bool:
     if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return False
-    return _factor_combo_shadow_due(settings, bucket) or _ready_lstm_shadow_due(settings, bucket)
+    return _factor_combo_shadow_due(settings, bucket) or _ready_any_model_family_shadow_due(settings, bucket)
 
 
 def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
@@ -342,68 +370,113 @@ def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
     return False
 
 
-def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    status = lstm_model_status(settings.symbol, settings.duration)
-    if not status.get("shadowPredictionReady"):
-        _log_lstm_shadow_skip(settings, status, role="sidecar")
-        return False
-    return bool(missing_lstm_shadow_entry_times(settings.symbol, settings.duration, bucket))
+def _ready_any_model_family_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    return any(_ready_model_family_shadow_due(family, settings, bucket, role="sidecar") for family in MODEL_FAMILIES)
 
 
-def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    status = lstm_model_status(settings.symbol, settings.duration)
+def _ready_model_family_shadow_due(family: str, settings: AutoTradeSettings, bucket: int, *, role: str) -> bool:
+    if family == "lstm":
+        status = lstm_model_status(settings.symbol, settings.duration)
+    else:
+        status = model_family_status(family, settings.symbol, settings.duration)
     if status.get("shadowPredictionReady"):
-        return bool(missing_lstm_shadow_entry_times(settings.symbol, settings.duration, bucket))
-    _log_lstm_shadow_skip(settings, status, role="primary")
+        if family == "lstm":
+            return bool(missing_lstm_shadow_entry_times(settings.symbol, settings.duration, bucket))
+        return bool(missing_model_family_shadow_entry_times(family, settings.symbol, settings.duration, bucket))
+    _log_model_family_shadow_skip(settings, family, status, role=role)
     return False
 
 
+def _ready_model_family_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    parsed = parse_model_family_strategy(settings.strategy_key)
+    if parsed is None:
+        return False
+    family, _duration = parsed
+    return _ready_model_family_shadow_due(family, settings, bucket, role="primary")
+
+
+def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    return _ready_model_family_shadow_due("lstm", settings, bucket, role="sidecar")
+
+
+def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    return _ready_model_family_shadow_due("lstm", settings, bucket, role="primary")
+
+
 async def _backfill_lstm_shadow_predictions(settings_list: list[AutoTradeSettings]) -> None:
-    targets = _unique_lstm_shadow_targets(settings_list)
+    targets = _unique_model_family_shadow_targets(settings_list)
     if not targets:
         return
     summaries = await asyncio.gather(
         *(
             asyncio.to_thread(
-                backfill_lstm_shadow_predictions,
+                backfill_model_family_shadow_predictions,
+                family,
                 symbol,
                 duration,
                 current_rule_entry_open_time_for_duration(duration),
             )
-            for symbol, duration in targets
+            for family, symbol, duration in targets
         )
     )
     for summary in summaries:
         if summary["savedCount"]:
-            logger.info("predict: LSTM shadow backfill summary=%s", summary)
+            logger.info("predict: model family shadow backfill summary=%s", summary)
 
 
 def _unique_lstm_shadow_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
+    return [(symbol, duration) for _family, symbol, duration in _unique_model_family_shadow_targets(settings_list) if _family == "lstm"]
+
+
+def _unique_model_family_shadow_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str, str]]:
     targets = set()
     for settings in settings_list:
-        if settings.strategy_key == FACTOR_COMBO_STRATEGY_KEY or is_lstm_shadow_strategy(settings.strategy_key):
-            targets.add((settings.symbol.upper(), settings.duration))
+        if settings.strategy_key == FACTOR_COMBO_STRATEGY_KEY:
+            for family in MODEL_FAMILIES:
+                targets.add((family, settings.symbol.upper(), settings.duration))
+            continue
+        parsed = parse_model_family_strategy(settings.strategy_key)
+        if parsed is not None:
+            family, _duration = parsed
+            targets.add((family, settings.symbol.upper(), settings.duration))
     return sorted(targets)
 
 
-def _log_lstm_shadow_skip(
+def _log_model_family_shadow_skip(
     settings: AutoTradeSettings,
+    family: str,
     status: dict,
     *,
     role: str,
 ) -> None:
     logger.info(
-        "predict: LSTM shadow skipped role=%s for %s %s reason=%s torch=%s torchError=%s status=%s artifacts=%s combo=%s",
+        "predict: %s shadow skipped role=%s for %s %s reason=%s dependency=%s status=%s artifacts=%s combo=%s",
+        family,
         role,
         settings.symbol,
         settings.duration,
         status.get("shadowPredictionBlockedReason"),
-        status.get("torchAvailable"),
-        (status.get("torchStatus") or {}).get("error"),
+        status.get("dependencyStatus"),
         status.get("status"),
         status.get("artifactsReady"),
         status.get("comboSnapshotReason"),
     )
+
+
+def _log_lstm_shadow_skip(settings: AutoTradeSettings, status: dict, *, role: str) -> None:
+    _log_model_family_shadow_skip(settings, "lstm", status, role=role)
+
+
+def lstm_model_status(symbol: str, duration: str) -> dict:
+    return model_family_status("lstm", symbol, duration)
+
+
+def predict_lstm_shadow_prediction(symbol: str, duration: str, *, entry_open_time: int | None = None) -> dict:
+    return predict_model_family_shadow_prediction("lstm", symbol, duration, entry_open_time=entry_open_time)
+
+
+def missing_lstm_shadow_entry_times(symbol: str, duration: str, current_entry_open_time: int) -> tuple[int, ...]:
+    return missing_model_family_shadow_entry_times("lstm", symbol, duration, current_entry_open_time)
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:

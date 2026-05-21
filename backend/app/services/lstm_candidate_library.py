@@ -8,7 +8,7 @@ from app.services.lstm_artifacts import artifact_paths, read_json, update_json
 from app.services.lstm_candidate_keys import search_key_for_config
 from app.services.lstm_config import LstmTrainingConfig
 
-CANDIDATE_LIBRARY_FILE = "candidate_library.json"
+CANDIDATE_LIBRARY_FILE = "lstm_candidate_library.json"
 
 
 def candidate_library_path(

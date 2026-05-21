@@ -18,6 +18,7 @@ from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
 )
+from app.services.model_family_config import MODEL_FAMILIES, model_family_strategy_key
 
 
 def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
@@ -40,6 +41,33 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert all(by_duration[duration]["enabled"] == 1 for duration in AUTO_TRADE_SLOT_DURATIONS)
     assert all(by_duration[duration]["live_trading_enabled"] == 0 for duration in AUTO_TRADE_SLOT_DURATIONS)
     assert _strategy_count(conn, "orderbook_notional_40m") == 0
+
+
+def test_db_seed_enables_model_family_10m_and_60m_sim_slots() -> None:
+    conn = _auto_trade_conn()
+    for family in MODEL_FAMILIES:
+        for duration in ("10m", "60m"):
+            _insert_strategy(conn, model_family_strategy_key(family, duration), duration, enabled=0, live=0)
+
+    _ensure_auto_trade_strategies(conn)
+
+    for family in MODEL_FAMILIES:
+        enabled = _strategy_rows(conn, model_family_strategy_key(family, "10m"))
+        assert enabled["10m"]["enabled"] == 1
+        assert enabled["10m"]["live_trading_enabled"] == 0
+        enabled = _strategy_rows(conn, model_family_strategy_key(family, "60m"))
+        assert enabled["60m"]["enabled"] == 1
+        assert enabled["60m"]["live_trading_enabled"] == 0
+
+
+def test_db_seed_keeps_model_family_30m_and_1d_disabled() -> None:
+    conn = _auto_trade_conn()
+
+    _ensure_auto_trade_strategies(conn)
+
+    for family in MODEL_FAMILIES:
+        assert _strategy_rows(conn, model_family_strategy_key(family, "30m"))["30m"]["enabled"] == 0
+        assert _strategy_rows(conn, model_family_strategy_key(family, "1d"))["1d"]["enabled"] == 0
 
 
 def test_high_winrate_live_trade_rejects_non_tradable_statuses(monkeypatch) -> None:
@@ -180,6 +208,18 @@ def _strategy_count(conn: sqlite3.Connection, key: str) -> int:
         (key,),
     ).fetchone()
     return int(row["count"])
+
+
+def _strategy_rows(conn: sqlite3.Connection, key: str) -> dict[str, sqlite3.Row]:
+    rows = conn.execute(
+        """
+        SELECT duration, enabled, live_trading_enabled
+        FROM auto_trade_strategies
+        WHERE strategy_key = ?
+        """,
+        (key,),
+    ).fetchall()
+    return {row["duration"]: row for row in rows}
 
 
 def _high_winrate_settings(*, live: bool) -> AutoTradeSettings:

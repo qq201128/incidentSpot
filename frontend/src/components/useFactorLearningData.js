@@ -2,12 +2,24 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchFactorLearningMemory,
   fetchFactorLearningOperators,
-  fetchLstmStatus,
-  requestLstmCandidateSearch,
+  fetchModelFamilyStatus,
+  requestModelCandidateSearch,
   requestFactorLearningRefresh,
 } from "../api/factorLearning";
 
 const TASK_POLL_MS = 3000;
+export const MODEL_FAMILIES = [
+  "lstm",
+  "gru",
+  "cnn",
+  "transformer",
+  "random_forest",
+  "xgboost",
+  "svm",
+  "bayesian",
+  "knn",
+  "rl_strategy",
+];
 
 export function useFactorLearningData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -20,10 +32,10 @@ export function useFactorLearningData(symbol, duration) {
 
   useInitialLoad(loadData);
   useLearningTaskPoll({ data: memoryState.data, duration, setMemoryState, symbol: normalizedSymbol });
-  useLstmTaskPoll({ data: lstmState.data, duration, setLstmState, symbol: normalizedSymbol });
+  useModelTaskPoll({ data: lstmState.data, duration, setLstmState, symbol: normalizedSymbol });
 
   const refresh = useRefreshQueue({ duration, normalizedSymbol, setMemoryState, setQueueing });
-  const startLstmSearch = useStartLstmSearch({
+  const startLstmSearch = useStartModelSearch({
     duration,
     normalizedSymbol,
     setLstmSearchState,
@@ -43,7 +55,7 @@ function useDataLoader({ duration, normalizedSymbol, setLstmState, setMemoryStat
     await Promise.all([
       loadMemory({ duration, setState: setMemoryState, signal, symbol: normalizedSymbol }),
       loadOperators(signal, setOperatorState),
-      loadLstmStatus({ duration, setState: setLstmState, signal, symbol: normalizedSymbol }),
+      loadModelStatuses({ duration, setState: setLstmState, signal, symbol: normalizedSymbol }),
     ]);
   }, [duration, normalizedSymbol, setLstmState, setMemoryState, setOperatorState]);
 }
@@ -98,21 +110,21 @@ function useLearningTaskPoll({ data, duration, setMemoryState, symbol }) {
   }, [active, duration, setMemoryState, symbol]);
 }
 
-function useLstmTaskPoll({ data, duration, setLstmState, symbol }) {
-  const active = ["queued", "running"].includes(data?.candidateSearchProgress?.status);
+function useModelTaskPoll({ data, duration, setLstmState, symbol }) {
+  const active = modelRows(data).some((row) => ["queued", "running"].includes(row?.candidateSearchProgress?.status));
   useEffect(() => {
     if (!active || !isValidSymbol(symbol)) return undefined;
     const ac = new AbortController();
     let timer;
     const poll = async () => {
       try {
-        const next = await fetchLstmStatus(symbol, duration, { signal: ac.signal });
-        if (!ac.signal.aborted) setLstmState({ data: next, status: lstmStatusText(next) });
-        if (!ac.signal.aborted && ["queued", "running"].includes(next?.candidateSearchProgress?.status)) {
+        const next = await fetchAllModelStatuses(symbol, duration, ac.signal);
+        if (!ac.signal.aborted) setLstmState({ data: next, status: modelStatusesText(next) });
+        if (!ac.signal.aborted && modelRows(next).some((row) => ["queued", "running"].includes(row?.candidateSearchProgress?.status))) {
           timer = window.setTimeout(poll, TASK_POLL_MS);
         }
       } catch (error) {
-        if (!isCanceled(error, ac.signal)) setLstmState((state) => ({ ...state, status: `LSTM状态轮询失败：${errorMessage(error)}` }));
+        if (!isCanceled(error, ac.signal)) setLstmState((state) => ({ ...state, status: `模型状态轮询失败：${errorMessage(error)}` }));
       }
     };
     timer = window.setTimeout(poll, TASK_POLL_MS);
@@ -144,31 +156,43 @@ async function loadOperators(signal, setState) {
   }
 }
 
-async function loadLstmStatus({ symbol, duration, signal, setState }) {
+async function loadModelStatuses({ symbol, duration, signal, setState }) {
   try {
-    const data = await fetchLstmStatus(symbol, duration, { signal });
-    if (!signal.aborted) setState({ data, status: lstmStatusText(data) });
+    const data = await fetchAllModelStatuses(symbol, duration, signal);
+    if (!signal.aborted) setState({ data, status: modelStatusesText(data) });
   } catch (error) {
-    if (!isCanceled(error, signal)) setState({ data: null, status: `LSTM状态失败：${errorMessage(error)}` });
+    if (!isCanceled(error, signal)) setState({ data: null, status: `模型状态失败：${errorMessage(error)}` });
   }
 }
 
-function useStartLstmSearch({ duration, normalizedSymbol, setLstmSearchState, setLstmState }) {
-  return useCallback(async () => {
+function useStartModelSearch({ duration, normalizedSymbol, setLstmSearchState, setLstmState }) {
+  return useCallback(async (family = "lstm") => {
     if (!isValidSymbol(normalizedSymbol)) {
       setLstmState({ data: null, status: "请输入有效交易对" });
       return;
     }
-    setLstmSearchState({ status: "running" });
+    setLstmSearchState({ status: "running", family });
     try {
-      const data = await requestLstmCandidateSearch(normalizedSymbol, duration);
-      setLstmState({ data, status: lstmStatusText(data) });
+      if (family === "__all__") {
+        await Promise.all(MODEL_FAMILIES.map((item) => requestModelCandidateSearch(item, normalizedSymbol, duration)));
+      } else {
+        await requestModelCandidateSearch(family, normalizedSymbol, duration);
+      }
+      const data = await fetchAllModelStatuses(normalizedSymbol, duration);
+      setLstmState({ data, status: modelStatusesText(data) });
     } catch (error) {
-      setLstmState((state) => ({ ...state, status: `LSTM候选搜索失败：${errorMessage(error)}` }));
+      setLstmState((state) => ({ ...state, status: `${modelFamilyLabel(family)}候选搜索失败：${errorMessage(error)}` }));
     } finally {
       setLstmSearchState({ status: "idle" });
     }
   }, [duration, normalizedSymbol, setLstmSearchState, setLstmState]);
+}
+
+async function fetchAllModelStatuses(symbol, duration, signal) {
+  const rows = await Promise.all(
+    MODEL_FAMILIES.map((family) => fetchModelFamilyStatus(family, symbol, duration, { signal }))
+  );
+  return { families: rows, lstm: rows.find((row) => row.modelFamily === "lstm") || rows[0] };
 }
 
 export function memoryStatus(data) {
@@ -216,10 +240,38 @@ function hasActiveLearningTask(data) {
   return ["queued", "running"].includes(refreshStatus) || ["pending", "running"].includes(agentStatus);
 }
 
+function modelStatusesText(data) {
+  const rows = modelRows(data);
+  const ready = rows.filter((row) => row.shadowPredictionReady).length;
+  const running = rows.filter((row) => ["queued", "running"].includes(row?.candidateSearchProgress?.status)).length;
+  return `模型族：${ready}/${rows.length} 可模拟${running ? ` · ${running} 个搜索中` : ""}`;
+}
+
+function modelRows(data) {
+  if (Array.isArray(data?.families)) return data.families;
+  return data ? [data] : [];
+}
+
 function lstmStatusText(data) {
   const label = lstmStatusLabel(data?.status);
   const version = data?.modelVersion ? ` · ${data.modelVersion}` : "";
   return `LSTM：${label}${version}${lstmProgressText(data)}${lstmReadyStatusText(data)}`;
+}
+
+function modelFamilyLabel(family) {
+  const labels = {
+    lstm: "LSTM",
+    gru: "GRU",
+    cnn: "CNN",
+    transformer: "Transformer",
+    random_forest: "RandomForest",
+    xgboost: "XGBoost",
+    svm: "SVM",
+    bayesian: "Bayesian",
+    knn: "KNN",
+    rl_strategy: "RL策略",
+  };
+  return labels[family] || family;
 }
 
 function lstmProgressText(data) {

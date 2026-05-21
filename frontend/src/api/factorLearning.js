@@ -22,7 +22,15 @@ export async function fetchFactorLearningOperators(options = {}) {
 }
 
 export async function fetchLstmStatus(symbol, duration = "10m", options = {}) {
-  const { data } = await axios.get(`${API_BASE_URL}/api/lstm/status`, {
+  return fetchModelStatus("lstm", symbol, duration, options);
+}
+
+export async function fetchModelStatus(family, symbol, duration = "10m", options = {}) {
+  return fetchModelFamilyStatus(family, symbol, duration, options);
+}
+
+export async function fetchModelFamilyStatus(family, symbol, duration = "10m", options = {}) {
+  const { data } = await axios.get(`${API_BASE_URL}/api/models/${family}/status`, {
     params: { symbol, duration },
     signal: options.signal,
     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -31,8 +39,12 @@ export async function fetchLstmStatus(symbol, duration = "10m", options = {}) {
 }
 
 export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "full") {
-  const { data } = await axios.post(`${API_BASE_URL}/api/lstm/candidate-search`, null, {
-    params: { symbol, duration, profile },
+  return requestModelCandidateSearch("lstm", symbol, duration, profile);
+}
+
+export async function requestModelCandidateSearch(family, symbol, duration = "10m", profile = "full", parallelWorkers = 10) {
+  const { data } = await axios.post(`${API_BASE_URL}/api/models/${family}/candidate-search`, null, {
+    params: { symbol, duration, profile, parallelWorkers },
     timeout: REFRESH_QUEUE_TIMEOUT_MS,
   });
   return data;

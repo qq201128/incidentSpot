@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import errno
 from pathlib import Path
 
 from app.services import lstm_artifacts
@@ -26,6 +27,45 @@ def test_write_json_uses_unique_temp_paths(tmp_path, monkeypatch) -> None:
 
     assert len(set(sources)) == 2
     assert "payload.json.tmp" not in sources
+
+
+def test_write_json_retries_transient_replace_permission_error(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "payload.json"
+    replace = lstm_artifacts.os.replace
+    attempts = []
+
+    def flaky_replace(source: Path, target: Path) -> None:
+        attempts.append(Path(source).name)
+        if len(attempts) == 1:
+            raise PermissionError("transient replace lock")
+        replace(source, target)
+
+    monkeypatch.setattr(lstm_artifacts.os, "replace", flaky_replace)
+    monkeypatch.setattr(lstm_artifacts.time, "sleep", lambda _seconds: None)
+
+    lstm_artifacts.write_json(path, {"value": 7})
+
+    assert len(attempts) == 2
+    assert lstm_artifacts.read_json(path) == {"value": 7}
+
+
+def test_windows_file_lock_retries_transient_deadlock(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "payload.json.lock"
+    attempts = []
+
+    class FakeMsvcrt:
+        LK_LOCK = 1
+
+        def locking(self, fileno: int, mode: int, size: int) -> None:
+            attempts.append((fileno, mode, size))
+            if len(attempts) == 1:
+                raise OSError(errno.EDEADLK, "transient lock deadlock")
+
+    monkeypatch.setattr(lstm_artifacts.time, "sleep", lambda _seconds: None)
+    with path.open("a+b") as handle:
+        lstm_artifacts._lock_windows_file(handle, FakeMsvcrt())
+
+    assert len(attempts) == 2
 
 
 def test_write_json_waits_for_active_reader(tmp_path, monkeypatch) -> None:

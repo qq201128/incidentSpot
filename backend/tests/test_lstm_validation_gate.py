@@ -122,8 +122,8 @@ def test_train_lstm_model_records_failed_attempt_when_dataset_builder_crashes() 
     assert attempt["reason"] == "dataset builder crashed"
 
 
-def test_train_lstm_model_promotes_shadow_active_when_trade_gate_fails(monkeypatch) -> None:
-    artifact_root = _runtime_path("shadow-active")
+def test_train_lstm_model_rejects_shadow_when_win_rate_not_above_70(monkeypatch) -> None:
+    artifact_root = _runtime_path("shadow-rejected")
     report = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
         artifact_root=artifact_root,
@@ -132,34 +132,23 @@ def test_train_lstm_model_promotes_shadow_active_when_trade_gate_fails(monkeypat
     )
     paths = artifact_paths("BTCUSDT", "10m", artifact_root)
     _patch_combo_ranking(monkeypatch)
-    monkeypatch.setattr(lstm_prediction_service, "build_live_feature_window", _live_window_two_features)
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
-    signal = lstm_prediction_service.predict_lstm_signal(
-        "BTCUSDT",
-        "10m",
-        artifact_root=artifact_root,
-        backend=_PredictOnlyBackend(),
-    )
 
-    assert report["status"] == "shadow_active"
-    assert report["candidateStatus"] == "promoted_shadow_active"
-    assert report["promotionReason"] == "shadow_quality_passed"
-    assert _read_json(paths.status)["status"] == "shadow_active"
-    assert status["shadowPredictionReady"] is True
+    assert report["status"] == "validation_failed"
+    assert report["candidateStatus"] == "rejected_validation"
+    assert paths.status.exists() is False
+    assert status["shadowPredictionReady"] is False
     assert status["tradePredictionReady"] is False
-    assert status["tradePredictionBlockedReason"] == "no_validation_confidence_threshold_met"
-    assert signal["modelStatus"] == "shadow_active"
-    assert signal["validationGatePassed"] is False
 
 
-def test_search_candidate_does_not_replace_shadow_active_artifacts(monkeypatch) -> None:
-    artifact_root = _runtime_path("shadow-candidate-no-publish")
+def test_search_candidate_does_not_replace_trade_active_artifacts(monkeypatch) -> None:
+    artifact_root = _runtime_path("trade-candidate-no-publish")
     active = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),
         artifact_root=artifact_root,
-        backend=_ModerateBackend(),
-        dataset_builder=_weighted_dataset,
+        backend=_HighConfidenceBackend(),
+        dataset_builder=_fake_dataset,
     )
     candidate = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=9, min_samples=30, epochs=1),
@@ -173,13 +162,13 @@ def test_search_candidate_does_not_replace_shadow_active_artifacts(monkeypatch) 
 
     status = lstm_prediction_service.lstm_model_status("BTCUSDT", "10m", artifact_root=artifact_root)
 
-    assert active["status"] == "shadow_active"
-    assert candidate["status"] == "shadow_active"
+    assert active["status"] == "trade_active"
+    assert candidate["status"] == "validation_failed"
     assert _read_json(paths.status)["featureWindow"] == 8
     assert _read_json(paths.version)["modelVersion"] == active["modelVersion"]
-    assert status["activeModelStatus"] == "shadow_active"
+    assert status["activeModelStatus"] == "trade_active"
     assert status["featureWindow"] == 8
-    assert status["lastAttemptStatus"] == "shadow_active"
+    assert status["lastAttemptStatus"] == "validation_failed"
 
 
 def test_train_lstm_model_keeps_old_active_model_when_validation_fails(monkeypatch) -> None:

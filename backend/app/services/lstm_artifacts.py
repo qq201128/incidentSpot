@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import errno
 import shutil
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -11,10 +13,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models" / "lstm"
+MODELS_ROOT = Path(__file__).resolve().parent.parent.parent / "models"
+ML_MODEL_DIR = MODELS_ROOT / "ml"
+LEGACY_LSTM_MODEL_DIR = MODELS_ROOT / "lstm"
+MODEL_DIR = ML_MODEL_DIR / "lstm"
 LOCK_BYTE_COUNT = 1
 LOCK_FILE_PREFIX = "."
 LOCK_FILE_SUFFIX = ".lock"
+JSON_REPLACE_MAX_ATTEMPTS = 5
+JSON_REPLACE_RETRY_SECONDS = 0.05
+LOCK_ACQUIRE_MAX_ATTEMPTS = 5
+LOCK_ACQUIRE_RETRY_SECONDS = 0.05
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[Path, threading.RLock] = {}
 
@@ -31,11 +40,18 @@ class LstmArtifactPaths:
     attempt: Path
 
 
-def artifact_paths(symbol: str, duration: str, root: Path | None = None) -> LstmArtifactPaths:
-    base = (root or MODEL_DIR) / symbol.strip().upper() / duration.strip()
+def artifact_paths(
+    symbol: str,
+    duration: str,
+    root: Path | None = None,
+    *,
+    family: str = "lstm",
+) -> LstmArtifactPaths:
+    base = artifact_base_path(symbol, duration, root, family=family)
+    model_name = "model.pt" if family in {"lstm", "gru", "cnn", "transformer"} else "model.joblib"
     return LstmArtifactPaths(
         root=base,
-        model=base / "model.pt",
+        model=base / model_name,
         report=base / "training_report.json",
         scaler=base / "scaler.json",
         features=base / "features.json",
@@ -45,10 +61,42 @@ def artifact_paths(symbol: str, duration: str, root: Path | None = None) -> Lstm
     )
 
 
+def artifact_base_path(
+    symbol: str,
+    duration: str,
+    root: Path | None = None,
+    *,
+    family: str = "lstm",
+) -> Path:
+    normalized = family.strip().lower()
+    if root is not None:
+        return root / symbol.strip().upper() / duration.strip()
+    sym = symbol.strip().upper()
+    dur = duration.strip()
+    if normalized == "lstm":
+        _migrate_legacy_lstm_dir(sym, dur)
+    return ML_MODEL_DIR / normalized / sym / dur
+
+
 def artifact_paths_for_root(root: Path) -> LstmArtifactPaths:
+    model_name = "model.joblib" if root.name.endswith("_joblib") else "model.pt"
     return LstmArtifactPaths(
         root=root,
-        model=root / "model.pt",
+        model=root / model_name,
+        report=root / "training_report.json",
+        scaler=root / "scaler.json",
+        features=root / "features.json",
+        version=root / "model_version.json",
+        status=root / "status.json",
+        attempt=root / "last_training_attempt.json",
+    )
+
+
+def artifact_paths_for_family_root(root: Path, family: str) -> LstmArtifactPaths:
+    model_name = "model.pt" if family in {"lstm", "gru", "cnn", "transformer"} else "model.joblib"
+    return LstmArtifactPaths(
+        root=root,
+        model=root / model_name,
         report=root / "training_report.json",
         scaler=root / "scaler.json",
         features=root / "features.json",
@@ -97,7 +145,18 @@ def _write_json_unlocked(path: Path, payload: dict[str, Any]) -> None:
     with tmp.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
-    os.replace(tmp, path)
+    _replace_json_file(tmp, path)
+
+
+def _replace_json_file(source: Path, target: Path) -> None:
+    for attempt in range(1, JSON_REPLACE_MAX_ATTEMPTS + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt >= JSON_REPLACE_MAX_ATTEMPTS:
+                raise
+            time.sleep(JSON_REPLACE_RETRY_SECONDS)
 
 
 @contextmanager
@@ -142,11 +201,22 @@ def _lock_file(handle) -> None:
     if os.name == "nt":
         import msvcrt
 
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, LOCK_BYTE_COUNT)
+        _lock_windows_file(handle, msvcrt)
         return
     import fcntl
 
     fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _lock_windows_file(handle, msvcrt_module) -> None:
+    for attempt in range(1, LOCK_ACQUIRE_MAX_ATTEMPTS + 1):
+        try:
+            msvcrt_module.locking(handle.fileno(), msvcrt_module.LK_LOCK, LOCK_BYTE_COUNT)
+            return
+        except OSError as exc:
+            if exc.errno != errno.EDEADLK or attempt >= LOCK_ACQUIRE_MAX_ATTEMPTS:
+                raise
+            time.sleep(LOCK_ACQUIRE_RETRY_SECONDS)
 
 
 def _unlock_file(handle) -> None:
@@ -187,3 +257,12 @@ def required_artifacts_exist(paths: LstmArtifactPaths) -> bool:
         path.exists()
         for path in (paths.model, paths.report, paths.scaler, paths.features, paths.version)
     )
+
+
+def _migrate_legacy_lstm_dir(symbol: str, duration: str) -> None:
+    legacy_base = LEGACY_LSTM_MODEL_DIR / symbol / duration
+    active_base = MODEL_DIR / symbol / duration
+    if not legacy_base.exists() or active_base.exists():
+        return
+    active_base.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(legacy_base), str(active_base))

@@ -17,13 +17,13 @@ from app.services.high_winrate_strategy_demotion import STATUS_TRADABLE, high_wi
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-    is_lstm_shadow_strategy,
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
     strategy_supports_duration,
     strategy_uses_trade_policy_gates,
 )
+from app.services.model_family_config import is_model_family_shadow_strategy
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -229,8 +229,8 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
     strategy = strategy_definition(settings.strategy_key)
     if settings.enabled and not strategy.tradable:
         raise ValueError(strategy.disabled_reason or f"strategy is not tradable: {strategy.key}")
-    if is_lstm_shadow_strategy(strategy.key) and settings.live_trading_enabled:
-        raise ValueError("LSTM shadow strategy supports simulation only; live trading must stay disabled")
+    if is_model_family_shadow_strategy(strategy.key) and settings.live_trading_enabled:
+        raise ValueError("model family shadow strategy supports simulation only; live trading must stay disabled")
     if is_batch_combo_simulation_strategy(strategy.key) and settings.live_trading_enabled:
         raise ValueError("batch factor combo strategy supports simulation only; live trading must stay disabled")
     symbol = settings.symbol.strip().upper()
