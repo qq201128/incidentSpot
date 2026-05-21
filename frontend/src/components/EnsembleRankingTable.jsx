@@ -4,7 +4,7 @@ import { factorLabel } from "../utils/factorLearningLabels";
 import { strategyLabel } from "../utils/strategyLabels";
 import "./EnsembleRankingTable.css";
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 12;
 const SORT_OPTIONS = {
   winRate: "胜率",
   profitFactor: "盈亏比",
@@ -62,19 +62,25 @@ export default function EnsembleRankingTable({ symbol, duration, reloadKey = 0 }
     <div className="ensemble-records">
       {error ? <p className="ensemble-records-error">{error}</p> : null}
       <div className="ensemble-records-toolbar" aria-label="候选排序">
-        <span>排序</span>
-        <div className="ensemble-sort-tabs" role="tablist" aria-label="排序方式">
-          {Object.entries(SORT_OPTIONS).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={sortKey === key ? "is-active" : ""}
-              aria-pressed={sortKey === key}
-              onClick={() => setSortKey(key)}
-            >
-              {label}
-            </button>
-          ))}
+        <span className="ensemble-records-count">共 {sortedRanking.length} 条</span>
+        <div className="ensemble-records-tools">
+          <span>排序</span>
+          <div className="ensemble-sort-tabs" role="tablist" aria-label="排序方式">
+            {Object.entries(SORT_OPTIONS).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={sortKey === key ? "is-active" : ""}
+                aria-pressed={sortKey === key}
+                onClick={() => setSortKey(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {sortedRanking.length > PAGE_SIZE ? (
+            <InlinePagination page={page} pageCount={pageCount} onPageChange={setPage} />
+          ) : null}
         </div>
       </div>
       <div className="ensemble-records-table" role="table" aria-label="候选信号排名">
@@ -97,29 +103,29 @@ export default function EnsembleRankingTable({ symbol, duration, reloadKey = 0 }
           <p className="ensemble-records-empty">暂无已结算候选，请在综合裁判中刷新统计</p>
         ) : null}
       </div>
-      {sortedRanking.length > PAGE_SIZE ? (
-        <nav className="ensemble-records-pagination" aria-label="候选信号分页">
-          <span>共 {sortedRanking.length} 条</span>
-          <div className="ensemble-records-page-actions">
-            <button type="button" disabled={page <= 1} onClick={() => setPage(1)}>
-              «
-            </button>
-            <button type="button" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              ‹
-            </button>
-            <strong>
-              {page} / {pageCount}
-            </strong>
-            <button type="button" disabled={page >= pageCount} onClick={() => setPage(page + 1)}>
-              ›
-            </button>
-            <button type="button" disabled={page >= pageCount} onClick={() => setPage(pageCount)}>
-              »
-            </button>
-          </div>
-        </nav>
-      ) : null}
     </div>
+  );
+}
+
+function InlinePagination({ page, pageCount, onPageChange }) {
+  return (
+    <nav className="ensemble-records-page-actions" aria-label="候选信号分页">
+      <button type="button" disabled={page <= 1} onClick={() => onPageChange(1)}>
+        «
+      </button>
+      <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+        ‹
+      </button>
+      <strong>
+        {page} / {pageCount}
+      </strong>
+      <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
+        ›
+      </button>
+      <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(pageCount)}>
+        »
+      </button>
+    </nav>
   );
 }
 

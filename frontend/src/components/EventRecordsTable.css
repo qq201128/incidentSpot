@@ -1,5 +1,6 @@
 .event-records--ensemble {
   min-height: 0;
+  overflow: hidden;
 }
 
 .event-records--ensemble .ensemble-records {

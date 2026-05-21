@@ -4,7 +4,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   overflow: hidden;
 }
 
@@ -29,10 +29,23 @@
 .ensemble-records-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   color: var(--muted);
   font-size: 11px;
+  min-height: 24px;
+}
+
+.ensemble-records-count {
+  white-space: nowrap;
+}
+
+.ensemble-records-tools {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
 
 .ensemble-sort-tabs {
@@ -46,8 +59,8 @@
 }
 
 .ensemble-sort-tabs button {
-  min-height: 24px;
-  padding: 0 10px;
+  min-height: 20px;
+  padding: 0 8px;
   border: 0;
   border-radius: 4px;
   color: var(--muted);
@@ -72,9 +85,10 @@
   grid-template-columns: 36px minmax(160px, 1.6fr) 72px 56px 64px 64px 56px minmax(100px, 1fr);
   gap: 8px;
   align-items: center;
-  padding: 8px 12px;
+  min-height: 24px;
+  padding: 4px 10px;
   border-bottom: 1px solid rgba(43, 54, 61, 0.55);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .ensemble-records-row--header {
@@ -101,7 +115,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .ensemble-records-signal small {
@@ -134,18 +148,6 @@
   font-size: 12px;
 }
 
-.ensemble-records-pagination {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 12px 4px;
-  border-top: 1px solid rgba(79, 116, 139, 0.18);
-  color: var(--muted);
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
 .ensemble-records-page-actions {
   display: flex;
   align-items: center;
@@ -153,13 +155,13 @@
 }
 
 .ensemble-records-page-actions button {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0 6px;
 }
 
 .ensemble-records-page-actions strong {
-  min-width: 52px;
+  min-width: 46px;
   text-align: center;
   color: var(--text);
 }
