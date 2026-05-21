@@ -1,4 +1,7 @@
+import { useEffect, useMemo, useState } from "react";
 import "./FactorCombinationRankingTable.css";
+
+const COMBO_PAGE_SIZE = 6;
 
 export default function FactorCombinationRankingTable({
   highWinrateRanking = [],
@@ -12,24 +15,52 @@ export default function FactorCombinationRankingTable({
         ranking={highWinrateRanking}
         summary={highWinrateSummaryText(highWinrateSummary)}
         title="高胜率目标组合"
+        variant="goal"
       />
-      <RankingSection emptyText="暂无普通组合" ranking={ranking} title="普通组合" />
+      <RankingSection emptyText="暂无普通组合" ranking={ranking} title="普通组合" variant="regular" />
     </div>
   );
 }
 
-function RankingSection({ emptyText, ranking, summary = "", title }) {
+function RankingSection({ emptyText, ranking, summary = "", title, variant = "regular" }) {
+  const [page, setPage] = useState(1);
+  const total = ranking.length;
+  const pageCount = Math.max(1, Math.ceil(total / COMBO_PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(1);
+  }, [ranking]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  const pageRows = useMemo(() => {
+    const start = (page - 1) * COMBO_PAGE_SIZE;
+    return ranking.slice(start, start + COMBO_PAGE_SIZE);
+  }, [page, ranking]);
+
+  const rankOffset = (page - 1) * COMBO_PAGE_SIZE;
+
   return (
-    <div className="factor-combo-ranking">
-      <div className="factor-combo-ranking-title">
-        <h3>{title}</h3>
-        <span>{countText(ranking.length, summary)}</span>
-      </div>
+    <section className={`factor-combo-ranking factor-combo-ranking-${variant} card-surface`}>
+      <header className="factor-combo-ranking-title">
+        <div>
+          <span className="section-kicker">{variant === "goal" ? "组合缓存" : "排名列表"}</span>
+          <h3>{title}</h3>
+        </div>
+        <span>{countText(total, summary)}</span>
+      </header>
       <div className="factor-combo-rank-list">
-        {ranking.map(renderRankingRow)}
-        {!ranking.length ? <p className="factor-combo-empty">{emptyText}</p> : null}
+        {pageRows.map((row, index) => renderRankingRow(row, rankOffset + index))}
+        {!total ? <p className="factor-combo-empty">{emptyText}</p> : null}
       </div>
-    </div>
+      {total > COMBO_PAGE_SIZE ? (
+        <ComboPagination page={page} pageCount={pageCount} total={total} onPageChange={setPage} />
+      ) : total ? (
+        <p className="factor-combo-rank-total">共 {total} 条</p>
+      ) : null}
+    </section>
   );
 }
 
@@ -43,7 +74,7 @@ function renderRankingRow(row, index) {
       <div className="factor-combo-rank-body">
         <strong className="factor-combo-rank-name">{row.factorDisplayName || row.factorName}</strong>
         <code className="factor-combo-rank-code">{row.factorName}</code>
-        <p>{memberText(row.members)}</p>
+        <p className="factor-combo-rank-members">{memberText(row.members)}</p>
       </div>
       <div className="factor-combo-rank-metrics">
         <Metric label="胜率" value={formatPct(row.winRate, 1)} strong={isGoalCombo(row)} />
@@ -54,6 +85,41 @@ function renderRankingRow(row, index) {
         <Metric label="相关" value={formatPct(row.avgAbsCorrelation, 1)} />
       </div>
     </article>
+  );
+}
+
+function ComboPagination({ page, pageCount, total, onPageChange }) {
+  return (
+    <nav className="factor-combo-rank-pagination" aria-label="组合排名分页">
+      <span className="factor-combo-rank-page-total">共 {total} 条</span>
+      <div className="factor-combo-rank-page-actions">
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(1)} aria-label="首页">
+          «
+        </button>
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)} aria-label="上一页">
+          ‹
+        </button>
+        <strong>
+          {page} / {pageCount}
+        </strong>
+        <button
+          type="button"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          aria-label="下一页"
+        >
+          ›
+        </button>
+        <button
+          type="button"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(pageCount)}
+          aria-label="末页"
+        >
+          »
+        </button>
+      </div>
+    </nav>
   );
 }
 

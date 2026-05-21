@@ -1,0 +1,1013 @@
+/* 自动挖掘页 — 对齐原型：顶栏 + KPI + (左模型/右栏) + 底表 */
+.mining-page.layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  height: calc(100vh - 50px);
+  min-height: 0;
+  padding: 10px 14px 12px;
+  gap: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.mining-page-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.mining-loading,
+.mining-banner {
+  padding: 14px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.mining-loading {
+  color: var(--muted);
+  background: rgba(13, 18, 23, 0.82);
+  border: 1px solid rgba(69, 88, 96, 0.5);
+}
+
+.mining-banner {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.12);
+  border: 1px solid rgba(243, 155, 49, 0.35);
+}
+
+/* —— 页头：左标题 / 右控件+状态 —— */
+.mining-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 12px 14px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(47, 140, 255, 0.1), transparent 55%),
+    rgba(10, 15, 20, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.mining-topbar-main h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.mining-topbar-main p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mining-topbar-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 1 1 480px;
+  max-width: 100%;
+}
+
+.mining-topbar-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.mining-topbar-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mining-topbar-controls select {
+  min-width: 118px;
+  height: 32px;
+}
+
+.mining-topbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.mining-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(69, 88, 96, 0.55);
+  background: rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+}
+
+.mining-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #33c37b;
+  flex-shrink: 0;
+}
+
+.mining-status-chip.is-done .mining-status-dot {
+  background: #33c37b;
+}
+
+.mining-status-chip.is-running .mining-status-dot,
+.mining-status-chip.is-warn .mining-status-dot {
+  background: #f3b94d;
+}
+
+.mining-status-chip.is-failed .mining-status-dot {
+  background: #ff6868;
+}
+
+.mining-status-chip.is-done {
+  color: #baf7e5;
+  border-color: rgba(51, 195, 123, 0.4);
+}
+
+.mining-status-chip.is-running,
+.mining-status-chip.is-warn {
+  color: #ffd9a8;
+  border-color: rgba(243, 155, 49, 0.35);
+}
+
+.mining-refresh-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(69, 88, 96, 0.45);
+}
+
+/* —— KPI 五卡横排 —— */
+.mining-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(300px, 1.35fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.mining-kpi-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  min-height: 88px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.88);
+}
+
+.mining-kpi-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.mining-kpi-value {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.mining-kpi-card small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.mining-kpi-card--accent {
+  border-color: rgba(51, 195, 123, 0.35);
+}
+
+.mining-kpi-meter {
+  height: 5px;
+  margin: 2px 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.mining-kpi-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #33c37b, #7ee4ad);
+}
+
+.mining-kpi-card--rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.mining-kpi-rules-text p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #c5d2dc;
+}
+
+.mining-kpi-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mining-kpi-actions button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mining-kpi-actions .is-primary {
+  color: #fff;
+  background: var(--blue);
+  border-color: rgba(47, 140, 255, 0.65);
+}
+
+/* —— 工作区：模型 → 洞察横条(5列) → Agent 表 —— */
+.mining-workspace {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* —— 多模型区 —— */
+.mining-model-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.88);
+  overflow: hidden;
+}
+
+.mining-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.mining-section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mining-ready-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.12);
+  border: 1px solid rgba(51, 195, 123, 0.28);
+}
+
+.mining-model-search-all {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.mining-model-search-all.is-primary {
+  color: #fff;
+  background: var(--blue);
+  border-color: rgba(47, 140, 255, 0.65);
+}
+
+.mining-model-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  gap: 8px;
+  align-content: start;
+}
+
+@media (min-width: 1500px) {
+  .mining-model-grid {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+  }
+}
+
+.mining-model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  height: auto;
+  align-self: start;
+  border: 1px solid rgba(69, 88, 96, 0.55);
+  border-radius: 6px;
+  background: rgba(6, 10, 14, 0.72);
+}
+
+.mining-model-card.is-ready {
+  border-color: rgba(51, 195, 123, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(51, 195, 123, 0.08);
+}
+
+.mining-model-card.is-searching {
+  border-color: rgba(243, 155, 49, 0.38);
+}
+
+.mining-model-card.is-blocked {
+  border-color: rgba(255, 104, 104, 0.28);
+}
+
+.mining-model-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+
+.mining-model-card-head strong {
+  font-size: 13px;
+}
+
+.mining-model-state {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.mining-model-state.is-ready {
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.15);
+}
+
+.mining-model-state.is-searching,
+.mining-model-state.is-pending_train {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.12);
+}
+
+.mining-model-state.is-blocked {
+  color: #ff98ab;
+  background: rgba(255, 104, 104, 0.12);
+}
+
+.mining-model-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+  margin: 0;
+}
+
+.mining-model-metrics dt {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.mining-model-metrics dd {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mining-model-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.mining-model-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.mining-model-progress-bar i {
+  display: block;
+  height: 100%;
+  background: #78a6ff;
+}
+
+.mining-model-progress.is-active .mining-model-progress-bar i {
+  background: #f3b94d;
+}
+
+.mining-model-latest {
+  margin: 0;
+  font-size: 9px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mining-model-search-btn {
+  margin-top: 2px;
+  min-height: 26px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.mining-model-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex-shrink: 0;
+  padding-top: 4px;
+  border-top: 1px solid rgba(69, 88, 96, 0.35);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.mining-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mining-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.mining-legend-item i.is-ready,
+.mining-legend-item i.is-ready-soft {
+  background: #33c37b;
+}
+
+.mining-legend-item i.is-searching,
+.mining-legend-item i.is-pending {
+  background: #f3b94d;
+}
+
+.mining-legend-item i.is-blocked {
+  background: #ff6868;
+}
+
+.mining-legend-item i.is-idle {
+  background: #6b7f8f;
+}
+
+/* —— Agent 表：占满剩余高度 —— */
+.mining-agent-section {
+  flex: 1;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.88);
+  overflow: hidden;
+}
+
+.mining-agent-section .mining-section-head {
+  margin-bottom: 8px;
+}
+
+.mining-agent-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.mining-agent-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mining-agent-table th:nth-child(1),
+.mining-agent-table td:nth-child(1) {
+  width: 16%;
+}
+
+.mining-agent-table th:nth-child(2),
+.mining-agent-table td:nth-child(2) {
+  width: 12%;
+}
+
+.mining-agent-table th:nth-child(3),
+.mining-agent-table td:nth-child(3) {
+  width: 18%;
+}
+
+.mining-agent-table th:nth-child(4),
+.mining-agent-table td:nth-child(4) {
+  width: 28%;
+}
+
+.mining-agent-table th:nth-child(5),
+.mining-agent-table td:nth-child(5) {
+  width: 12%;
+}
+
+.mining-agent-table th:nth-child(6),
+.mining-agent-table td:nth-child(6) {
+  width: 6%;
+}
+
+.mining-agent-table th:nth-child(7),
+.mining-agent-table td:nth-child(7) {
+  width: 8%;
+}
+
+.mining-agent-table th,
+.mining-agent-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(69, 88, 96, 0.4);
+  text-align: left;
+  vertical-align: top;
+}
+
+.mining-agent-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(10, 15, 20, 0.98);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mining-agent-table code {
+  display: block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #9fc6ff;
+}
+
+.mining-agent-rationale {
+  max-width: 280px;
+  line-height: 1.4;
+  color: #c5d2dc;
+}
+
+.mining-agent-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mining-agent-status.is-pending {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.12);
+}
+
+.mining-agent-status.is-blue {
+  color: #9fc6ff;
+  background: rgba(120, 167, 255, 0.12);
+}
+
+.mining-agent-status.is-green {
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.12);
+}
+
+.mining-agent-status.is-red {
+  color: #ff98ab;
+  background: rgba(255, 104, 104, 0.12);
+}
+
+.mining-agent-footer {
+  flex-shrink: 0;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9fc6ff;
+}
+
+.mining-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* —— 洞察区：五列横排（与 5 张卡片一一对应） —— */
+.mining-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  max-height: min(38vh, 320px);
+  overflow: hidden;
+}
+
+.mining-side-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.88);
+  overflow: hidden;
+}
+
+.mining-side-card > h3 {
+  flex-shrink: 0;
+}
+
+.mining-pattern-scroll,
+.mining-weight-scroll,
+.mining-operator-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mining-side-card--loop .mining-alert {
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.mining-side-card--operators {
+  overflow: hidden;
+}
+
+.mining-side-card--operators .mining-side-link {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.mining-side-card--path {
+  justify-content: center;
+}
+
+.mining-side-card h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mining-side-card h3 b {
+  color: #9fc6ff;
+  font-weight: 800;
+}
+
+.mining-loop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mining-loop-metric {
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(69, 88, 96, 0.45);
+}
+
+.mining-loop-metric span {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.mining-loop-metric strong {
+  font-size: 17px;
+}
+
+.mining-loop-metric.is-warn strong {
+  color: #ff98ab;
+}
+
+.mining-loop-metric.is-small strong {
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.mining-alert {
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  flex-shrink: 0;
+}
+
+.mining-alert.is-warn {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.1);
+  border: 1px solid rgba(243, 155, 49, 0.3);
+}
+
+.mining-alert.is-error {
+  color: #ff98ab;
+  background: rgba(255, 104, 104, 0.1);
+  border: 1px solid rgba(255, 104, 104, 0.3);
+}
+
+.mining-alert-link {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0;
+  color: #9fc6ff;
+  font-size: 11px;
+  background: none;
+  border: none;
+}
+
+.mining-pattern-block + .mining-pattern-block {
+  margin-top: 8px;
+}
+
+.mining-pattern-block h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mining-pattern-block ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mining-pattern-block li {
+  display: flex;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-bottom: 3px;
+}
+
+.mining-pattern-block li i {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  border-radius: 50%;
+}
+
+.mining-pattern-block li i.is-ok {
+  background: rgba(51, 195, 123, 0.85);
+}
+
+.mining-pattern-block li i.is-bad {
+  background: rgba(255, 104, 104, 0.85);
+}
+
+.mining-weight-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.42fr) 1fr 36px;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 10px;
+}
+
+.mining-weight-row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mining-weight-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.mining-weight-bar i {
+  display: block;
+  height: 100%;
+  background: #78a6ff;
+}
+
+.mining-operator-group {
+  margin-bottom: 6px;
+}
+
+.mining-operator-group > span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.mining-operator-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mining-operator-tags em {
+  font-style: normal;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(120, 167, 255, 0.1);
+  color: #cfe0ff;
+  border: 1px solid rgba(120, 167, 255, 0.18);
+}
+
+.mining-side-link {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9fc6ff;
+}
+
+.mining-muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 入库路径：横向 stepper */
+.mining-ingestion-path {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.mining-ingestion-step {
+  position: relative;
+  flex: 1;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  text-align: center;
+  min-width: 0;
+}
+
+.mining-ingestion-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(69, 88, 96, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  z-index: 1;
+}
+
+.mining-ingestion-step.is-done .mining-ingestion-icon {
+  border-color: #33c37b;
+  background: rgba(51, 195, 123, 0.3);
+  box-shadow: inset 0 0 0 3px rgba(10, 15, 20, 0.9);
+}
+
+.mining-ingestion-step.is-running .mining-ingestion-icon {
+  border-color: #f3b94d;
+  background: rgba(243, 155, 49, 0.25);
+}
+
+.mining-ingestion-step.is-error .mining-ingestion-icon {
+  border-color: #ff6868;
+  background: rgba(255, 104, 104, 0.25);
+}
+
+.mining-ingestion-step.is-pending .mining-ingestion-icon {
+  border-style: dashed;
+}
+
+.mining-ingestion-step strong {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.mining-ingestion-step small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.mining-ingestion-connector {
+  position: absolute;
+  top: 10px;
+  left: calc(50% + 12px);
+  width: calc(100% - 24px);
+  height: 2px;
+  background: rgba(69, 88, 96, 0.55);
+  z-index: 0;
+}
+
+.mining-ingestion-step.is-done .mining-ingestion-connector {
+  background: rgba(51, 195, 123, 0.45);
+}
+
+@media (max-width: 1500px) {
+  .mining-kpi-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .mining-kpi-card--rules {
+    grid-column: 1 / -1;
+  }
+
+  .mining-insights-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-height: min(44vh, 380px);
+  }
+
+  .mining-insights-grid .mining-side-card:nth-child(4),
+  .mining-insights-grid .mining-side-card:nth-child(5) {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 1200px) {
+  .mining-topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .mining-topbar-right {
+    align-items: stretch;
+  }
+
+  .mining-topbar-status {
+    justify-content: flex-start;
+  }
+
+  .mining-insights-grid {
+    grid-template-columns: 1fr;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .mining-side-card {
+    max-height: 240px;
+  }
+
+  .mining-model-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mining-model-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto;
+  }
+}
+
+@media (max-width: 800px) {
+  .mining-kpi-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mining-model-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mining-ingestion-path {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .mining-ingestion-connector {
+    display: none;
+  }
+}

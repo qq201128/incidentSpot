@@ -5,11 +5,9 @@ const ANIMATION_SCOPE_METHODS = {
   enterPage: "enterPage",
   refreshList: "refreshList",
   refreshRanking: "refreshRanking",
-  showDetail: "showDetail",
-  showBacktest: "showBacktest",
 };
 
-export function useFactorPageAnimations({ backtestKey, detailKey, listKey, pageRef, rankingKey }) {
+export function useFactorPageAnimations({ listKey, pageRef, rankingKey }) {
   const animationScopeRef = useRef(null);
 
   useEffect(() => {
@@ -32,21 +30,12 @@ export function useFactorPageAnimations({ backtestKey, detailKey, listKey, pageR
     animationScopeRef.current?.methods[ANIMATION_SCOPE_METHODS.refreshRanking]();
   }, [rankingKey]);
 
-  useEffect(() => {
-    animationScopeRef.current?.methods[ANIMATION_SCOPE_METHODS.showDetail]();
-  }, [detailKey]);
-
-  useEffect(() => {
-    animationScopeRef.current?.methods[ANIMATION_SCOPE_METHODS.showBacktest]();
-  }, [backtestKey]);
 }
 
 function registerFactorPageAnimations(scope) {
   scope.add(ANIMATION_SCOPE_METHODS.enterPage, animatePageEntry);
   scope.add(ANIMATION_SCOPE_METHODS.refreshList, animateFactorListRefresh);
   scope.add(ANIMATION_SCOPE_METHODS.refreshRanking, animateRankingRefresh);
-  scope.add(ANIMATION_SCOPE_METHODS.showDetail, animateDetailRefresh);
-  scope.add(ANIMATION_SCOPE_METHODS.showBacktest, animateBacktestRefresh);
 }
 
 function animatePageEntry() {
@@ -103,24 +92,3 @@ function animateRankingRefresh() {
   });
 }
 
-function animateDetailRefresh() {
-  animate(".factors-detail-panel .factors-section-head, .factors-dl > div, .factors-placeholder", {
-    opacity: [0, 1],
-    y: [8, 0],
-    duration: 320,
-    delay: stagger(34),
-    ease: "outQuad",
-    composition: "replace",
-  });
-}
-
-function animateBacktestRefresh() {
-  animate(".factors-backtest-block button, .factors-metrics > div, .factors-backtest-block .factors-error", {
-    opacity: [0, 1],
-    y: [6, 0],
-    duration: 280,
-    delay: stagger(22),
-    ease: "outQuad",
-    composition: "replace",
-  });
-}

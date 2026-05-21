@@ -1,23 +1,46 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  confirmEnsembleStage,
-  fetchEnsembleRanking,
-  fetchEnsembleStatus,
-  refreshEnsemble,
-} from "../api/client";
+import { confirmEnsembleStage, fetchEnsembleStatus, refreshEnsemble } from "../api/client";
+import "./EnsembleJudgePanel.css";
 
 const STAGE_LABELS = {
   observe: "观察中",
   weight_ready: "可启用降权",
-  ensemble_ready: "可模拟综合策略",
+  ensemble_ready: "可模拟综合",
+};
+
+const STAGE_HINTS = {
+  observe: "样本或覆盖不足，暂不推荐升阶",
+  weight_ready: "可对弱势信号降权，继续观察",
+  ensemble_ready: "满足综合模拟条件，可确认启用",
 };
 
 export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
   const [status, setStatus] = useState(null);
-  const [ranking, setRanking] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setError("");
+    const nextStatus = await fetchEnsembleStatus(symbol, duration);
+    setStatus(nextStatus);
+  }, [duration, symbol]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    load()
+      .catch((err) => {
+        if (!cancelled) setError(_errorMessage(err, "读取综合裁判失败"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
 
   const canConfirm = Boolean(
     status?.updatedAt &&
@@ -25,49 +48,29 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
       status.recommendedStage !== "observe" &&
       status.recommendedStage !== status.confirmedStage,
   );
+
+  const stageSynced = Boolean(
+    status?.confirmedStage && status.confirmedStage === status.recommendedStage,
+  );
+
   const simulationState = useMemo(() => _simulationState(status), [status]);
-
-  const load = useCallback(async () => {
-    setError("");
-    const [nextStatus, nextRanking] = await Promise.all([
-      fetchEnsembleStatus(symbol, duration),
-      fetchEnsembleRanking(symbol, duration),
-    ]);
-    setStatus(nextStatus);
-    setRanking(Array.isArray(nextRanking?.ranking) ? nextRanking.ranking : []);
-  }, [duration, symbol]);
-
-  useEffect(() => {
-    let stopped = false;
-    setLoading(true);
-    load()
-      .catch((err) => {
-        if (!stopped) setError(_errorMessage(err, "读取综合裁判失败"));
-      })
-      .finally(() => {
-        if (!stopped) setLoading(false);
-      });
-    return () => {
-      stopped = true;
-    };
-  }, [load]);
+  const durationLabel = useMemo(() => _durationLabel(duration), [duration]);
 
   async function handleRefresh() {
-    setBusy("refresh");
+    setRefreshing(true);
     setError("");
     try {
       const data = await refreshEnsemble(symbol, duration);
       setStatus(data?.status || null);
-      setRanking(Array.isArray(data?.ranking) ? data.ranking : []);
     } catch (err) {
       setError(_errorMessage(err, "刷新综合裁判失败"));
     } finally {
-      setBusy("");
+      setRefreshing(false);
     }
   }
 
   async function handleConfirm() {
-    if (!canConfirm) return;
+    if (!canConfirm || !status?.recommendedStage) return;
     setBusy("confirm");
     setError("");
     try {
@@ -81,103 +84,132 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
     }
   }
 
-  if (loading) return <div className="ensemble-card">正在读取综合裁判...</div>;
+  if (loading) {
+    return <div className="ensemble-card ensemble-card--loading">正在读取综合裁判…</div>;
+  }
 
   return (
     <div className="ensemble-card">
-      <div className="ensemble-head">
+      <header className="ensemble-head">
         <div>
-          <strong>综合裁判</strong>
-          <span>{duration} · {STAGE_LABELS[status?.stage] || "观察中"}</span>
+          <strong className="ensemble-title">综合裁判</strong>
+          <span className="ensemble-subtitle">
+            {symbol} · {durationLabel}
+            {status?.updatedAt ? ` · 更新 ${_formatTime(status.updatedAt)}` : ""}
+          </span>
         </div>
-        <button type="button" onClick={() => void handleRefresh()} disabled={busy === "refresh"}>
-          {busy === "refresh" ? "刷新中" : "刷新"}
-        </button>
-      </div>
-      <div className="ensemble-stage-grid">
-        <StagePill label="系统推荐" value={STAGE_LABELS[status?.recommendedStage] || "--"} />
-        <StagePill label="人工确认" value={STAGE_LABELS[status?.confirmedStage] || "未确认"} />
-        <StagePill label="模拟状态" value={simulationState} />
-      </div>
-      <p className="ensemble-reason">{status?.recommendationReason || "等待刷新统计"}</p>
-      {canConfirm && (
         <button
           type="button"
-          className="ensemble-confirm-btn"
-          onClick={() => void handleConfirm()}
-          disabled={busy === "confirm"}
+          className="ensemble-refresh-btn"
+          onClick={() => void handleRefresh()}
+          disabled={refreshing || busy === "confirm"}
         >
-          {busy === "confirm" ? "确认中" : `确认：${STAGE_LABELS[status.recommendedStage]}`}
+          {refreshing ? "刷新中…" : "刷新统计"}
         </button>
-      )}
-      <RankingTable rows={ranking} />
+      </header>
+
+      <div className="ensemble-stage-grid">
+        <StagePill
+          label="系统推荐"
+          stage={status?.recommendedStage}
+          value={STAGE_LABELS[status?.recommendedStage] || "—"}
+          hint={STAGE_HINTS[status?.recommendedStage]}
+        />
+        <StagePill
+          label="人工确认"
+          stage={status?.confirmedStage || "none"}
+          value={status?.confirmedStage ? STAGE_LABELS[status.confirmedStage] : "未确认"}
+          hint={status?.confirmedAt ? `确认于 ${_formatTime(status.confirmedAt)}` : "待操作"}
+        />
+        <StagePill label="模拟状态" stage={simulationState} value={simulationState} />
+      </div>
+
+      <CoverageSummary coverage={status?.sampleCoverage} />
+
+      <div className="ensemble-reason-block">
+        <span className="ensemble-reason-label">推荐 / 阻断原因</span>
+        <p className="ensemble-reason">{status?.recommendationReason || "请点击「刷新统计」生成推荐"}</p>
+      </div>
+      <div className="ensemble-actions">
+        {canConfirm ? (
+          <button
+            type="button"
+            className="ensemble-confirm-btn"
+            onClick={() => void handleConfirm()}
+            disabled={busy === "confirm"}
+          >
+            {busy === "confirm" ? "确认中…" : `确认启用：${STAGE_LABELS[status.recommendedStage]}`}
+          </button>
+        ) : null}
+        {stageSynced ? <p className="ensemble-hint ensemble-hint--ok">已与系统推荐阶段一致，无需重复确认</p> : null}
+        {!canConfirm && !stageSynced && status?.recommendedStage === "observe" ? (
+          <p className="ensemble-hint">当前仅观察：结算样本或交易日覆盖尚未达标</p>
+        ) : null}
+      </div>
+
       {!!error && <div className="predict-error">{error}</div>}
     </div>
   );
 }
 
-function StagePill({ label, value }) {
+function StagePill({ label, stage, value, hint = "" }) {
   return (
-    <div className="ensemble-stage-pill">
+    <div className={`ensemble-stage-pill ensemble-stage-pill--${_stageVariant(stage)}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {hint ? <small>{hint}</small> : null}
     </div>
   );
 }
 
-function RankingTable({ rows }) {
-  if (!rows.length) return <div className="strategy-empty">暂无已结算候选信号</div>;
+function CoverageSummary({ coverage }) {
+  if (!coverage) return null;
+  const sampleCount = coverage.sampleCount ?? 0;
+  const days = coverage.distinctTradingDays ?? 0;
+  const maxLoss = coverage.maxConsecutiveLosses ?? 0;
+  const pfWarn = Boolean(coverage.recentProfitFactorBelowOne);
   return (
-    <div className="ensemble-ranking">
-      {rows.slice(0, 6).map((row) => (
-        <div key={row.signalKey} className="ensemble-ranking-row">
-          <div>
-            <strong>{row.signalKey}</strong>
-            <span>{_typeLabel(row.signalType)} · {_badges(row).join(" / ") || "稳定观察"}</span>
-          </div>
-          <div className="ensemble-metrics">
-            <span>{row.sampleCount}样本</span>
-            <span>{_pct(row.winRate)}</span>
-            <span>PF {_num(row.profitFactor)}</span>
-            <span>权重 {_num(row.weightSuggestion)}</span>
-          </div>
-        </div>
-      ))}
+    <div className="ensemble-coverage">
+      <span>结算样本 {sampleCount}</span>
+      <span>覆盖 {days} 个交易日</span>
+      <span>最大连亏 {maxLoss}</span>
+      {pfWarn ? <span className="is-warn">近期 PF&lt;1</span> : <span className="is-ok">近期 PF 正常</span>}
     </div>
   );
+}
+
+function _stageVariant(stage) {
+  if (stage === "ensemble_ready" || stage === "综合模拟已启用") return "ready";
+  if (stage === "weight_ready" || stage === "可启用降权") return "weight";
+  if (stage === "observe" || stage === "观察中") return "observe";
+  if (stage === "模拟可用") return "ready";
+  if (stage === "未启用模拟") return "idle";
+  return "neutral";
 }
 
 function _simulationState(status) {
-  if (status?.confirmedStage === "ensemble_ready") return "模拟可用";
-  if (status?.confirmedStage === "weight_ready") return "观察中";
+  if (status?.confirmedStage === "ensemble_ready") return "综合模拟已启用";
+  if (status?.confirmedStage === "weight_ready") return "观察期";
+  if (status?.confirmedStage === "observe") return "仅观察";
   return "未启用";
 }
 
-function _badges(row) {
-  const badges = [];
-  if (row.lowSample) badges.push("低样本");
-  if (row.insufficientSample && !row.lowSample) badges.push("样本不足");
-  if (row.weakSignal) badges.push("近期走弱");
-  if (Number(row.consecutiveLosses) >= 5) badges.push("连续亏损");
-  if (row.degraded && !row.weakSignal) badges.push("恢复中");
-  return badges;
+function _durationLabel(duration) {
+  const map = { "10m": "10分钟", "30m": "30分钟", "60m": "60分钟", "1d": "1天" };
+  return map[duration] || duration;
 }
 
-function _typeLabel(type) {
-  if (type === "factor_combo") return "多因子";
-  if (type === "high_winrate_combo") return "高胜率";
-  if (type === "model_family") return "模型族";
-  return "其他";
-}
-
-function _pct(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : "--";
-}
-
-function _num(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(2) : "--";
+function _formatTime(value) {
+  if (!value) return "—";
+  const dt = new Date(value);
+  if (!Number.isFinite(dt.getTime())) return String(value);
+  return dt.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function _errorMessage(err, fallback) {

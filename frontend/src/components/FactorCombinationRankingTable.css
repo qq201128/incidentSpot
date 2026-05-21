@@ -1,40 +1,51 @@
-.factor-combo-ranking {
-  min-width: 0;
-  border: 1px solid rgba(81, 100, 108, 0.55);
-  border-radius: 8px;
-  overflow: visible;
-  background: rgba(13, 18, 23, 0.7);
-}
-
 .factor-combo-ranking-stack {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.factor-combo-ranking {
+  min-width: 0;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.factor-combo-ranking-goal {
+  border-color: rgba(255, 196, 58, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 196, 58, 0.06), transparent 72px),
+    rgba(10, 15, 20, 0.9);
 }
 
 .factor-combo-ranking-title {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .factor-combo-ranking-title h3 {
-  margin: 0;
+  margin: 2px 0 0;
   font-size: 15px;
+  font-weight: 800;
 }
 
 .factor-combo-ranking-title span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .factor-combo-rank-list {
   display: grid;
   gap: 8px;
   padding: 10px;
+  min-width: 0;
 }
 
 .factor-combo-rank-card {
@@ -42,35 +53,48 @@
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
+  grid-template-columns: 72px minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid rgba(81, 100, 108, 0.45);
   border-radius: 8px;
   background: rgba(7, 11, 15, 0.62);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.factor-combo-ranking-goal .factor-combo-rank-card {
+  border-color: rgba(255, 196, 58, 0.22);
+}
+
+.factor-combo-rank-card:hover {
+  border-color: rgba(47, 140, 255, 0.35);
+  background: rgba(47, 140, 255, 0.05);
 }
 
 .factor-combo-rank-index {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 8px;
+  gap: 6px;
+  justify-items: start;
 }
 
 .factor-combo-rank-index b {
-  color: var(--gold);
-  font-size: 18px;
+  color: #9fc6ff;
+  font-size: 20px;
   line-height: 1;
+}
+
+.factor-combo-ranking-goal .factor-combo-rank-index b {
+  color: #ffe27a;
 }
 
 .factor-combo-rank-type {
   width: fit-content;
   max-width: 100%;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -90,36 +114,35 @@
 .factor-combo-rank-body {
   min-width: 0;
   display: grid;
-  gap: 6px;
-  align-content: start;
+  gap: 5px;
 }
 
 .factor-combo-rank-name {
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.35;
+  font-weight: 800;
   overflow-wrap: anywhere;
 }
 
 .factor-combo-rank-code {
-  box-sizing: border-box;
   display: block;
   width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: break-all;
   color: #9fc6ff;
-  background: rgba(120, 167, 255, 0.08);
+  background: rgba(47, 140, 255, 0.1);
   border-radius: 6px;
-  padding: 5px 6px;
-  font-size: 11px;
+  padding: 4px 6px;
+  font-size: 10px;
   line-height: 1.35;
 }
 
-.factor-combo-rank-body p {
+.factor-combo-rank-members {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -127,45 +150,112 @@
 .factor-combo-rank-metrics {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .factor-combo-rank-metrics span {
   min-width: 0;
   display: grid;
   gap: 2px;
-  align-content: center;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(81, 100, 108, 0.35);
 }
 
 .factor-combo-rank-metrics small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .factor-combo-rank-metrics b {
   color: var(--text);
-  font-size: 13px;
-  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .factor-combo-rank-metrics .is-strong b {
-  color: #3fd3a6;
+  color: var(--green);
 }
 
 .factor-combo-empty {
   margin: 0;
-  padding: 14px 16px;
+  padding: 18px 14px;
+  text-align: center;
   color: var(--muted);
-  border: 1px solid var(--line);
+  font-size: 13px;
+  border: 1px dashed var(--line);
   border-radius: 8px;
-  background: rgba(13, 18, 23, 0.55);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.factor-combo-rank-pagination,
+.factor-combo-rank-total {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.factor-combo-rank-total {
+  grid-template-columns: 1fr;
+  font-weight: 700;
+}
+
+.factor-combo-rank-page-total {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.factor-combo-rank-page-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.factor-combo-rank-page-actions strong {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text);
+}
+
+.factor-combo-rank-page-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+}
+
+@media (max-width: 1200px) {
+  .factor-combo-ranking-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .factor-combo-rank-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .factor-combo-rank-metrics {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
+  .factor-combo-rank-card {
+    grid-template-columns: 1fr;
+  }
+
   .factor-combo-rank-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

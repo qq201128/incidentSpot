@@ -1,9 +1,14 @@
 import { useRef, useState } from "react";
 import FactorCombinationPanel from "../components/FactorCombinationPanel";
 import FactorDetailPanel from "../components/FactorDetailPanel";
+import FactorHighWinrateCard from "../components/FactorHighWinrateCard";
+import FactorLibraryAlerts from "../components/FactorLibraryAlerts";
 import FactorListPanel from "../components/FactorListPanel";
+import FactorRankingTable from "../components/FactorRankingTable";
+import { durationLabel, formatUpdatedTime, sourcePillClass } from "../components/factorDisplayUtils";
+import { toolbarCategoryOptions } from "../utils/factorCatalogLabels";
 import "./FactorsPage.css";
-import "./FactorsDetail.css";
+import "../components/FactorDetailPanel.css";
 import { useFactorPageAnimations } from "./useFactorPageAnimations";
 import { useFactorsPageData } from "./useFactorsPageData";
 
@@ -14,6 +19,13 @@ const DURATIONS = [
   { value: "1d", label: "1 天" },
 ];
 
+const SOURCE_LABELS = [
+  { key: "local_definition", label: "本地定义" },
+  { key: "agent_candidate", label: "Agent候选" },
+  { key: "lstm_shadow", label: "LSTM影子" },
+  { key: "composite_cache", label: "组合缓存" },
+];
+
 const WORKSPACE_TABS = [
   { key: "detail", label: "因子详情" },
   { key: "combination", label: "多因子组合" },
@@ -21,40 +33,107 @@ const WORKSPACE_TABS = [
 
 export default function FactorsPage() {
   const pageRef = useRef(null);
-  const [workspaceTab, setWorkspaceTab] = useState(WORKSPACE_TABS[0].key);
+  const [workspaceTab, setWorkspaceTab] = useState("detail");
   const { actions, animationKeys, state } = useFactorsPageData();
 
   useFactorPageAnimations({ pageRef, ...animationKeys });
 
+  const selectFactor = (factorName) => {
+    actions.setSelectedName(factorName);
+    setWorkspaceTab("detail");
+  };
+
   return (
     <main ref={pageRef} className="factors-page layout">
-      <FactorsTopbar state={state} />
+      <FactorsTopbar state={state} onRefreshRanking={actions.requestRankingRefresh} />
       <FactorsToolbar actions={actions} state={state} />
-      <FactorsWorkbench actions={actions} state={state} tab={workspaceTab} onTabChange={setWorkspaceTab} />
+      <div className="factors-main-grid" data-factor-motion="primary-grid">
+        <FactorListPanel
+          category={state.category}
+          factors={state.filteredFactors}
+          listPage={state.listPage}
+          listPageCount={state.listPageCount}
+          listPageSize={state.listPageSize}
+          listTab={state.listTab}
+          listTotal={state.listTotal}
+          onCategoryChange={actions.setCategory}
+          onListPageChange={actions.setListPage}
+          onListPageSizeChange={actions.setListPageSize}
+          onListQueryChange={actions.setQuery}
+          onListTabChange={actions.setListTab}
+          onRefreshList={actions.reloadList}
+          onSelectFactor={selectFactor}
+          query={state.query}
+          selectedName={state.selectedName}
+          total={state.total}
+          comboTotal={state.comboTotal}
+        />
+        <FactorsWorkspacePanel
+          actions={actions}
+          state={state}
+          tab={workspaceTab}
+          onSelectFactor={selectFactor}
+          onTabChange={setWorkspaceTab}
+        />
+      </div>
     </main>
   );
 }
 
-function FactorsTopbar({ state }) {
+function FactorsTopbar({ state, onRefreshRanking }) {
+  const summary = state.sourceSummary || {};
+  const summaryGlobal = state.sourceSummaryGlobal || {};
+  const sym = state.symbol;
+  const dur = durationLabel(state.duration);
+  const rankingReady = state.ranking.items.length > 0 || state.overview?.rankingSource === "cache";
+  const updatedAt = state.overview?.rankingUpdatedAt ?? null;
+
   return (
     <header className="factors-topbar topbar" data-factor-motion="hero">
-      <div>
-        <span className="eyebrow">因子库</span>
+      <div className="factors-topbar-title">
+        <span className="eyebrow">因子库 /</span>
         <h1>量化因子目录与回测</h1>
-        <p>统一管理单因子、组合因子、回测评分与排名缓存。</p>
+        <p>统一管理单因子、组合因子、回测评分与排名缓存</p>
       </div>
       <div className="factors-topbar-meta">
         <div className="factors-topbar-metrics" aria-label="因子库概览">
           <TopbarMetric label="单因子" value={state.total} />
           <TopbarMetric label="组合因子" value={state.comboTotal} />
-          <TopbarMetric label="排名" value={state.ranking.items.length} />
+          <TopbarMetric label="排名" value={state.rankingTotal} />
         </div>
-        <div className="factors-topbar-sources" aria-label="因子来源">
-          <SourceGroup label="单因子" summary={state.singleSourceSummary} />
-          <SourceGroup label="组合" summary={state.comboSourceSummary} />
+        <div className="factors-topbar-sources-wrap">
+          <span className="factors-sources-label">来源状态</span>
+          <div className="factors-topbar-sources" aria-label="因子来源">
+            {SOURCE_LABELS.map((item) => (
+              <SourcePill
+                key={item.key}
+                kind={item.key}
+                label={item.key === "agent_candidate" ? "Agent入库" : item.label}
+                value={summary[item.key] ?? 0}
+                hint={
+                  item.key === "agent_candidate" && summaryGlobal.agent_candidate != null
+                    ? `全库 ${summaryGlobal.agent_candidate}`
+                    : ""
+                }
+              />
+            ))}
+          </div>
         </div>
       </div>
-      <p className="status-pill factors-status-pill">{state.listStatus}</p>
+      <div className="factors-topbar-status">
+        <span className={`status-dot${rankingReady ? "" : " is-warn"}`} />
+        <p>
+          {rankingReady
+            ? `排名缓存已刷新 · ${sym} · ${dur}`
+            : `暂无排名缓存 · ${sym} · ${dur}`}
+        </p>
+        <div className="factors-topbar-status-row">
+          <small>更新时间: {formatUpdatedTime(updatedAt)}</small>
+          <button type="button" className="factors-icon-btn" title="刷新排名" onClick={onRefreshRanking}>
+            ↻
+          </button>
+        </div>
+      </div>
     </header>
   );
 }
@@ -68,21 +147,11 @@ function TopbarMetric({ label, value }) {
   );
 }
 
-function SourceGroup({ label, summary }) {
+function SourcePill({ kind, label, value, hint = "" }) {
   return (
-    <span className="factors-source-group">
-      <b>{label}</b>
-      <SourcePill label="原生" value={summary.native} />
-      <SourcePill label="回灌" value={summary.mined} />
-      <SourcePill label="Agent" value={summary.agent} />
-    </span>
-  );
-}
-
-function SourcePill({ label, value }) {
-  return (
-    <span>
-      {label} {value ?? 0}
+    <span className={`factors-source-pill ${sourcePillClass(kind)}`} title={hint || undefined}>
+      {label} <b>{value ?? 0}</b>
+      {hint ? <small className="factors-source-pill-hint">{hint}</small> : null}
     </span>
   );
 }
@@ -90,72 +159,64 @@ function SourcePill({ label, value }) {
 function FactorsToolbar({ actions, state }) {
   return (
     <section className="factors-toolbar card-surface" data-factor-motion="toolbar">
-      <div className="factors-toolbar-title">
-        <span className="section-kicker">检索条件</span>
-        <strong>当前上下文</strong>
-      </div>
-      <div className="factors-toolbar-row">
+      <div className="factors-toolbar-filters">
         <label>
           <span>交易对</span>
-          <input
-            value={state.symbol}
-            onChange={(event) => actions.setSymbol(event.target.value.toUpperCase())}
-            placeholder="BTCUSDT"
-          />
+          <select value={state.symbol} onChange={(event) => actions.setSymbol(event.target.value)}>
+            <option value="BTCUSDT">BTCUSDT</option>
+            <option value="ETHUSDT">ETHUSDT</option>
+          </select>
         </label>
         <label>
-          <span>规则周期</span>
+          <span>周期</span>
           <select value={state.duration} onChange={(event) => actions.setDuration(event.target.value)}>
-            {DURATIONS.map((duration) => (
-              <option key={duration.value} value={duration.value}>
-                {duration.label}
+            {DURATIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
               </option>
             ))}
           </select>
         </label>
-        <button type="button" className="factors-btn-secondary" onClick={actions.requestRankingRefresh}>
+        <label>
+          <span>分类</span>
+          <select value={state.category} onChange={(event) => actions.setCategory(event.target.value)}>
+            {toolbarCategoryOptions(state.categories).map((item) => (
+              <option key={item.key || "all"} value={item.key}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="factors-toolbar-search">
+          <span className="sr-only">搜索</span>
+          <input
+            value={state.query}
+            onChange={(event) => actions.setQuery(event.target.value)}
+            placeholder="搜索因子名/公式/来源"
+          />
+        </label>
+      </div>
+      <div className="factors-toolbar-actions">
+        <button type="button" className="factors-btn-outline" onClick={actions.requestRankingRefresh}>
           刷新排名
         </button>
+        <button
+          type="button"
+          className="factors-btn-primary"
+          disabled={!state.selectedName || state.backtest.loading}
+          onClick={actions.runBacktest}
+        >
+          {state.backtest.loading ? "计算中…" : "运行回测"}
+        </button>
       </div>
-      <p className="factors-rank-hint" role="status">{state.ranking.status}</p>
+      <p className="factors-toolbar-hint" role="status">
+        数据缺失或回测失败将直接显示错误原因
+      </p>
     </section>
   );
 }
 
-function FactorsWorkbench({ actions, state, tab, onTabChange }) {
-  const selectFactor = (factorName) => {
-    actions.setSelectedName(factorName);
-    onTabChange("detail");
-  };
-
-  return (
-    <div className="factors-workbench" data-factor-motion="primary-grid">
-      <FactorListPanel
-        categories={state.categories}
-        category={state.category}
-        comboFactors={state.filteredComboFactors}
-        comboTotal={state.comboTotal}
-        factors={state.filteredFactors}
-        onCategoryChange={actions.setCategory}
-        onQueryChange={actions.setQuery}
-        onSelectFactor={selectFactor}
-        query={state.query}
-        selectedName={state.selectedName}
-        total={state.total}
-      />
-      <FactorsWorkspacePanel
-        actions={actions}
-        duration={state.duration}
-        state={state}
-        symbol={state.symbol}
-        tab={tab}
-        onTabChange={onTabChange}
-      />
-    </div>
-  );
-}
-
-function FactorsWorkspacePanel({ actions, duration, state, symbol, tab, onTabChange }) {
+function FactorsWorkspacePanel({ actions, state, tab, onSelectFactor, onTabChange }) {
   return (
     <section className="factors-workspace-panel card-surface" data-factor-motion="secondary-grid">
       <div className="factors-workspace-tabs" role="tablist" aria-label="因子工作区">
@@ -174,19 +235,36 @@ function FactorsWorkspacePanel({ actions, duration, state, symbol, tab, onTabCha
       </div>
       <div className="factors-workspace-content">
         {tab === "detail" ? (
-          <FactorDetailPanel
-            backtest={state.backtest.data}
-            backtestError={state.backtest.error}
-            backtestLoading={state.backtest.loading}
-            detail={state.detail.data}
-            detailError={state.detail.error}
-            onRunBacktest={actions.runBacktest}
-            onSelectFactor={actions.setSelectedName}
-            ranking={state.ranking.items}
-            selectedName={state.selectedName}
-          />
+          <div className="factors-workspace-detail-layout">
+            <div className="factors-workspace-detail-top">
+              <FactorDetailPanel
+                backtestError={state.backtest.error}
+                detail={state.detail.data}
+                detailError={state.detail.error}
+                detailLoading={state.detail.loading}
+                displayMetrics={state.displayMetrics}
+                duration={state.previewDuration}
+                onDurationChange={actions.setPreviewDuration}
+                periodScores={state.periodScores}
+                periodScoresPending={state.periodScoresPending}
+                selectedFactor={state.selectedFactor}
+                selectedName={state.selectedName}
+              />
+            </div>
+            <div className="factors-workspace-bottom">
+              <FactorRankingTable
+                ranking={state.ranking.items}
+                selectedName={state.selectedName}
+                onSelectFactor={onSelectFactor}
+              />
+              <FactorHighWinrateCard combo={state.highWinrateCombo} />
+            </div>
+            <FactorLibraryAlerts alerts={state.alerts} />
+          </div>
         ) : null}
-        {tab === "combination" ? <FactorCombinationPanel symbol={symbol} duration={duration} /> : null}
+        {tab === "combination" ? (
+          <FactorCombinationPanel symbol={state.symbol} duration={state.duration} />
+        ) : null}
       </div>
     </section>
   );

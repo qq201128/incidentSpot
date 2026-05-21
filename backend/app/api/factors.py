@@ -20,6 +20,16 @@ from app.services.factor_catalog import (
     get_factor_payload_by_name,
     list_single_factor_categories,
 )
+from app.services.factor_page_service import (
+    build_factor_alerts,
+    build_factor_list_page,
+    build_factor_overview,
+    build_factor_page_bundle,
+    build_factor_page_context,
+    build_factor_period_scores,
+    enrich_factor_summary,
+    ranking_metrics_for_factor,
+)
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 router = APIRouter(prefix="/api/factors", tags=["factors"])
@@ -39,28 +49,100 @@ def _ranking_sort_key(row: dict) -> tuple[float, float]:
 @router.get("/list")
 def list_factors(
     category: str | None = None,
+    kind: str = Query("single", pattern="^(single|combo)$"),
+    q: str | None = Query(None, description="search name/formula/source"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
 ) -> dict:
     try:
-        factors = list_single_factor_summaries(category)
-        combo_factors = list_combo_factor_summaries()
-        categories = list_single_factor_categories()
-        return {
-            "factors": factors,
-            "comboFactors": combo_factors,
-            "categories": categories,
-            "total": len(factors),
-            "comboTotal": len(combo_factors),
-        }
+        return build_factor_list_page(
+            category=category,
+            kind=kind,
+            query=q,
+            page=page,
+            page_size=page_size,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/page")
+def factor_page(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+    category: str | None = Query(None),
+    kind: str = Query("single", pattern="^(single|combo)$"),
+    q: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+) -> dict:
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    try:
+        return build_factor_page_bundle(
+            symbol,
+            duration,
+            category=category,
+            kind=kind,
+            query=q,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/overview")
+def factor_overview(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+    category: str | None = Query(None),
+) -> dict:
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    return build_factor_page_context(symbol, duration, category=category)
+
+
+@router.get("/alerts")
+def factor_alerts(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+) -> dict:
+    if duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    sym_u = symbol.upper()
+    return {
+        "symbol": sym_u,
+        "duration": duration,
+        "alerts": build_factor_alerts(sym_u, duration),
+    }
+
+
+@router.get("/detail/{factor_name}/scores")
+def factor_period_scores(
+    factor_name: str,
+    symbol: str = Query(..., min_length=6),
+) -> dict:
+    return build_factor_period_scores(symbol, factor_name)
+
+
 @router.get("/detail/{factor_name}")
-def get_factor_detail(factor_name: str) -> dict:
+def get_factor_detail(
+    factor_name: str,
+    symbol: str | None = Query(None, min_length=6),
+    duration: str | None = Query(None),
+) -> dict:
     payload = get_factor_payload_by_name(factor_name)
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Factor not found: {factor_name}")
-    return payload
+    enriched = enrich_factor_summary(payload)
+    if symbol and duration:
+        if duration not in SUPPORTED_RULE_DURATIONS:
+            raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+        metrics = ranking_metrics_for_factor(symbol.upper(), duration, factor_name)
+        if metrics:
+            enriched = enrich_factor_summary(payload, metrics)
+    return enriched
 
 
 @router.get("/backtest/all")

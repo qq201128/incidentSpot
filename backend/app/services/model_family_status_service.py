@@ -55,6 +55,7 @@ def model_family_status(
         "sampleCounts": report.get("sampleCounts") or {},
         "testAccuracy": (report.get("test") or {}).get("accuracy"),
         "testWinRate": (report.get("test") or {}).get("winRate"),
+        "validationWinRate": (report.get("validation") or {}).get("winRate"),
         "validationGate": version.get("validationGate") or report.get("validationGate"),
         "selectedConfidenceThreshold": version.get("selectedConfidenceThreshold") or report.get("selectedConfidenceThreshold"),
         "activeModelStatus": status.get("status"),

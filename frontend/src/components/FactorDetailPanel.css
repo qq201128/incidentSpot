@@ -1,0 +1,276 @@
+.factor-detail-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.factor-detail-stack.is-detail-pending .factor-detail-body {
+  opacity: 0.88;
+}
+
+.factor-period-chart.is-pending {
+  opacity: 0.55;
+}
+
+.factor-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.factor-detail-title-block h2 {
+  margin: 0;
+  font-size: 18px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.factor-detail-name-tag {
+  display: inline-block;
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9fc6ff;
+  background: rgba(47, 140, 255, 0.14);
+  border: 1px solid rgba(47, 140, 255, 0.35);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.factor-detail-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.factor-store-tag {
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(51, 195, 123, 0.45);
+  background: rgba(51, 195, 123, 0.12);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-duration-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 12, 16, 0.72);
+}
+
+.factor-duration-toggle button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-duration-toggle button.is-active {
+  background: rgba(47, 140, 255, 0.2);
+  color: #9fc6ff;
+}
+
+.factor-star-btn {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.factor-star-btn.is-starred {
+  color: #f2d68f;
+  border-color: rgba(242, 214, 143, 0.45);
+  background: rgba(242, 214, 143, 0.12);
+}
+
+.factor-detail-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.9fr) minmax(260px, 1.15fr) minmax(140px, 0.7fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.factor-definition-column {
+  min-width: 0;
+}
+
+.factor-definition-list {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.factor-definition-row {
+  display: grid;
+  gap: 3px;
+}
+
+.factor-definition-row dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-definition-row dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.factor-copy-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.factor-copy-row code {
+  flex: 1;
+  min-width: 0;
+}
+
+.factor-copy-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  min-height: 26px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.factors-code.is-path {
+  word-break: break-all;
+}
+
+.factor-metrics-column {
+  min-width: 0;
+}
+
+.factor-metrics-grid {
+  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.factor-metric-cell {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(81, 100, 108, 0.35);
+}
+
+.factor-metric-cell.is-featured {
+  grid-column: 1 / -1;
+}
+
+.factor-metric-cell.is-featured dd {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.factor-metric-cell dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-metric-cell dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.factor-metric-cell.is-positive dd {
+  color: var(--green);
+}
+
+.factor-metric-cell.is-negative dd {
+  color: var(--red);
+}
+
+.factor-period-chart {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 12, 16, 0.45);
+}
+
+.factor-period-chart-empty {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.factor-period-bars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+  min-height: 96px;
+  margin-top: 4px;
+}
+
+.factor-period-bar {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.factor-period-bar-fill {
+  width: 100%;
+  max-width: 36px;
+  min-height: 4px;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #3f8cff, rgba(47, 140, 255, 0.35));
+}
+
+.factor-period-bar.is-active .factor-period-bar-fill {
+  background: linear-gradient(180deg, #5eb0ff, #2f8cff);
+}
+
+.factor-period-bar.is-empty .factor-period-bar-fill {
+  background: rgba(143, 161, 174, 0.25);
+}
+
+.factor-period-bar small {
+  font-weight: 800;
+  color: var(--text);
+}
+
+@media (max-width: 1200px) {
+  .factor-detail-body {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .factor-period-chart {
+    grid-column: 1 / -1;
+  }
+
+  .factor-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

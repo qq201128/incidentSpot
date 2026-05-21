@@ -1,0 +1,131 @@
+.ensemble-records {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.ensemble-records-error {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #ff98ab;
+  background: rgba(255, 104, 104, 0.1);
+  font-size: 12px;
+}
+
+.ensemble-records-table {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ensemble-records-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ensemble-records-row {
+  display: grid;
+  grid-template-columns: 36px minmax(160px, 1.6fr) 72px 56px 64px 64px 56px minmax(100px, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(43, 54, 61, 0.55);
+  font-size: 12px;
+}
+
+.ensemble-records-row--header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(9, 13, 16, 0.98);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ensemble-records-row.is-low-sample {
+  opacity: 0.78;
+}
+
+.ensemble-records-signal {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ensemble-records-signal strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ensemble-records-signal small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #7eb0ff;
+  font-size: 10px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.ensemble-records-row .is-good {
+  color: #baf7e5;
+  font-weight: 800;
+}
+
+.ensemble-records-tags {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffd9a8;
+  font-size: 11px;
+}
+
+.ensemble-records-empty {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ensemble-records-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 4px;
+  border-top: 1px solid rgba(79, 116, 139, 0.18);
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ensemble-records-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ensemble-records-page-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+.ensemble-records-page-actions strong {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text);
+}

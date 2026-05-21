@@ -5,7 +5,7 @@ export default function FactorCombinationSignalGrid({ onSelect, selectedKey, sig
   return (
     <div className="factor-combo-signals">
       {columns.map(({ duration, signals: columnSignals }) => (
-        <div key={duration} className="factor-combo-signal-column">
+        <div key={duration} className="factor-combo-signal-column" data-duration={duration}>
           {columnSignals.map((signal) => (
             <SignalCard
               key={signalKey(signal)}

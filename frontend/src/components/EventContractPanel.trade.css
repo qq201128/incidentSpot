@@ -1,5 +1,21 @@
 .trade-card {
-  gap: 12px;
+  gap: 8px;
+  padding: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panel-tab-panel--trade .trade-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trade-panel-top {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .trade-live-mode-block {
@@ -7,8 +23,59 @@
   gap: 6px;
 }
 
-.trade-live-mode-hint {
+.trade-live-mode-hint,
+.trade-mode-hint {
   margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.trade-symbol-strip {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(63, 211, 166, 0.22);
+  background: rgba(63, 211, 166, 0.06);
+}
+
+.trade-symbol {
+  color: #f8fcfa;
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.trade-price {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(63, 211, 166, 0.1);
+  border: 1px solid rgba(63, 211, 166, 0.2);
+  color: #baf7e5;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.trade-amount-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trade-amount-row input {
+  width: 100%;
+  min-width: 0;
 }
 
 /* --- Order book (USD-M depth; primary placement: App market column) --- */
@@ -713,21 +780,23 @@
 
 .symbol-row strong {
   color: #f8fcfa;
-  font-size: 28px;
-  line-height: 1;
+  font-size: 22px;
+  line-height: 1.1;
 }
 
 .symbol-row span {
   background: rgba(63, 211, 166, 0.08);
   border: 1px solid rgba(63, 211, 166, 0.22);
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .duration-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .chip,
@@ -739,7 +808,10 @@
 
 .chip {
   min-width: 0;
-  padding-inline: 8px;
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .chip.active {
@@ -752,55 +824,91 @@
 .order-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .rate-row div,
 .order-grid div {
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
   background: rgba(9, 14, 19, 0.86);
   border: 1px solid rgba(69, 88, 96, 0.72);
   border-radius: 8px;
-  padding: 9px;
+  padding: 7px 6px;
 }
 
 .rate-row span,
 .order-grid span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rate-row strong,
 .order-grid strong {
   color: var(--text);
-  font-size: 17px;
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.action-row button {
+  min-height: 36px;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .predict-row {
   display: grid;
-  gap: 7px;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .predict-btn {
+  width: 100%;
+  min-height: 34px;
   background: var(--gold);
   color: #211704;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .predict-result,
 .ai-success-summary {
   flex-wrap: wrap;
+  min-width: 0;
   background: rgba(9, 14, 19, 0.86);
   border: 1px solid rgba(69, 88, 96, 0.72);
   border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: 7px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.predict-result > span,
+.ai-success-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ai-success-summary {

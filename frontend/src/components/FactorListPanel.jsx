@@ -1,78 +1,98 @@
-import { useEffect, useMemo, useState } from "react";
-import { directionLabel, factorTitle } from "./factorDisplayUtils";
+import { directionLabel, factorTitle, sourceLabel, sourceTagClass } from "./factorDisplayUtils";
+import { factorTableCategoryLabel, SIDEBAR_CATEGORY_CHIPS } from "../utils/factorCatalogLabels";
 import "./FactorListPanel.css";
 
-const PAGE_SIZE_OPTIONS = [24, 48, 96];
+const PAGE_SIZE_OPTIONS = [20, 48, 96];
 const LIST_TABS = [
-  { key: "single", label: "单因子", title: "因子列表" },
-  { key: "combo", label: "组合因子", title: "组合因子列表" },
+  { key: "single", label: "单因子" },
+  { key: "combo", label: "组合因子" },
 ];
 
 export default function FactorListPanel({
-  categories,
   category,
-  comboFactors,
   comboTotal,
   factors,
+  listPage,
+  listPageCount,
+  listPageSize,
+  listTab,
+  listTotal,
   onCategoryChange,
-  onQueryChange,
+  onListPageChange,
+  onListPageSizeChange,
+  onListQueryChange,
+  onListTabChange,
+  onRefreshList,
   onSelectFactor,
   query,
   selectedName,
   total,
 }) {
-  const [activeTab, setActiveTab] = useState(LIST_TABS[0].key);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
-  const activeFactors = activeTab === "combo" ? comboFactors : factors;
-  const activeTotal = activeTab === "combo" ? comboTotal : total;
-  const totalItems = activeFactors.length;
-  const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
-  const visibleFactors = useMemo(
-    () => activeFactors.slice((page - 1) * pageSize, page * pageSize),
-    [activeFactors, page, pageSize],
-  );
-  const activeTitle = listTitle(activeTab);
+  const catalogTotal = listTab === "combo" ? comboTotal : total;
 
-  useEffect(() => {
-    setPage(1);
-  }, [activeTab, category, query, pageSize]);
-
-  useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
+  const directoryTitle = listTab === "combo" ? "组合因子目录" : "单因子目录";
 
   return (
     <section className="factors-list-panel card-surface">
-      <div className="section-head factors-section-head">
-        <div>
-          <span className="section-kicker">筛选</span>
-          <h2>{activeTitle}</h2>
-        </div>
-        <span className="factors-count">{totalItems} / {activeTotal} 项</span>
-      </div>
-      <ListTabs activeTab={activeTab} onChange={setActiveTab} />
-      {activeTab === "single" ? (
-        <CategoryChips categories={categories} category={category} onChange={onCategoryChange} />
+      <header className="factors-directory-head">
+        <span className="section-kicker">筛选</span>
+        <span className="factors-directory-sep">/</span>
+        <h2>{directoryTitle}</h2>
+      </header>
+      <ListTabs activeTab={listTab} onChange={onListTabChange} />
+
+      {listTab === "single" ? (
+        <CategoryChips category={category} onChange={onCategoryChange} />
       ) : null}
+
       <div className="factors-list-controls">
-        <SearchBox query={query} onChange={onQueryChange} />
-        <PageSizeSelect pageSize={pageSize} onChange={setPageSize} />
+        <label className="factors-search">
+          <span className="sr-only">搜索因子</span>
+          <span className="factors-search-icon" aria-hidden>
+            ⌕
+          </span>
+          <input
+            value={query}
+            onChange={(event) => onListQueryChange(event.target.value)}
+            placeholder="搜索因子…"
+          />
+        </label>
+        <label className="factors-page-size">
+          <span className="sr-only">每页条数</span>
+          <select
+            value={listPageSize}
+            onChange={(event) => onListPageSizeChange(Number(event.target.value))}
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                每页 {size} 条
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="factors-filter-icon" title="筛选" aria-label="筛选">
+          ☰
+        </button>
       </div>
-      <FactorTable factors={visibleFactors} selectedName={selectedName} onSelect={onSelectFactor} />
+
+      <FactorTable
+        factors={factors}
+        page={listPage}
+        pageSize={listPageSize}
+        selectedName={selectedName}
+        onSelect={onSelectFactor}
+      />
+
       <Pagination
-        page={page}
-        pageCount={pageCount}
-        pageSize={pageSize}
-        totalItems={totalItems}
-        onPageChange={setPage}
+        catalogTotal={catalogTotal}
+        listTotal={listTotal}
+        page={listPage}
+        pageCount={listPageCount}
+        onPageChange={onListPageChange}
+        onRefresh={onRefreshList}
       />
     </section>
   );
-}
-
-function listTitle(activeTab) {
-  return LIST_TABS.find((item) => item.key === activeTab)?.title || LIST_TABS[0].title;
 }
 
 function ListTabs({ activeTab, onChange }) {
@@ -94,136 +114,107 @@ function ListTabs({ activeTab, onChange }) {
   );
 }
 
-function CategoryChips({ categories, category, onChange }) {
+function CategoryChips({ category, onChange }) {
   return (
     <div className="factors-chips" role="tablist" aria-label="因子分类">
-      <button
-        type="button"
-        className={`factors-chip${category === "" ? " factors-chip-active" : ""}`}
-        onClick={() => onChange("")}
-      >
-        全部
-      </button>
-      {categories.map((item) => (
+      {SIDEBAR_CATEGORY_CHIPS.map((chip) => (
         <button
-          key={item.key}
+          key={chip.key || "all"}
           type="button"
-          className={`factors-chip${category === item.key ? " factors-chip-active" : ""}`}
-          onClick={() => onChange(item.key)}
-          title={`${item.count ?? 0} 个`}
+          className={`factors-chip${category === chip.key ? " factors-chip-active" : ""}`}
+          onClick={() => onChange(chip.key)}
         >
-          {item.name}
-          <span className="factors-chip-meta">{item.count ?? 0}</span>
+          {chip.label}
         </button>
       ))}
     </div>
   );
 }
 
-function SearchBox({ query, onChange }) {
-  return (
-    <label className="factors-search">
-      搜索
-      <input value={query} onChange={(event) => onChange(event.target.value)} placeholder="名称或描述…" />
-    </label>
-  );
-}
-
-function PageSizeSelect({ pageSize, onChange }) {
-  return (
-    <label className="factors-page-size">
-      每页
-      <select value={pageSize} onChange={(event) => onChange(Number(event.target.value))}>
-        {PAGE_SIZE_OPTIONS.map((size) => (
-          <option key={size} value={size}>
-            {size} 条
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function FactorTable({ factors, selectedName, onSelect }) {
+function FactorTable({ factors, page, pageSize, selectedName, onSelect }) {
+  const indexOffset = (page - 1) * pageSize;
   return (
     <div className="factors-table-wrap">
-      <table className="factors-table">
+      <table className="factors-table factors-catalog-table">
         <thead>
           <tr>
+            <th>#</th>
             <th>中文因子</th>
             <th>分类</th>
             <th>方向</th>
             <th>来源</th>
           </tr>
         </thead>
-        <tbody>{factors.map((factor) => renderFactorRow(factor, selectedName, onSelect))}</tbody>
+        <tbody>
+          {factors.map((factor, index) =>
+            renderFactorRow(factor, indexOffset + index + 1, selectedName, onSelect),
+          )}
+        </tbody>
       </table>
       {!factors.length ? <p className="factors-empty">无匹配因子</p> : null}
     </div>
   );
 }
 
-function renderFactorRow(factor, selectedName, onSelect) {
+function renderFactorRow(factor, rankIndex, selectedName, onSelect) {
+  const direction = directionLabel(factor.direction);
   return (
     <tr
       key={factor.name}
       className={selectedName === factor.name ? "factors-row-selected" : ""}
       onClick={() => onSelect(factor.name)}
     >
-      <td>
+      <td className="factors-index-cell">{rankIndex}</td>
+      <td className="factors-factor-cell" title={`${factorTitle(factor)} (${factor.name})`}>
         <strong className="factors-name-cn">{factorTitle(factor)}</strong>
         <code className="factors-code">{factor.name}</code>
       </td>
-      <td>{factor.categoryName || factor.category}</td>
-      <td>{directionLabel(factor.direction)}</td>
-      <td>
-        <span className={`factors-source-tag ${sourceClass(factor.sourceFile)}`}>
-          {sourceLabel(factor.sourceFile)}
+      <td className="factors-category-cell">{factorTableCategoryLabel(factor)}</td>
+      <td className={`factors-direction-cell${direction === "正向" ? " is-positive" : ""}`}>{direction}</td>
+      <td className="factors-source-cell">
+        <span className={`factors-source-tag ${sourceTagClass(factor)}`} title={sourceLabel(factor)}>
+          {sourceLabel(factor)}
         </span>
       </td>
     </tr>
   );
 }
 
-function sourceLabel(sourceFile) {
-  const raw = String(sourceFile || "");
-  if (raw === "mined_factor_library.json") return "回灌";
-  if (raw === "agent_mined_factor_library.json") return "Agent";
-  return raw ? "原生" : "—";
-}
-
-function sourceClass(sourceFile) {
-  const raw = String(sourceFile || "");
-  if (raw === "mined_factor_library.json") return "is-mined";
-  if (raw === "agent_mined_factor_library.json") return "is-agent";
-  return raw ? "is-native" : "is-empty";
-}
-
-function Pagination({ page, pageCount, pageSize, totalItems, onPageChange }) {
-  const start = totalItems ? (page - 1) * pageSize + 1 : 0;
-  const end = Math.min(page * pageSize, totalItems);
+function Pagination({ catalogTotal, listTotal, page, pageCount, onPageChange, onRefresh }) {
+  const totalLabel = listTotal !== catalogTotal ? `${listTotal} / ${catalogTotal}` : catalogTotal;
   return (
     <nav className="factors-pagination" aria-label="因子列表分页">
-      <span className="factors-page-range">
-        {start}-{end} / {totalItems}
-      </span>
+      <span className="factors-page-total">共 {totalLabel} 条</span>
       <div className="factors-page-actions">
-        <button type="button" disabled={page <= 1} onClick={() => onPageChange(1)}>
-          首页
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(1)} aria-label="首页">
+          «
         </button>
-        <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-          上一页
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)} aria-label="上一页">
+          ‹
         </button>
-        <strong>
+        <strong className="factors-page-indicator">
           {page} / {pageCount}
         </strong>
-        <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
-          下一页
+        <button
+          type="button"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          aria-label="下一页"
+        >
+          ›
         </button>
-        <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(pageCount)}>
-          末页
+        <button
+          type="button"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(pageCount)}
+          aria-label="末页"
+        >
+          »
         </button>
       </div>
+      <button type="button" className="factors-icon-btn factors-list-refresh" title="刷新列表" onClick={onRefresh}>
+        ↻
+      </button>
     </nav>
   );
 }

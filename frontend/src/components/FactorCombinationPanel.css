@@ -1,81 +1,236 @@
 .factor-combo-panel {
   display: grid;
-  gap: 14px;
-  padding: 4px 0 2px;
+  gap: 10px;
+  padding: 2px 0 4px;
   min-width: 0;
 }
 
-.factor-combo-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 14px 16px;
-  border: 1px solid rgba(81, 100, 108, 0.55);
-  border-radius: 8px;
-  background: rgba(13, 18, 23, 0.72);
+.factor-combo-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 16px;
+  align-items: start;
+  padding: 12px 14px;
+}
+
+.factor-combo-hero-main {
+  display: grid;
+  gap: 8px;
   min-width: 0;
 }
 
-.factor-combo-head h2 {
-  margin: 2px 0 8px;
+.factor-combo-hero-title h2 {
+  margin: 2px 0 0;
   font-size: 20px;
-  line-height: 1.2;
+  font-weight: 800;
+  line-height: 1.25;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
 }
 
-.factor-combo-head p {
-  margin: 2px 0;
+.factor-combo-hero-sep {
   color: var(--muted);
+  font-weight: 700;
+}
+
+.factor-combo-hero-duration {
+  color: #9fc6ff;
+}
+
+.factor-combo-status-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.factor-combo-status-pill {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.factor-combo-status-pill > span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-combo-status-pill p {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.factor-combo-hero-summary {
+  margin: 0;
+  color: #c5d2dc;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.factor-combo-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.factor-combo-meta-card {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.factor-combo-meta-card.is-goal {
+  border-color: rgba(255, 196, 58, 0.35);
+  background: rgba(255, 196, 58, 0.06);
+}
+
+.factor-combo-meta-card dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-combo-meta-card dd {
+  margin: 4px 0 0;
+  display: grid;
+  gap: 2px;
+}
+
+.factor-combo-meta-card strong {
+  color: var(--text);
   font-size: 13px;
 }
 
-.factor-combo-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
+.factor-combo-meta-card span,
+.factor-combo-meta-card small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
-.factor-combo-actions button {
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  color: var(--text);
+.factor-combo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 148px;
+}
+
+.factor-combo-actions .factors-btn-outline,
+.factor-combo-actions .factors-btn-primary {
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.factor-combo-section {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+
+.factor-combo-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.factor-combo-section-head h3 {
+  margin: 2px 0 0;
+  font-size: 15px;
   font-weight: 800;
+}
+
+.factor-combo-section-status {
+  margin: 0;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.factor-combo-empty-inline {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .factor-combo-signals {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
   align-items: stretch;
-  gap: 12px;
-  padding-bottom: 4px;
 }
 
 .factor-combo-signal-column {
   min-width: 0;
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.factor-combo-signal-column::before {
+  content: attr(data-duration);
+  display: block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #9fc6ff;
+  background: rgba(47, 140, 255, 0.12);
+  border: 1px solid rgba(47, 140, 255, 0.28);
+  text-align: center;
 }
 
 .factor-combo-signal {
   text-align: left;
   color: inherit;
   font: inherit;
-  min-height: 172px;
-  padding: 13px 14px;
+  width: 100%;
+  min-height: 168px;
+  padding: 10px 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: linear-gradient(145deg, rgba(20, 27, 32, 0.95), rgba(10, 15, 19, 0.96));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 48px),
+    rgba(10, 15, 20, 0.92);
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-content: start;
   cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.factor-combo-signal:hover {
+  border-color: rgba(143, 161, 174, 0.55);
 }
 
 .factor-combo-signal.is-up {
-  border-color: rgba(63, 211, 166, 0.42);
+  border-color: rgba(51, 195, 123, 0.42);
 }
 
 .factor-combo-signal.is-down {
@@ -83,8 +238,11 @@
 }
 
 .factor-combo-signal.is-selected {
-  outline: 2px solid rgba(243, 212, 138, 0.52);
-  outline-offset: 2px;
+  border-color: rgba(47, 140, 255, 0.65);
+  box-shadow: inset 3px 0 0 var(--blue);
+  background:
+    linear-gradient(180deg, rgba(47, 140, 255, 0.12), transparent 56px),
+    rgba(10, 15, 20, 0.95);
 }
 
 .factor-combo-signal-top {
@@ -95,16 +253,27 @@
 }
 
 .factor-combo-signal-top span {
-  color: var(--gold);
-  font-size: 12px;
-  font-weight: 800;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .factor-combo-signal-top strong {
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 11px;
+  padding: 3px 8px;
   border-radius: 999px;
+  font-weight: 800;
   background: rgba(120, 167, 255, 0.1);
+}
+
+.factor-combo-signal.is-up .factor-combo-signal-top strong {
+  color: var(--green);
+  background: rgba(51, 195, 123, 0.12);
+}
+
+.factor-combo-signal.is-down .factor-combo-signal-top strong {
+  color: var(--red);
+  background: rgba(255, 104, 104, 0.12);
 }
 
 .factor-combo-signal-family {
@@ -130,8 +299,9 @@
 
 .factor-combo-signal h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.35;
+  font-weight: 800;
   color: var(--text);
   overflow-wrap: anywhere;
 }
@@ -139,7 +309,7 @@
 .factor-combo-signal p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -147,46 +317,66 @@
 .factor-combo-signal-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .factor-combo-signal-metrics span {
   min-width: 0;
   display: grid;
   gap: 2px;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(81, 100, 108, 0.35);
 }
 
 .factor-combo-signal-metrics small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .factor-combo-signal-metrics b {
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 800;
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
-  .factor-combo-head {
-    flex-direction: column;
+@media (max-width: 1280px) {
+  .factor-combo-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .factor-combo-hero {
+    grid-template-columns: 1fr;
   }
 
   .factor-combo-actions {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .factor-combo-actions button {
-    flex: 1 1 120px;
-  }
-
-  .factor-combo-signal-column {
+    flex-direction: row;
+    flex-wrap: wrap;
     min-width: 0;
-    width: 100%;
   }
 
+  .factor-combo-actions .factors-btn-outline,
+  .factor-combo-actions .factors-btn-primary {
+    flex: 1 1 140px;
+  }
+
+  .factor-combo-section-head {
+    align-items: flex-start;
+  }
+
+  .factor-combo-section-status {
+    text-align: left;
+    max-width: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .factor-combo-signals {
+    grid-template-columns: 1fr;
+  }
 }

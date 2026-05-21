@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import {
   CandlestickSeries,
+  CrosshairMode,
+  LineSeries,
+  LineStyle,
+  PriceScaleMode,
   TickMarkType,
   createChart,
   isBusinessDay,
   isUTCTimestamp,
 } from "lightweight-charts";
+import { computeMovingAverage } from "../utils/klineIndicators";
 
 const DEFAULT_CHART_HEIGHT = 440;
 const CHART_COLORS = Object.freeze({
@@ -17,17 +22,41 @@ const CHART_COLORS = Object.freeze({
   down: "#ef5350",
 });
 
-export default function KlineChart({ data, latest }) {
+const MA_STYLES = Object.freeze({
+  ma7: { period: 7, color: "#f3d49b", label: "MA7" },
+  ma20: { period: 20, color: "#5ba4ff", label: "MA20" },
+  ma60: { period: 60, color: "#c084fc", label: "MA60" },
+});
+
+export default function KlineChart({
+  clearDrawingsToken = 0,
+  data,
+  drawingTool = "cursor",
+  drawingsLocked = false,
+  fitToken = 0,
+  indicators = {},
+  latest,
+  settings = {},
+}) {
   const wrapRef = useRef(null);
   const containerRef = useRef(null);
   const tooltipRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
+  const maSeriesRef = useRef({});
+  const priceLinesRef = useRef([]);
+  const trendSeriesRef = useRef([]);
+  const trendDraftRef = useRef(null);
   const lastTimeRef = useRef(null);
+  const drawingToolRef = useRef(drawingTool);
+  const drawingsLockedRef = useRef(drawingsLocked);
+
+  drawingToolRef.current = drawingTool;
+  drawingsLockedRef.current = drawingsLocked;
 
   useEffect(() => {
     if (!containerRef.current || !wrapRef.current) {
-      return;
+      return undefined;
     }
 
     const chart = createChart(containerRef.current, {
@@ -43,6 +72,9 @@ export default function KlineChart({ data, latest }) {
       localization: {
         locale: "zh-CN",
         timeFormatter: (time) => formatCrosshairTime(time),
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
       },
       timeScale: {
         borderColor: CHART_COLORS.scale,
@@ -107,7 +139,52 @@ export default function KlineChart({ data, latest }) {
       tip.style.top = `${top}px`;
     };
 
+    const onClick = (param) => {
+      if (drawingsLockedRef.current) return;
+      const tool = drawingToolRef.current;
+      if (!tool || tool === "cursor" || tool === "measure" || tool === "reset" || tool === "settings") {
+        return;
+      }
+      if (!param.point || param.time === undefined) return;
+      const price = series.coordinateToPrice(param.point.y);
+      if (price == null || !Number.isFinite(price)) return;
+
+      if (tool === "hline") {
+        const line = series.createPriceLine({
+          price,
+          color: "#f3d49b",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+        });
+        priceLinesRef.current.push(line);
+        return;
+      }
+
+      if (tool === "trend") {
+        const draft = trendDraftRef.current;
+        if (!draft) {
+          trendDraftRef.current = { time: param.time, price };
+          return;
+        }
+        const trendSeries = chart.addSeries(LineSeries, {
+          color: "#ff9f68",
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        trendSeries.setData([
+          { time: draft.time, value: draft.price },
+          { time: param.time, value: price },
+        ]);
+        trendSeriesRef.current.push(trendSeries);
+        trendDraftRef.current = null;
+      }
+    };
+
     chart.subscribeCrosshairMove(onCrosshairMove);
+    chart.subscribeClick(onClick);
 
     const observer = new ResizeObserver(() => {
       if (wrapRef.current) {
@@ -118,45 +195,129 @@ export default function KlineChart({ data, latest }) {
 
     return () => {
       chart.unsubscribeCrosshairMove(onCrosshairMove);
+      chart.unsubscribeClick(onClick);
       observer.disconnect();
       chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      maSeriesRef.current = {};
+      priceLinesRef.current = [];
+      trendSeriesRef.current = [];
+      trendDraftRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (!seriesRef.current || !data.length) {
-      return;
-    }
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+
+    chart.applyOptions({
+      grid: {
+        vertLines: { visible: settings.showGrid !== false, color: CHART_COLORS.grid },
+        horzLines: { visible: settings.showGrid !== false, color: CHART_COLORS.grid },
+      },
+      crosshair: {
+        mode: settings.crosshairMagnet ? CrosshairMode.Magnet : CrosshairMode.Normal,
+      },
+    });
+
+    const scaleMode = priceScaleModeFromSetting(settings.priceScaleMode);
+    chart.priceScale("right").applyOptions({ mode: scaleMode });
+  }, [settings.crosshairMagnet, settings.priceScaleMode, settings.showGrid]);
+
+  useEffect(() => {
+    if (!seriesRef.current || !data.length) return;
     const normalized = normalizeSeriesData(data);
     if (!normalized.length) return;
     seriesRef.current.setData(normalized);
     lastTimeRef.current = normalized[normalized.length - 1].time;
-  }, [data]);
+    syncMovingAverages(chartRef.current, maSeriesRef, normalized, indicators);
+  }, [data, indicators]);
 
   useEffect(() => {
-    if (!seriesRef.current || !latest) {
-      return;
-    }
+    if (!seriesRef.current || !latest) return;
     const next = normalizeCandle(latest);
     if (!next) return;
     const lastTime = lastTimeRef.current;
-    if (lastTime != null && timeValue(next.time) < timeValue(lastTime)) {
-      return;
-    }
+    if (lastTime != null && timeValue(next.time) < timeValue(lastTime)) return;
     seriesRef.current.update(next);
     lastTimeRef.current = next.time;
-  }, [latest]);
+    if (settings.autoScroll && chartRef.current) {
+      chartRef.current.timeScale().scrollToRealTime();
+    }
+  }, [latest, settings.autoScroll]);
+
+  useEffect(() => {
+    if (!chartRef.current || !fitToken) return;
+    chartRef.current.timeScale().fitContent();
+  }, [fitToken]);
+
+  useEffect(() => {
+    if (!clearDrawingsToken) return;
+    clearChartDrawings(chartRef.current, seriesRef.current, priceLinesRef, trendSeriesRef, trendDraftRef);
+  }, [clearDrawingsToken]);
+
+  useEffect(() => {
+    trendDraftRef.current = null;
+  }, [drawingTool]);
 
   return (
     <div className="chart-container kline-chart-wrap" ref={wrapRef}>
-      <div
-        className="kline-chart-canvas-host"
-        ref={containerRef}
-        aria-hidden
-      />
+      <div className="kline-chart-canvas-host" ref={containerRef} aria-hidden />
       <div className="kline-hover-tooltip" ref={tooltipRef} role="status" />
     </div>
   );
+}
+
+function priceScaleModeFromSetting(mode) {
+  if (mode === "log") return PriceScaleMode.Logarithmic;
+  if (mode === "percent") return PriceScaleMode.Percentage;
+  return PriceScaleMode.Normal;
+}
+
+function syncMovingAverages(chart, maSeriesRef, candles, indicators) {
+  if (!chart) return;
+  for (const [key, style] of Object.entries(MA_STYLES)) {
+    const enabled = Boolean(indicators[key]);
+    const existing = maSeriesRef.current[key];
+    if (!enabled) {
+      if (existing) {
+        chart.removeSeries(existing);
+        delete maSeriesRef.current[key];
+      }
+      continue;
+    }
+    const points = computeMovingAverage(candles, style.period);
+    let series = existing;
+    if (!series) {
+      series = chart.addSeries(LineSeries, {
+        color: style.color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        title: style.label,
+      });
+      maSeriesRef.current[key] = series;
+    }
+    series.setData(points);
+  }
+}
+
+function clearChartDrawings(chart, candleSeries, priceLinesRef, trendSeriesRef, trendDraftRef) {
+  if (candleSeries) {
+    for (const line of priceLinesRef.current) {
+      candleSeries.removePriceLine(line);
+    }
+  }
+  priceLinesRef.current = [];
+  if (chart) {
+    for (const series of trendSeriesRef.current) {
+      chart.removeSeries(series);
+    }
+  }
+  trendSeriesRef.current = [];
+  trendDraftRef.current = null;
 }
 
 function chartSize(container) {
@@ -180,7 +341,6 @@ function timeToDate(time) {
   return new Date();
 }
 
-/** 十字光标时间轴标签与悬浮层：本地日历日期 + 时分 */
 function formatCrosshairTime(time) {
   const d = timeToDate(time);
   const y = d.getFullYear();

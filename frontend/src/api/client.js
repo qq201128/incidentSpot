@@ -211,18 +211,29 @@ export async function predictDirection(symbol, duration = "10m", limit = 2000, s
   return data;
 }
 
-/** 因子库列表（可选 category 过滤）。 */
-export async function fetchFactorsList(category) {
-  const params = {};
+/** 因子库列表（分页、搜索、单因子/组合因子切换）。 */
+export async function fetchFactorsList({
+  category,
+  kind = "single",
+  q,
+  page = 1,
+  pageSize = 20,
+} = {}) {
+  const params = { kind, page, page_size: pageSize };
   if (category) params.category = category;
+  if (q) params.q = q;
   const { data } = await axios.get(`${BASE_URL}/api/factors/list`, { params });
   return data;
 }
 
-/** 单个因子元数据。 */
-export async function fetchFactorDetail(factorName) {
+/** 单个因子元数据（可选 symbol/duration 以附带排名缓存指标）。 */
+export async function fetchFactorDetail(factorName, symbol, duration) {
+  const params = {};
+  if (symbol) params.symbol = symbol;
+  if (duration) params.duration = duration;
   const { data } = await axios.get(
     `${BASE_URL}/api/factors/detail/${encodeURIComponent(factorName)}`,
+    { params },
   );
   return data;
 }

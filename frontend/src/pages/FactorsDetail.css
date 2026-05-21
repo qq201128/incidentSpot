@@ -103,7 +103,7 @@
 }
 
 .factors-ranking-wrap {
-  overflow-x: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   margin-top: 8px;

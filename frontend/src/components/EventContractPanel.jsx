@@ -3,13 +3,12 @@ import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import AutoStrategyControls from "./AutoStrategyControls";
 import EnsembleJudgePanel from "./EnsembleJudgePanel";
-import EventList from "./EventList";
 import TradeControls from "./TradeControls";
 const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
 
-const PANEL_TABS = /** @type {const} */ (["strategies", "judge", "trade", "events"]);
+const PANEL_TABS = /** @type {const} */ (["strategies", "judge", "trade"]);
 
 export default function EventContractPanel({
   symbol,
@@ -17,11 +16,9 @@ export default function EventContractPanel({
   currentPrice,
   events,
   onQuickTrade,
-  onSettle,
   onPredict,
   latestPrediction,
   onClearAllEvents,
-  onClearStrategyEvents,
 }) {
   const [durationMinutes, setDurationMinutes] = useState(() =>
     intervalToTradeMinutes(chartInterval),
@@ -40,10 +37,6 @@ export default function EventContractPanel({
   const [strategyReloadKey, setStrategyReloadKey] = useState(0);
 
   const aiHistorySuccess = useMemo(() => _aiHistorySuccessByStrategy(events, symbol), [events, symbol]);
-  const openEventsCount = useMemo(
-    () => events.filter((e) => e.symbol === symbol && e.status === "OPEN").length,
-    [events, symbol],
-  );
   const dbHasOpenPosition = useMemo(
     () => events.some((event) => event.symbol === symbol && event.status === "OPEN" && event.orderSide),
     [events, symbol],
@@ -185,17 +178,6 @@ export default function EventContractPanel({
           >
             交易
           </button>
-          <button
-            type="button"
-            role="tab"
-            className={`panel-tab ${panelTab === "events" ? "is-active" : ""}`}
-            aria-selected={panelTab === "events"}
-            id="panel-tab-events"
-            onClick={() => setPanelTab("events")}
-          >
-            持仓
-            {openEventsCount > 0 ? <span className="panel-tab-badge">{openEventsCount}</span> : null}
-          </button>
         </div>
       </div>
 
@@ -212,7 +194,11 @@ export default function EventContractPanel({
         </div>
       )}
       {panelTab === "judge" && (
-        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-judge">
+        <div
+          className="panel-tab-panel panel-tab-panel--judge"
+          role="tabpanel"
+          aria-labelledby="panel-tab-judge"
+        >
           <EnsembleJudgePanel
             symbol={symbol}
             duration={predictDurationKey(durationMinutes)}
@@ -221,7 +207,11 @@ export default function EventContractPanel({
         </div>
       )}
       {panelTab === "trade" && (
-        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-trade">
+        <div
+          className="panel-tab-panel panel-tab-panel--trade"
+          role="tabpanel"
+          aria-labelledby="panel-tab-trade"
+        >
           <TradeControls
             symbol={symbol}
             currentPrice={currentPrice}
@@ -241,21 +231,13 @@ export default function EventContractPanel({
           />
         </div>
       )}
-      {panelTab === "events" && (
-        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-events">
-          <EventList
-            events={events}
-            onSettle={onSettle}
-            onClearStrategyEvents={onClearStrategyEvents}
-          />
-        </div>
-      )}
     </section>
   );
 }
 
 function _initialPanelTab() {
   const raw = localStorage.getItem(STORAGE_PANEL_TAB);
+  if (raw === "events") return "trade";
   return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "trade";
 }
 

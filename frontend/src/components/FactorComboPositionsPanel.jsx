@@ -30,7 +30,7 @@ export default function FactorComboPositionsPanel({ signal, symbol }) {
   const events = useMemo(() => state.data?.events || [], [state.data]);
   if (!signal) return null;
   return (
-    <section className="factor-combo-positions">
+    <section className="factor-combo-positions card-surface">
       <PanelTitle signal={signal} state={state} />
       {state.error ? <p className="factor-combo-position-error">{state.error}</p> : null}
       <PositionSummary data={state.data} />

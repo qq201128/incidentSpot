@@ -12,7 +12,7 @@ import "./FactorCombinationPanel.css";
 const TOP_PER_DURATION = 3;
 const SIGNAL_LIMIT = 12;
 const REFRESH_RELOAD_DELAY_MS = 3000;
-const DURATION_LABELS = { "10m": "10m", "30m": "30m", "60m": "60m", "1d": "1d" };
+const DURATION_LABELS = { "10m": "10 分钟", "30m": "30 分钟", "60m": "60 分钟", "1d": "1 天" };
 const SIGNAL_IDLE_STATUS = "等待加载周期信号…";
 
 export default function FactorCombinationPanel({ symbol, duration }) {
@@ -56,7 +56,8 @@ function useFactorCombinationData(symbol, duration) {
     refreshing,
     loadingSignals,
     onLoadSignals: () => void loadSignals(),
-    onRefreshCurrent: () => void refresh(duration), onRefreshAll: () => void refresh(undefined),
+    onRefreshCurrent: () => void refresh(duration),
+    onRefreshAll: () => void refresh(undefined),
   };
 }
 
@@ -182,17 +183,31 @@ function ComboPanelView(props) {
   useEffect(() => {
     if (selectedKey && !selectedSignal) setSelectedKey("");
   }, [selectedKey, selectedSignal]);
+
   return (
     <section className="factor-combo-panel">
       <ComboPanelHeader {...props} />
-      {signals.length ? (
-        <FactorCombinationSignalGrid
-          onSelect={(signal) => setSelectedKey(signalKey(signal))}
-          selectedKey={selectedKey}
-          signals={signals}
-        />
+      <section className="factor-combo-section card-surface">
+        <header className="factor-combo-section-head">
+          <div>
+            <span className="section-kicker">实盘模拟</span>
+            <h3>周期 Top{TOP_PER_DURATION} 信号</h3>
+          </div>
+          <p className="factor-combo-section-status">{props.signalState.status}</p>
+        </header>
+        {signals.length ? (
+          <FactorCombinationSignalGrid
+            onSelect={(signal) => setSelectedKey(signalKey(signal))}
+            selectedKey={selectedKey}
+            signals={signals}
+          />
+        ) : (
+          <p className="factor-combo-empty-inline">{props.signalState.status || "暂无周期信号"}</p>
+        )}
+      </section>
+      {selectedSignal ? (
+        <FactorComboPositionsPanel signal={selectedSignal} symbol={props.symbol} />
       ) : null}
-      {selectedSignal ? <FactorComboPositionsPanel signal={selectedSignal} symbol={props.symbol} /> : null}
       <FactorCombinationRankingTable
         highWinrateRanking={props.rankingState.highWinrateItems}
         highWinrateSummary={props.rankingState.highWinrateSummary}
@@ -214,29 +229,99 @@ function ComboPanelHeader({
   onRefreshAll,
   onLoadSignals,
 }) {
+  const durationLabel = DURATION_LABELS[duration] || duration;
   return (
-    <div className="factor-combo-head">
-      <div>
-        <span className="section-kicker">多因子组合</span>
-        <h2>{symbol} · {DURATION_LABELS[duration] || duration}</h2>
-        <p>{rankingState.status}</p>
-        {baseSummary ? <p>{baseSummary}</p> : null}
-        <StatusLine data={rankingState.highWinrateStatus} />
-        <CoverageLine data={rankingState.dataCoverage} />
-        <p>{signalState.status}</p>
+    <header className="factor-combo-hero card-surface">
+      <div className="factor-combo-hero-main">
+        <div className="factor-combo-hero-title">
+          <span className="section-kicker">多因子组合</span>
+          <h2>
+            {symbol}
+            <span className="factor-combo-hero-sep">/</span>
+            <span className="factor-combo-hero-duration">{durationLabel}</span>
+          </h2>
+        </div>
+        <div className="factor-combo-status-pills">
+          <StatusPill label="排名缓存" text={rankingState.status} />
+          <StatusPill label="周期信号" text={signalState.status} />
+        </div>
+        {baseSummary ? <p className="factor-combo-hero-summary">{baseSummary}</p> : null}
+        <div className="factor-combo-meta-grid">
+          <HighWinrateMeta data={rankingState.highWinrateStatus} />
+          <CoverageMeta data={rankingState.dataCoverage} />
+        </div>
       </div>
       <div className="factor-combo-actions">
-        <button type="button" disabled={loadingSignals} onClick={onLoadSignals}>
+        <button
+          type="button"
+          className="factors-btn-outline"
+          disabled={loadingSignals}
+          onClick={onLoadSignals}
+        >
           {loadingSignals ? "加载中…" : "重载周期信号"}
         </button>
-        <button type="button" disabled={refreshing} onClick={onRefreshCurrent}>
-          当前周期
+        <button
+          type="button"
+          className="factors-btn-outline"
+          disabled={refreshing}
+          onClick={onRefreshCurrent}
+        >
+          刷新当前周期
         </button>
-        <button type="button" disabled={refreshing} onClick={onRefreshAll}>
-          全部周期
+        <button type="button" className="factors-btn-primary" disabled={refreshing} onClick={onRefreshAll}>
+          {refreshing ? "排队中…" : "刷新全部周期"}
         </button>
       </div>
+    </header>
+  );
+}
+
+function StatusPill({ label, text }) {
+  if (!text) return null;
+  return (
+    <div className="factor-combo-status-pill">
+      <span>{label}</span>
+      <p title={text}>{text}</p>
     </div>
+  );
+}
+
+function HighWinrateMeta({ data }) {
+  if (!data) return null;
+  const metrics = data.metrics || {};
+  const settled = data.settledSampleCount ?? data.sampleCount ?? metrics.sampleCount ?? 0;
+  const required = data.requiredSampleCount ?? data.thresholds?.requiredSampleCount ?? data.thresholds?.activeSampleCount ?? "—";
+  const winRate = formatPct(data.winRate ?? metrics.winRate, 1);
+  return (
+    <article className="factor-combo-meta-card is-goal">
+      <dt>高胜率门控</dt>
+      <dd>
+        <strong>{data.status || "unknown"}</strong>
+        <span>
+          已结算 {settled}/{required} · 胜率 {winRate}
+        </span>
+        <small>{highWinrateReasonText(data)}</small>
+      </dd>
+    </article>
+  );
+}
+
+function CoverageMeta({ data }) {
+  if (!data?.mainRange) return null;
+  const range = data.mainRange;
+  const missing = Array.isArray(data.missingFeatureSources) ? data.missingFeatureSources : [];
+  const missingNames = [...new Set(missing.map((row) => row.table).filter(Boolean))];
+  return (
+    <article className="factor-combo-meta-card">
+      <dt>数据覆盖</dt>
+      <dd>
+        <strong>10m K线 {range.rowCount ?? 0} 根</strong>
+        <span>
+          {formatDate(range.minTimeUtc)} — {formatDate(range.maxTimeUtc)}
+        </span>
+        {missingNames.length ? <small>缺失特征源：{missingNames.join("、")}</small> : null}
+      </dd>
+    </article>
   );
 }
 
@@ -259,7 +344,7 @@ function baseFactorSummary(data) {
   const mined = data.minedFactorUsedCount ?? 0;
   const agent = data.agentMinedFactorUsedCount ?? 0;
   const source = data.minedFactorSourceCount ?? 0;
-  return `候选基础因子：${total} 个 · 挖掘因子参与 ${mined} 个 · Agent 因子 ${agent} 个 · 挖掘库来源 ${source} 条`;
+  return `候选基础因子 ${total} 个 · 挖掘参与 ${mined} · Agent ${agent} · 挖掘库来源 ${source} 条`;
 }
 
 function signalStatus(items, missing, failures, cacheStatus) {
@@ -281,19 +366,6 @@ function cacheReasonText(reason) {
   return texts[reason] || reason;
 }
 
-function StatusLine({ data }) {
-  if (!data) return null;
-  const metrics = data.metrics || {};
-  const settled = data.settledSampleCount ?? data.sampleCount ?? metrics.sampleCount ?? 0;
-  const required = data.requiredSampleCount ?? data.thresholds?.requiredSampleCount ?? data.thresholds?.activeSampleCount ?? "—";
-  const winRate = formatPct(data.winRate ?? metrics.winRate, 1);
-  return (
-    <p>
-      High-winrate：{data.status || "unknown"} · settled {settled}/{required} · winRate {winRate} · {highWinrateReasonText(data)}
-    </p>
-  );
-}
-
 function highWinrateReasonText(data) {
   if (data?.reason === "candidate_pool_exhausted_refresh_failed") {
     const refresh = data.refreshReport || {};
@@ -305,20 +377,7 @@ function highWinrateReasonText(data) {
   if (data?.reason === "candidate_pool_exhausted_refreshing") {
     return "候选已用尽，正在刷新榜单";
   }
-  return data?.reason || "no_reason";
-}
-
-function CoverageLine({ data }) {
-  if (!data?.mainRange) return null;
-  const range = data.mainRange;
-  const missing = Array.isArray(data.missingFeatureSources) ? data.missingFeatureSources : [];
-  const missingNames = [...new Set(missing.map((row) => row.table).filter(Boolean))];
-  const missingText = missingNames.length ? ` · 缺失特征源 ${missingNames.join(", ")}` : "";
-  return (
-    <p>
-      数据覆盖：10m K线 {range.rowCount ?? 0} 根 · {formatDate(range.minTimeUtc)} 至 {formatDate(range.maxTimeUtc)}{missingText}
-    </p>
-  );
+  return data?.reason || "无附加说明";
 }
 
 function formatPct(value, digits) {

@@ -15,7 +15,7 @@ def event_response(conn, row) -> dict:
 def _latest_order(conn, event_id: int):
     return conn.execute(
         """
-        SELECT id, side, qty, price, created_at, external_order_id, external_status
+        SELECT id, side, qty, price, status, created_at, external_order_id, external_status, external_response
         FROM orders
         WHERE event_id = ?
         ORDER BY id DESC
@@ -58,8 +58,10 @@ def _order_fields(order) -> dict:
         "orderQty": order["qty"] if order else None,
         "orderPrice": order["price"] if order else None,
         "orderCreatedAt": order["created_at"] if order else None,
+        "orderStatus": order["status"] if order else None,
         "externalOrderId": order["external_order_id"] if order else None,
         "externalStatus": order["external_status"] if order else None,
+        "externalResponse": order["external_response"] if order else None,
     }
 
 

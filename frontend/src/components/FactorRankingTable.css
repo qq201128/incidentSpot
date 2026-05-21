@@ -1,0 +1,147 @@
+.factors-ranking-block {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.factors-ranking-wrap {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.factors-ranking-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.factors-ranking-table th {
+  padding: 6px 5px;
+  text-align: left;
+  background: rgba(9, 13, 16, 0.92);
+  color: var(--muted);
+  font-weight: 700;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.factors-ranking-table td {
+  padding: 6px 5px;
+  border-bottom: 1px solid rgba(43, 54, 61, 0.65);
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.factors-ranking-table th:nth-child(1),
+.factors-ranking-table td:nth-child(1) {
+  width: 36px;
+  text-align: center;
+}
+
+.factors-ranking-table th:nth-child(2),
+.factors-ranking-table td:nth-child(2) {
+  width: 24%;
+}
+
+.factors-ranking-table th:nth-child(3),
+.factors-ranking-table td:nth-child(3) {
+  width: 9%;
+}
+
+.factors-ranking-table th:nth-child(4),
+.factors-ranking-table td:nth-child(4) {
+  width: 8%;
+}
+
+.factors-ranking-table th:nth-child(5),
+.factors-ranking-table td:nth-child(5),
+.factors-ranking-table th:nth-child(6),
+.factors-ranking-table td:nth-child(6),
+.factors-ranking-table th:nth-child(7),
+.factors-ranking-table td:nth-child(7),
+.factors-ranking-table th:nth-child(8),
+.factors-ranking-table td:nth-child(8),
+.factors-ranking-table th:nth-child(9),
+.factors-ranking-table td:nth-child(9),
+.factors-ranking-table th:nth-child(10),
+.factors-ranking-table td:nth-child(10) {
+  width: 8%;
+}
+
+.factors-ranking-factor-cell {
+  min-width: 0;
+}
+
+.factors-ranking-factor-cell .factors-name-cn {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.factors-ranking-factor-cell .factors-code {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.factors-ranking-num {
+  white-space: nowrap;
+}
+
+.factors-ranking-pagination {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.factors-ranking-page-total {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.factors-ranking-page-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.factors-ranking-page-indicator {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.factors-ranking-page-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.factors-ranking-empty {
+  padding: 12px;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+}

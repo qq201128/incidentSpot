@@ -22,9 +22,11 @@ export default function TradeControls({
   onPredictClick,
   onTrade,
 }) {
+  const priceText = Number(currentPrice || 0).toFixed(2);
+
   return (
     <div className="card trade-card">
-      <div className="trade-live-mode-block">
+      <header className="trade-panel-top">
         <button
           type="button"
           className={liveTradingEnabled ? "trade-mode-btn live" : "trade-mode-btn sim"}
@@ -36,19 +38,21 @@ export default function TradeControls({
         </button>
         <p className="toggle-hint trade-mode-hint trade-live-mode-hint">
           {liveTradingEnabled
-            ? "本页手动下单与「规则计算并下单」将调用 Binance 事件合约接口。"
-            : "本页仅创建本地事件与订单记录，不请求交易所下单。"}
+            ? "手动与规则下单将调用 Binance 事件合约接口。"
+            : "仅创建本地事件与订单记录，不请求交易所。"}
         </p>
-      </div>
-      <div className="symbol-row">
-        <strong>{symbol}</strong>
-        <span>当前价 {Number(currentPrice || 0).toFixed(2)}</span>
+      </header>
+
+      <div className="trade-symbol-strip">
+        <strong className="trade-symbol">{symbol}</strong>
+        <span className="trade-price">当前价 {priceText}</span>
       </div>
 
-      <div className="duration-row">
+      <div className="duration-row" role="group" aria-label="结算周期">
         {[10, 30, 60, 1440].map((value) => (
           <button
             key={value}
+            type="button"
             className={durationMinutes === value ? "chip active" : "chip"}
             onClick={() => onDurationChange(value)}
           >
@@ -57,8 +61,15 @@ export default function TradeControls({
         ))}
       </div>
 
-      <label>数量（USDT）</label>
-      <input type="number" min="1" value={amount} onChange={(e) => onAmountChange(Number(e.target.value))} />
+      <label className="trade-amount-row">
+        <span>数量（USDT）</span>
+        <input
+          type="number"
+          min="1"
+          value={amount}
+          onChange={(e) => onAmountChange(Number(e.target.value))}
+        />
+      </label>
 
       <div className="rate-row">
         <RateCell label="上涨支付率" value={`${FIXED_PAYOUT_PERCENT}%`} />
@@ -67,17 +78,17 @@ export default function TradeControls({
       </div>
 
       <div className="action-row">
-        <button className="up-btn" onClick={() => onTrade("UP")}>
+        <button type="button" className="up-btn" onClick={() => onTrade("UP")}>
           上涨
         </button>
-        <button className="down-btn" onClick={() => onTrade("DOWN")}>
+        <button type="button" className="down-btn" onClick={() => onTrade("DOWN")}>
           下跌
         </button>
       </div>
 
       <div className="predict-row">
-        <button className="predict-btn" onClick={onPredictClick} disabled={predictLoading}>
-          {predictLoading ? "规则计算并下单中..." : `规则计算并下单${durationLabel(durationMinutes)}`}
+        <button type="button" className="predict-btn" onClick={onPredictClick} disabled={predictLoading}>
+          {predictLoading ? "计算下单中…" : `规则下单 · ${durationLabel(durationMinutes)}`}
         </button>
         <PredictionResult prediction={prediction} />
         {!!predictInfo && <div className="predict-info">{predictInfo}</div>}
@@ -122,11 +133,11 @@ function AiSuccessSummary({ symbol, aiHistorySuccess }) {
   return (
     <div className="ai-success-summary">
       <div className="ai-success-row ai-success-overall">
-        <span>规则命中率（{symbol}，已结算·合计）</span>
+        <span>规则命中率（{symbol}）</span>
         <strong>
           {overall.total === 0
             ? "暂无样本"
-            : `${Math.round(overall.rate * 100)}%（${overall.hits}/${overall.total}） · 盈亏 ${formatPnlU(overall.pnlU)}`}
+            : `${Math.round(overall.rate * 100)}%（${overall.hits}/${overall.total}） · ${formatPnlU(overall.pnlU)}`}
         </strong>
       </div>
       {durationGroups.length > 0 && (
@@ -141,7 +152,7 @@ function AiSuccessSummary({ symbol, aiHistorySuccess }) {
                     <strong>
                       {row.total === 0
                         ? "—"
-                        : `${Math.round(row.rate * 100)}%（${row.hits}/${row.total}） · 盈亏 ${formatPnlU(row.pnlU)}`}
+                        : `${Math.round(row.rate * 100)}%（${row.hits}/${row.total}） · ${formatPnlU(row.pnlU)}`}
                     </strong>
                   </li>
                 ))}
@@ -156,7 +167,6 @@ function AiSuccessSummary({ symbol, aiHistorySuccess }) {
 
 const UNKNOWN_DURATION = -1;
 
-/** @param {Array<{ strategyKey: string, durationMinutes: number, total: number, hits: number, pnlU: number, rate: number | null }>} rows */
 function _groupAiSuccessByTradeDuration(rows) {
   const map = new Map();
   for (const row of rows) {
@@ -180,9 +190,9 @@ function PredictionDirection({ prediction }) {
   const up = (prediction.probabilityUp * 100).toFixed(2);
   const down = ((1 - prediction.probabilityUp) * 100).toFixed(2);
   if (isNoTradeSignal(prediction)) {
-    return <span>当前不下单（观察涨 {up}% / 跌 {down}%）</span>;
+    return <span>观察涨 {up}% / 跌 {down}%</span>;
   }
-  return <span>结果：{prediction.direction === "up" ? "涨" : "跌"}（涨 {up}% / 跌 {down}%）</span>;
+  return <span>{prediction.direction === "up" ? "涨" : "跌"} {up}% / {down}%</span>;
 }
 
 function isNoTradeSignal(prediction) {

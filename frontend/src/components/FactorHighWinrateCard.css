@@ -1,0 +1,169 @@
+.factor-hwr-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.factor-hwr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.factor-hwr-title {
+  display: block;
+  margin-top: 2px;
+  font-size: 15px;
+}
+
+.factor-hwr-tag {
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(51, 195, 123, 0.45);
+  background: rgba(51, 195, 123, 0.12);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-hwr-tag-muted {
+  border-color: rgba(143, 161, 174, 0.4);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+.factor-hwr-meta {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.factor-hwr-meta dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-hwr-meta dd {
+  margin: 2px 0 0;
+}
+
+.factor-hwr-name {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 800;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.factor-hwr-members-title {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.factor-hwr-code {
+  display: block;
+  font-size: 11px;
+  color: #9fc6ff;
+  background: rgba(47, 140, 255, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.factor-hwr-members {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.factor-hwr-members li {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.factor-hwr-members-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.factor-hwr-members-pagination button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.factor-hwr-metrics {
+  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.factor-hwr-metric {
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(81, 100, 108, 0.35);
+}
+
+.factor-hwr-metric dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-hwr-metric dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.factor-hwr-metric.is-positive dd {
+  color: var(--green);
+}
+
+.factor-hwr-metric.is-negative dd {
+  color: var(--red);
+}
+
+.factor-hwr-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.factor-hwr-detail-btn {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 12px;
+  border-color: rgba(47, 140, 255, 0.5);
+  color: #9fc6ff;
+  font-size: 12px;
+  font-weight: 800;
+}

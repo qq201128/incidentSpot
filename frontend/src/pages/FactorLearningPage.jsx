@@ -1,52 +1,76 @@
 import { useState } from "react";
-import FactorLearningPanel from "../components/FactorLearningPanel";
-import "./FactorLearningPage.css";
+import MiningAgentTable from "../components/mining/MiningAgentTable";
+import MiningKpiCards from "../components/mining/MiningKpiCards";
+import MiningModelGrid from "../components/mining/MiningModelGrid";
+import MiningPageHeader from "../components/mining/MiningPageHeader";
+import MiningSidebar from "../components/mining/MiningSidebar";
+import { useMiningPageData } from "./useMiningPageData";
+import "./MiningPage.css";
 
-const DEFAULT_SYMBOL = "BTCUSDT";
-const DEFAULT_DURATION = "10m";
 const DURATIONS = [
-  { value: "10m", label: "10 分钟" },
-  { value: "30m", label: "30 分钟" },
-  { value: "60m", label: "60 分钟" },
-  { value: "1d", label: "1 天" },
+  { value: "10m", label: "10分钟" },
+  { value: "30m", label: "30分钟" },
+  { value: "60m", label: "60分钟" },
+  { value: "1d", label: "1天" },
 ];
 
 export default function FactorLearningPage() {
-  const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
-  const [duration, setDuration] = useState(DEFAULT_DURATION);
+  const [symbol, setSymbol] = useState("BTCUSDT");
+  const [duration, setDuration] = useState("10m");
+  const mining = useMiningPageData(symbol, duration);
+
+  if (mining.loading) {
+    return (
+      <main className="mining-page layout">
+        <div className="mining-loading">正在加载自动挖掘数据…</div>
+      </main>
+    );
+  }
+
+  const overview = mining.overview;
 
   return (
-    <main className="factor-learning-page layout">
-      <header className="topbar factor-learning-page-topbar">
-        <div>
-          <span className="eyebrow">自动挖掘</span>
-          <h1>因子学习与候选挖掘</h1>
-          <p>从亏损样本、Agent 候选、算子库和 LSTM 影子信号中提炼可入库因子。</p>
-        </div>
-        <div className="factor-learning-page-controls">
-          <label>
-            <span>交易对</span>
-            <input
-              value={symbol}
-              onChange={(event) => setSymbol(event.target.value.toUpperCase())}
-              placeholder="BTCUSDT"
+    <main className="mining-page layout">
+      <MiningPageHeader
+        symbol={symbol}
+        duration={duration}
+        durationOptions={DURATIONS}
+        onSymbolChange={setSymbol}
+        onDurationChange={setDuration}
+        header={overview?.header}
+        updatedAt={overview?.updatedAt}
+        onReload={() => void mining.reload()}
+        reloading={mining.busy !== ""}
+      />
+
+      {mining.status ? <div className="mining-banner">{mining.status}</div> : null}
+
+      {overview ? (
+        <div className="mining-page-body">
+          <MiningKpiCards
+            summary={overview.summary}
+            trainingRules={overview.trainingRules}
+            busy={mining.busy}
+            onRefreshLocal={() => void mining.refreshLocal()}
+            onRefreshAgent={() => void mining.refreshAgent()}
+            onSearchAll={() => void mining.searchAllModels()}
+          />
+          <section className="mining-workspace">
+            <MiningModelGrid
+              models={overview.models}
+              summary={overview.summary}
+              busy={mining.busy}
+              onSearchModel={(family) => void mining.searchModel(family)}
             />
-          </label>
-          <label>
-            <span>规则周期</span>
-            <select value={duration} onChange={(event) => setDuration(event.target.value)}>
-              {DURATIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+            <MiningSidebar
+              sidebar={overview.sidebar}
+              operators={overview.operators}
+              ingestionPath={overview.ingestionPath}
+            />
+            <MiningAgentTable rows={overview.agentCandidates} />
+          </section>
         </div>
-      </header>
-      <section className="factor-learning-page-body">
-        <FactorLearningPanel symbol={symbol} duration={duration} />
-      </section>
+      ) : null}
     </main>
   );
 }
