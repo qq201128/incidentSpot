@@ -7,6 +7,7 @@ export const STRATEGY_LABELS = {
   high_winrate_factor_combo_v1: "高胜率目标组合",
   high_winrate_factor_combo_v1_top2: "高胜率目标组合·Top2",
   high_winrate_factor_combo_v1_top3: "高胜率目标组合·Top3",
+  ensemble_ranker_v1: "综合裁判模拟策略",
 };
 
 export function strategyLabel(key) {

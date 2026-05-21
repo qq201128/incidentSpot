@@ -172,6 +172,36 @@ export async function updateAutoTradeStrategy(strategyKey, payload) {
   return data;
 }
 
+export async function fetchEnsembleStatus(symbol, duration = "10m") {
+  const { data } = await axios.get(`${BASE_URL}/api/ensemble/status`, {
+    params: { symbol, duration },
+  });
+  return data;
+}
+
+export async function fetchEnsembleRanking(symbol, duration = "10m") {
+  const { data } = await axios.get(`${BASE_URL}/api/ensemble/ranking`, {
+    params: { symbol, duration },
+  });
+  return data;
+}
+
+export async function refreshEnsemble(symbol, duration = "10m") {
+  const { data } = await axios.post(`${BASE_URL}/api/ensemble/refresh`, null, {
+    params: { symbol, duration },
+  });
+  return data;
+}
+
+export async function confirmEnsembleStage(symbol, duration, stage) {
+  const { data } = await axios.post(`${BASE_URL}/api/ensemble/confirm-stage`, {
+    symbol,
+    duration,
+    stage,
+  });
+  return data;
+}
+
 export async function predictDirection(symbol, duration = "10m", limit = 2000, strategyKey) {
   const params = { symbol, duration, limit };
   if (strategyKey) params.strategyKey = strategyKey;

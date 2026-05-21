@@ -14,6 +14,10 @@ from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.high_winrate_strategy_demotion import STATUS_TRADABLE, high_winrate_demotion_status
+from app.services.ensemble_judge_constants import (
+    ENSEMBLE_RANKER_STRATEGY_KEY,
+    STAGE_ENSEMBLE_READY,
+)
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
@@ -64,6 +68,7 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
                     result.append(_settings_from_row(row))
                 else:
                     result.append(_default_settings(key, dur))
+        result.extend(_ensemble_ranker_settings(conn, by_pair))
         return result
     finally:
         conn.close()
@@ -233,6 +238,8 @@ def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
         raise ValueError("model family shadow strategy supports simulation only; live trading must stay disabled")
     if is_batch_combo_simulation_strategy(strategy.key) and settings.live_trading_enabled:
         raise ValueError("batch factor combo strategy supports simulation only; live trading must stay disabled")
+    if strategy.key == ENSEMBLE_RANKER_STRATEGY_KEY and settings.live_trading_enabled:
+        raise ValueError("ensemble_ranker_v1 supports simulation only; live trading must stay disabled")
     symbol = settings.symbol.strip().upper()
     if len(symbol) < 6:
         raise ValueError("symbol must contain at least 6 characters")
@@ -340,6 +347,39 @@ def _demotion_payload(settings: AutoTradeSettings) -> dict[str, Any] | None:
 def _payload_durations(payload: dict[str, Any]) -> list[str]:
     durations = payload.get("supportedDurations") or AUTO_TRADE_SLOT_DURATIONS
     return [duration for duration in AUTO_TRADE_SLOT_DURATIONS if duration in set(durations)]
+
+
+def _ensemble_ranker_settings(conn: Any, by_pair: dict[tuple[str, str], Any]) -> list[AutoTradeSettings]:
+    if not _ensemble_ranker_visible(conn):
+        return []
+    return [
+        _settings_from_row(row) if row is not None else _default_settings(ENSEMBLE_RANKER_STRATEGY_KEY, duration)
+        for duration in AUTO_TRADE_SLOT_DURATIONS
+        for row in [by_pair.get((ENSEMBLE_RANKER_STRATEGY_KEY, duration))]
+    ]
+
+
+def _ensemble_ranker_visible(conn: Any) -> bool:
+    if not _table_exists(conn, "ensemble_stage_status"):
+        return False
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM ensemble_stage_status
+        WHERE confirmed_stage = ?
+        LIMIT 1
+        """,
+        (STAGE_ENSEMBLE_READY,),
+    ).fetchone()
+    return row is not None
+
+
+def _table_exists(conn: Any, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
 
 
 def _row_strategy_key(row: Any) -> str:

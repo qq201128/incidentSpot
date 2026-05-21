@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import AutoStrategyControls from "./AutoStrategyControls";
+import EnsembleJudgePanel from "./EnsembleJudgePanel";
 import EventList from "./EventList";
 import TradeControls from "./TradeControls";
 const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
 
-const PANEL_TABS = /** @type {const} */ (["strategies", "trade", "events"]);
+const PANEL_TABS = /** @type {const} */ (["strategies", "judge", "trade", "events"]);
 
 export default function EventContractPanel({
   symbol,
@@ -36,6 +37,7 @@ export default function EventContractPanel({
   );
   const [clearAllLoading, setClearAllLoading] = useState(false);
   const [panelTab, setPanelTab] = useState(() => _initialPanelTab());
+  const [strategyReloadKey, setStrategyReloadKey] = useState(0);
 
   const aiHistorySuccess = useMemo(() => _aiHistorySuccessByStrategy(events, symbol), [events, symbol]);
   const openEventsCount = useMemo(
@@ -166,6 +168,16 @@ export default function EventContractPanel({
           <button
             type="button"
             role="tab"
+            className={`panel-tab ${panelTab === "judge" ? "is-active" : ""}`}
+            aria-selected={panelTab === "judge"}
+            id="panel-tab-judge"
+            onClick={() => setPanelTab("judge")}
+          >
+            综合裁判
+          </button>
+          <button
+            type="button"
+            role="tab"
             className={`panel-tab ${panelTab === "trade" ? "is-active" : ""}`}
             aria-selected={panelTab === "trade"}
             id="panel-tab-trade"
@@ -192,9 +204,19 @@ export default function EventContractPanel({
           <AutomationCard
             amount={amount}
             clearAllLoading={clearAllLoading}
+            reloadKey={strategyReloadKey}
             onClearAllEvents={onClearAllEvents}
             onClearAllEventsClick={handleClearAllEventsClick}
             symbol={symbol}
+          />
+        </div>
+      )}
+      {panelTab === "judge" && (
+        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-judge">
+          <EnsembleJudgePanel
+            symbol={symbol}
+            duration={predictDurationKey(durationMinutes)}
+            onConfirmed={() => setStrategyReloadKey((value) => value + 1)}
           />
         </div>
       )}
@@ -237,13 +259,13 @@ function _initialPanelTab() {
   return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "trade";
 }
 
-function AutomationCard({ amount, clearAllLoading, onClearAllEvents, onClearAllEventsClick, symbol }) {
+function AutomationCard({ amount, clearAllLoading, reloadKey, onClearAllEvents, onClearAllEventsClick, symbol }) {
   return (
     <div className="card automation-toggles">
       <p className="toggle-hint trade-mode-hint automation-intro">
         每条策略右侧可单独切换「模拟 / 实盘」；同一策略下各结算周期共用该开关。仅对已点亮的周期自动下单；多策略可并行。
       </p>
-      <AutoStrategyControls symbol={symbol} amount={amount} />
+      <AutoStrategyControls symbol={symbol} amount={amount} reloadKey={reloadKey} />
       <p className="toggle-hint trade-mode-hint">
         同一策略在不同周期上的持仓相互独立。
       </p>

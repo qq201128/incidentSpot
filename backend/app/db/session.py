@@ -139,6 +139,37 @@ SCHEMA_MIGRATIONS = (
     PRIMARY KEY (strategy_key, symbol, duration)
   )
   """,
+  """
+  CREATE TABLE IF NOT EXISTS ensemble_stage_status (
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    recommended_stage TEXT NOT NULL,
+    recommendation_reason TEXT NOT NULL,
+    confirmed_stage TEXT,
+    confirmed_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, duration)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS ensemble_signal_scores (
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    signal_key TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    win_rate REAL NOT NULL,
+    avg_return REAL NOT NULL,
+    profit_factor REAL NOT NULL,
+    consecutive_losses INTEGER NOT NULL,
+    stability_score REAL NOT NULL,
+    weight_suggestion REAL NOT NULL,
+    score REAL NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, duration, signal_key)
+  )
+  """,
 )
 
 

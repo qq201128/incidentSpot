@@ -17,6 +17,7 @@ from app.services.binance_event_contract import (
 from app.services.live_order_failure_log import log_live_order_failure
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 from app.services.position_guard import has_open_position
+from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
 from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
 
 
@@ -73,6 +74,8 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
 def _place_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
     if not ctx.live_trading_enabled:
         return _simulated_external_order(ctx)
+    if ctx.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
+        raise HTTPException(status_code=400, detail="ensemble_ranker_v1 supports simulation only")
     try:
         return place_event_contract_order(
             symbol=ctx.symbol,

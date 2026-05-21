@@ -16,6 +16,10 @@ from app.services.model_family_config import (
     model_family_strategy_key,
     parse_model_family_strategy,
 )
+from app.services.ensemble_judge_constants import (
+    ENSEMBLE_RANKER_RULE_NAME,
+    ENSEMBLE_RANKER_STRATEGY_KEY,
+)
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
@@ -85,6 +89,17 @@ STRATEGIES = (
         signal_source="high_winrate_factor_combo_goal",
         rule_names=(HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,),
         requires_kline_features=True,
+        uses_trade_policy_gates=False,
+    ),
+    StrategyDefinition(
+        key=ENSEMBLE_RANKER_STRATEGY_KEY,
+        name="综合裁判模拟策略",
+        description="按候选信号裁判层建议权重综合投票；后端强制仅允许模拟下单。",
+        requires_vegas_confirmation=False,
+        signal_source="ensemble_judge",
+        rule_names=(ENSEMBLE_RANKER_RULE_NAME,),
+        tradable=True,
+        requires_kline_features=False,
         uses_trade_policy_gates=False,
     ),
 )
@@ -196,7 +211,11 @@ def strategy_payloads() -> list[dict]:
 
 
 def _tradable_strategy_definitions() -> tuple[StrategyDefinition, ...]:
-    static = tuple(strategy for strategy in STRATEGIES if strategy.tradable)
+    static = tuple(
+        strategy
+        for strategy in STRATEGIES
+        if strategy.tradable and strategy.key != ENSEMBLE_RANKER_STRATEGY_KEY
+    )
     model_families = tuple(
         _model_family_shadow_strategy_definition(model_family_strategy_key(family, duration))
         for family in MODEL_FAMILIES

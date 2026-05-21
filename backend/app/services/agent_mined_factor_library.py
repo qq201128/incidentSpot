@@ -271,7 +271,7 @@ def _promoted_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _row_quality_passed(row: dict[str, Any]) -> bool:
-    if "qualityPassed" in row:
+    if isinstance(row.get("qualityPassed"), bool):
         return bool(row.get("qualityPassed"))
     metrics = row.get("metrics")
     return isinstance(metrics, dict) and _promotable(metrics)

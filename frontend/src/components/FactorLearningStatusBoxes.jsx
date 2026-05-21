@@ -72,12 +72,30 @@ function PromotionBox({ promotion }) {
       <BoxTitle title="Agent候选结果" count={promotion.promoted ?? 0} />
       <ul>
         <MetricRow label="候选" value={promotion.candidateCount ?? "—"} />
-        <MetricRow label="入库" value={promotion.promoted ?? "—"} />
+        <MetricRow label="本轮入库" value={promotion.promoted ?? "—"} />
         <MetricRow label="未入库" value={records.length ? failed : "—"} />
+        {records.slice(0, 3).map((record) => (
+          <li key={record.factorName || record.formula}>
+            <strong>{record.displayName || record.factorName}</strong>
+            <span>{agentRecordStatus(record)}</span>
+          </li>
+        ))}
       </ul>
       {!records.length ? <p className="factor-learning-empty small">暂无候选回灌结果</p> : null}
     </section>
   );
+}
+
+function agentRecordStatus(record) {
+  if (record.status === "promoted") return "本轮入库";
+  if (record.status === "duplicate_existing") return "重复";
+  if (record.status === "failed") return "失败";
+  if (record.status === "rejected_metrics") {
+    const winRate = formatPct(record.metrics?.winRate, 1);
+    const profitFactor = record.metrics?.profitFactor ?? "—";
+    return `未达标 ${winRate} / PF ${profitFactor}`;
+  }
+  return record.status || "—";
 }
 
 function MonitorBox({ monitoring }) {

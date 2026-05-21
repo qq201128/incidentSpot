@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
 
-export default function AutoStrategyControls({ symbol, amount }) {
+const ENSEMBLE_RANKER_STRATEGY_KEY = "ensemble_ranker_v1";
+
+export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) {
   const [strategies, setStrategies] = useState([]);
   const strategiesRef = useRef([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,7 @@ export default function AutoStrategyControls({ symbol, amount }) {
     return () => {
       stopped = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   /** 交易对或数量变更时同步到已开启的周期槽位（各槽位保留自身实盘开关） */
   useEffect(() => {
@@ -74,6 +76,7 @@ export default function AutoStrategyControls({ symbol, amount }) {
   const toggleStrategyLive = useCallback(
     async (group) => {
       if (group.tradable === false) return;
+      if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return;
       const nextLive = !group.slots.some((s) => s.liveTradingEnabled);
       const busyKey = `${group.strategyKey}:__live__`;
       setUpdatingKey(busyKey);
@@ -137,13 +140,17 @@ export default function AutoStrategyControls({ symbol, amount }) {
                 type="button"
                 className={`strategy-live-mode-btn ${group.slots.some((s) => s.liveTradingEnabled) ? "live" : "sim"}`}
                 aria-pressed={group.slots.some((s) => s.liveTradingEnabled)}
-                disabled={updatingKey === `${group.strategyKey}:__live__` || group.tradable === false}
+                disabled={
+                  updatingKey === `${group.strategyKey}:__live__` ||
+                  group.tradable === false ||
+                  group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY
+                }
                 onClick={() => void toggleStrategyLive(group)}
-                title="该策略下所有结算周期共用此开关；仅对已点亮的周期自动下单。"
+                title={_liveButtonTitle(group)}
               >
                 <span className="mode-dot" />
                 <span className="strategy-live-mode-label">
-                  {group.slots.some((s) => s.liveTradingEnabled) ? "实盘" : "模拟"}
+                  {_liveButtonLabel(group)}
                 </span>
               </button>
             </div>
@@ -215,6 +222,16 @@ function _mergeStrategyRows(setStrategies, rows) {
       return updated ? { ...item, ...updated } : item;
     }),
   );
+}
+
+function _liveButtonLabel(group) {
+  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "仅模拟";
+  return group.slots.some((s) => s.liveTradingEnabled) ? "实盘" : "模拟";
+}
+
+function _liveButtonTitle(group) {
+  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "综合裁判策略后端强制仅模拟。";
+  return "该策略下所有结算周期共用此开关；仅对已点亮的周期自动下单。";
 }
 
 function StrategyBacktestSummary({ summary }) {

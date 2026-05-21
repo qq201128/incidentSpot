@@ -94,6 +94,23 @@ def test_agent_library_summary_counts_only_promoted_rows(monkeypatch, tmp_path: 
     assert [row["qualityPassed"] for row in summary["factors"]] == [True, True]
 
 
+def test_agent_library_summary_recomputes_null_quality_flag(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    _write_existing_library(tmp_path, count=1, rejected_count=1)
+    payload = agent_lib.load_agent_factor_library()
+    payload["factors"][0]["qualityPassed"] = None
+    (tmp_path / "agent_mined_factor_library.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = agent_lib.agent_mined_factor_library_summary("BTCUSDT", "10m")
+
+    assert summary["total"] == 1
+    assert summary["candidateTotal"] == 2
+    assert summary["rejectedTotal"] == 1
+
+
 def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
     _patch_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(factor_mined_candidates, "mined_factor_rows_for_duration", lambda *_args: [])

@@ -15,6 +15,8 @@ from app.services.factor_combo_batch_predictions import (
 from app.services.factor_combo_batch_simulation_service import create_batch_combo_simulation_trade
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_demotion
+from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
+from app.services.ensemble_ranker_prediction_service import predict_ensemble_ranker_prediction
 from app.services.kline_timing import (
     MS_PER_MINUTE,
     current_rule_entry_open_time_for_duration,
@@ -135,13 +137,7 @@ async def _run_prediction(
     write_lock: asyncio.Lock,
 ) -> None:
     entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
-    result = await asyncio.to_thread(
-        predict_rule_direction,
-        settings.symbol,
-        settings.duration,
-        entry_open_time=entry_open_time,
-        strategy_key=settings.strategy_key,
-    )
+    result = await _predict_strategy_result(settings, entry_open_time)
     if not await _save_prediction(result, write_lock):
         await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
         return
@@ -156,6 +152,23 @@ async def _run_prediction(
         result["confidence"],
         result["trade_quality_score"],
         result["trade_quality_passed"],
+    )
+
+
+async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time: int) -> dict:
+    if settings.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
+        return await asyncio.to_thread(
+            predict_ensemble_ranker_prediction,
+            settings.symbol,
+            settings.duration,
+            entry_open_time=entry_open_time,
+        )
+    return await asyncio.to_thread(
+        predict_rule_direction,
+        settings.symbol,
+        settings.duration,
+        entry_open_time=entry_open_time,
+        strategy_key=settings.strategy_key,
     )
 
 

@@ -24,7 +24,8 @@ DEFAULT_PARALLEL_WORKERS = 10
 
 
 def lstm_candidate_retry_enabled() -> bool:
-    raw = os.getenv("LSTM_CANDIDATE_RETRY_ENABLED", "1").strip().lower()
+    """LSTM_CANDIDATE_RETRY_ENABLED: 默认关闭；多策略/集成场景下通常无需后台网格搜索。"""
+    raw = os.getenv("LSTM_CANDIDATE_RETRY_ENABLED", "0").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 

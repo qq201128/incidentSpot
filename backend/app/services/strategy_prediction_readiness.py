@@ -6,6 +6,8 @@ from typing import Any
 from app.services.factor_cache_metadata import cache_is_usable_for_live_signal, live_signal_cache_reason
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
+from app.db.session import get_conn
+from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY, STAGE_ENSEMBLE_READY
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
 RECOVERABLE_REASONS = {
@@ -50,7 +52,27 @@ def strategy_prediction_readiness(
             _recover_high_winrate_ranking,
             attempt_recovery=attempt_recovery,
         )
+    if strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
+        return _ensemble_readiness(symbol, duration)
     return PredictionReadiness(True, "ready")
+
+
+def _ensemble_readiness(symbol: str, duration: str) -> PredictionReadiness:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT confirmed_stage
+            FROM ensemble_stage_status
+            WHERE symbol = ? AND duration = ?
+            """,
+            (symbol.strip().upper(), duration),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is not None and row["confirmed_stage"] == STAGE_ENSEMBLE_READY:
+        return PredictionReadiness(True, "ready")
+    return PredictionReadiness(False, "ensemble_stage_not_confirmed")
 
 
 def _readiness_with_recovery(
