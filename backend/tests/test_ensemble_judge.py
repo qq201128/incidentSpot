@@ -53,6 +53,39 @@ def test_refresh_scores_factor_candidate_signals(monkeypatch, tmp_path: Path) ->
     assert ranking[0]["signalLabel"] == "rsi_14"
 
 
+def test_ranking_includes_unsettled_factor_candidates(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "pending-factor-candidates.db"
+    _init_db(db_path)
+    candidate_key = factor_candidate_signal_key("macd_hist_12_26_9")
+    _insert_predictions(db_path, FACTOR_COMBO_STRATEGY_KEY, 60, settled=True)
+    _insert_predictions(db_path, candidate_key, 3, settled=False, label="macd_hist_12_26_9")
+    _patch_db(monkeypatch, db_path)
+    ensemble_judge_service.refresh_ensemble_judge("btcusdt", "10m")
+
+    ranking = ensemble_judge_service.ensemble_ranking("btcusdt", "10m")["ranking"]
+    pending = next(row for row in ranking if row["signalKey"] == candidate_key)
+
+    assert pending["signalType"] == "indicator"
+    assert pending["signalLabel"] == "macd_hist_12_26_9"
+    assert pending["sampleCount"] == 0
+    assert pending["pendingCount"] == 3
+    assert pending["pendingSettlement"] is True
+
+
+def test_refresh_classifies_combo_shadow_signals(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "combo-shadows.db"
+    _init_db(db_path)
+    _insert_predictions(db_path, f"{FACTOR_COMBO_STRATEGY_KEY}_top2", 60, settled=True)
+    _insert_predictions(db_path, f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top2", 60, settled=True)
+    _patch_db(monkeypatch, db_path)
+
+    ranking = ensemble_judge_service.refresh_ensemble_judge("btcusdt", "10m")["ranking"]
+    by_key = {row["signalKey"]: row for row in ranking}
+
+    assert by_key[f"{FACTOR_COMBO_STRATEGY_KEY}_top2"]["signalType"] == "factor_combo"
+    assert by_key[f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top2"]["signalType"] == "high_winrate_combo"
+
+
 def test_candidate_signals_affect_stage_coverage(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "coverage.db"
     _init_db(db_path)

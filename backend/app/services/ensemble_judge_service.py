@@ -24,6 +24,7 @@ from app.services.ensemble_judge_metrics import (
     score_candidate_rows,
     window_return,
 )
+from app.services.ensemble_ranking_rows import ensemble_candidate_rows, scored_rows
 from app.services.rule_config import DURATION_TO_MINUTES
 
 
@@ -45,7 +46,7 @@ def ensemble_status(symbol: str, duration: str) -> dict[str, Any]:
     conn = get_conn()
     try:
         row = _stage_row(conn, sym, duration)
-        scores = _score_rows(conn, sym, duration)
+        scores = scored_rows(conn, sym, duration)
         return _status_payload(dict(row), scores) if row else _default_status(sym, duration, scores)
     finally:
         conn.close()
@@ -55,8 +56,7 @@ def ensemble_ranking(symbol: str, duration: str) -> dict[str, Any]:
     sym = _symbol(symbol)
     conn = get_conn()
     try:
-        rows = [dict(row) for row in _score_rows(conn, sym, duration)]
-        _attach_signal_labels(conn, sym, duration, rows)
+        rows = ensemble_candidate_rows(conn, sym, duration)
         return {"symbol": sym, "duration": duration, "ranking": ranking_payload(rows)}
     finally:
         conn.close()
@@ -131,7 +131,7 @@ def _upsert_stage_status(conn: Any, symbol: str, duration: str, scores: list[dic
         ),
     )
     row = _stage_row(conn, symbol, duration)
-    return _status_payload(dict(row), _score_rows(conn, symbol, duration))
+    return _status_payload(dict(row), scored_rows(conn, symbol, duration))
 
 
 def _stage_recommendation(conn: Any, symbol: str, duration: str, scores: list[Any]) -> dict[str, str]:
@@ -199,44 +199,6 @@ def _default_status(symbol: str, duration: str, scores: list[Any]) -> dict[str, 
         "updated_at": None,
     }
     return _status_payload(row, scores)
-
-
-def _score_rows(conn: Any, symbol: str, duration: str) -> list[Any]:
-    rows = conn.execute(
-        """
-        SELECT s.*,
-               COALESCE(labels.signal_label, s.signal_key) AS signal_label
-        FROM ensemble_signal_scores s
-        LEFT JOIN (
-          SELECT signal_key,
-                 MAX(COALESCE(NULLIF(high_winrate_rule, ''), NULLIF(model_version, ''), signal_key)) AS signal_label
-          FROM predictions
-          WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
-            AND signal_key != ?
-          GROUP BY signal_key
-        ) labels ON labels.signal_key = s.signal_key
-        WHERE s.symbol = ? AND s.duration = ?
-        """,
-        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration),
-    ).fetchall()
-    return rows
-
-
-def _attach_signal_labels(conn: Any, symbol: str, duration: str, rows: list[dict[str, Any]]) -> None:
-    labels = conn.execute(
-        """
-        SELECT signal_key,
-               MAX(COALESCE(NULLIF(high_winrate_rule, ''), NULLIF(model_version, ''), signal_key)) AS signal_label
-        FROM predictions
-        WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
-          AND signal_key != ?
-        GROUP BY signal_key
-        """,
-        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY),
-    ).fetchall()
-    mapping = {str(row["signal_key"]): str(row["signal_label"] or row["signal_key"]) for row in labels}
-    for row in rows:
-        row["signal_label"] = mapping.get(str(row["signal_key"]), str(row["signal_key"]))
 
 
 def _stage_row(conn: Any, symbol: str, duration: str) -> Any | None:

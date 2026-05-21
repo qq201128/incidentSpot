@@ -42,27 +42,59 @@ const OPERATOR_LABELS = {
 };
 
 const EXACT_FACTOR_LABELS = {
+  close_to_high_20: "20周期收盘接近高点",
+  close_to_low_20: "20周期收盘接近低点",
+  gap_1: "1周期跳空幅度",
   tf_1d_volume_share: "1天成交量占比",
   dollar_volume_ma_20: "20周期成交额均值",
   vol_median_ratio_20: "20周期成交量中位比",
 };
 
 const TOKEN_LABELS = {
+  agent: "Agent",
+  abs: "绝对值",
+  autocorr: "自相关",
   ret: "收益率",
   vol: "成交量",
   ma: "均线",
   ratio: "比率",
+  high: "高点",
+  low: "低点",
+  close: "收盘",
+  to: "接近",
+  chg: "变化",
+  corr: "相关",
+  slope: "斜率",
+  tszscore: "历史标准分",
+  tsrank: "时间序列排名",
   realized: "已实现",
   skew: "偏度",
   bb: "布林带",
+  z: "标准分",
   width: "宽度",
   efficiency: "效率",
   tf: "多周期",
+  h: "小时",
+  m: "分钟",
   volume: "成交量",
   share: "占比",
   dollar: "成交额",
   median: "中位数",
   adx: "趋势强度",
+  atr: "ATR波动",
+  rsi: "RSI",
+  macd: "MACD",
+  stochastic: "随机指标",
+  k: "K值",
+  d: "D值",
+  cci: "CCI",
+  aroon: "Aroon",
+  down: "下行",
+  upper: "上影线",
+  lower: "下影线",
+  shadow: "影线",
+  long: "多头",
+  short: "空头",
 };
 
 export function learningPatternLabel(item, key) {
@@ -82,6 +114,7 @@ export function factorLabel(name) {
   const raw = String(name || "");
   if (!raw) return "—";
   if (EXACT_FACTOR_LABELS[raw]) return EXACT_FACTOR_LABELS[raw];
+  if (raw.startsWith("agent__")) return agentFactorLabel(raw);
   if (raw.startsWith("combo__")) return comboLabel(raw);
   return regexFactorLabel(raw) || tokenizedLabel(raw);
 }
@@ -128,6 +161,12 @@ function regexFactorLabel(raw) {
 function comboLabel(raw) {
   const names = comboLeafNames(raw).map(factorLabel);
   return `组合：${names.join(" + ")}`;
+}
+
+function agentFactorLabel(raw) {
+  const core = raw.replace(/^agent__/, "").replace(/__[0-9a-f]{8,}$/i, "");
+  const label = regexFactorLabel(core) || tokenizedLabel(core);
+  return label === "自定义因子" ? "Agent单因子" : `Agent${label}`;
 }
 
 function comboLeafNames(raw) {

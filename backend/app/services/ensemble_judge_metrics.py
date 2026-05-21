@@ -10,22 +10,11 @@ from app.services.ensemble_judge_constants import (
     MAJOR_SIGNAL_TYPES,
     RECENT_WINDOW_COUNT,
     SIGNAL_FACTOR_CANDIDATE,
-    SIGNAL_FACTOR_COMBO,
-    SIGNAL_HIGH_WINRATE_COMBO,
-    SIGNAL_MODEL_FAMILY,
-    SIGNAL_OTHER,
     WEIGHT_READY_SAMPLE_COUNT,
 )
-from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
-from app.services.factor_combo_simulation_keys import (
-    BATCH_COMBO_KEY_PREFIX,
-    BATCH_HIGH_WINRATE_KEY_PREFIX,
-)
-from app.services.factor_combo_display import short_factor_label
-from app.services.model_family_config import is_model_family_shadow_strategy
-from app.services.strategy_registry import (
-    FACTOR_COMBO_STRATEGY_KEY,
-    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+from app.services.ensemble_signal_identity import (
+    signal_label,
+    signal_type,
 )
 
 EPSILON = 1e-9
@@ -46,6 +35,24 @@ class SignalMetrics:
 
 def score_candidate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [_score_signal(metric) for metric in _group_metrics(rows)]
+
+
+def unscored_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
+    rows = [row]
+    return {
+        "signal_key": str(row["signal_key"]),
+        "signal_type": signal_type(str(row["signal_key"]), rows),
+        "signal_label": signal_label(str(row["signal_key"]), rows),
+        "sample_count": 0,
+        "win_rate": 0.0,
+        "avg_return": 0.0,
+        "profit_factor": 0.0,
+        "consecutive_losses": 0,
+        "stability_score": 0.0,
+        "weight_suggestion": 0.0,
+        "score": 0.0,
+        "pending_count": int(row.get("pending_count") or 0),
+    }
 
 
 def ranking_payload(rows: list[Any]) -> list[dict[str, Any]]:
@@ -87,7 +94,7 @@ def _group_metrics(rows: list[dict[str, Any]]) -> tuple[SignalMetrics, ...]:
     for row in rows:
         grouped.setdefault(str(row["signal_key"]), []).append(row)
     return tuple(
-        SignalMetrics(key, _signal_type(key, items), _signal_label(key, items), tuple(items))
+        SignalMetrics(key, signal_type(key, items), signal_label(key, items), tuple(items))
         for key, items in sorted(grouped.items())
     )
 
@@ -133,6 +140,8 @@ def _score_payload(row: Any) -> dict[str, Any]:
         "stabilityScore": row["stability_score"],
         "weightSuggestion": row["weight_suggestion"],
         "score": row["score"],
+        "pendingCount": int(row.get("pending_count") or 0),
+        "pendingSettlement": sample_count == 0 and int(row.get("pending_count") or 0) > 0,
         "lowSample": sample_count < LOW_SAMPLE_LIMIT,
         "insufficientSample": sample_count < WEIGHT_READY_SAMPLE_COUNT,
         "weakSignal": weak,
@@ -248,67 +257,6 @@ def _ranking_score(count: int, win_rate: float, avg_return: float, pf: float, st
         win_rate_score * 35 + profit_factor_score * 20 + avg_return_score * 15
         + stability * 15 + sample_score * 10 - drawdown_penalty * 5
     )
-
-
-def _signal_type(strategy_key: str, rows: list[dict[str, Any]] | None = None) -> str:
-    if strategy_key == HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
-        return SIGNAL_HIGH_WINRATE_COMBO
-    if strategy_key.startswith(BATCH_HIGH_WINRATE_KEY_PREFIX):
-        return SIGNAL_HIGH_WINRATE_COMBO
-    if strategy_key == FACTOR_COMBO_STRATEGY_KEY:
-        return SIGNAL_FACTOR_COMBO
-    if strategy_key.startswith(BATCH_COMBO_KEY_PREFIX):
-        return SIGNAL_FACTOR_COMBO
-    if is_factor_candidate_signal_key(strategy_key):
-        return _candidate_signal_type(rows)
-    if is_model_family_shadow_strategy(strategy_key):
-        return SIGNAL_MODEL_FAMILY
-    return SIGNAL_OTHER
-
-
-def _signal_label(strategy_key: str, rows: list[dict[str, Any]] | None = None) -> str:
-    if is_factor_candidate_signal_key(strategy_key):
-        return _candidate_signal_label(rows)
-    if rows:
-        row = rows[-1]
-        label = str(row.get("high_winrate_rule") or row.get("model_version") or "")
-        if label:
-            return label
-    return short_factor_label(strategy_key)
-
-
-def _candidate_signal_type(rows: list[dict[str, Any]] | None) -> str:
-    row = rows[-1] if rows else None
-    label = str((row or {}).get("high_winrate_rule") or (row or {}).get("model_version") or "").lower()
-    if label.startswith(
-        (
-            "rsi_",
-            "macd",
-            "ema_",
-            "sma_",
-            "stochastic_",
-            "williams_",
-            "cci_",
-            "aroon_",
-            "dmi_",
-            "adx_",
-            "atr_",
-            "ppo_",
-            "tsi_",
-            "ultimate_",
-            "volume_",
-            "ret_",
-            "log_ret_",
-        )
-    ):
-        return "indicator"
-    return SIGNAL_FACTOR_CANDIDATE
-
-
-def _candidate_signal_label(rows: list[dict[str, Any]] | None) -> str:
-    row = rows[-1] if rows else None
-    label = str((row or {}).get("high_winrate_rule") or (row or {}).get("model_version") or "")
-    return label or "因子候选信号"
 
 
 def _clamp(value: float) -> float:
