@@ -29,7 +29,12 @@ export default function FactorAdaptiveLearningPanel({
         <Metric label="候选记录" value={summary.candidates} />
       </div>
 
-      <ModelFamilyBoard families={modelRows} onSearchCandidates={onSearchCandidates} searchStatus={searchStatus} />
+      <ModelFamilyBoard
+        families={modelRows}
+        onSearchCandidates={onSearchCandidates}
+        searchStatus={searchStatus}
+        onRescanCandidates={(family) => onSearchCandidates?.(family, { resetHistory: true })}
+      />
 
       <div className="factor-adaptive-insight">
         <strong>智能学习洞察：</strong>

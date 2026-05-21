@@ -47,6 +47,7 @@ class LstmCandidateRetryConfig:
     profile: str = EXPERIMENT_PROFILE_FAST
     search: LstmCandidateSearchConfig = LstmCandidateSearchConfig()
     manual_trigger: bool = False
+    reset_history: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ def validated_lstm_candidate_retry_config(config: LstmCandidateRetryConfig) -> L
         profile=profile,
         search=config.search,
         manual_trigger=config.manual_trigger,
+        reset_history=config.reset_history,
     )
 
 
@@ -182,7 +184,7 @@ def _next_search_configs(
         symbol=symbol,
         duration=duration,
         profile=config.profile,
-        attempted_keys=deps.attempted_keys(symbol, duration),
+        attempted_keys=frozenset() if config.reset_history else deps.attempted_keys(symbol, duration),
         search_config=config.search,
     )
     return next_candidate_configs(request)

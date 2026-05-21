@@ -54,7 +54,7 @@ async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> N
 
 
 def list_auto_trade_settings() -> list[AutoTradeSettings]:
-    """每个可交易策略 × 每个结算周期一条配置（可同时开启多周期）。"""
+    """每个可交易执行项 × 每个结算周期一条配置（可同时开启多周期）。"""
     conn = get_conn()
     try:
         rows = conn.execute("SELECT * FROM auto_trade_strategies").fetchall()

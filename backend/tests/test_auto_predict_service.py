@@ -8,6 +8,7 @@ from app.services.factor_combo_simulation_keys import (
     factor_combo_shadow_strategy_key,
     simulation_strategy_key_for_factor_name,
 )
+from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_prediction_readiness import PredictionReadiness
@@ -101,6 +102,7 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
         lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
     )
     monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
     monkeypatch.setattr(
         service,
         "eligible_factor_combo_rows",
@@ -111,6 +113,7 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
         "prediction_exists",
         lambda **kwargs: calls.append(kwargs["strategy_key"]) or True,
     )
+    monkeypatch.setattr(service, "factor_candidate_signal_keys", lambda *_args: ())
     monkeypatch.setattr(
         service,
         "missing_lstm_shadow_entry_times",
@@ -118,15 +121,11 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     )
 
     assert service._should_predict_entry(_settings(FACTOR_COMBO_STRATEGY_KEY))
-    assert calls == [
-        FACTOR_COMBO_STRATEGY_KEY,
-        simulation_strategy_key_for_factor_name("combo__a"),
-        simulation_strategy_key_for_factor_name("combo__b"),
-    ]
+    assert calls == [FACTOR_COMBO_STRATEGY_KEY]
     assert missing_calls == [("BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME)]
 
 
-def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
+def test_candidate_collection_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
     saved = []
     trades = []
 
@@ -145,6 +144,7 @@ def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch
         lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
     )
     monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", _batch_predictions)
+    monkeypatch.setattr(service, "predict_factor_candidate_signals", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
     monkeypatch.setattr(service, "create_batch_combo_simulation_trade", lambda settings, result: trades.append(result["strategy_key"]))
     monkeypatch.setattr(service, "prediction_response", lambda result: result)
@@ -154,21 +154,24 @@ def test_factor_combo_prediction_saves_top_two_and_three_shadow_rows(monkeypatch
         "lstm_model_status",
         lambda *_args: {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "torch_unavailable"},
     )
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
 
-    asyncio.run(service._run_prediction(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock()))
+    asyncio.run(
+        service._save_candidate_collection_predictions(
+            _settings(FACTOR_COMBO_STRATEGY_KEY),
+            write_lock=asyncio.Lock(),
+        )
+    )
 
     assert saved == [
-        (FACTOR_COMBO_STRATEGY_KEY, False),
         (simulation_strategy_key_for_factor_name("combo__a"), False),
         (simulation_strategy_key_for_factor_name("combo__b"), False),
     ]
     assert trades == [simulation_strategy_key_for_factor_name("combo__a"), simulation_strategy_key_for_factor_name("combo__b")]
 
 
-def test_factor_combo_existing_primary_still_saves_lstm_shadow(monkeypatch) -> None:
+def test_factor_combo_existing_primary_does_not_save_candidates_inline(monkeypatch) -> None:
     saved = []
-    broadcasts = []
-    lstm_key = lstm_shadow_strategy_key(DEFAULT_DURATION)
 
     async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
         saved.append((result["strategy_key"], allow_existing))
@@ -185,24 +188,189 @@ def test_factor_combo_existing_primary_still_saves_lstm_shadow(monkeypatch) -> N
         lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
     )
     monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", _batch_predictions)
+    monkeypatch.setattr(service, "predict_factor_candidate_signals", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         service,
         "predict_lstm_shadow_prediction",
-        lambda *_args, **_kwargs: _prediction(lstm_key, symbol="BTCUSDT", duration=DEFAULT_DURATION),
+        lambda *_args, **_kwargs: _prediction(
+            lstm_shadow_strategy_key(DEFAULT_DURATION),
+            symbol="BTCUSDT",
+            duration=DEFAULT_DURATION,
+        ),
     )
     monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
-    monkeypatch.setattr(service, "_broadcast", lambda result: broadcasts.append(result))
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
 
     asyncio.run(service._run_prediction(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock()))
 
-    assert saved == [
-        (FACTOR_COMBO_STRATEGY_KEY, False),
-        (simulation_strategy_key_for_factor_name("combo__a"), False),
-        (simulation_strategy_key_for_factor_name("combo__b"), False),
-        (lstm_key, False),
+    assert saved == [(FACTOR_COMBO_STRATEGY_KEY, False)]
+
+
+def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> None:
+    saved = []
+    candidate_key = factor_candidate_signal_key("rsi_14")
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_rule_direction",
+        lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
+    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        service,
+        "predict_factor_candidate_signals",
+        lambda symbol, duration, **_kwargs: [_prediction(candidate_key, symbol=symbol, duration=duration)],
+    )
+    monkeypatch.setattr(
+        service,
+        "lstm_model_status",
+        lambda *_args: {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "torch_unavailable"},
+    )
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "prediction_response", lambda result: result)
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+
+    asyncio.run(
+        service._save_candidate_collection_predictions(
+            _settings(FACTOR_COMBO_STRATEGY_KEY),
+            write_lock=asyncio.Lock(),
+        )
+    )
+
+    assert saved == [(candidate_key, False)]
+
+
+def test_factor_candidate_collection_failure_is_exposed(monkeypatch) -> None:
+    saved = []
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_rule_direction",
+        lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
+    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        service,
+        "predict_factor_candidate_signals",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("candidate failed")),
+    )
+    monkeypatch.setattr(
+        service,
+        "lstm_model_status",
+        lambda *_args: {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "torch_unavailable"},
+    )
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "prediction_response", lambda result: result)
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+
+    try:
+        asyncio.run(
+            service._save_candidate_collection_predictions(
+                _settings(FACTOR_COMBO_STRATEGY_KEY),
+                write_lock=asyncio.Lock(),
+            )
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "candidate failed"
+    else:
+        raise AssertionError("candidate collection failure was not exposed")
+
+    assert saved == []
+
+
+def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatch) -> None:
+    calls = []
+    targets = [_settings(FACTOR_COMBO_STRATEGY_KEY)]
+
+    async def prepare(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("prepare", [(item.strategy_key, item.duration) for item in settings_list]))
+
+    async def run_batch(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("run_batch", len(settings_list)))
+
+    async def collect(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("collect", [(item.strategy_key, item.duration) for item in settings_list]))
+
+    async def backfill(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("backfill", [(item.strategy_key, item.duration) for item in settings_list]))
+
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: targets)
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
+    monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
+
+    asyncio.run(service._predict_due_entries(targets))
+
+    assert calls == [
+        ("prepare", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
+        ("collect", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
+        ("backfill", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
     ]
-    assert broadcasts == []
+
+
+def test_candidate_collection_uses_factor_combo_source_for_non_combo_strategy(monkeypatch) -> None:
+    saved = []
+    candidate_key = factor_candidate_signal_key("rsi_14")
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_rule_direction",
+        lambda symbol, duration, **kwargs: _prediction(kwargs["strategy_key"], symbol=symbol, duration=duration),
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_factor_candidate_signals",
+        lambda symbol, duration, **_kwargs: [_prediction(candidate_key, symbol=symbol, duration=duration)],
+    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        service,
+        "lstm_model_status",
+        lambda *_args: {"shadowPredictionReady": False, "shadowPredictionBlockedReason": "torch_unavailable"},
+    )
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "prediction_response", lambda result: result)
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+
+    target = service._collection_settings(_settings(HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY))
+    asyncio.run(service._save_candidate_collection_predictions(target, write_lock=asyncio.Lock()))
+
+    assert target.strategy_key == FACTOR_COMBO_STRATEGY_KEY
+    assert saved == [(candidate_key, False)]
 
 
 def test_lstm_strategy_prediction_saves_own_simulation_row(monkeypatch) -> None:
@@ -360,9 +528,14 @@ def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions
     async def prepare(settings_list: list[AutoTradeSettings]) -> None:
         calls.append(("prepare", len(settings_list)))
 
+    async def collect(_settings_list: list[AutoTradeSettings]) -> None:
+        return None
+
     monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda items: items)
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _items: [])
     monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
     monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
     monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
 
     asyncio.run(service._predict_due_entries(targets))

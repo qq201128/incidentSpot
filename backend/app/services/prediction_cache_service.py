@@ -8,13 +8,13 @@ from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 
 
 INSERT_PREDICTION_SQL = """INSERT INTO predictions(
-  strategy_key, symbol, duration, open_time, direction, probability_up, confidence,
+  signal_key, strategy_key, symbol, duration, open_time, direction, probability_up, confidence,
   certainty_label, trade_quality_score, trade_quality_passed, trade_quality_gate,
   high_winrate_gate, high_winrate_rule, high_winrate_gate_passed,
   high_winrate_gate_value, high_winrate_gate_min, entry_price, expected_return,
   model_version, feature_window, model_duration, model_trained_at, created_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
 
 def save_prediction(result: dict, *, allow_existing: bool = False) -> bool:
@@ -31,7 +31,8 @@ def save_prediction(result: dict, *, allow_existing: bool = False) -> bool:
 
 def prediction_exists(
     *,
-    strategy_key: str,
+    strategy_key: str | None = None,
+    signal_key: str | None = None,
     symbol: str,
     duration: str,
     open_time: int,
@@ -39,6 +40,7 @@ def prediction_exists(
     conn = get_conn()
     try:
         request = {
+            "signal_key": signal_key,
             "strategy_key": strategy_key,
             "symbol": symbol,
             "duration": duration,
@@ -53,11 +55,11 @@ def prediction_exists_conn(conn, request: dict) -> bool:
     row = conn.execute(
         """
         SELECT 1 FROM predictions
-        WHERE strategy_key = ? AND symbol = ? AND duration = ? AND open_time = ?
+        WHERE signal_key = ? AND symbol = ? AND duration = ? AND open_time = ?
         LIMIT 1
         """,
         (
-            _strategy_key(request),
+            _signal_key(request),
             request["symbol"].upper(),
             request["duration"],
             int(request["open_time"]),
@@ -71,23 +73,24 @@ def get_latest_prediction(
     duration: str,
     *,
     strategy_key: str = DEFAULT_STRATEGY_KEY,
+    signal_key: str | None = None,
 ) -> dict:
     conn = get_conn()
     row = conn.execute(
         """
         SELECT
-          strategy_key, symbol, duration, open_time, direction, probability_up, confidence, certainty_label,
+          signal_key, strategy_key, symbol, duration, open_time, direction, probability_up, confidence, certainty_label,
           trade_quality_score, trade_quality_passed, trade_quality_gate,
           high_winrate_gate, high_winrate_rule, high_winrate_gate_passed,
           high_winrate_gate_value, high_winrate_gate_min, entry_price, exit_price,
           actual_return, prediction_correct, settled_at, expected_return,
           model_version, feature_window, model_duration, model_trained_at, created_at
         FROM predictions
-        WHERE strategy_key = ? AND symbol = ? AND duration = ?
+        WHERE signal_key = ? AND symbol = ? AND duration = ?
         ORDER BY id DESC
         LIMIT 1
         """,
-        (strategy_key, symbol.upper(), duration),
+        (signal_key or strategy_key, symbol.upper(), duration),
     ).fetchone()
     conn.close()
     if row is None:
@@ -101,6 +104,7 @@ def prediction_response(result: dict) -> dict:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     return {
         "symbol": result["symbol"],
+        "signalKey": _signal_key(result),
         "strategyKey": _strategy_key(result),
         "duration": result["duration"],
         "direction": result["direction"],
@@ -140,7 +144,7 @@ def prediction_response(result: dict) -> dict:
 
 def _prediction_values(result: dict) -> tuple:
     return (
-        _strategy_key(result), result["symbol"], result["duration"], result["open_time"],
+        _signal_key(result), _strategy_key(result), result["symbol"], result["duration"], result["open_time"],
         result["direction"], result["probability_up"], result["confidence"],
         result["certainty_label"], result.get("trade_quality_score"),
         int(bool(result.get("trade_quality_passed"))), result.get("trade_quality_gate"),
@@ -150,6 +154,10 @@ def _prediction_values(result: dict) -> tuple:
         result.get("model_version"), result.get("feature_window"), result.get("model_duration"),
         result.get("model_trained_at"), _utc_now_iso(),
     )
+
+
+def _signal_key(result: dict) -> str:
+    return str(result.get("signal_key") or result.get("strategy_key") or DEFAULT_STRATEGY_KEY)
 
 
 def _strategy_key(result: dict) -> str:

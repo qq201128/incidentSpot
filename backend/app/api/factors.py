@@ -11,6 +11,7 @@ from app.services.factor_catalog_summaries import (
     list_combo_factor_summaries,
     list_single_factor_summaries,
 )
+from app.services.factor_combo_metrics import combo_metrics_for_factor, combo_period_scores
 from app.services.factor_ranking_background import refresh_symbol_rankings
 from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
@@ -123,6 +124,8 @@ def factor_period_scores(
     factor_name: str,
     symbol: str = Query(..., min_length=6),
 ) -> dict:
+    if _is_combo_factor(factor_name):
+        return combo_period_scores(symbol, factor_name)
     return build_factor_period_scores(symbol, factor_name)
 
 
@@ -139,7 +142,7 @@ def get_factor_detail(
     if symbol and duration:
         if duration not in SUPPORTED_RULE_DURATIONS:
             raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
-        metrics = ranking_metrics_for_factor(symbol.upper(), duration, factor_name)
+        metrics = _metrics_for_factor(symbol.upper(), duration, factor_name)
         if metrics:
             enriched = enrich_factor_summary(payload, metrics)
     return enriched
@@ -261,3 +264,13 @@ def _stale_factor_ranking(
 @router.get("/categories")
 def get_categories() -> dict:
     return {"categories": list_single_factor_categories()}
+
+
+def _metrics_for_factor(symbol: str, duration: str, factor_name: str) -> dict | None:
+    if _is_combo_factor(factor_name):
+        return combo_metrics_for_factor(symbol, duration, factor_name)
+    return ranking_metrics_for_factor(symbol, duration, factor_name)
+
+
+def _is_combo_factor(factor_name: str) -> bool:
+    return factor_name.startswith("combo__") or factor_name.startswith("goal_combo__")

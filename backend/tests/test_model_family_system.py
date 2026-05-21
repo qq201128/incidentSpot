@@ -203,6 +203,46 @@ def test_candidate_search_publishes_initial_baseline_when_untrained(monkeypatch)
     assert training_calls[-1][1]["publish_initial_baseline"] is True
 
 
+def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> None:
+    config = search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1, reset_history=True)
+    base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+    requested = []
+
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset({"already_tried"}))
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda _base, _profile, attempted: requested.append(attempted) or [base])
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_model_family", lambda *_args, **_kwargs: _report("validation_failed", 0.52, 1))
+
+    result = search_service.run_model_candidate_search(config)
+
+    assert result["status"] == "validation_failed"
+    assert requested[0] == frozenset()
+
+
+def test_model_candidate_search_finishes_progress(monkeypatch) -> None:
+    calls = []
+    config = search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: [base])
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_start", kwargs["total"])) or {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_complete", args[3])) or {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_finish", kwargs["status"])) or {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_model_family", lambda *_args, **_kwargs: _report("validation_failed", 0.52, 1))
+
+    result = search_service.run_model_candidate_search(config)
+
+    assert result["status"] == "validation_failed"
+    assert calls[-1] == ("progress_finish", "validation_failed")
+
+
 def test_exhausted_candidate_search_uses_library_status(monkeypatch) -> None:
     captured = {}
     library = {"records": [_report("validation_failed", 0.52, 1), _report("validation_failed", 0.54, 2)]}

@@ -90,7 +90,7 @@ export function modelFamilyLabel(family) {
     svm: "SVM",
     bayesian: "Bayesian",
     knn: "KNN",
-    rl_strategy: "RL策略",
+    rl_strategy: "RL执行",
   };
   return labels[family] || "模型族";
 }

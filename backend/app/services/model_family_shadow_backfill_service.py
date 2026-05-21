@@ -60,7 +60,7 @@ def _existing_prediction_times(family: str, symbol: str, duration: str, start_op
             """
             SELECT open_time
             FROM predictions
-            WHERE strategy_key = ? AND symbol = ? AND duration = ?
+            WHERE signal_key = ? AND symbol = ? AND duration = ?
               AND open_time BETWEEN ? AND ?
             """,
             (model_family_strategy_key(family, duration), symbol, duration, int(start_open_time), int(end_open_time)),

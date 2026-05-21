@@ -5,16 +5,23 @@ import "./EnsembleJudgePanel.css";
 const STAGE_LABELS = {
   observe: "观察中",
   weight_ready: "可启用降权",
-  ensemble_ready: "可模拟综合",
+  ensemble_ready: "可模拟裁判",
 };
 
 const STAGE_HINTS = {
   observe: "样本或覆盖不足，暂不推荐升阶",
   weight_ready: "可对弱势信号降权，继续观察",
-  ensemble_ready: "满足综合模拟条件，可确认启用",
+  ensemble_ready: "满足裁判模拟条件，可确认启用",
 };
 
-export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
+const SIGNAL_TYPE_LABELS = {
+  factor_combo: "组合",
+  high_winrate_combo: "高胜率",
+  model_family: "模型族",
+  factor_candidate: "候选",
+};
+
+export default function EnsembleJudgePanel({ symbol, duration, onConfirmed, onRefreshed }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,6 +69,7 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
     try {
       const data = await refreshEnsemble(symbol, duration);
       setStatus(data?.status || null);
+      onRefreshed?.();
     } catch (err) {
       setError(_errorMessage(err, "刷新综合裁判失败"));
     } finally {
@@ -92,7 +100,7 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
     <div className="ensemble-card">
       <header className="ensemble-head">
         <div>
-          <strong className="ensemble-title">综合裁判</strong>
+          <strong className="ensemble-title">信号裁判</strong>
           <span className="ensemble-subtitle">
             {symbol} · {durationLabel}
             {status?.updatedAt ? ` · 更新 ${_formatTime(status.updatedAt)}` : ""}
@@ -104,7 +112,7 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
           onClick={() => void handleRefresh()}
           disabled={refreshing || busy === "confirm"}
         >
-          {refreshing ? "刷新中…" : "刷新统计"}
+          {refreshing ? "刷新中…" : "刷新裁判"}
         </button>
       </header>
 
@@ -128,7 +136,7 @@ export default function EnsembleJudgePanel({ symbol, duration, onConfirmed }) {
 
       <div className="ensemble-reason-block">
         <span className="ensemble-reason-label">推荐 / 阻断原因</span>
-        <p className="ensemble-reason">{status?.recommendationReason || "请点击「刷新统计」生成推荐"}</p>
+        <p className="ensemble-reason">{status?.recommendationReason || "请点击「刷新裁判」生成推荐"}</p>
       </div>
       <div className="ensemble-actions">
         {canConfirm ? (
@@ -168,18 +176,33 @@ function CoverageSummary({ coverage }) {
   const days = coverage.distinctTradingDays ?? 0;
   const maxLoss = coverage.maxConsecutiveLosses ?? 0;
   const pfWarn = Boolean(coverage.recentProfitFactorBelowOne);
+  const readyCount = coverage.readySignalTypeCount ?? _readySignalTypeCount(coverage.bySignalType);
+  const requiredCount = coverage.requiredSignalTypeCount ?? Object.keys(SIGNAL_TYPE_LABELS).length;
+  const sourceText = _sourceCoverageText(coverage.bySignalType);
   return (
     <div className="ensemble-coverage">
       <span>结算样本 {sampleCount}</span>
       <span>覆盖 {days} 个交易日</span>
       <span>最大连亏 {maxLoss}</span>
+      <span>达标信号源 {readyCount}/{requiredCount}</span>
+      {sourceText ? <span title={sourceText}>来源 {sourceText}</span> : null}
       {pfWarn ? <span className="is-warn">近期 PF&lt;1</span> : <span className="is-ok">近期 PF 正常</span>}
     </div>
   );
 }
 
+function _readySignalTypeCount(bySignalType = {}) {
+  return Object.values(bySignalType).filter((item) => Number(item?.sampleCount || 0) >= 200).length;
+}
+
+function _sourceCoverageText(bySignalType = {}) {
+  return Object.entries(SIGNAL_TYPE_LABELS)
+    .map(([key, label]) => `${label} ${Number(bySignalType[key]?.sampleCount || 0)}`)
+    .join(" / ");
+}
+
 function _stageVariant(stage) {
-  if (stage === "ensemble_ready" || stage === "综合模拟已启用") return "ready";
+  if (stage === "ensemble_ready" || stage === "裁判模拟已启用") return "ready";
   if (stage === "weight_ready" || stage === "可启用降权") return "weight";
   if (stage === "observe" || stage === "观察中") return "observe";
   if (stage === "模拟可用") return "ready";
@@ -188,7 +211,7 @@ function _stageVariant(stage) {
 }
 
 function _simulationState(status) {
-  if (status?.confirmedStage === "ensemble_ready") return "综合模拟已启用";
+  if (status?.confirmedStage === "ensemble_ready") return "裁判模拟已启用";
   if (status?.confirmedStage === "weight_ready") return "观察期";
   if (status?.confirmedStage === "observe") return "仅观察";
   return "未启用";

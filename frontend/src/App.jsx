@@ -54,7 +54,7 @@ export default function App() {
     async (strategyKey) => {
       await deleteEventsByStrategy(strategyKey);
       await reloadWorkbench({ rethrow: true });
-      setStatus(`已清除「${strategyLabel(strategyKey)}」策略的事件`);
+      setStatus(`已清除「${strategyLabel(strategyKey)}」执行事件`);
     },
     [reloadWorkbench],
   );

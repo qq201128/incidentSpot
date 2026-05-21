@@ -40,9 +40,9 @@ def _settled_prediction_rows(symbol: str, duration: str) -> list[dict[str, Any]]
             f"""
             SELECT open_time, direction, confidence, trade_quality_score,
                    trade_quality_passed, actual_return, prediction_correct,
-                   high_winrate_rule, strategy_key
+                   high_winrate_rule, signal_key, strategy_key
             FROM predictions
-            WHERE strategy_key IN ({placeholders}) AND symbol = ? AND duration = ?
+            WHERE signal_key IN ({placeholders}) AND symbol = ? AND duration = ?
               AND settled_at IS NOT NULL
             ORDER BY open_time DESC
             LIMIT ?

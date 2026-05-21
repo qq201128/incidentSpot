@@ -38,7 +38,7 @@ def _comparison_rows(symbol: str, duration: str) -> list[dict[str, Any]]:
     strategy_keys = [factor_combo_simulation_strategy_key(rank) for rank in FACTOR_COMBO_TOP_SIMULATION_RANKS]
     strategy_keys.append(lstm_shadow_strategy_key(duration))
     rows = _settled_rows(symbol, strategy_keys, duration=duration)
-    return [_strategy_stats(key, [row for row in rows if row["strategy_key"] == key]) for key in strategy_keys]
+    return [_strategy_stats(key, [row for row in rows if row["signal_key"] == key]) for key in strategy_keys]
 
 
 def _settled_rows(symbol: str, strategy_keys: list[str], duration: str | None) -> list[dict[str, Any]]:
@@ -51,10 +51,10 @@ def _settled_rows(symbol: str, strategy_keys: list[str], duration: str | None) -
     try:
         rows = conn.execute(
             f"""
-            SELECT strategy_key, symbol, duration, open_time, direction,
+            SELECT signal_key, strategy_key, symbol, duration, open_time, direction,
                    actual_return, prediction_correct, model_version, feature_window
             FROM predictions
-            WHERE strategy_key IN ({placeholders}) AND symbol = ?
+            WHERE signal_key IN ({placeholders}) AND symbol = ?
               AND settled_at IS NOT NULL {duration_sql}
             ORDER BY open_time
             """,

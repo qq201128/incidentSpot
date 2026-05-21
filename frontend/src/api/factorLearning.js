@@ -38,13 +38,20 @@ export async function fetchModelFamilyStatus(family, symbol, duration = "10m", o
   return data;
 }
 
-export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "full") {
-  return requestModelCandidateSearch("lstm", symbol, duration, profile);
+export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "full", options = {}) {
+  return requestModelCandidateSearch("lstm", symbol, duration, profile, options.parallelWorkers, options.resetHistory);
 }
 
-export async function requestModelCandidateSearch(family, symbol, duration = "10m", profile = "full", parallelWorkers = 10) {
+export async function requestModelCandidateSearch(
+  family,
+  symbol,
+  duration = "10m",
+  profile = "full",
+  parallelWorkers = 10,
+  resetHistory = false,
+) {
   const { data } = await axios.post(`${API_BASE_URL}/api/models/${family}/candidate-search`, null, {
-    params: { symbol, duration, profile, parallelWorkers },
+    params: { symbol, duration, profile, parallelWorkers, resetHistory },
     timeout: REFRESH_QUEUE_TIMEOUT_MS,
   });
   return data;

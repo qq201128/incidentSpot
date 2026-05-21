@@ -16,7 +16,7 @@ import {
 } from "./ModelFamilyBoardLabels";
 import "./ModelFamilyBoard.css";
 
-export default function ModelFamilyBoard({ families, onSearchCandidates, searchStatus }) {
+export default function ModelFamilyBoard({ families, onSearchCandidates, onRescanCandidates, searchStatus }) {
   if (!families.length) return <p className="factor-learning-empty small">模型族状态加载中</p>;
   const searchState = normalizedSearchState(searchStatus);
   const allRunning = searchState.status === "running" && searchState.family === "__all__";
@@ -39,6 +39,7 @@ export default function ModelFamilyBoard({ families, onSearchCandidates, searchS
             key={shadow.modelFamily || shadow.strategyKey}
             shadow={shadow}
             onSearchCandidates={onSearchCandidates}
+            onRescanCandidates={onRescanCandidates}
             searchStatus={searchState}
           />
         ))}
@@ -47,7 +48,7 @@ export default function ModelFamilyBoard({ families, onSearchCandidates, searchS
   );
 }
 
-function ModelShadowCard({ shadow, onSearchCandidates, searchStatus }) {
+function ModelShadowCard({ shadow, onSearchCandidates, onRescanCandidates, searchStatus }) {
   const ready = predictionReady(shadow);
   const progress = shadow.candidateSearchProgress || {};
   const library = shadow.candidateLibrary || {};
@@ -60,6 +61,7 @@ function ModelShadowCard({ shadow, onSearchCandidates, searchStatus }) {
         searchActive={searchActive}
         searchLabel={candidateSearchLabel(progress, searchStatus)}
         onSearchCandidates={onSearchCandidates}
+        onRescanCandidates={onRescanCandidates}
       />
       <CandidateProgress progress={progress} />
       <div className="factor-lstm-grid">
@@ -89,11 +91,11 @@ function ModelShadowCard({ shadow, onSearchCandidates, searchStatus }) {
   );
 }
 
-function ModelCardHead({ shadow, searchActive, searchLabel, onSearchCandidates }) {
+function ModelCardHead({ shadow, searchActive, searchLabel, onSearchCandidates, onRescanCandidates }) {
   return (
     <div className="factor-lstm-card-head">
       <div>
-        <span className="section-kicker">{modelFamilyLabel(shadow.modelFamily)} 影子策略</span>
+        <span className="section-kicker">{modelFamilyLabel(shadow.modelFamily)} 影子执行</span>
         <h4>{statusLabel(shadow.status)}</h4>
         <p>{modelFamilyCardText(shadow)}</p>
       </div>
@@ -106,6 +108,14 @@ function ModelCardHead({ shadow, searchActive, searchLabel, onSearchCandidates }
           onClick={() => onSearchCandidates?.(shadow.modelFamily || "lstm")}
         >
           {searchLabel}
+        </button>
+        <button
+          type="button"
+          className="factor-lstm-search-button is-secondary"
+          disabled={!onRescanCandidates}
+          onClick={() => onRescanCandidates?.(shadow.modelFamily || "lstm")}
+        >
+          重搜候选
         </button>
       </div>
     </div>

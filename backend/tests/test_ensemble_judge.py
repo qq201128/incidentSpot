@@ -10,10 +10,12 @@ from app.services import forward_validation_service
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.ensemble_judge_constants import (
     ENSEMBLE_RANKER_STRATEGY_KEY,
+    SIGNAL_HIGH_WINRATE_COMBO,
     STAGE_ENSEMBLE_READY,
     STAGE_OBSERVE,
     STAGE_WEIGHT_READY,
 )
+from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.model_family_config import model_family_strategy_key
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
@@ -34,6 +36,40 @@ def test_refresh_reads_only_settled_predictions(monkeypatch, tmp_path: Path) -> 
     assert ranking[0]["signalKey"] == FACTOR_COMBO_STRATEGY_KEY
     assert ranking[0]["sampleCount"] == 60
     assert result["status"]["recommendedStage"] == STAGE_OBSERVE
+
+
+def test_refresh_scores_factor_candidate_signals(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "factor-candidate.db"
+    _init_db(db_path)
+    candidate_key = factor_candidate_signal_key("rsi_14")
+    _insert_predictions(db_path, candidate_key, 60, settled=True, label="rsi_14")
+    _patch_db(monkeypatch, db_path)
+
+    result = ensemble_judge_service.refresh_ensemble_judge("btcusdt", "10m")
+
+    ranking = result["ranking"]
+    assert ranking[0]["signalKey"] == candidate_key
+    assert ranking[0]["signalType"] == "indicator"
+    assert ranking[0]["signalLabel"] == "rsi_14"
+
+
+def test_candidate_signals_affect_stage_coverage(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "coverage.db"
+    _init_db(db_path)
+    candidate_key = factor_candidate_signal_key("rsi_14")
+    _insert_predictions(db_path, candidate_key, 200, settled=True, label="rsi_14")
+    _insert_predictions(db_path, FACTOR_COMBO_STRATEGY_KEY, 200, settled=True)
+    _insert_predictions(db_path, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, 200, settled=True)
+    _insert_predictions(db_path, model_family_strategy_key("lstm", "10m"), 200, settled=True)
+    _patch_db(monkeypatch, db_path)
+
+    status = ensemble_judge_service.refresh_ensemble_judge("BTCUSDT", "10m")["status"]
+
+    assert status["sampleCoverage"]["sampleCount"] == 800
+    assert status["sampleCoverage"]["readySignalTypeCount"] == 4
+    assert status["sampleCoverage"]["requiredSignalTypeCount"] == 4
+    assert status["sampleCoverage"]["bySignalType"]["indicator"]["sampleCount"] == 200
+    assert status["sampleCoverage"]["byMajorSignalType"]["factor_candidate"]["sampleCount"] == 200
 
 
 def test_low_sample_does_not_recommend_weight_ready(monkeypatch, tmp_path: Path) -> None:
@@ -154,6 +190,7 @@ def _major_keys() -> tuple[str, str, str]:
         FACTOR_COMBO_STRATEGY_KEY,
         HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
         model_family_strategy_key("lstm", "10m"),
+        factor_candidate_signal_key("rsi_14"),
     )
 
 
@@ -169,8 +206,9 @@ def _init_db(path: Path) -> None:
             CREATE TABLE klines(symbol TEXT, interval TEXT, open_time INTEGER, close REAL);
             CREATE TABLE predictions(
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              strategy_key TEXT, symbol TEXT, duration TEXT, open_time INTEGER,
+              signal_key TEXT, strategy_key TEXT, symbol TEXT, duration TEXT, open_time INTEGER,
               direction TEXT, probability_up REAL, confidence REAL, certainty_label TEXT,
+              high_winrate_gate TEXT, high_winrate_rule TEXT, model_version TEXT,
               expected_return REAL, entry_price REAL, exit_price REAL, actual_return REAL,
               prediction_correct INTEGER, settled_at TEXT, created_at TEXT
             );
@@ -197,33 +235,63 @@ def _init_db(path: Path) -> None:
         conn.close()
 
 
-def _insert_predictions(path: Path, strategy_key: str, count: int, *, settled: bool) -> None:
+def _insert_predictions(path: Path, strategy_key: str, count: int, *, settled: bool, label: str | None = None) -> None:
     conn = _connect(path)
     try:
         for index in range(count):
-            _insert_prediction_conn(conn, strategy_key, index, index * 86_400_000, settled)
+            _insert_prediction_conn(conn, strategy_key, index, index * 86_400_000, settled, label=label)
         conn.commit()
     finally:
         conn.close()
 
 
-def _insert_prediction(path: Path, strategy_key: str, index: int, *, open_time: int, settled: bool) -> None:
+def _insert_prediction(
+    path: Path,
+    strategy_key: str,
+    index: int,
+    *,
+    open_time: int,
+    settled: bool,
+    label: str | None = None,
+) -> None:
     conn = _connect(path)
     try:
-        _insert_prediction_conn(conn, strategy_key, index, open_time, settled)
+        _insert_prediction_conn(conn, strategy_key, index, open_time, settled, label=label)
         conn.commit()
     finally:
         conn.close()
 
 
-def _insert_prediction_conn(conn: sqlite3.Connection, strategy_key: str, index: int, open_time: int, settled: bool) -> None:
+def _insert_prediction_conn(
+    conn: sqlite3.Connection,
+    strategy_key: str,
+    index: int,
+    open_time: int,
+    settled: bool,
+    *,
+    label: str | None = None,
+) -> None:
+    display = label or strategy_key
+    actual_return = 0.01 if settled else None
     conn.execute(
         """
         INSERT INTO predictions
-        VALUES(NULL, ?, 'BTCUSDT', '10m', ?, 'up', 0.62, 0.62, 'test',
-               0.01, NULL, NULL, ?, ?, ?, 'now')
+        (signal_key, strategy_key, symbol, duration, open_time, direction, probability_up, confidence,
+         certainty_label, high_winrate_gate, high_winrate_rule, model_version, expected_return,
+         entry_price, exit_price, actual_return, prediction_correct, settled_at, created_at)
+        VALUES(?, ?, 'BTCUSDT', '10m', ?, 'up', 0.62, 0.62, 'test',
+               NULL, ?, ?, 0.01, 0.01, NULL, ?, ?, ?, 'now')
         """,
-        (strategy_key, open_time, 0.01, 1, "done" if settled else None),
+        (
+            strategy_key,
+            strategy_key,
+            open_time,
+            display,
+            display,
+            actual_return,
+            1,
+            "done" if settled else None,
+        ),
     )
 
 
@@ -269,7 +337,7 @@ def _insert_kline(path: Path, open_time: int, close: float) -> None:
 def _prediction_row(path: Path, strategy_key: str) -> sqlite3.Row:
     conn = _connect(path)
     try:
-        return conn.execute("SELECT * FROM predictions WHERE strategy_key = ?", (strategy_key,)).fetchone()
+        return conn.execute("SELECT * FROM predictions WHERE signal_key = ?", (strategy_key,)).fetchone()
     finally:
         conn.close()
 

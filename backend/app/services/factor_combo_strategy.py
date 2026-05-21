@@ -181,6 +181,7 @@ def _prediction_payload(
     gate_name = _gate_name(strategy_key)
     return {
         "symbol": signal["symbol"],
+        "signal_key": strategy_key,
         "strategy_key": strategy_key,
         "duration": signal["duration"],
         "open_time": open_time,

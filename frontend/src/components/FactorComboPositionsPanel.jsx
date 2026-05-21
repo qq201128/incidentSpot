@@ -73,7 +73,7 @@ function SummaryCell({ label, value }) {
 
 function PositionTable({ events, factorName }) {
   if (!events.length) {
-    return <p className="factor-combo-position-empty">暂无该周期组合策略持仓记录</p>;
+    return <p className="factor-combo-position-empty">暂无该周期组合执行持仓记录</p>;
   }
   return (
     <div className="factor-combo-position-table-wrap">

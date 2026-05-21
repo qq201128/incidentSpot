@@ -20,6 +20,7 @@ from app.services.ensemble_judge_constants import (
     ENSEMBLE_RANKER_RULE_NAME,
     ENSEMBLE_RANKER_STRATEGY_KEY,
 )
+from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 FACTOR_COMBO_STRATEGY_KEY = "factor_combo_ranker_v1"
@@ -67,10 +68,10 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=FACTOR_COMBO_STRATEGY_KEY,
-        name="多因子组合胜率榜",
+        name="多因子组合执行",
         description=(
             "读取因子页缓存的最佳组合因子；每个结算周期独立使用该周期胜率最高的组合，"
-            "用当前组合分数给出多空方向，可在自动策略中按周期开启模拟或实盘。"
+            "用当前组合分数给出多空方向，可在自动执行中按周期开启模拟或实盘。"
         ),
         requires_vegas_confirmation=False,
         signal_source="factor_combination_ranking",
@@ -80,7 +81,7 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-        name="高胜率目标组合",
+        name="高胜率目标组合执行",
         description=(
             "只读取 high-winrate goal 搜索写入的 goal_combo 组合；"
             "用于把 10m/30m 70%+ 目标组合与普通多因子组合分开观察。"
@@ -93,7 +94,7 @@ STRATEGIES = (
     ),
     StrategyDefinition(
         key=ENSEMBLE_RANKER_STRATEGY_KEY,
-        name="综合裁判模拟策略",
+        name="综合裁判模拟",
         description="按候选信号裁判层建议权重综合投票；后端强制仅允许模拟下单。",
         requires_vegas_confirmation=False,
         signal_source="ensemble_judge",
@@ -118,6 +119,8 @@ def strategy_definition(strategy_key: str | None) -> StrategyDefinition:
         return _factor_combo_shadow_strategy_definition(key)
     if key.startswith(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top"):
         return _high_winrate_combo_shadow_strategy_definition(key)
+    if is_factor_candidate_signal_key(key):
+        return _factor_candidate_signal_definition(key)
     if is_model_family_shadow_strategy(key):
         return _model_family_shadow_strategy_definition(key)
     raise ValueError(f"unsupported strategy: {key}")
@@ -127,7 +130,7 @@ def _batch_combo_strategy_definition(strategy_key: str, name: str, source: str) 
     return StrategyDefinition(
         key=strategy_key,
         name=name,
-        description="按组合因子独立 strategy_key 批量开模拟仓，用于快速验证因子组合。",
+        description="按组合因子独立执行键批量开模拟仓，用于快速验证因子组合。",
         requires_vegas_confirmation=False,
         signal_source=source,
         rule_names=(FACTOR_COMBO_RULE_NAME,),
@@ -141,8 +144,8 @@ def _factor_combo_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
     rank = strategy_key.removeprefix(f"{FACTOR_COMBO_STRATEGY_KEY}_top")
     return StrategyDefinition(
         key=strategy_key,
-        name=f"多因子组合胜率榜·Top{rank}",
-        description="多因子组合胜率榜影子排名，仅用于模拟实盘对比。",
+        name=f"多因子组合执行·Top{rank}",
+        description="多因子组合执行影子排名，仅用于模拟实盘对比。",
         requires_vegas_confirmation=False,
         signal_source="factor_combination_ranking",
         rule_names=(FACTOR_COMBO_RULE_NAME,),
@@ -167,12 +170,27 @@ def _high_winrate_combo_shadow_strategy_definition(strategy_key: str) -> Strateg
     )
 
 
+def _factor_candidate_signal_definition(strategy_key: str) -> StrategyDefinition:
+    suffix = strategy_key.rsplit("_", 1)[-1]
+    return StrategyDefinition(
+        key=strategy_key,
+        name=f"因子候选信号·{suffix}",
+        description="单因子、Agent 因子和技术指标发布的独立候选信号，用于综合裁判观察加权。",
+        requires_vegas_confirmation=False,
+        signal_source="factor_candidate_signal",
+        rule_names=("factor_candidate_signal_v1",),
+        tradable=False,
+        requires_kline_features=True,
+        uses_trade_policy_gates=False,
+    )
+
+
 def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
     duration = lstm_strategy_duration(strategy_key)
     return StrategyDefinition(
         key=strategy_key,
-        name=f"LSTM模拟实盘·{duration}",
-        description="LSTM 候选算法可开启模拟实盘下单，真实下单仍由后端禁止。",
+        name=f"LSTM模拟执行·{duration}",
+        description="LSTM 候选算法可开启模拟执行，真实下单仍由后端禁止。",
         requires_vegas_confirmation=False,
         signal_source="factor_lstm_shadow",
         rule_names=(LSTM_RULE_NAME,),
@@ -191,8 +209,8 @@ def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
     label = family.upper() if family != "random_forest" else "RandomForest"
     return StrategyDefinition(
         key=strategy_key,
-        name=f"{label}模拟实盘·{duration}",
-        description=f"{family} 候选算法可开启模拟实盘下单，每个算法族独立训练、预测和缓存。",
+        name=f"{label}模拟执行·{duration}",
+        description=f"{family} 候选算法可开启模拟执行，每个算法族独立训练、预测和缓存。",
         requires_vegas_confirmation=False,
         signal_source=f"factor_{family}_shadow",
         rule_names=(model_family_rule_name(family),),

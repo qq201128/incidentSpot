@@ -56,6 +56,7 @@ def ensemble_ranking(symbol: str, duration: str) -> dict[str, Any]:
     conn = get_conn()
     try:
         rows = [dict(row) for row in _score_rows(conn, sym, duration)]
+        _attach_signal_labels(conn, sym, duration, rows)
         return {"symbol": sym, "duration": duration, "ranking": ranking_payload(rows)}
     finally:
         conn.close()
@@ -84,11 +85,12 @@ def confirm_ensemble_stage(symbol: str, duration: str, stage: str) -> dict[str, 
 def _settled_candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT strategy_key, symbol, duration, open_time, direction,
-               probability_up, confidence, prediction_correct, actual_return
+        SELECT signal_key, strategy_key, symbol, duration, open_time, direction,
+               probability_up, confidence, prediction_correct, actual_return,
+               high_winrate_rule, model_version
         FROM predictions
         WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
-          AND strategy_key != ?
+          AND signal_key != ?
         ORDER BY open_time, id
         """,
         (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY),
@@ -142,8 +144,9 @@ def _stage_recommendation(conn: Any, symbol: str, duration: str, scores: list[An
 
 
 def _weight_ready(coverage: dict[str, Any]) -> bool:
+    by_type = coverage["byMajorSignalType"]
     for signal_type in MAJOR_SIGNAL_TYPES:
-        item = coverage["bySignalType"].get(signal_type)
+        item = by_type.get(signal_type)
         if not item or item["sampleCount"] < WEIGHT_READY_SAMPLE_COUNT:
             return False
         if item["distinctTradingDays"] < WEIGHT_READY_MIN_DAYS:
@@ -155,7 +158,7 @@ def _weight_ready(coverage: dict[str, Any]) -> bool:
 
 def _ensemble_ready(conn: Any, symbol: str, duration: str, coverage: dict[str, Any]) -> bool:
     if not all(
-        coverage["bySignalType"].get(kind, {}).get("sampleCount", 0) >= ENSEMBLE_READY_SAMPLE_COUNT
+        coverage["byMajorSignalType"].get(kind, {}).get("sampleCount", 0) >= ENSEMBLE_READY_SAMPLE_COUNT
         for kind in MAJOR_SIGNAL_TYPES
     ):
         return False
@@ -199,10 +202,41 @@ def _default_status(symbol: str, duration: str, scores: list[Any]) -> dict[str, 
 
 
 def _score_rows(conn: Any, symbol: str, duration: str) -> list[Any]:
-    return conn.execute(
-        "SELECT * FROM ensemble_signal_scores WHERE symbol = ? AND duration = ?",
-        (symbol, duration),
+    rows = conn.execute(
+        """
+        SELECT s.*,
+               COALESCE(labels.signal_label, s.signal_key) AS signal_label
+        FROM ensemble_signal_scores s
+        LEFT JOIN (
+          SELECT signal_key,
+                 MAX(COALESCE(NULLIF(high_winrate_rule, ''), NULLIF(model_version, ''), signal_key)) AS signal_label
+          FROM predictions
+          WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+            AND signal_key != ?
+          GROUP BY signal_key
+        ) labels ON labels.signal_key = s.signal_key
+        WHERE s.symbol = ? AND s.duration = ?
+        """,
+        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration),
     ).fetchall()
+    return rows
+
+
+def _attach_signal_labels(conn: Any, symbol: str, duration: str, rows: list[dict[str, Any]]) -> None:
+    labels = conn.execute(
+        """
+        SELECT signal_key,
+               MAX(COALESCE(NULLIF(high_winrate_rule, ''), NULLIF(model_version, ''), signal_key)) AS signal_label
+        FROM predictions
+        WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+          AND signal_key != ?
+        GROUP BY signal_key
+        """,
+        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY),
+    ).fetchall()
+    mapping = {str(row["signal_key"]): str(row["signal_label"] or row["signal_key"]) for row in labels}
+    for row in rows:
+        row["signal_label"] = mapping.get(str(row["signal_key"]), str(row["signal_key"]))
 
 
 def _stage_row(conn: Any, symbol: str, duration: str) -> Any | None:
@@ -217,7 +251,7 @@ def _settled_ensemble_rows(conn: Any, symbol: str, duration: str) -> list[dict[s
         """
         SELECT open_time, actual_return
         FROM predictions
-        WHERE strategy_key = ? AND symbol = ? AND duration = ? AND settled_at IS NOT NULL
+        WHERE signal_key = ? AND symbol = ? AND duration = ? AND settled_at IS NOT NULL
         ORDER BY open_time
         """,
         (ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration),

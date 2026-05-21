@@ -219,8 +219,8 @@ def enrich_factor_summary(row: dict[str, Any], metrics: dict[str, Any] | None = 
     payload["sourceKind"] = classify_factor_source(row.get("sourceFile"), row.get("name"))
     payload["sourceLabel"] = source_label(payload["sourceKind"])
     merged = {**payload, **(metrics or {})}
-    payload["canStore"] = _can_store(merged)
-    return payload
+    merged["canStore"] = _can_store(merged)
+    return merged
 
 
 def classify_factor_source(source_file: object, name: object) -> str:

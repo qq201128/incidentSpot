@@ -198,6 +198,7 @@ def _signal_payload(
 
 def _prediction_payload(signal: dict[str, Any]) -> dict[str, Any]:
     return {
+        "signal_key": signal["strategyKey"],
         "strategy_key": signal["strategyKey"],
         "symbol": signal["symbol"],
         "duration": signal["duration"],

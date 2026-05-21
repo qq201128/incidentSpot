@@ -20,6 +20,7 @@ export default function EventRecordsTable({
   compact = false,
   symbol = "",
   ensembleDuration = "10m",
+  ensembleReloadKey = 0,
 }) {
   const [activeTab, setActiveTab] = useState(EVENT_TAB);
   const [page, setPage] = useState(1);
@@ -65,9 +66,9 @@ export default function EventRecordsTable({
       />
       {showEnsemble ? (
         <EnsembleRankingTable
-          key={`${symbol}-${ensembleDuration}`}
           symbol={symbol}
           duration={ensembleDuration}
+          reloadKey={ensembleReloadKey}
         />
       ) : (
         <>

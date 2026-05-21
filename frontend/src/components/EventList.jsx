@@ -31,9 +31,7 @@ export default function EventList({ events, onSettle, onClearStrategyEvents }) {
   async function handleClearStrategy() {
     if (!onClearStrategyEvents || !strategyFilter || clearStrategyLoading) return;
     const label = strategyLabel(strategyFilter);
-    if (
-      !window.confirm(`确定删除「${label}」下的全部事件及关联订单、结算记录？`)
-    ) {
+    if (!window.confirm(`确定删除「${label}」下的全部事件及关联订单、结算记录？`)) {
       return;
     }
     setClearStrategyLoading(true);
@@ -52,13 +50,13 @@ export default function EventList({ events, onSettle, onClearStrategyEvents }) {
     <div className="card">
       <h3>持仓事件</h3>
       <div className="event-strategy-filter">
-        <label htmlFor="event-strategy-select">策略</label>
+        <label htmlFor="event-strategy-select">执行项</label>
         <select
           id="event-strategy-select"
           value={strategyFilter}
           onChange={(e) => setStrategyFilter(e.target.value)}
         >
-          <option value={FILTER_ALL}>全部策略</option>
+          <option value={FILTER_ALL}>全部执行项</option>
           {strategyOptions.map((key) => (
             <option key={key} value={key}>
               {strategyLabel(key)}
@@ -73,7 +71,7 @@ export default function EventList({ events, onSettle, onClearStrategyEvents }) {
             disabled={!canClearStrategy || clearStrategyLoading}
             title={!filteredEvents.length ? "当前筛选下没有可删除的事件" : undefined}
           >
-            {clearStrategyLoading ? "删除中…" : "清除该策略事件"}
+            {clearStrategyLoading ? "删除中…" : "清除该执行项事件"}
           </button>
         ) : null}
       </div>
@@ -82,7 +80,7 @@ export default function EventList({ events, onSettle, onClearStrategyEvents }) {
         {pagedEvents.map((item) => (
           <EventItem key={item.id} item={item} onSettle={onSettle} />
         ))}
-        {!filteredEvents.length && <li>{events.length ? "该策略下暂无事件" : "暂无事件"}</li>}
+        {!filteredEvents.length && <li>{events.length ? "该执行项下暂无事件" : "暂无事件"}</li>}
       </ul>
     </div>
   );

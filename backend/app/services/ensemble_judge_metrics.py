@@ -9,16 +9,19 @@ from app.services.ensemble_judge_constants import (
     LOW_SAMPLE_LIMIT,
     MAJOR_SIGNAL_TYPES,
     RECENT_WINDOW_COUNT,
+    SIGNAL_FACTOR_CANDIDATE,
     SIGNAL_FACTOR_COMBO,
     SIGNAL_HIGH_WINRATE_COMBO,
     SIGNAL_MODEL_FAMILY,
     SIGNAL_OTHER,
     WEIGHT_READY_SAMPLE_COUNT,
 )
+from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import (
     BATCH_COMBO_KEY_PREFIX,
     BATCH_HIGH_WINRATE_KEY_PREFIX,
 )
+from app.services.factor_combo_display import short_factor_label
 from app.services.model_family_config import is_model_family_shadow_strategy
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
@@ -37,6 +40,7 @@ MS_PER_DAY = 86_400_000
 class SignalMetrics:
     signal_key: str
     signal_type: str
+    signal_label: str
     rows: tuple[dict[str, Any], ...]
 
 
@@ -51,13 +55,19 @@ def ranking_payload(rows: list[Any]) -> list[dict[str, Any]]:
 
 def coverage_from_scores(conn: Any, symbol: str, duration: str, scores: list[Any]) -> dict[str, Any]:
     by_type = {kind: _empty_coverage() for kind in MAJOR_SIGNAL_TYPES}
+    major_by_type = {kind: _empty_coverage() for kind in MAJOR_SIGNAL_TYPES}
+    total = _empty_coverage()
     for row in scores:
-        item = by_type.setdefault(row["signal_type"], _empty_coverage())
-        item["sampleCount"] += int(row["sample_count"])
-        item["maxConsecutiveLosses"] = max(item["maxConsecutiveLosses"], int(row["consecutive_losses"]))
-        item["recentProfitFactorBelowOne"] = item["recentProfitFactorBelowOne"] or float(row["profit_factor"]) < 1
-        item["distinctTradingDays"] = max(item["distinctTradingDays"], _distinct_days(conn, symbol, duration, row))
-    return {"bySignalType": by_type}
+        item = _row_coverage(conn, symbol, duration, row)
+        _merge_coverage(total, item)
+        _merge_coverage(by_type.setdefault(row["signal_type"], _empty_coverage()), item)
+        _merge_coverage(major_by_type.setdefault(_major_signal_type(row["signal_type"]), _empty_coverage()), item)
+    return {
+        **total,
+        **_ready_source_counts(major_by_type),
+        "bySignalType": by_type,
+        "byMajorSignalType": major_by_type,
+    }
 
 
 def recent_windows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -75,9 +85,9 @@ def window_return(rows: list[dict[str, Any]]) -> float:
 def _group_metrics(rows: list[dict[str, Any]]) -> tuple[SignalMetrics, ...]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        grouped.setdefault(str(row["strategy_key"]), []).append(row)
+        grouped.setdefault(str(row["signal_key"]), []).append(row)
     return tuple(
-        SignalMetrics(key, _signal_type(key), tuple(items))
+        SignalMetrics(key, _signal_type(key, items), _signal_label(key, items), tuple(items))
         for key, items in sorted(grouped.items())
     )
 
@@ -94,6 +104,7 @@ def _score_signal(metric: SignalMetrics) -> dict[str, Any]:
     return {
         "signal_key": metric.signal_key,
         "signal_type": metric.signal_type,
+        "signal_label": metric.signal_label,
         "sample_count": len(rows),
         "win_rate": win_rate,
         "avg_return": avg_return,
@@ -113,6 +124,7 @@ def _score_payload(row: Any) -> dict[str, Any]:
     return {
         "signalKey": row["signal_key"],
         "signalType": row["signal_type"],
+        "signalLabel": row.get("signal_label"),
         "sampleCount": sample_count,
         "winRate": row["win_rate"],
         "avgReturn": row["avg_return"],
@@ -143,12 +155,45 @@ def _empty_coverage() -> dict[str, Any]:
     }
 
 
+def _row_coverage(conn: Any, symbol: str, duration: str, row: Any) -> dict[str, Any]:
+    return {
+        "sampleCount": int(row["sample_count"]),
+        "distinctTradingDays": _distinct_days(conn, symbol, duration, row),
+        "maxConsecutiveLosses": int(row["consecutive_losses"]),
+        "recentProfitFactorBelowOne": float(row["profit_factor"]) < 1,
+    }
+
+
+def _merge_coverage(target: dict[str, Any], item: dict[str, Any]) -> None:
+    target["sampleCount"] += int(item["sampleCount"])
+    target["distinctTradingDays"] = max(int(target["distinctTradingDays"]), int(item["distinctTradingDays"]))
+    target["maxConsecutiveLosses"] = max(int(target["maxConsecutiveLosses"]), int(item["maxConsecutiveLosses"]))
+    target["recentProfitFactorBelowOne"] = bool(
+        target["recentProfitFactorBelowOne"] or item["recentProfitFactorBelowOne"]
+    )
+
+
+def _ready_source_counts(by_type: dict[str, dict[str, Any]]) -> dict[str, int]:
+    ready_sources = sum(
+        1 for kind in MAJOR_SIGNAL_TYPES
+        if int(by_type.get(kind, {}).get("sampleCount", 0)) >= WEIGHT_READY_SAMPLE_COUNT
+    )
+    return {
+        "readySignalTypeCount": ready_sources,
+        "requiredSignalTypeCount": len(MAJOR_SIGNAL_TYPES),
+    }
+
+
+def _major_signal_type(signal_type: str) -> str:
+    return SIGNAL_FACTOR_CANDIDATE if signal_type == "indicator" else signal_type
+
+
 def _distinct_days(conn: Any, symbol: str, duration: str, row: Any) -> int:
     rows = conn.execute(
         """
         SELECT DISTINCT CAST(open_time / ? AS INTEGER) AS day
         FROM predictions
-        WHERE symbol = ? AND duration = ? AND strategy_key = ? AND settled_at IS NOT NULL
+        WHERE symbol = ? AND duration = ? AND signal_key = ? AND settled_at IS NOT NULL
         """,
         (MS_PER_DAY, symbol, duration, row["signal_key"]),
     ).fetchall()
@@ -205,7 +250,7 @@ def _ranking_score(count: int, win_rate: float, avg_return: float, pf: float, st
     )
 
 
-def _signal_type(strategy_key: str) -> str:
+def _signal_type(strategy_key: str, rows: list[dict[str, Any]] | None = None) -> str:
     if strategy_key == HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
         return SIGNAL_HIGH_WINRATE_COMBO
     if strategy_key.startswith(BATCH_HIGH_WINRATE_KEY_PREFIX):
@@ -214,9 +259,56 @@ def _signal_type(strategy_key: str) -> str:
         return SIGNAL_FACTOR_COMBO
     if strategy_key.startswith(BATCH_COMBO_KEY_PREFIX):
         return SIGNAL_FACTOR_COMBO
+    if is_factor_candidate_signal_key(strategy_key):
+        return _candidate_signal_type(rows)
     if is_model_family_shadow_strategy(strategy_key):
         return SIGNAL_MODEL_FAMILY
     return SIGNAL_OTHER
+
+
+def _signal_label(strategy_key: str, rows: list[dict[str, Any]] | None = None) -> str:
+    if is_factor_candidate_signal_key(strategy_key):
+        return _candidate_signal_label(rows)
+    if rows:
+        row = rows[-1]
+        label = str(row.get("high_winrate_rule") or row.get("model_version") or "")
+        if label:
+            return label
+    return short_factor_label(strategy_key)
+
+
+def _candidate_signal_type(rows: list[dict[str, Any]] | None) -> str:
+    row = rows[-1] if rows else None
+    label = str((row or {}).get("high_winrate_rule") or (row or {}).get("model_version") or "").lower()
+    if label.startswith(
+        (
+            "rsi_",
+            "macd",
+            "ema_",
+            "sma_",
+            "stochastic_",
+            "williams_",
+            "cci_",
+            "aroon_",
+            "dmi_",
+            "adx_",
+            "atr_",
+            "ppo_",
+            "tsi_",
+            "ultimate_",
+            "volume_",
+            "ret_",
+            "log_ret_",
+        )
+    ):
+        return "indicator"
+    return SIGNAL_FACTOR_CANDIDATE
+
+
+def _candidate_signal_label(rows: list[dict[str, Any]] | None) -> str:
+    row = rows[-1] if rows else None
+    label = str((row or {}).get("high_winrate_rule") or (row or {}).get("model_version") or "")
+    return label or "因子候选信号"
 
 
 def _clamp(value: float) -> float:

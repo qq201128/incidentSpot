@@ -45,7 +45,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
         if (!stopped) setStrategies(Array.isArray(data?.strategies) ? data.strategies : []);
       })
       .catch((err) => {
-        if (!stopped) setError(_errorMessage(err, "读取策略配置失败"));
+        if (!stopped) setError(_errorMessage(err, "读取执行配置失败"));
       })
       .finally(() => {
         if (!stopped) setLoading(false);
@@ -66,7 +66,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
         if (!stopped) _mergeStrategyRows(setStrategies, rows);
       })
       .catch((err) => {
-        if (!stopped) setError(_errorMessage(err, "同步策略配置失败"));
+        if (!stopped) setError(_errorMessage(err, "同步执行配置失败"));
       });
     return () => {
       stopped = true;
@@ -97,7 +97,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
         );
         _mergeStrategyRows(setStrategies, rows);
       } catch (err) {
-        setError(_errorMessage(err, "更新策略实盘开关失败"));
+        setError(_errorMessage(err, "更新执行实盘开关失败"));
       } finally {
         setUpdatingKey("");
       }
@@ -115,7 +115,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
         const updated = await buildSlotUpdate(slot, !slot.enabled);
         _mergeStrategyRows(setStrategies, [updated]);
       } catch (err) {
-        setError(_errorMessage(err, "更新策略配置失败"));
+        setError(_errorMessage(err, "更新执行配置失败"));
       } finally {
         setUpdatingKey("");
       }
@@ -124,7 +124,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   );
 
   if (loading) {
-    return <div className="strategy-empty">正在读取策略配置...</div>;
+    return <div className="strategy-empty">正在读取执行配置...</div>;
   }
 
   return (
@@ -184,7 +184,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
           </div>
         </div>
       ))}
-      {!groups.length && <div className="strategy-empty">暂无可用策略</div>}
+      {!groups.length && <div className="strategy-empty">暂无可用执行项</div>}
       {!!error && <div className="predict-error">{error}</div>}
     </div>
   );
@@ -230,8 +230,8 @@ function _liveButtonLabel(group) {
 }
 
 function _liveButtonTitle(group) {
-  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "综合裁判策略后端强制仅模拟。";
-  return "该策略下所有结算周期共用此开关；仅对已点亮的周期自动下单。";
+  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "综合裁判后端强制仅模拟。";
+  return "该执行项下所有结算周期共用此开关；仅对已点亮的周期自动下单。";
 }
 
 function StrategyBacktestSummary({ summary }) {

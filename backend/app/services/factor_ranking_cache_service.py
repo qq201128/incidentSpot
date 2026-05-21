@@ -8,6 +8,7 @@ from typing import Any
 
 from app.db.session import get_conn
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
+from app.services.auto_trade_service import list_auto_trade_settings
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -92,10 +93,10 @@ def save_cached_ranking(
 
 def factor_ranking_precomputed_symbols() -> list[str]:
     raw = os.getenv("FACTOR_RANKING_SYMBOLS", "BTCUSDT").strip()
-    if not raw:
-        return ["BTCUSDT"]
-    parts = [p.strip().upper() for p in raw.split(",") if p.strip()]
-    return parts or ["BTCUSDT"]
+    base = [p.strip().upper() for p in raw.split(",") if p.strip()] if raw else ["BTCUSDT"]
+    enabled = [settings.symbol.strip().upper() for settings in list_auto_trade_settings() if settings.enabled]
+    symbols = list(dict.fromkeys(base + enabled))
+    return symbols or ["BTCUSDT"]
 
 
 def _ranking_payload(payload: Any) -> tuple[Any, dict[str, Any] | None, dict[str, Any], list[dict[str, Any]]]:

@@ -87,6 +87,12 @@
   white-space: nowrap;
 }
 
+.factor-lstm-search-button.is-secondary {
+  border-color: rgba(236, 187, 73, 0.34);
+  background: rgba(236, 187, 73, 0.1);
+  color: #ecbb49;
+}
+
 .factor-lstm-search-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;

@@ -206,6 +206,7 @@ def predict(
 def latest_prediction(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
+    signalKey: str | None = Query(None),
     strategyKey: str | None = Query(None),
 ) -> dict:
     if duration not in SUPPORTED_RULE_DURATIONS:
@@ -214,7 +215,12 @@ def latest_prediction(
             detail=f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}",
         )
     try:
-        return get_latest_prediction(symbol, duration, strategy_key=strategyKey or DEFAULT_STRATEGY_KEY)
+        return get_latest_prediction(
+            symbol,
+            duration,
+            signal_key=signalKey,
+            strategy_key=strategyKey or DEFAULT_STRATEGY_KEY,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -253,6 +259,7 @@ def predict_10m(
 def _rule_prediction_response(result: dict) -> dict:
     return {
         "symbol": result["symbol"],
+        "signalKey": result.get("signal_key") or result.get("strategy_key"),
         "strategyKey": result.get("strategy_key"),
         "duration": result["duration"],
         "direction": result["direction"],

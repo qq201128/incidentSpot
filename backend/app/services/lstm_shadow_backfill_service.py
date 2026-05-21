@@ -65,7 +65,7 @@ def _existing_lstm_prediction_times(
             """
             SELECT open_time
             FROM predictions
-            WHERE strategy_key = ? AND symbol = ? AND duration = ?
+            WHERE signal_key = ? AND symbol = ? AND duration = ?
               AND open_time BETWEEN ? AND ?
             """,
             (

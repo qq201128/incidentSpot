@@ -41,13 +41,13 @@ def _assert_ensemble_ready(conn: Any, symbol: str, duration: str) -> None:
 def _weighted_candidates(conn: Any, symbol: str, duration: str, open_time: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT p.strategy_key, p.direction, p.probability_up, p.expected_return,
+        SELECT p.signal_key, p.strategy_key, p.direction, p.probability_up, p.expected_return,
                s.weight_suggestion
         FROM predictions p
         JOIN ensemble_signal_scores s
-          ON s.symbol = p.symbol AND s.duration = p.duration AND s.signal_key = p.strategy_key
+          ON s.symbol = p.symbol AND s.duration = p.duration AND s.signal_key = p.signal_key
         WHERE p.symbol = ? AND p.duration = ? AND p.open_time = ?
-          AND p.strategy_key != ?
+          AND p.signal_key != ?
         ORDER BY p.id
         """,
         (symbol, duration, int(open_time), ENSEMBLE_RANKER_STRATEGY_KEY),
@@ -64,6 +64,7 @@ def _prediction_payload(symbol: str, duration: str, open_time: int, rows: list[d
     expected_return = _weighted_expected_return(rows, total_weight)
     direction = "up" if probability_up >= 0.5 else "down"
     return {
+        "signal_key": ENSEMBLE_RANKER_STRATEGY_KEY,
         "strategy_key": ENSEMBLE_RANKER_STRATEGY_KEY,
         "symbol": symbol,
         "duration": duration,

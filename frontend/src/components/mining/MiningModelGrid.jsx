@@ -48,7 +48,7 @@ function ModelCard({ model, busy, onSearch }) {
       </div>
       <dl className="mining-model-metrics">
         <div>
-          <dt>策略</dt>
+          <dt>执行项</dt>
           <dd title={model.strategyKey}>{shortLabel(model.strategyKey)}</dd>
         </div>
         <div>

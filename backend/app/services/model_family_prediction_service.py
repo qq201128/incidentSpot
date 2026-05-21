@@ -159,6 +159,7 @@ def _signal_payload(family: str, symbol: str, duration: str, probability_up: flo
 def _prediction_payload(signal: dict[str, Any]) -> dict[str, Any]:
     rule_name = model_family_rule_name(signal["modelFamily"])
     return {
+        "signal_key": signal["strategyKey"],
         "strategy_key": signal["strategyKey"],
         "modelFamily": signal["modelFamily"],
         "symbol": signal["symbol"],

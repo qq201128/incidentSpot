@@ -5,7 +5,7 @@ import "./EnsembleRankingTable.css";
 
 const PAGE_SIZE = 8;
 
-export default function EnsembleRankingTable({ symbol, duration }) {
+export default function EnsembleRankingTable({ symbol, duration, reloadKey = 0 }) {
   const [ranking, setRanking] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -31,7 +31,7 @@ export default function EnsembleRankingTable({ symbol, duration }) {
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [load, reloadKey]);
 
   useEffect(() => {
     setPage(1);
@@ -143,6 +143,8 @@ function _badges(row) {
 function _typeLabel(type) {
   if (type === "factor_combo") return "多因子";
   if (type === "high_winrate_combo") return "高胜率";
+  if (type === "factor_candidate") return "单因子";
+  if (type === "indicator") return "指标";
   if (type === "model_family") return "模型族";
   return "其他";
 }

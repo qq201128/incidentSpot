@@ -212,12 +212,13 @@ def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[s
         rows = conn.execute(
             """
             SELECT open_time, direction, confidence, trade_quality_score,
-                   actual_return, prediction_correct, high_winrate_rule, strategy_key
+                   actual_return, prediction_correct, high_winrate_rule,
+                   signal_key, strategy_key
             FROM predictions
             WHERE (
-                strategy_key IN ({placeholders})
-                OR strategy_key LIKE ?
-                OR strategy_key LIKE ?
+                signal_key IN ({placeholders})
+                OR signal_key LIKE ?
+                OR signal_key LIKE ?
             )
               AND symbol = ? AND duration = ?
               AND settled_at IS NOT NULL

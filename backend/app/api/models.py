@@ -77,6 +77,7 @@ def model_candidate_search(
     duration: str = Query("10m"),
     profile: str = Query("full"),
     parallel_workers: int = Query(10, alias="parallelWorkers", ge=1),
+    reset_history: bool = Query(False, alias="resetHistory"),
 ) -> dict:
     try:
         selected = normalize_model_family(family)
@@ -91,7 +92,15 @@ def model_candidate_search(
             total=total,
             parallel_workers=parallel_workers,
         )
-        background_tasks.add_task(_background_model_candidate_search, selected, sym, duration, selected_profile, parallel_workers)
+        background_tasks.add_task(
+            _background_model_candidate_search,
+            selected,
+            sym,
+            duration,
+            selected_profile,
+            parallel_workers,
+            reset_history,
+        )
         status = model_family_status(selected, sym, duration)
         return {
             **status,
@@ -117,9 +126,18 @@ def model_predict(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _background_model_candidate_search(family: str, symbol: str, duration: str, profile: str, parallel_workers: int) -> None:
+def _background_model_candidate_search(
+    family: str,
+    symbol: str,
+    duration: str,
+    profile: str,
+    parallel_workers: int,
+    reset_history: bool,
+) -> None:
     try:
-        report = run_model_candidate_search(ModelCandidateSearchConfig(family, symbol, duration, profile, parallel_workers))
+        report = run_model_candidate_search(
+            ModelCandidateSearchConfig(family, symbol, duration, profile, parallel_workers, reset_history)
+        )
         if str(report.get("status") or "") == "skipped":
             finish_model_candidate_progress(family, symbol=symbol, duration=duration, status="skipped")
     except Exception:

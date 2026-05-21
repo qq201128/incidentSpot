@@ -307,6 +307,95 @@ def test_candidate_retry_manual_trigger_ignores_stale_training_status(monkeypatc
     assert [item for item in calls if item[0] == "train"]
 
 
+def test_candidate_retry_reset_history_researches_attempted_candidates(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(
+        retry,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration: ENTRY_OPEN_TIME,
+    )
+    attempted_key = "profile=fast|duration=10m|window=24|move_bps=8|epochs=8|seed=20260513"
+    deps = retry.LstmCandidateRetryDependencies(
+        lstm_status=lambda *_args: {
+            "activeModelStatus": "shadow_active",
+            "lastAttemptStatus": "shadow_active",
+            "shadowPredictionReady": True,
+            "comboSnapshotMatches": True,
+            "artifactsReady": True,
+        },
+        refresh_klines=lambda *args: calls.append(("refresh", args)),
+        run_combination_ranking=lambda *args: calls.append(("ranking", args)) or _ranking(),
+        save_combination_ranking=lambda *_args: None,
+        promote_combinations=lambda *_args: {"promoted": 0},
+        train_lstm=lambda config: calls.append(("train", config.feature_window)) or _training_report("validation_failed"),
+        attempted_keys=lambda *_args: frozenset({attempted_key}),
+        record_candidate=lambda config, profile, report: calls.append(("record", config.feature_window)) or report,
+        publish_trade_candidate=_forbidden("publish_trade_candidate"),
+        start_progress=lambda **kwargs: calls.append(("progress_start", kwargs["total"])) or {},
+        complete_progress=lambda **kwargs: calls.append(("progress_complete", kwargs["completed"])) or {},
+        finish_progress=lambda **kwargs: calls.append(("progress_finish", kwargs["status"])) or {},
+    )
+
+    report = retry.run_lstm_candidate_retry(
+        retry.LstmCandidateRetryConfig(
+            symbols=("BTCUSDT",),
+            durations=("10m",),
+            profile=retry.EXPERIMENT_PROFILE_FAST,
+            search=_one_candidate_search(),
+            manual_trigger=True,
+            reset_history=True,
+        ),
+        deps,
+    )
+
+    assert report["results"][0]["reason"] == "manual_candidate_search"
+    assert [item for item in calls if item[0] == "train"]
+
+
+def test_candidate_retry_finishes_progress_on_success(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(
+        retry,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration: ENTRY_OPEN_TIME,
+    )
+    deps = retry.LstmCandidateRetryDependencies(
+        lstm_status=lambda *_args: {
+            "activeModelStatus": "shadow_active",
+            "lastAttemptStatus": "shadow_active",
+            "shadowPredictionReady": True,
+            "comboSnapshotMatches": True,
+            "artifactsReady": True,
+        },
+        refresh_klines=lambda *args: None,
+        run_combination_ranking=lambda *args: _ranking(),
+        save_combination_ranking=lambda *_args: None,
+        promote_combinations=lambda *_args: {"promoted": 0},
+        train_lstm=lambda config: _training_report("validation_failed"),
+        attempted_keys=lambda *_args: frozenset(),
+        record_candidate=lambda *_args: None,
+        publish_trade_candidate=_forbidden("publish_trade_candidate"),
+        start_progress=lambda **kwargs: calls.append(("progress_start", kwargs["total"])) or {},
+        complete_progress=lambda **kwargs: calls.append(("progress_complete", kwargs["completed"])) or {},
+        finish_progress=lambda **kwargs: calls.append(("progress_finish", kwargs["status"])) or {},
+    )
+
+    report = retry.run_lstm_candidate_retry(
+        retry.LstmCandidateRetryConfig(
+            symbols=("BTCUSDT",),
+            durations=("10m",),
+            search=_one_candidate_search(),
+            manual_trigger=True,
+        ),
+        deps,
+    )
+
+    assert report["status"] == "completed_with_rejections"
+    assert calls[-1] == ("progress_finish", "validation_failed")
+
+
 def _ranking() -> dict:
     return {
         "symbol": "BTCUSDT",

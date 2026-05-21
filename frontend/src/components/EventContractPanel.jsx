@@ -8,7 +8,7 @@ const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
 
-const PANEL_TABS = /** @type {const} */ (["strategies", "judge", "trade"]);
+const PANEL_TABS = /** @type {const} */ (["execution", "judge", "trade"]);
 
 export default function EventContractPanel({
   symbol,
@@ -19,6 +19,7 @@ export default function EventContractPanel({
   onPredict,
   latestPrediction,
   onClearAllEvents,
+  onEnsembleRefreshed,
 }) {
   const [durationMinutes, setDurationMinutes] = useState(() =>
     intervalToTradeMinutes(chartInterval),
@@ -151,12 +152,12 @@ export default function EventContractPanel({
           <button
             type="button"
             role="tab"
-            className={`panel-tab ${panelTab === "strategies" ? "is-active" : ""}`}
-            aria-selected={panelTab === "strategies"}
-            id="panel-tab-strategies"
-            onClick={() => setPanelTab("strategies")}
+            className={`panel-tab ${panelTab === "execution" ? "is-active" : ""}`}
+            aria-selected={panelTab === "execution"}
+            id="panel-tab-execution"
+            onClick={() => setPanelTab("execution")}
           >
-            自动策略
+            自动执行
           </button>
           <button
             type="button"
@@ -181,8 +182,8 @@ export default function EventContractPanel({
         </div>
       </div>
 
-      {panelTab === "strategies" && (
-        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-strategies">
+      {panelTab === "execution" && (
+        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-execution">
           <AutomationCard
             amount={amount}
             clearAllLoading={clearAllLoading}
@@ -203,6 +204,10 @@ export default function EventContractPanel({
             symbol={symbol}
             duration={predictDurationKey(durationMinutes)}
             onConfirmed={() => setStrategyReloadKey((value) => value + 1)}
+            onRefreshed={() => {
+              setStrategyReloadKey((value) => value + 1);
+              onEnsembleRefreshed?.();
+            }}
           />
         </div>
       )}
@@ -237,7 +242,7 @@ export default function EventContractPanel({
 
 function _initialPanelTab() {
   const raw = localStorage.getItem(STORAGE_PANEL_TAB);
-  if (raw === "events") return "trade";
+  if (raw === "events" || raw === "strategies") return "trade";
   return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "trade";
 }
 
@@ -245,11 +250,11 @@ function AutomationCard({ amount, clearAllLoading, reloadKey, onClearAllEvents, 
   return (
     <div className="card automation-toggles">
       <p className="toggle-hint trade-mode-hint automation-intro">
-        每条策略右侧可单独切换「模拟 / 实盘」；同一策略下各结算周期共用该开关。仅对已点亮的周期自动下单；多策略可并行。
+        每条执行项右侧可单独切换「模拟 / 实盘」；同一执行项下各结算周期共用该开关。仅对已点亮的周期自动下单；多执行项可并行。
       </p>
       <AutoStrategyControls symbol={symbol} amount={amount} reloadKey={reloadKey} />
       <p className="toggle-hint trade-mode-hint">
-        同一策略在不同周期上的持仓相互独立。
+        同一执行项在不同周期上的持仓相互独立。
       </p>
       <div className="clear-all-row">
         <button
@@ -258,7 +263,7 @@ function AutomationCard({ amount, clearAllLoading, reloadKey, onClearAllEvents, 
           onClick={() => void onClearAllEventsClick()}
           disabled={!onClearAllEvents || clearAllLoading}
         >
-          {clearAllLoading ? "清除中..." : "清除全部事件"}
+          {clearAllLoading ? "清除中..." : "清除全部执行事件"}
         </button>
         <p className="toggle-hint clear-all-hint">立即删除库中全部事件与关联订单、结算记录并重载列表。</p>
       </div>

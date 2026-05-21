@@ -22,6 +22,8 @@ __pycache__/
 pip-wheel-metadata/
 .pytest_cache/
 pytest-cache-files-*/
+.pytest-tmp/
+backend/.tmp/
 .mypy_cache/
 .ruff_cache/
 htmlcov/

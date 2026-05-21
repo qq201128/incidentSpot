@@ -42,6 +42,7 @@ class ModelCandidateSearchConfig:
     duration: str
     profile: str
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS
+    reset_history: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,8 @@ def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, 
     cfg = _validated(config)
     base = model_training_config_for_profile(cfg.family, cfg.symbol, cfg.duration, cfg.profile)
     attempted = attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
+    if cfg.reset_history:
+        attempted = frozenset()
     candidates = next_model_candidate_configs(base, cfg.profile, attempted)
     if not candidates:
         current = read_model_candidate_progress(cfg.family, cfg.symbol, cfg.duration)
@@ -219,6 +222,7 @@ def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig
         duration=config.duration,
         profile=normalize_experiment_profile(config.profile),
         parallel_workers=int(config.parallel_workers),
+        reset_history=bool(config.reset_history),
     )
 
 

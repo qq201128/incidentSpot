@@ -21,6 +21,7 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE events ADD COLUMN ai_quality_score REAL",
   "ALTER TABLE events ADD COLUMN ai_quality_passed INTEGER",
   "ALTER TABLE predictions ADD COLUMN strategy_key TEXT NOT NULL DEFAULT 'factor_combo_ranker_v1'",
+  "ALTER TABLE predictions ADD COLUMN signal_key TEXT",
   "ALTER TABLE predictions ADD COLUMN trade_quality_score REAL",
   "ALTER TABLE predictions ADD COLUMN trade_quality_passed INTEGER",
   "ALTER TABLE predictions ADD COLUMN trade_quality_gate TEXT",
@@ -193,6 +194,7 @@ def init_db() -> None:
   with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
     conn.executescript(f.read())
   _apply_schema_migrations(conn)
+  _ensure_prediction_signal_keys(conn)
   _migrate_auto_trade_strategies_composite_pk(conn)
   _ensure_auto_trade_settings(conn)
   _ensure_auto_trade_strategies(conn)
@@ -207,6 +209,19 @@ def _apply_schema_migrations(conn: sqlite3.Connection) -> None:
       conn.execute(sql)
     except sqlite3.OperationalError:
       pass
+
+
+def _ensure_prediction_signal_keys(conn: sqlite3.Connection) -> None:
+  columns = {row["name"] for row in conn.execute("PRAGMA table_info(predictions)")}
+  if "signal_key" not in columns:
+    conn.execute("ALTER TABLE predictions ADD COLUMN signal_key TEXT")
+  conn.execute(
+    """
+    UPDATE predictions
+    SET signal_key = strategy_key
+    WHERE signal_key IS NULL OR signal_key = ''
+    """
+  )
 
 
 def _ensure_auto_trade_settings(conn: sqlite3.Connection) -> None:

@@ -368,22 +368,45 @@ def _create_prediction_db(path: Path) -> None:
     conn.executescript(
         """
         CREATE TABLE predictions (
-          strategy_key TEXT, symbol TEXT, duration TEXT, open_time INTEGER,
-          direction TEXT, actual_return REAL, prediction_correct INTEGER,
-          model_version TEXT, feature_window INTEGER, settled_at TEXT
+          signal_key TEXT, strategy_key TEXT, symbol TEXT, duration TEXT,
+          open_time INTEGER, direction TEXT, actual_return REAL,
+          prediction_correct INTEGER, model_version TEXT, feature_window INTEGER,
+          settled_at TEXT
         );
         """
     )
     rows = [
-        (FACTOR_COMBO_STRATEGY_KEY, "BTCUSDT", "10m", 1, "up", 0.01, 1, None, None, "x"),
-        (factor_combo_shadow_strategy_key(2), "BTCUSDT", "10m", 2, "up", -0.01, 0, None, None, "x"),
-        (factor_combo_shadow_strategy_key(3), "BTCUSDT", "10m", 3, "up", 0.01, 1, None, None, "x"),
-        (lstm_shadow_strategy_key("10m"), "BTCUSDT", "10m", 4, "up", 0.01, 1, "v1", 64, "x"),
-        (lstm_shadow_strategy_key("10m"), "BTCUSDT", "10m", 5, "down", -0.01, 0, "v1", 64, "x"),
+        _prediction_fixture_row(FACTOR_COMBO_STRATEGY_KEY, {"open_time": 1, "actual_return": 0.01, "correct": 1}),
+        _prediction_fixture_row(factor_combo_shadow_strategy_key(2), {"open_time": 2, "actual_return": -0.01}),
+        _prediction_fixture_row(factor_combo_shadow_strategy_key(3), {"open_time": 3, "actual_return": 0.01, "correct": 1}),
+        _prediction_fixture_row(
+            lstm_shadow_strategy_key("10m"),
+            {"open_time": 4, "actual_return": 0.01, "correct": 1, "model_version": "v1", "feature_window": 64},
+        ),
+        _prediction_fixture_row(
+            lstm_shadow_strategy_key("10m"),
+            {"open_time": 5, "direction": "down", "actual_return": -0.01, "model_version": "v1", "feature_window": 64},
+        ),
     ]
-    conn.executemany("INSERT INTO predictions VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.executemany("INSERT INTO predictions VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     conn.commit()
     conn.close()
+
+
+def _prediction_fixture_row(signal_key: str, values: dict[str, object]) -> tuple:
+    return (
+        signal_key,
+        signal_key,
+        "BTCUSDT",
+        "10m",
+        values["open_time"],
+        values.get("direction", "up"),
+        values["actual_return"],
+        values.get("correct", 0),
+        values.get("model_version"),
+        values.get("feature_window"),
+        "x",
+    )
 
 
 def _connect(path: Path) -> sqlite3.Connection:

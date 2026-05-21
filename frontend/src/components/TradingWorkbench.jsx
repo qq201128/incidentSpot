@@ -11,6 +11,7 @@ import WorkbenchStatusBar from "./WorkbenchStatusBar";
 
 export default function TradingWorkbench(props) {
   const chartUi = useKlineChartUi();
+  const [ensembleReloadKey, setEnsembleReloadKey] = useState(0);
 
   return (
     <main className="terminal-layout">
@@ -56,17 +57,32 @@ export default function TradingWorkbench(props) {
           <RecentTrades symbol={props.symbol} trades={props.aggTrades} />
         </aside>
         <section className="trade-column terminal-card">
-          <EventContractPanel {...panelProps(props)} />
+          <EventContractPanel
+            symbol={props.symbol}
+            chartInterval={props.interval}
+            currentPrice={props.currentPrice}
+            events={props.events}
+            onQuickTrade={props.onQuickTrade}
+            onPredict={props.onPredict}
+            latestPrediction={props.latestPrediction}
+            onClearAllEvents={props.onClearAllEvents}
+            onEnsembleRefreshed={() => setEnsembleReloadKey((value) => value + 1)}
+          />
         </section>
         <div className="records-column">
           <EventRecordsTable
             events={props.events}
             symbol={props.symbol}
             ensembleDuration={durationKeyFromChartInterval(props.interval)}
+            ensembleReloadKey={ensembleReloadKey}
           />
         </div>
         <div className="records-side">
-          <EventRecordsTable events={props.events} compact />
+          <EventRecordsTable
+            events={props.events}
+            compact
+            ensembleReloadKey={ensembleReloadKey}
+          />
         </div>
       </div>
       <WorkbenchStatusBar latencyMs={props.summaryLatencyMs} summary={props.summary} />

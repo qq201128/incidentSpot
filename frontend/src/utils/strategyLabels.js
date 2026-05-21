@@ -1,19 +1,19 @@
 import { factorLabel } from "./factorLearningLabels";
 
-/** 与后端 strategy_registry 策略 key 对齐的展示名 */
+/** 与后端 strategy_registry 执行项 key 对齐的展示名 */
 export const STRATEGY_LABELS = {
   manual: "手动",
-  factor_combo_ranker_v1: "多因子组合胜率榜",
-  factor_combo_ranker_v1_top2: "多因子组合胜率榜·Top2",
-  factor_combo_ranker_v1_top3: "多因子组合胜率榜·Top3",
-  high_winrate_factor_combo_v1: "高胜率目标组合",
-  high_winrate_factor_combo_v1_top2: "高胜率目标组合·Top2",
-  high_winrate_factor_combo_v1_top3: "高胜率目标组合·Top3",
-  ensemble_ranker_v1: "综合裁判模拟策略",
+  factor_combo_ranker_v1: "多因子组合执行",
+  factor_combo_ranker_v1_top2: "多因子组合执行·Top2",
+  factor_combo_ranker_v1_top3: "多因子组合执行·Top3",
+  high_winrate_factor_combo_v1: "高胜率目标组合执行",
+  high_winrate_factor_combo_v1_top2: "高胜率目标组合执行·Top2",
+  high_winrate_factor_combo_v1_top3: "高胜率目标组合执行·Top3",
+  ensemble_ranker_v1: "综合裁判模拟",
   optimized_rules_10m: "优化规则集（回测）",
 };
 
-/** 已下线但仍可能出现在历史预测/排名中的策略 key */
+/** 已下线但仍可能出现在历史预测/排名中的执行项 key */
 const LEGACY_STRATEGY_LABELS = {
   complete_day_10m_production: "全日规则·10分钟",
   vegas_fib_resonance: "维加斯斐波共振",
@@ -85,6 +85,7 @@ const TOKEN_LABELS = {
 
 const BATCH_COMBO_PREFIX = "factor_combo_ranker_v1_combo_";
 const BATCH_HIGH_WINRATE_PREFIX = "high_winrate_factor_combo_v1_combo_";
+const FACTOR_CANDIDATE_PREFIX = "factor_candidate_signal_";
 
 export function strategyLabel(key) {
   const raw = String(key || "").trim();
@@ -103,6 +104,9 @@ export function strategyLabel(key) {
   const batch = batchComboLabel(raw);
   if (batch) return batch;
 
+  const candidate = factorCandidateLabel(raw);
+  if (candidate) return candidate;
+
   const top = topShadowLabel(raw);
   if (top) return top;
 
@@ -119,7 +123,7 @@ function modelShadowLabel(key) {
     const prefix = `factor_${family}_shadow_`;
     if (lowered.startsWith(prefix)) {
       const duration = key.slice(prefix.length);
-      return `${label}影子·${durationLabel(duration)}`;
+    return `${label}影子·${durationLabel(duration)}`;
     }
   }
   return "";
@@ -129,13 +133,20 @@ function batchComboLabel(key) {
   const lowered = key.toLowerCase();
   if (lowered.startsWith(BATCH_COMBO_PREFIX)) {
     const suffix = key.slice(BATCH_COMBO_PREFIX.length);
-    return suffix ? `多因子批量模拟·${suffix.slice(-4)}` : "多因子批量模拟";
+    return suffix ? `多因子批量执行·${suffix.slice(-4)}` : "多因子批量执行";
   }
   if (lowered.startsWith(BATCH_HIGH_WINRATE_PREFIX)) {
     const suffix = key.slice(BATCH_HIGH_WINRATE_PREFIX.length);
-    return suffix ? `高胜率批量模拟·${suffix.slice(-4)}` : "高胜率批量模拟";
+    return suffix ? `高胜率批量执行·${suffix.slice(-4)}` : "高胜率批量执行";
   }
   return "";
+}
+
+function factorCandidateLabel(key) {
+  const lowered = key.toLowerCase();
+  if (!lowered.startsWith(FACTOR_CANDIDATE_PREFIX)) return "";
+  const suffix = key.slice(FACTOR_CANDIDATE_PREFIX.length);
+  return suffix ? `因子候选信号·${suffix.slice(-4)}` : "因子候选信号";
 }
 
 function topShadowLabel(key) {

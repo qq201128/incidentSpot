@@ -13,9 +13,14 @@ from app.services.factor_combo_batch_predictions import (
     predict_eligible_factor_combo_rows,
 )
 from app.services.factor_combo_batch_simulation_service import create_batch_combo_simulation_trade
+from app.services.factor_candidate_signal_service import (
+    factor_candidate_signal_keys,
+    predict_factor_candidate_signals,
+)
 from app.services.forward_validation_service import settle_due_predictions
 from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_demotion
 from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
+from app.services.ensemble_judge_service import refresh_ensemble_judge
 from app.services.ensemble_ranker_prediction_service import predict_ensemble_ranker_prediction
 from app.services.kline_timing import (
     MS_PER_MINUTE,
@@ -43,6 +48,7 @@ from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     FACTOR_COMBO_STRATEGY_KEY,
+    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
     strategy_entry_grace_ms,
     strategy_supports_duration,
 )
@@ -76,11 +82,16 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
 
 async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
     due_targets = await asyncio.to_thread(_ready_due_prediction_targets, targets)
-    if not due_targets:
+    collection_targets = await asyncio.to_thread(_candidate_collection_targets, targets)
+    active_targets = _merged_targets(due_targets, collection_targets)
+    if not active_targets:
         return
-    await _prepare_prediction_inputs(due_targets)
-    await _run_prediction_batch(due_targets)
-    await _backfill_lstm_shadow_predictions(due_targets)
+    await _prepare_prediction_inputs(active_targets)
+    if due_targets:
+        await _run_prediction_batch(due_targets)
+    if collection_targets:
+        await _run_candidate_collection_batch(collection_targets)
+    await _backfill_lstm_shadow_predictions(active_targets)
 
 
 async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
@@ -116,6 +127,12 @@ async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> 
     )
     await asyncio.gather(
         *(
+            asyncio.to_thread(refresh_ensemble_judge, symbol, duration)
+            for symbol, duration in _unique_symbol_durations(settings_list)
+        )
+    )
+    await asyncio.gather(
+        *(
             asyncio.to_thread(evaluate_high_winrate_demotion, symbol, duration)
             for symbol, duration in _unique_symbol_durations(settings_list)
         )
@@ -139,10 +156,8 @@ async def _run_prediction(
     entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
     result = await _predict_strategy_result(settings, entry_open_time)
     if not await _save_prediction(result, write_lock):
-        await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
         return
     await _broadcast(prediction_response(result))
-    await _save_factor_combo_sidecar_predictions(settings, entry_open_time, write_lock)
     logger.info(
         "predict: %s %s entry=%s -> %s (conf=%.4f quality=%.4f qualityPassed=%s)",
         settings.symbol,
@@ -153,6 +168,30 @@ async def _run_prediction(
         result["trade_quality_score"],
         result["trade_quality_passed"],
     )
+
+
+async def _run_candidate_collection_batch(settings_list: list[AutoTradeSettings]) -> None:
+    write_lock = asyncio.Lock()
+    results = await asyncio.gather(
+        *(_save_candidate_collection_predictions(settings, write_lock=write_lock) for settings in settings_list),
+        return_exceptions=True,
+    )
+    failures = [
+        (settings, result)
+        for settings, result in zip(settings_list, results)
+        if isinstance(result, Exception)
+    ]
+    for settings, exc in failures:
+        logger.error(
+            "candidate collection failed strategy=%s symbol=%s duration=%s",
+            settings.strategy_key,
+            settings.symbol,
+            settings.duration,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    if failures:
+        failed = ", ".join(f"{item.symbol}:{item.duration}" for item, _exc in failures)
+        raise RuntimeError(f"candidate collection failed for: {failed}") from failures[0][1]
 
 
 async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time: int) -> dict:
@@ -172,13 +211,14 @@ async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time:
     )
 
 
-async def _save_factor_combo_sidecar_predictions(
+async def _save_candidate_collection_predictions(
     settings: AutoTradeSettings,
-    entry_open_time: int,
+    *,
     write_lock: asyncio.Lock,
 ) -> None:
+    entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
+    await _save_factor_candidate_signals(settings, entry_open_time, write_lock)
     await _save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock)
-    await _save_model_family_shadow_predictions(settings, entry_open_time, write_lock)
 
 
 async def _save_factor_combo_shadow_predictions(
@@ -186,7 +226,7 @@ async def _save_factor_combo_shadow_predictions(
     entry_open_time: int,
     write_lock: asyncio.Lock,
 ) -> None:
-    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+    if settings.strategy_key not in {FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}:
         return
     results = await asyncio.to_thread(
         predict_eligible_factor_combo_rows,
@@ -206,7 +246,7 @@ async def _save_model_family_shadow_predictions(
     entry_open_time: int,
     write_lock: asyncio.Lock,
 ) -> None:
-    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+    if settings.strategy_key not in {FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}:
         return
     for family in MODEL_FAMILIES:
         if family == "lstm":
@@ -221,6 +261,24 @@ async def _save_model_family_shadow_predictions(
             *((settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)),
             entry_open_time=entry_open_time,
         )
+        await _save_prediction(result, write_lock)
+
+
+async def _save_factor_candidate_signals(
+    settings: AutoTradeSettings,
+    entry_open_time: int,
+    write_lock: asyncio.Lock,
+) -> None:
+    if not strategy_supports_duration(settings.strategy_key, settings.duration):
+        return
+    results = await asyncio.to_thread(
+        predict_factor_candidate_signals,
+        settings.symbol,
+        settings.duration,
+        entry_open_time=entry_open_time,
+        entry_grace_ms=strategy_entry_grace_ms(settings.strategy_key),
+    )
+    for result in results:
         await _save_prediction(result, write_lock)
 
 
@@ -347,10 +405,45 @@ def _ready_due_prediction_targets(targets: list[AutoTradeSettings]) -> list[Auto
     return ready
 
 
+def _candidate_collection_targets(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    collection = []
+    for settings in _unique_collection_settings(targets):
+        bucket = current_rule_entry_open_time_for_duration(settings.duration)
+        if _candidate_collection_due(settings, bucket):
+            collection.append(settings)
+    return collection
+
+
+def _unique_collection_settings(targets: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
+    selected: dict[tuple[str, str], AutoTradeSettings] = {}
+    for settings in targets:
+        if not strategy_supports_duration(settings.strategy_key, settings.duration):
+            continue
+        key = (settings.symbol.upper(), settings.duration)
+        selected[key] = _collection_settings(settings)
+    return list(selected.values())
+
+
+def _collection_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
+    return AutoTradeSettings(
+        strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+        enabled=True,
+        symbol=settings.symbol.upper(),
+        duration=settings.duration,
+        duration_minutes=settings.duration_minutes,
+        qty=settings.qty,
+        live_trading_enabled=False,
+    )
+
+
+def _candidate_collection_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    return _factor_candidate_signal_due(settings, bucket) or _factor_combo_shadow_due(settings, bucket)
+
+
 def _should_predict_entry(settings: AutoTradeSettings) -> bool:
     bucket = current_rule_entry_open_time_for_duration(settings.duration)
     if _current_bucket_prediction_exists(settings, bucket):
-        return _factor_combo_sidecar_due(settings, bucket)
+        return _ready_any_model_family_shadow_due(settings, bucket)
     if is_model_family_shadow_strategy(settings.strategy_key):
         return _ready_model_family_strategy_due(settings, bucket)
     return True
@@ -365,16 +458,22 @@ def _current_bucket_prediction_exists(settings: AutoTradeSettings, bucket: int) 
     )
 
 
-def _factor_combo_sidecar_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
-        return False
-    return _factor_combo_shadow_due(settings, bucket) or _ready_any_model_family_shadow_due(settings, bucket)
-
-
 def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
     for row in eligible_factor_combo_rows(settings.symbol, settings.duration):
         if not prediction_exists(
             strategy_key=simulation_strategy_key_for_factor_name(str(row["factorName"])),
+            symbol=settings.symbol,
+            duration=settings.duration,
+            open_time=bucket,
+        ):
+            return True
+    return False
+
+
+def _factor_candidate_signal_due(settings: AutoTradeSettings, bucket: int) -> bool:
+    for signal_key in factor_candidate_signal_keys(settings.symbol, settings.duration):
+        if not prediction_exists(
+            signal_key=signal_key,
             symbol=settings.symbol,
             duration=settings.duration,
             open_time=bucket,
@@ -494,6 +593,16 @@ def missing_lstm_shadow_entry_times(symbol: str, duration: str, current_entry_op
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
     return sorted({(settings.symbol.upper(), settings.duration) for settings in settings_list})
+
+
+def _merged_targets(
+    first: list[AutoTradeSettings],
+    second: list[AutoTradeSettings],
+) -> list[AutoTradeSettings]:
+    merged = {}
+    for settings in [*first, *second]:
+        merged[(settings.strategy_key, settings.symbol.upper(), settings.duration)] = settings
+    return list(merged.values())
 
 
 def _refresh_1m_prediction_input(symbol: str, entry_open_time: int) -> None:

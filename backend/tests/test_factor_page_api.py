@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from app.api import factors as factors_api
 from app.services import factor_page_service
 
 
@@ -72,3 +75,42 @@ def test_build_factor_period_scores_from_cache(monkeypatch) -> None:
     assert ten["available"] is True
     thirty = next(item for item in payload["scores"] if item["duration"] == "30m")
     assert thirty["available"] is False
+
+
+def test_combo_detail_uses_combination_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        factors_api,
+        "get_factor_payload_by_name",
+        lambda _name: {
+            "name": "combo__a__b",
+            "displayName": "组合：A + B",
+            "description": "组合：A + B",
+            "sourceFile": "mined_factor_library.json",
+        },
+    )
+    monkeypatch.setattr(
+        factors_api,
+        "combo_metrics_for_factor",
+        lambda *_args: {"factorName": "combo__a__b", "factorScore": 91.2, "winRate": 0.72},
+    )
+
+    detail = factors_api.get_factor_detail("combo__a__b", symbol="BTCUSDT", duration="10m")
+
+    assert detail["factorScore"] == 91.2
+    assert detail["winRate"] == 0.72
+
+
+def test_combo_period_scores_use_combination_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        factors_api,
+        "combo_period_scores",
+        lambda symbol, factor_name: {
+            "symbol": symbol,
+            "factorName": factor_name,
+            "scores": [{"duration": "10m", "factorScore": 88.0, "available": True}],
+        },
+    )
+
+    payload = factors_api.factor_period_scores("combo__a__b", symbol="BTCUSDT")
+
+    assert payload["scores"][0]["factorScore"] == 88.0

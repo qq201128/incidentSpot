@@ -166,17 +166,28 @@ async function loadModelStatuses({ symbol, duration, signal, setState }) {
 }
 
 function useStartModelSearch({ duration, normalizedSymbol, setLstmSearchState, setLstmState }) {
-  return useCallback(async (family = "lstm") => {
+  return useCallback(async (family = "lstm", options = {}) => {
     if (!isValidSymbol(normalizedSymbol)) {
       setLstmState({ data: null, status: "请输入有效交易对" });
       return;
     }
-    setLstmSearchState({ status: "running", family });
+    setLstmSearchState({ status: "running", family, resetHistory: Boolean(options.resetHistory) });
     try {
       if (family === "__all__") {
-        await Promise.all(MODEL_FAMILIES.map((item) => requestModelCandidateSearch(item, normalizedSymbol, duration)));
+        await Promise.all(
+          MODEL_FAMILIES.map((item) =>
+            requestModelCandidateSearch(item, normalizedSymbol, duration, "full", 10, Boolean(options.resetHistory)),
+          ),
+        );
       } else {
-        await requestModelCandidateSearch(family, normalizedSymbol, duration);
+        await requestModelCandidateSearch(
+          family,
+          normalizedSymbol,
+          duration,
+          "full",
+          10,
+          Boolean(options.resetHistory),
+        );
       }
       const data = await fetchAllModelStatuses(normalizedSymbol, duration);
       setLstmState({ data, status: modelStatusesText(data) });
@@ -269,7 +280,7 @@ function modelFamilyLabel(family) {
     svm: "SVM",
     bayesian: "Bayesian",
     knn: "KNN",
-    rl_strategy: "RL策略",
+    rl_strategy: "RL执行",
   };
   return labels[family] || family;
 }

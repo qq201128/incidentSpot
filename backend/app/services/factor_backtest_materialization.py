@@ -54,6 +54,17 @@ def _materialized_mined_frame(
     return _materialize_mined_target_frame(frame, row, symbol, duration, factor_def.name)
 
 
+def materialized_frame_for_mined_row(
+    frame: pd.DataFrame,
+    *,
+    row: dict[str, Any],
+    symbol: str,
+    duration: str,
+    factor_name: str,
+) -> pd.DataFrame:
+    return _materialize_mined_target_frame(frame, row, symbol, duration, factor_name)
+
+
 def _materialize_mined_target_frame(
     frame: pd.DataFrame,
     row: dict[str, Any],

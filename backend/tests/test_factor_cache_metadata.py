@@ -6,6 +6,7 @@ from pathlib import Path
 from app.services import factor_cache_metadata
 from app.services import factor_combination_cache_service
 from app.services import factor_ranking_cache_service
+from app.services.auto_trade_types import AutoTradeSettings
 
 ONE_MINUTE_MS = 60_000
 TEN_MINUTES_MS = 10 * ONE_MINUTE_MS
@@ -57,6 +58,19 @@ def test_factor_ranking_cache_preserves_diagnostics(monkeypatch, tmp_path: Path)
 
     assert cached["rankingDiagnostics"]["failureCount"] == 1
     assert cached["rankingFailures"][0]["factorName"] == "agent_a"
+
+
+def test_factor_ranking_precomputed_symbols_include_enabled_auto_trade_symbols(monkeypatch) -> None:
+    monkeypatch.setattr(
+        factor_ranking_cache_service,
+        "list_auto_trade_settings",
+        lambda: [
+            _auto_trade_settings("BTCUSDT", enabled=False),
+            _auto_trade_settings("ETHUSDT", enabled=True),
+        ],
+    )
+
+    assert factor_ranking_cache_service.factor_ranking_precomputed_symbols() == ["BTCUSDT", "ETHUSDT"]
 
 
 def test_legacy_combination_cache_is_marked_stale(monkeypatch, tmp_path: Path) -> None:
@@ -232,3 +246,15 @@ def _insert_legacy_combo_cache(db_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _auto_trade_settings(symbol: str, *, enabled: bool) -> AutoTradeSettings:
+    return AutoTradeSettings(
+        strategy_key="factor_combo_ranker_v1",
+        enabled=enabled,
+        symbol=symbol,
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=False,
+    )

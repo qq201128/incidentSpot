@@ -70,6 +70,7 @@ def lstm_candidate_search(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     profile: str = Query("full"),
+    reset_history: bool = Query(False, alias="resetHistory"),
 ) -> dict:
     try:
         sym_u = symbol.upper()
@@ -84,7 +85,7 @@ def lstm_candidate_search(
             search_space_total=search_total,
             parallel_workers=search_config.parallel_workers,
         )
-        background_tasks.add_task(_background_lstm_candidate_search, sym_u, duration, selected_profile)
+        background_tasks.add_task(_background_lstm_candidate_search, sym_u, duration, selected_profile, reset_history)
         status = lstm_model_status(sym_u, duration)
         return {
             **status,
@@ -109,17 +110,21 @@ def lstm_predict(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _background_lstm_candidate_search(symbol: str, duration: str, profile: str) -> None:
+def _background_lstm_candidate_search(symbol: str, duration: str, profile: str, reset_history: bool) -> None:
     config = LstmCandidateRetryConfig(
         symbols=(symbol,),
         durations=(duration,),
         profile=profile,
         manual_trigger=True,
+        reset_history=reset_history,
     )
     try:
         report = run_lstm_candidate_retry(config)
-        if str(report.get("status") or "") == "skipped":
-            finish_lstm_candidate_progress(symbol=symbol, duration=duration, status="skipped")
+        finish_lstm_candidate_progress(
+            symbol=symbol,
+            duration=duration,
+            status=str(report.get("status") or "failed"),
+        )
     except Exception:
         finish_lstm_candidate_progress(symbol=symbol, duration=duration, status="failed")
         logger.exception("lstm candidate search failed: %s %s", symbol, duration)

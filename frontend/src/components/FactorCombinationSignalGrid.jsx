@@ -89,9 +89,9 @@ function Metric({ label, value }) {
 
 function simulationLabel(signal) {
   if (signal.comboStrategyFamily === "high_winrate_goal") {
-    return signal.comboRank === 1 ? "高胜率主策略" : `高胜率影子${signal.comboRank}`;
+    return signal.comboRank === 1 ? "高胜率主执行" : `高胜率影子${signal.comboRank}`;
   }
-  if (signal.simulationStrategyKey) return signal.comboRank === 1 ? "实盘主策略" : `实盘影子${signal.comboRank}`;
+  if (signal.simulationStrategyKey) return signal.comboRank === 1 ? "实盘主执行" : `实盘影子${signal.comboRank}`;
   return "未标记";
 }
 
