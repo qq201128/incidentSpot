@@ -54,7 +54,7 @@ function LearningHeader(props) {
     <div className="factor-learning-head">
       <div className="factor-learning-head-main">
         <span className="section-kicker">因子学习 / 自动挖掘</span>
-        <h2>{agent?.model || "Kimi 因子挖掘 Agent"}</h2>
+        <h2>{agent?.model || "LLM 因子挖掘 Agent（未运行）"}</h2>
         <div className="factor-learning-status-line">
           <HeaderStatus status={refreshTaskStatus(refreshTask)} text={refreshTaskLabel(refreshTask, source)} />
           <HeaderStatus status={agentStatus} text={agentStatusLabel(agentStatus)} />

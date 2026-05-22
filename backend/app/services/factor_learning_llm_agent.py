@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from app.services.factor_operator_library import AGENT_FORMULA_RULES, factor_operator_prompt_payload
+from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 from app.services.siliconflow_chat_client import SiliconFlowChatClient
 
@@ -49,6 +50,7 @@ def attach_llm_agent_review(
         "provider": AGENT_PROVIDER,
         "status": "completed",
         "model": active_client.model,
+        "reviewedAt": utc_now(),
         "completionId": completion.get("id"),
         "usage": completion.get("usage") or {},
         "review": review,

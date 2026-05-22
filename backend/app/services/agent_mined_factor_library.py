@@ -20,6 +20,7 @@ from app.services.agent_factor_formula import materialize_agent_formula
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN, utc_now
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+from app.services.json_atomic_io import load_json_object, save_json_object
 from app.services.factor_metric_enrichment import enrich_factor_results, factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
@@ -122,8 +123,7 @@ def load_agent_factor_library(path: Path | None = None) -> dict[str, Any]:
     target = path or AGENT_FACTOR_LIBRARY_PATH
     if not target.exists():
         return _empty_library()
-    with target.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
+    payload = load_json_object(target)
     if not isinstance(payload, dict):
         raise ValueError(f"agent mined factor library is not an object: {target}")
     return payload
@@ -241,10 +241,7 @@ def _save_library(payload: dict[str, Any]) -> None:
     _save_json(AGENT_FACTOR_LIBRARY_PATH, payload)
 
 def _save_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
+    save_json_object(path, payload)
 
 def _library_with_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"version": AGENT_FACTOR_LIBRARY_VERSION, "updatedAt": utc_now(), "thresholds": _threshold_payload(), "factors": rows}

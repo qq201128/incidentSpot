@@ -27,7 +27,7 @@ export default function MiningAgentTable({ rows }) {
               <th>动机 / 直觉</th>
               <th>验证状态</th>
               <th>来源</th>
-              <th>创建时间</th>
+              <th>评估时间</th>
             </tr>
           </thead>
           <tbody>
@@ -52,7 +52,7 @@ export default function MiningAgentTable({ rows }) {
             ))}
           </tbody>
         </table>
-        {!total ? <p className="mining-empty">暂无 Agent 候选，请先运行 Agent 复盘</p> : null}
+        {!total ? <p className="mining-empty">暂无 Agent 候选，请先执行「联网 Agent 挖掘」</p> : null}
       </div>
       {total ? (
         <footer className="mining-agent-footer">查看全部 {total} 项候选 →</footer>

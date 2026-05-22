@@ -55,7 +55,7 @@ export default function MiningKpiCards({
             {busy === "local" ? "排队中…" : "刷新本地记忆"}
           </button>
           <button type="button" disabled={busy === "agent"} onClick={onRefreshAgent}>
-            {busy === "agent" ? "排队中…" : "运行 Agent 复盘"}
+            {busy === "agent" ? "排队中…" : "联网 Agent 挖掘"}
           </button>
           <button type="button" className="is-primary" disabled={busy === "search-all"} onClick={onSearchAll}>
             {busy === "search-all" ? "全部排队中" : "全量搜索全部算法"}

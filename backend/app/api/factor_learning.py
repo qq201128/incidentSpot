@@ -107,7 +107,7 @@ def _background_factor_learning_refresh(symbol: str, duration: str, run_agent: b
 
 def _refresh_queue_message(run_agent: bool) -> str:
     if run_agent:
-        return "因子学习复盘和 Kimi 因子挖掘已排队，完成后会写回记忆。"
+        return "本地复盘与联网 Agent 挖掘已排队（先复盘记忆，再调用 LLM），完成后会写回记忆。"
     return "本地因子学习复盘已排队，完成后会写回记忆。"
 
 

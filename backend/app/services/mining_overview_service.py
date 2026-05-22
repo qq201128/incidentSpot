@@ -5,6 +5,7 @@ from typing import Any
 from app.services.factor_learning_service import get_factor_learning_memory
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.model_family_status_service import model_family_status
+from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, siliconflow_config_from_env
 
 MODEL_FAMILIES = (
     "lstm",
@@ -91,7 +92,17 @@ def _header_payload(memory: dict, ideas: list, promotion: dict, agent_rows: list
         "agentCandidateCount": idea_count,
         "pendingVerificationCount": pending,
         "agentStatus": agent.get("status") or ("done" if agent.get("review") else "idle"),
+        "agentModel": agent.get("model") or _configured_agent_model(),
+        "agentReviewedAt": _agent_reviewed_at(memory),
+        "memoryUpdatedAt": memory.get("updatedAt"),
     }
+
+
+def _configured_agent_model() -> str:
+    try:
+        return siliconflow_config_from_env().model
+    except RuntimeError:
+        return DEFAULT_SILICONFLOW_MODEL
 
 
 def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
@@ -200,42 +211,107 @@ def _latest_candidate_label(progress: dict) -> str | None:
 def _agent_candidate_rows(memory: dict) -> list[dict[str, Any]]:
     ideas = _candidate_ideas(memory)
     promotion = memory.get("agentCandidatePromotion") or {}
-    records = {str(item.get("factorName") or item.get("nameHint") or ""): item for item in promotion.get("records") or []}
+    record_index = _promotion_record_index(promotion)
+    agent_reviewed_at = _agent_reviewed_at(memory)
     rows = []
+    matched_record_ids: set[str] = set()
     for index, idea in enumerate(ideas):
-        key = str(idea.get("nameHint") or idea.get("displayNameZh") or f"idea-{index}")
-        record = records.get(key) or {}
-        rows.append(
-            {
-                "id": key or f"idea-{index}",
-                "factorName": idea.get("displayNameZh") or idea.get("nameHint") or f"候选因子 {index + 1}",
-                "operatorTrace": idea.get("operatorTrace") or [],
-                "formulaHint": idea.get("formulaHint"),
-                "rationale": idea.get("rationaleZh") or idea.get("rationale"),
-                "validationStatus": _validation_status_label(record, idea),
-                "validationStatusKey": _validation_status_key(record, idea),
-                "source": "Agent",
-                "createdAt": record.get("evaluatedAt") or memory.get("updatedAt"),
-            }
-        )
+        record = _lookup_promotion_record(record_index, idea)
+        row_id = str(record.get("factorName") or idea.get("nameHint") or idea.get("displayNameZh") or f"idea-{index}")
+        if record:
+            matched_record_ids.add(row_id)
+        rows.append(_agent_candidate_row(idea, record, row_id=row_id, agent_reviewed_at=agent_reviewed_at))
     for record in promotion.get("records") or []:
-        key = str(record.get("factorName") or "")
-        if any(row["id"] == key for row in rows):
+        row_id = str(record.get("factorName") or record.get("formula") or "")
+        if row_id in matched_record_ids:
             continue
-        rows.append(
-            {
-                "id": key or record.get("formula") or "record",
-                "factorName": record.get("displayName") or record.get("factorName") or "—",
-                "operatorTrace": [],
-                "formulaHint": record.get("formula"),
-                "rationale": record.get("error") or record.get("reason"),
-                "validationStatus": _validation_status_label(record, {}),
-                "validationStatusKey": _validation_status_key(record, {}),
-                "source": "Agent",
-                "createdAt": record.get("evaluatedAt") or memory.get("updatedAt"),
-            }
-        )
+        rows.append(_agent_candidate_row({}, record, row_id=row_id or "record", agent_reviewed_at=agent_reviewed_at))
     return rows
+
+
+def _promotion_record_index(promotion: dict) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for item in promotion.get("records") or []:
+        if not isinstance(item, dict):
+            continue
+        idea = item.get("idea") if isinstance(item.get("idea"), dict) else {}
+        aliases = (
+            item.get("factorName"),
+            item.get("nameHint"),
+            item.get("displayName"),
+            idea.get("nameHint"),
+            idea.get("displayNameZh"),
+            idea.get("formulaHint"),
+            item.get("formula"),
+        )
+        for alias in aliases:
+            text = str(alias or "").strip()
+            if text:
+                index[text] = item
+    return index
+
+
+def _lookup_promotion_record(index: dict[str, dict[str, Any]], idea: dict[str, Any]) -> dict[str, Any]:
+    for alias in (
+        idea.get("nameHint"),
+        idea.get("displayNameZh"),
+        idea.get("formulaHint"),
+    ):
+        text = str(alias or "").strip()
+        if text and text in index:
+            return index[text]
+    return {}
+
+
+def _agent_candidate_row(
+    idea: dict[str, Any],
+    record: dict[str, Any],
+    *,
+    row_id: str,
+    agent_reviewed_at: str | None,
+) -> dict[str, Any]:
+    idea_payload = idea if isinstance(idea, dict) else {}
+    record_payload = record if isinstance(record, dict) else {}
+    has_idea = bool(idea_payload)
+    return {
+        "id": row_id,
+        "factorName": (
+            record_payload.get("displayName")
+            or idea_payload.get("displayNameZh")
+            or idea_payload.get("nameHint")
+            or record_payload.get("factorName")
+            or "—"
+        ),
+        "operatorTrace": idea_payload.get("operatorTrace") or [],
+        "formulaHint": record_payload.get("formula") or idea_payload.get("formulaHint"),
+        "rationale": (
+            idea_payload.get("rationaleZh")
+            or idea_payload.get("rationale")
+            or record_payload.get("error")
+            or record_payload.get("reason")
+        ),
+        "validationStatus": _validation_status_label(record_payload, idea_payload if has_idea else {}),
+        "validationStatusKey": _validation_status_key(record_payload, idea_payload if has_idea else {}),
+        "source": "Agent",
+        "createdAt": _record_evaluated_at(record_payload, agent_reviewed_at),
+        "agentReviewedAt": agent_reviewed_at,
+    }
+
+
+def _record_evaluated_at(record: dict[str, Any], agent_reviewed_at: str | None) -> str | None:
+    return str(record.get("seenAt") or record.get("evaluatedAt") or agent_reviewed_at or "") or None
+
+
+def _agent_reviewed_at(memory: dict) -> str | None:
+    agent = memory.get("llmAgent") or {}
+    reviewed_at = agent.get("reviewedAt")
+    if reviewed_at:
+        return str(reviewed_at)
+    refresh = memory.get("refreshTask") or {}
+    if refresh.get("runAgent") and refresh.get("status") == "completed":
+        updated = refresh.get("updatedAt")
+        return str(updated) if updated else None
+    return None
 
 
 def _candidate_ideas(memory: dict) -> list[dict]:

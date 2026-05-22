@@ -35,7 +35,7 @@ export function useMiningPageData(symbol, duration) {
         return;
       }
       try {
-        const data = await fetchMiningOverview(normalizedSymbol, duration, { signal });
+        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal });
         if (!signal?.aborted) {
           setOverview(data);
           setStatus("");
@@ -63,6 +63,7 @@ export function useMiningPageData(symbol, duration) {
       setStatus(runAgent ? "联网挖掘排队中…" : "本地复盘排队中…");
       try {
         await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
+        await sleep(400);
         await load();
       } catch (error) {
         setStatus(`刷新失败：${errorMessage(error)}`);
@@ -88,7 +89,7 @@ export function useMiningPageData(symbol, duration) {
     let timer;
     const poll = async () => {
       try {
-        const data = await fetchMiningOverview(normalizedSymbol, duration, { signal: ac.signal });
+        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal: ac.signal });
         if (!ac.signal.aborted) setOverview(data);
         if (!ac.signal.aborted && hasActiveTasks(data)) timer = window.setTimeout(poll, POLL_MS);
       } catch (error) {
@@ -168,4 +169,28 @@ function isCanceled(error, signal) {
 
 function errorMessage(error) {
   return error?.response?.data?.detail || error?.message || "unknown_error";
+}
+
+async function fetchMiningOverviewWithRetry(symbol, duration, options = {}) {
+  const retries = 5;
+  let lastError;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      return await fetchMiningOverview(symbol, duration, options);
+    } catch (error) {
+      lastError = error;
+      if (options.signal?.aborted || isCanceled(error, options.signal)) throw error;
+      const retryable =
+        error?.response?.status === 503 ||
+        String(errorMessage(error)).includes("delimiter") ||
+        String(errorMessage(error)).includes("JSON");
+      if (!retryable || attempt + 1 >= retries) throw error;
+      await sleep(300 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

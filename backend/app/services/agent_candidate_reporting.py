@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+from app.services.json_atomic_io import load_json_object, save_json_object
 
 AGENT_CANDIDATE_HISTORY_VERSION = "agent_factor_candidate_history_v1"
 AGENT_CANDIDATE_HISTORY_PATH = FACTOR_LEARNING_DIR / "agent_factor_candidate_history.json"
@@ -58,8 +58,7 @@ def load_agent_candidate_history(path: Path | None = None) -> dict[str, Any]:
     target = path or AGENT_CANDIDATE_HISTORY_PATH
     if not target.exists():
         return {"version": AGENT_CANDIDATE_HISTORY_VERSION, "runs": []}
-    with target.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    return load_json_object(target)
 
 
 def _promoted_factor_names(records: list[dict[str, Any]]) -> list[str]:
@@ -87,7 +86,4 @@ def _engine_support_item(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _save_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
+    save_json_object(path, payload)

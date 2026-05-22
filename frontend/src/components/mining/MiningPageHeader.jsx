@@ -41,7 +41,7 @@ export default function MiningPageHeader({
           <StatusChip tone={header?.localReplayStatus} dot>
             {header?.localReplayLabel || "—"}
           </StatusChip>
-          <StatusChip tone="info" title="最近一次 Agent 复盘提出的单因子研究想法">
+          <StatusChip tone="info" title="最近一次联网 Agent 挖掘提出的单因子研究想法">
             本轮想法 {header?.agentIdeaCount ?? header?.agentCandidateCount ?? 0} 项
           </StatusChip>
           <StatusChip tone="info" title="当前交易对与周期在 Agent 入库库中的记录数">
@@ -50,6 +50,16 @@ export default function MiningPageHeader({
           <StatusChip tone={header?.pendingVerificationCount ? "warn" : "info"}>
             待验证 {header?.pendingVerificationCount ?? 0} 项
           </StatusChip>
+          {header?.agentModel ? (
+            <StatusChip tone="info" title="最近一次或当前配置的联网 LLM 模型（见 SILICONFLOW_MODEL）">
+              模型 {header.agentModel}
+            </StatusChip>
+          ) : null}
+          {header?.agentReviewedAt ? (
+            <StatusChip tone="info" title="最近一次联网 Agent 完成并写回候选想法的时间">
+              Agent {formatTime(header.agentReviewedAt)}
+            </StatusChip>
+          ) : null}
           <button type="button" className="mining-refresh-time" onClick={onReload} disabled={reloading}>
             更新时间：{formatTime(updatedAt)}
             <span aria-hidden>↻</span>

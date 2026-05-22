@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.mining_overview_service import mining_overview
@@ -14,6 +16,11 @@ def get_mining_overview(
 ) -> dict:
     try:
         return mining_overview(symbol.upper(), duration)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"因子学习记忆文件正在写入，请稍后重试：{exc}",
+        ) from exc
     except ValueError as exc:
         detail = str(exc)
         status = 404 if "not found" in detail.lower() else 400

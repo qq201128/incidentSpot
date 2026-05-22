@@ -15,6 +15,7 @@ from app.services.factor_learning_common import (
     utc_now,
 )
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+from app.services.json_atomic_io import load_json_object, save_json_object
 from app.services.factor_metric_enrichment import factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
@@ -29,8 +30,7 @@ def load_mined_factor_library(path: Path | None = None) -> dict[str, Any]:
     target = path or MINED_FACTOR_LIBRARY_PATH
     if not target.exists():
         return _empty_library()
-    with target.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
+    payload = load_json_object(target)
     if not isinstance(payload, dict):
         raise ValueError(f"mined factor library is not an object: {target}")
     return payload
@@ -304,10 +304,7 @@ def _empty_library() -> dict[str, Any]:
 
 
 def _save_library(payload: dict[str, Any]) -> None:
-    MINED_FACTOR_LIBRARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with MINED_FACTOR_LIBRARY_PATH.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
+    save_json_object(MINED_FACTOR_LIBRARY_PATH, payload)
 
 
 def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
