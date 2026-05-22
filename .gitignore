@@ -23,6 +23,8 @@ pip-wheel-metadata/
 .pytest_cache/
 pytest-cache-files-*/
 .pytest-tmp/
+.pytest_tmp/
+backend/.pytest_tmp/
 backend/.tmp/
 .mypy_cache/
 .ruff_cache/
@@ -49,6 +51,11 @@ backend/data.db-wal
 
 # --- 模型与训练产物（体积大、常变；勿提交以免仓库膨胀） ---
 backend/models/
+# Agent / 因子学习运行时 JSON（库文件、候选历史、记忆快照）
+backend/models/factor_learning/
+**/agent_mined_factor_library.json
+**/agent_factor_candidate_history.json
+**/mined_factor_library.json
 
 # --- 回测/报告产物（本地生成，勿提交） ---
 **/reports/

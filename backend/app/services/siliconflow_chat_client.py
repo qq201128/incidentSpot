@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -38,6 +39,8 @@ class SiliconFlowChatClient:
                 json=request_payload,
                 timeout=self.config.timeout_seconds,
             )
+            if response.status_code >= 400:
+                raise RuntimeError(_http_error_message(response)) from None
             response.raise_for_status()
         except RequestException as exc:
             raise RuntimeError(f"SiliconFlow chat completion failed: {exc}") from exc
@@ -47,11 +50,16 @@ class SiliconFlowChatClient:
         return data
 
 
+def resolved_siliconflow_model() -> str:
+    """Model id used for the next chat/completions request (from SILICONFLOW_MODEL or default)."""
+    return os.getenv("SILICONFLOW_MODEL", DEFAULT_SILICONFLOW_MODEL).strip() or DEFAULT_SILICONFLOW_MODEL
+
+
 def siliconflow_config_from_env() -> SiliconFlowConfig:
     api_key = os.getenv("SILICONFLOW_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("missing SILICONFLOW_API_KEY in environment or .env")
-    model = os.getenv("SILICONFLOW_MODEL", DEFAULT_SILICONFLOW_MODEL).strip()
+    model = resolved_siliconflow_model()
     url = os.getenv("SILICONFLOW_CHAT_COMPLETIONS_URL", DEFAULT_CHAT_COMPLETIONS_URL).strip()
     return SiliconFlowConfig(
         api_key=api_key,
@@ -79,3 +87,31 @@ def _headers(api_key: str) -> dict[str, str]:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+
+
+def _http_error_message(response: requests.Response) -> str:
+    detail = ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("error") or "").strip()
+            code = payload.get("code")
+            if code is not None and detail:
+                detail = f"[{code}] {detail}"
+    except ValueError:
+        detail = (response.text or "").strip()[:240]
+    model_hint = ""
+    try:
+        body = response.request.body
+        if isinstance(body, (bytes, bytearray)):
+            body = body.decode("utf-8", errors="replace")
+        if isinstance(body, str) and body.strip():
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and parsed.get("model"):
+                model_hint = f" model={parsed['model']}"
+    except (ValueError, TypeError, AttributeError):
+        model_hint = ""
+    base = f"SiliconFlow HTTP {response.status_code}"
+    if detail:
+        return f"{base}: {detail}{model_hint}"
+    return f"{base} for {response.url}"

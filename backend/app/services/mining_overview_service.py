@@ -5,7 +5,7 @@ from typing import Any
 from app.services.factor_learning_service import get_factor_learning_memory
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.model_family_status_service import model_family_status
-from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, siliconflow_config_from_env
+from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model, siliconflow_config_from_env
 
 MODEL_FAMILIES = (
     "lstm",
@@ -100,7 +100,7 @@ def _header_payload(memory: dict, ideas: list, promotion: dict, agent_rows: list
 
 def _configured_agent_model() -> str:
     try:
-        return siliconflow_config_from_env().model
+        return resolved_siliconflow_model()
     except RuntimeError:
         return DEFAULT_SILICONFLOW_MODEL
 

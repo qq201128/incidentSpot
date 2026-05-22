@@ -79,6 +79,10 @@ def test_parse_factor_agent_json_skips_leading_prose() -> None:
 
 def test_factor_agent_attaches_json_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FACTOR_LEARNING_AGENT_MAX_TOKENS", raising=False)
+    monkeypatch.setattr(
+        "app.services.factor_learning_llm_agent.limited_do_not_suggest_formulas",
+        lambda *_args, **_kwargs: ["TsZScore(FundingZ(20), 60)"],
+    )
     client = FakeClient()
     memory = {"symbol": "BTCUSDT", "duration": "10m", "weights": {"factor_a": 0.7}}
 
@@ -91,8 +95,10 @@ def test_factor_agent_attaches_json_review(monkeypatch: pytest.MonkeyPatch) -> N
     assert "factor_a" in client.payload["messages"][1]["content"]
     assert "operator_library" in client.payload["messages"][1]["content"]
     assert "formula_constraints" in client.payload["messages"][1]["content"]
-    assert "PctChange(x, 1) is invalid" in client.payload["messages"][1]["content"]
+    assert "PctChange" in client.payload["messages"][1]["content"]
     assert "\"retrieval\"" in client.payload["messages"][1]["content"]
+    assert "doNotSuggestFormulas" in client.payload["messages"][1]["content"]
+    assert "TsZScore(FundingZ(20), 60)" in client.payload["messages"][1]["content"]
     assert "llmAgent" not in memory
 
 

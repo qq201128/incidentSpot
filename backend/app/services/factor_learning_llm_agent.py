@@ -4,18 +4,48 @@ import json
 import os
 import re
 from copy import deepcopy
+from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from app.services.agent_formula_dedup import filter_agent_review_duplicates, limited_do_not_suggest_formulas
 from app.services.factor_operator_library import AGENT_FORMULA_RULES, factor_operator_prompt_payload
 from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
-from app.services.siliconflow_chat_client import SiliconFlowChatClient
+from app.services.siliconflow_chat_client import SiliconFlowChatClient, siliconflow_config_from_env
 
-AGENT_NAME = "siliconflow_kimi_factor_agent_v1"
+AGENT_NAME = "siliconflow_factor_agent_v1"
 AGENT_PROVIDER = "siliconflow"
 AGENT_TEMPERATURE = 0.2
 # Chinese-heavy JSON can exceed a few thousand characters; 2400 tokens often truncates mid-object.
 AGENT_MAX_TOKENS_DEFAULT = 8192
+AGENT_TIMEOUT_SECONDS_DEFAULT = 300
+AGENT_TIMEOUT_ENV = "FACTOR_LEARNING_SILICONFLOW_TIMEOUT_SECONDS"
+AGENT_PROMPT_FORMULA_BLOCK_LIMIT = 48
+AGENT_PROMPT_LIBRARY_ROW_LIMIT = 8
+AGENT_PROMPT_COMBO_ROW_LIMIT = 6
+AGENT_PROMPT_TEXT_LIMIT = 160
+AGENT_RUNNING_STALE_SECONDS = 600
+
+
+def _factor_agent_chat_client() -> SiliconFlowChatClient:
+    base = siliconflow_config_from_env()
+    timeout_seconds = _agent_timeout_seconds(base.timeout_seconds)
+    if timeout_seconds == base.timeout_seconds:
+        return SiliconFlowChatClient(base)
+    return SiliconFlowChatClient(replace(base, timeout_seconds=timeout_seconds))
+
+
+def _agent_timeout_seconds(fallback: int) -> int:
+    raw = os.getenv(AGENT_TIMEOUT_ENV, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return max(fallback, AGENT_TIMEOUT_SECONDS_DEFAULT)
+        if value > 0:
+            return value
+    return max(fallback, AGENT_TIMEOUT_SECONDS_DEFAULT)
 
 
 def _agent_max_tokens() -> int:
@@ -41,9 +71,13 @@ def attach_llm_agent_review(
     memory: dict[str, Any],
     client: ChatCompletionClient | None = None,
 ) -> dict[str, Any]:
-    active_client = client or SiliconFlowChatClient()
+    active_client = client or _factor_agent_chat_client()
     completion = active_client.create_chat_completion(_agent_payload(memory))
-    review = _review_from_completion(completion)
+    review = filter_agent_review_duplicates(
+        _review_from_completion(completion),
+        str(memory["symbol"]),
+        str(memory["duration"]),
+    )
     updated = deepcopy(memory)
     updated["llmAgent"] = {
         "agent": AGENT_NAME,
@@ -74,7 +108,8 @@ def _system_prompt() -> str:
     return (
         "你是量化因子挖掘 LLM Agent。你必须只输出 JSON 对象。"
         "不要编造已验证结果，不要声称真实回测通过；只能基于输入记忆提出候选研究方向。"
-        "不要再次提出 doNotSuggestFactorNames 中已经入库的单因子。"
+        "不要再次提出 doNotSuggestFactorNames 中已经入库的单因子，"
+        "也不要再次提出 doNotSuggestFormulas 中已经出现过的 formulaHint（含未达标、已存在、物化失败的历史公式）。"
         "必须优先使用 memory.retrieval 中整理好的成功模式、禁区、亏损模式和权重。"
         "重点学习 FactorMiner 思路：成功模式、禁区、亏损模式、多重过滤、自动权重。"
         "候选必须能落到现有算子库和现有特征列，不可物化的想法直接拒绝。"
@@ -131,20 +166,165 @@ def _required_schema() -> dict[str, Any]:
 
 
 def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(memory.get("symbol") or "")
+    duration = str(memory.get("duration") or "")
+    blocklist = limited_do_not_suggest_formulas(symbol, duration)
     return {
         "symbol": memory.get("symbol"),
         "duration": memory.get("duration"),
-        "source": memory.get("source") or {},
+        "source": _slim_source(memory.get("source") or {}),
         "retrieval": build_factor_learning_retrieval(memory),
-        "factorMining": memory.get("factorMining") or {},
-        "lossMemory": memory.get("lossMemory") or {},
+        "factorMining": _slim_factor_mining(memory.get("factorMining") or {}),
+        "lossMemory": _slim_loss_memory(memory.get("lossMemory") or {}),
         "filters": memory.get("filters") or {},
         "weights": _top_weights(memory.get("weights") or {}),
-        "minedFactorLibrary": memory.get("minedFactorLibrary") or {},
-        "agentMinedFactorLibrary": memory.get("agentMinedFactorLibrary") or {},
+        "minedFactorLibrary": _slim_mined_library(memory.get("minedFactorLibrary") or {}),
+        "agentMinedFactorLibrary": _slim_agent_library(memory.get("agentMinedFactorLibrary") or {}),
         "doNotSuggestFactorNames": _factor_names(memory.get("agentMinedFactorLibrary") or {}),
-        "monitoring": memory.get("monitoring") or {},
+        "doNotSuggestFormulas": blocklist[:AGENT_PROMPT_FORMULA_BLOCK_LIMIT],
+        "doNotSuggestFormulaTotal": len(blocklist),
+        "monitoring": _slim_monitoring(memory.get("monitoring") or {}),
     }
+
+
+def is_llm_agent_run_stale(agent: dict[str, Any], *, now: datetime | None = None) -> bool:
+    if str(agent.get("status") or "") != "running":
+        return False
+    stamp = str(agent.get("agentStartedAt") or agent.get("updatedAt") or "")
+    if not stamp:
+        return True
+    try:
+        started = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return (current - started).total_seconds() >= AGENT_RUNNING_STALE_SECONDS
+
+
+def stale_llm_agent_error(agent: dict[str, Any]) -> str:
+    stamp = str(agent.get("agentStartedAt") or agent.get("updatedAt") or "")
+    return (
+        "Agent 联网挖掘超时或中断（状态停留在 running）。"
+        f" 开始于 {stamp or '未知'}，超过 {AGENT_RUNNING_STALE_SECONDS} 秒未写回 review。"
+        " 请重新点击联网挖掘；若反复失败，请检查 SILICONFLOW_API_KEY / 网络，"
+        " 或在 backend/.env 设置 FACTOR_LEARNING_SILICONFLOW_TIMEOUT_SECONDS=420。"
+    )
+
+
+def _slim_source(source: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": source.get("status"),
+        "rankingRefreshSource": source.get("rankingRefreshSource"),
+        "minedFrameFailureCount": source.get("minedFrameFailureCount"),
+        "learningRefreshSource": source.get("learningRefreshSource"),
+    }
+
+
+def _slim_factor_mining(factor_mining: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "successPatterns": _slim_pattern_rows(factor_mining.get("successPatterns") or [], "pattern"),
+        "forbiddenRegions": _slim_pattern_rows(factor_mining.get("forbiddenRegions") or [], "region"),
+    }
+
+
+def _slim_pattern_rows(rows: list[Any], label_key: str) -> list[dict[str, Any]]:
+    slim = []
+    for row in rows[:8]:
+        if not isinstance(row, dict):
+            continue
+        members = row.get("members") or []
+        slim.append(
+            {
+                label_key: _truncate_text(row.get(label_key) or row.get("pattern") or row.get("region")),
+                "support": row.get("support"),
+                "members": [str(name) for name in members[:6] if name],
+            }
+        )
+    return slim
+
+
+def _slim_loss_memory(loss_memory: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": loss_memory.get("status"),
+        "sampleCount": loss_memory.get("sampleCount"),
+        "lossCount": loss_memory.get("lossCount"),
+        "patterns": _slim_pattern_rows(loss_memory.get("patterns") or [], "pattern"),
+    }
+
+
+def _slim_monitoring(monitoring: dict[str, Any]) -> dict[str, Any]:
+    issues = monitoring.get("issues") or []
+    return {
+        "status": monitoring.get("status"),
+        "issues": [dict(item) for item in issues[:6] if isinstance(item, dict)],
+    }
+
+
+def _slim_mined_library(library: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for row in library.get("factors") or []:
+        if not isinstance(row, dict):
+            continue
+        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        members = row.get("members") or []
+        rows.append(
+            {
+                "factorName": _truncate_text(row.get("factorName"), 96),
+                "factorDisplayName": _truncate_text(row.get("factorDisplayName")),
+                "formula": _truncate_text(row.get("formula")),
+                "method": row.get("method"),
+                "memberNames": [str(item.get("name") or item) for item in members[:6] if item],
+                "winRate": metrics.get("winRate"),
+                "profitFactor": metrics.get("profitFactor"),
+                "ir": metrics.get("ir"),
+                "score": row.get("score") or row.get("factorScore"),
+            }
+        )
+        if len(rows) >= AGENT_PROMPT_COMBO_ROW_LIMIT:
+            break
+    return {
+        "total": library.get("total"),
+        "duration": library.get("duration"),
+        "symbol": library.get("symbol"),
+        "factors": rows,
+    }
+
+
+def _slim_agent_library(library: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for row in library.get("factors") or []:
+        if not isinstance(row, dict):
+            continue
+        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        rows.append(
+            {
+                "factorName": row.get("factorName"),
+                "factorDisplayName": _truncate_text(row.get("factorDisplayName")),
+                "formula": _truncate_text(row.get("formula")),
+                "winRate": metrics.get("winRate"),
+                "profitFactor": metrics.get("profitFactor"),
+                "qualityPassed": row.get("qualityPassed"),
+            }
+        )
+        if len(rows) >= AGENT_PROMPT_LIBRARY_ROW_LIMIT:
+            break
+    return {
+        "total": library.get("total"),
+        "candidateTotal": library.get("candidateTotal"),
+        "rejectedTotal": library.get("rejectedTotal"),
+        "duration": library.get("duration"),
+        "symbol": library.get("symbol"),
+        "factors": rows,
+    }
+
+
+def _truncate_text(value: Any, limit: int = AGENT_PROMPT_TEXT_LIMIT) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
 
 
 def _top_weights(weights: dict[str, Any]) -> dict[str, Any]:

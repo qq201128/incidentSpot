@@ -31,7 +31,10 @@ from app.services.factor_learning_llm_agent import (
     AGENT_NAME,
     AGENT_PROVIDER,
     attach_llm_agent_review,
+    is_llm_agent_run_stale,
+    stale_llm_agent_error,
 )
+from app.services.siliconflow_chat_client import resolved_siliconflow_model
 from app.services.factor_learning_memory_store import (
     FACTOR_LEARNING_VERSION,
     load_factor_learning_memory,
@@ -53,7 +56,19 @@ def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | N
     memory = load_factor_learning_memory(symbol, duration)
     if memory is None:
         return None
+    memory = recover_stale_llm_agent_memory(memory)
     return _enrich_learning_memory(memory)
+
+
+def recover_stale_llm_agent_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    agent = memory.get("llmAgent")
+    if not isinstance(agent, dict) or not is_llm_agent_run_stale(agent):
+        return memory
+    sym = str(memory.get("symbol") or "").strip().upper()
+    dur = str(memory.get("duration") or "")
+    if sym and dur:
+        return mark_factor_learning_agent_failed(sym, dur, stale_llm_agent_error(agent))
+    return _save_factor_learning_agent_status(memory, "failed", stale_llm_agent_error(agent))
 
 
 def refresh_factor_learning_memory(
@@ -138,20 +153,42 @@ def _save_factor_learning_agent_status(
     error: str | None = None,
 ) -> dict[str, Any]:
     updated = deepcopy(memory)
-    updated["llmAgent"] = _agent_status_payload(status, error)
+    updated["llmAgent"] = _agent_status_payload(status, error, previous=updated.get("llmAgent"))
     return _save_memory_payload(updated)
 
 
-def _agent_status_payload(status: str, error: str | None) -> dict[str, Any]:
+def _agent_status_payload(
+    status: str,
+    error: str | None,
+    *,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = utc_now()
     payload = {
         "agent": AGENT_NAME,
         "provider": AGENT_PROVIDER,
         "status": status,
-        "updatedAt": utc_now(),
+        "updatedAt": now,
+        "model": _resolved_agent_model(previous),
     }
+    if status in {"pending", "running"}:
+        payload["agentStartedAt"] = now
+    elif isinstance(previous, dict) and previous.get("agentStartedAt"):
+        payload["agentStartedAt"] = previous.get("agentStartedAt")
     if error:
         payload["error"] = error
     return payload
+
+
+def _resolved_agent_model(previous: dict[str, Any] | None) -> str:
+    if isinstance(previous, dict):
+        model = str(previous.get("model") or "").strip()
+        if model:
+            return model
+    try:
+        return resolved_siliconflow_model()
+    except RuntimeError:
+        return ""
 
 
 def _queued_memory(symbol: str, duration: str) -> dict[str, Any]:

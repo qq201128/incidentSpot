@@ -16,6 +16,11 @@ from app.services.agent_candidate_reporting import (
     agent_candidate_promotion,
     append_agent_candidate_history,
 )
+from app.services.agent_formula_dedup import (
+    filter_duplicate_factor_ideas,
+    known_agent_formulas,
+    normalize_agent_formula,
+)
 from app.services.agent_factor_formula import materialize_agent_formula
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN, utc_now
@@ -42,7 +47,9 @@ class AgentMinedCandidate:
     orientation: int
 
 def process_agent_factor_candidates(memory: dict[str, Any], frame: pd.DataFrame) -> dict[str, Any]:
-    ideas = _candidate_ideas(memory)
+    symbol = str(memory["symbol"]).strip().upper()
+    duration = str(memory["duration"])
+    ideas, _skipped = filter_duplicate_factor_ideas(_candidate_ideas(memory), known_agent_formulas(symbol, duration))
     rows, records = _evaluate_ideas(memory, frame, ideas)
     evaluation = agent_candidate_evaluation_summary(records)
     updated = deepcopy(memory)
@@ -135,7 +142,16 @@ def _evaluate_ideas(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     library = load_agent_factor_library()
     existing = library.get("factors") or []
-    records = [_record_for_idea(memory, frame, idea, existing) for idea in ideas]
+    symbol = str(memory["symbol"]).strip().upper()
+    duration = str(memory["duration"])
+    known = set(known_agent_formulas(symbol, duration))
+    records = []
+    for idea in ideas:
+        record = _record_for_idea(memory, frame, idea, existing, known)
+        records.append(record)
+        formula = normalize_agent_formula(str(record.get("formula") or ""))
+        if formula:
+            known.add(formula)
     library_rows = [_library_row(record) for record in records]
     rows = _merged_rows(existing, [row for row in library_rows if row is not None])
     return rows, records
@@ -145,9 +161,11 @@ def _record_for_idea(
     frame: pd.DataFrame,
     idea: dict[str, Any],
     existing: list[dict[str, Any]],
+    known: set[str],
 ) -> dict[str, Any]:
     base = _record_base(memory, idea)
-    if _duplicate_formula(base["formula"], existing):
+    formula = normalize_agent_formula(str(base["formula"]))
+    if formula and (formula in known or _duplicate_formula(formula, existing)):
         return {**base, "status": "duplicate_existing"}
     try:
         working = _with_agent_column(frame, base)
@@ -284,7 +302,8 @@ def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -
 
 
 def _duplicate_formula(formula: str, existing: list[dict[str, Any]]) -> bool:
-    return any(str(row.get("formula") or "") == formula for row in existing)
+    normalized = normalize_agent_formula(formula)
+    return any(normalize_agent_formula(str(row.get("formula") or "")) == normalized for row in existing)
 
 
 def _empty_library() -> dict[str, Any]:
