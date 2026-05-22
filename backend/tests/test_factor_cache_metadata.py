@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from app.services import factor_cache_metadata
+from app.services import factor_combo_backtest_cache_service
 from app.services import factor_combination_cache_service
 from app.services import factor_ranking_cache_service
 from app.services.auto_trade_types import AutoTradeSettings
@@ -113,6 +114,27 @@ def test_empty_combination_report_does_not_overwrite_nonempty_cache(monkeypatch,
     assert [row["factorName"] for row in cached["ranking"]] == ["combo__a__b"]
 
 
+def test_combo_backtest_cache_becomes_stale_when_market_data_changes(monkeypatch, tmp_path: Path) -> None:
+    db_path = _init_db(tmp_path)
+    _patch_cache_db(monkeypatch, db_path)
+    _insert_kline(db_path, "30m", 0)
+    factor_combo_backtest_cache_service.save_cached_combo_backtest(
+        "BTCUSDT",
+        "30m",
+        "combo__a__b",
+        {"factorName": "combo__a__b", "factorScore": 65.8},
+    )
+
+    cached = factor_combo_backtest_cache_service.get_usable_combo_backtest("BTCUSDT", "30m", "combo__a__b")
+    assert cached["factorScore"] == 65.8
+
+    _insert_kline(db_path, "30m", TEN_MINUTES_MS)
+
+    cached = factor_combo_backtest_cache_service.get_cached_combo_backtest("BTCUSDT", "30m", "combo__a__b")
+    assert cached["cacheStatus"]["usable"] is False
+    assert factor_combo_backtest_cache_service.get_usable_combo_backtest("BTCUSDT", "30m", "combo__a__b") is None
+
+
 def test_diagnostic_empty_combination_report_overwrites_nonempty_cache(monkeypatch, tmp_path: Path) -> None:
     db_path = _init_db(tmp_path)
     _patch_cache_db(monkeypatch, db_path)
@@ -172,6 +194,7 @@ def test_rewritten_market_change_is_not_allowed_for_live_signal() -> None:
 
 def _patch_cache_db(monkeypatch, db_path: Path) -> None:
     monkeypatch.setattr(factor_cache_metadata, "get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(factor_combo_backtest_cache_service, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(factor_ranking_cache_service, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(factor_combination_cache_service, "get_conn", lambda: _connect(db_path))
 
@@ -203,6 +226,14 @@ def _init_db(tmp_path: Path) -> Path:
               search_config TEXT NOT NULL,
               payload TEXT NOT NULL,
               PRIMARY KEY (symbol, duration)
+            );
+            CREATE TABLE factor_combo_backtest_cache (
+              symbol TEXT NOT NULL,
+              duration TEXT NOT NULL,
+              factor_name TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              PRIMARY KEY (symbol, duration, factor_name)
             );
             """
         )

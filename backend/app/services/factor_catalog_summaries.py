@@ -5,6 +5,7 @@ from typing import Any
 
 from app.services.agent_mined_factor_library import load_agent_factor_library
 from app.services.factor_mined_library import MINED_FACTOR_SOURCE_FILE, mined_factor_rows
+from app.services.factor_metric_enrichment import factor_score
 from app.services.factor_registry import FactorCategory, FactorDirection, list_factor_payloads
 
 AGENT_FACTOR_SOURCE_FILE = "agent_mined_factor_library.json"
@@ -64,6 +65,7 @@ def _agent_summary(row: dict[str, Any]) -> dict[str, Any]:
 def _mined_summary(row: dict[str, Any]) -> dict[str, Any]:
     name = str(row.get("factorName") or "")
     display = str(row.get("factorDisplayName") or row.get("description") or name)
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
     return {
         "name": name,
         "category": FactorCategory.PERFORMANCE.value,
@@ -75,6 +77,9 @@ def _mined_summary(row: dict[str, Any]) -> dict[str, Any]:
         "symbol": _row_symbol(row),
         "duration": str(row.get("duration") or ""),
         "promotionCount": int(row.get("promotionCount") or 0),
+        "factorScore": _mined_factor_score(row, metrics),
+        "winRate": metrics.get("winRate"),
+        "ir": metrics.get("ir"),
     }
 
 
@@ -127,6 +132,12 @@ def _has_combo_member(row: dict[str, Any]) -> bool:
 def _is_combo_name(name: object) -> bool:
     raw = str(name or "")
     return raw.startswith("combo__") or raw.startswith("goal_combo__")
+
+
+def _mined_factor_score(row: dict[str, Any], metrics: dict[str, Any]) -> float:
+    if str(row.get("stabilityStatus") or "") == "rejected":
+        return 0.0
+    return factor_score(metrics)
 
 
 def _row_order_key(row: dict[str, Any]) -> tuple[str, int]:

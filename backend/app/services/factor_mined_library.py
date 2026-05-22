@@ -15,6 +15,7 @@ from app.services.factor_learning_common import (
     utc_now,
 )
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
+from app.services.factor_metric_enrichment import factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
 MINED_FACTOR_LIBRARY_VERSION = "mined_factor_library_v1"
@@ -163,7 +164,9 @@ def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] 
         "threshold": finite(row.get("threshold")),
         "minTrades": int(row.get("minTrades") or row.get("totalPeriods") or 0),
         "metrics": _metric_payload(row),
-        "score": _row_score(row),
+        "score": _standard_score(row),
+        "searchScore": _row_score(row),
+        "searchProfitFactor": finite(row.get("profitFactor")),
         "firstSeenAt": now,
         "lastSeenAt": now,
         "promotionCount": 1,
@@ -194,7 +197,9 @@ def _library_combination_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "ir": finite(metrics.get("ir")),
         "totalPeriods": int(metrics.get("totalPeriods") or 0),
         "contribution": finite(metrics.get("contribution")),
-        "factorScore": finite(row.get("score")),
+        "factorScore": _display_score(row),
+        "searchScore": finite(row.get("searchScore")),
+        "searchProfitFactor": finite(row.get("searchProfitFactor")),
         "source": str(row.get("source") or MINED_FACTOR_SOURCE),
         "walkForward": validation if isinstance(validation, dict) else None,
         "walkForwardPassed": _validation_passed(validation),
@@ -334,11 +339,28 @@ def _row_symbol(row: dict[str, Any]) -> str:
 
 def _library_score(row: dict[str, Any]) -> float:
     metrics = row.get("metrics") or row
-    return _row_score(metrics)
+    if _is_stability_rejected(row):
+        return 0.0
+    return _standard_score(metrics)
 
 
 def _row_score(row: dict[str, Any]) -> float:
     return round_metric(edge_score(row), 6)
+
+
+def _standard_score(row: dict[str, Any]) -> float:
+    return factor_score(row)
+
+
+def _display_score(row: dict[str, Any]) -> float:
+    if _is_stability_rejected(row):
+        return 0.0
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else row
+    return _standard_score(metrics)
+
+
+def _is_stability_rejected(row: dict[str, Any]) -> bool:
+    return str(row.get("stabilityStatus") or "") == "rejected"
 
 
 def _score_num(value: Any) -> float:

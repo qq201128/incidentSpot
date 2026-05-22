@@ -84,7 +84,10 @@ def test_predict_factor_candidate_signals_refreshes_required_source_kline(monkey
 
     service.predict_factor_candidate_signals("btcusdt", "10m", entry_open_time=520 * step_ms)
 
-    assert calls == [("btcusdt", "10m", 519 * step_ms)]
+    assert calls == [
+        ("btcusdt", "1m", 520 * step_ms - 60_000),
+        ("btcusdt", "10m", 519 * step_ms),
+    ]
 
 
 def test_predict_factor_candidate_signals_keeps_valid_rows_when_one_candidate_fails(monkeypatch) -> None:

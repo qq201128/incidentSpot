@@ -42,9 +42,19 @@ export function useFactorsPageData() {
   const ranking = useFactorRanking({ category, duration, symbol });
   const debouncedQuery = useDebouncedValue(query, LIST_DEBOUNCE_MS);
 
+  const selectedFactor = useMemo(() => {
+    if (!selectedName) return null;
+    const fromList = list.factors.find((row) => row.name === selectedName);
+    if (fromList) return fromList;
+    const fromRanking = ranking.items.find(
+      (row) => row.factorName === selectedName || row.name === selectedName,
+    );
+    return fromRanking ? rankingRowToFactorSnapshot(fromRanking) : null;
+  }, [list.factors, ranking.items, selectedName]);
+
   useEffect(() => {
-    setPreviewDuration(duration);
-  }, [duration, selectedName]);
+    setPreviewDuration(defaultPreviewDuration(selectedFactor, duration));
+  }, [duration, selectedFactor, selectedName]);
 
   useEffect(() => {
     setListPage(1);
@@ -121,20 +131,11 @@ export function useFactorsPageData() {
   }, [ranking.items, selectedName]);
 
   const displayMetrics = useMemo(() => {
-    if (metricsMatchFactor(backtest.data, selectedName)) return backtest.data;
-    if (metricsMatchFactor(previewMetrics, selectedName)) return previewMetrics;
+    if (metricsCanDisplay(backtest.data, selectedName)) return backtest.data;
+    if (metricsCanDisplay(previewMetrics, selectedName)) return previewMetrics;
+    if (metricsCanDisplay(detail.data, selectedName)) return detail.data;
     return cachedMetrics;
-  }, [backtest.data, cachedMetrics, previewMetrics, selectedName]);
-
-  const selectedFactor = useMemo(() => {
-    if (!selectedName) return null;
-    const fromList = list.factors.find((row) => row.name === selectedName);
-    if (fromList) return fromList;
-    const fromRanking = ranking.items.find(
-      (row) => row.factorName === selectedName || row.name === selectedName,
-    );
-    return fromRanking ? rankingRowToFactorSnapshot(fromRanking) : null;
-  }, [list.factors, ranking.items, selectedName]);
+  }, [backtest.data, cachedMetrics, detail.data, previewMetrics, selectedName]);
 
   const rankingTotal = overview?.rankingTotal ?? ranking.items.length;
 
@@ -376,6 +377,15 @@ function metricsMatchFactor(metrics, factorName) {
   if (!metrics || !factorName) return false;
   const name = metrics.factorName || metrics.name;
   return name === factorName;
+}
+
+function metricsCanDisplay(metrics, factorName) {
+  return metricsMatchFactor(metrics, factorName) && hasRankingMetrics(metrics);
+}
+
+function defaultPreviewDuration(factor, fallback) {
+  const duration = factor?.duration || factor?.timeframes?.[0];
+  return duration || fallback;
 }
 
 function rankingRowToFactorSnapshot(row) {

@@ -246,6 +246,15 @@ CREATE TABLE IF NOT EXISTS factor_combo_signal_cache (
   payload TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS factor_combo_backtest_cache (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  factor_name TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (symbol, duration, factor_name)
+);
+
 CREATE TABLE IF NOT EXISTS high_winrate_combo_ranking_cache (
   symbol TEXT NOT NULL,
   duration TEXT NOT NULL,

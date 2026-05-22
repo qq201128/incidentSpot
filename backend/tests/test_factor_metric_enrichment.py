@@ -52,6 +52,17 @@ def test_negative_sharpe_and_ir_do_not_boost_factor_score() -> None:
     assert factor_score(negative) < 20.0
 
 
+def test_profit_factor_component_is_capped() -> None:
+    normal = {
+        "totalPeriods": BACKTEST_MIN_PERIODS,
+        "winRate": 0.63,
+        "profitFactor": 2.0,
+    }
+    extreme = {**normal, "profitFactor": 716.8354}
+
+    assert factor_score(extreme) == factor_score(normal)
+
+
 def test_factor_signal_metrics_use_gross_returns_without_roundtrip_cost() -> None:
     rows = BACKTEST_MIN_PERIODS + 20
     df = pd.DataFrame(

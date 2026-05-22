@@ -60,6 +60,10 @@ def paginate_rows(rows: list[dict[str, Any]], page: int, page_size: int) -> dict
     }
 
 
+def sort_combo_rows_by_score(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=_combo_list_sort_key, reverse=True)
+
+
 def build_factor_list_page(
     *,
     category: str | None,
@@ -72,7 +76,7 @@ def build_factor_list_page(
     combos = [enrich_factor_summary(row) for row in list_combo_factor_summaries()]
     overview = build_factor_overview(category)
     if kind == "combo":
-        rows = filter_factor_rows(combos, query)
+        rows = sort_combo_rows_by_score(filter_factor_rows(combos, query))
         paginated = paginate_rows(rows, page, page_size)
         return {
             **overview,
@@ -321,6 +325,14 @@ def _ranking_row_for_factor(symbol: str, duration: str, factor_name: str) -> dic
         if row.get("factorName") == factor_name or row.get("name") == factor_name:
             return dict(row)
     return None
+
+
+def _combo_list_sort_key(row: dict[str, Any]) -> tuple[float, float, str]:
+    return (
+        float(row.get("factorScore") or 0.0),
+        abs(float(row.get("ir") or 0.0)),
+        str(row.get("name") or ""),
+    )
 
 
 def _high_winrate_card(symbol: str, duration: str) -> dict[str, Any]:

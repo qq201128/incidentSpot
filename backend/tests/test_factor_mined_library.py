@@ -27,6 +27,46 @@ def test_good_combo_is_promoted_to_mined_factor_library(monkeypatch: pytest.Monk
     assert promotion["promoted"] == 1
     assert rows[0]["factorDisplayName"] == "组合：factor a + factor b"
     assert rows[0]["metrics"]["winRate"] == 0.63
+    assert rows[0]["score"] == pytest.approx(23.49)
+    assert rows[0]["searchScore"] == pytest.approx(0.64)
+    assert rows[0]["searchProfitFactor"] == pytest.approx(1.12)
+
+
+def test_goal_combo_score_uses_capped_standard_score(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / "mined-library-test.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    report = _ranking_report()
+    report["ranking"][0]["factorName"] = "goal_combo__factor_a__factor_b"
+    report["ranking"][0]["profitFactor"] = 716.8354
+    monkeypatch.setattr(factor_mined_library, "MINED_FACTOR_LIBRARY_PATH", target)
+    try:
+        factor_mined_library.upsert_good_combinations(report)
+        rows = factor_mined_library.mined_factor_rows_for_duration("BTCUSDT", "10m")
+    finally:
+        target.unlink(missing_ok=True)
+
+    assert rows[0]["score"] == pytest.approx(34.05)
+    assert rows[0]["searchScore"] == pytest.approx(716.3554)
+    assert rows[0]["searchProfitFactor"] == pytest.approx(716.8354)
+
+
+def test_rejected_goal_combo_displays_zero_score() -> None:
+    row = {
+        "factorName": "goal_combo__factor_a__factor_b",
+        "members": [{"name": "factor_a"}, {"name": "factor_b"}],
+        "metrics": {
+            "winRate": 0.9817,
+            "profitFactor": 716.8354,
+            "totalPeriods": ROWS,
+        },
+        "score": 34.05,
+        "stabilityStatus": "rejected",
+    }
+
+    combo = factor_mined_library._library_combination_row(row)
+
+    assert combo["factorScore"] == 0.0
 
 
 def test_mined_factor_library_summary_recomputes_display_names(monkeypatch: pytest.MonkeyPatch) -> None:

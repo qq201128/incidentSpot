@@ -4,6 +4,7 @@ import pytest
 
 from app.api import factors as factors_api
 from app.services import factor_page_service
+from app.services.factor_metric_enrichment import factor_score
 
 
 def test_classify_factor_sources() -> None:
@@ -52,6 +53,23 @@ def test_build_factor_list_page_pagination(monkeypatch) -> None:
     assert len(page1["factors"]) == 2
     assert page1["listTotal"] == 5
     assert page1["pageCount"] == 3
+
+
+def test_combo_factor_list_page_sorts_by_score(monkeypatch) -> None:
+    rows = [
+        {"name": "combo__low", "sourceFile": "mined_factor_library.json", "factorScore": 10.0},
+        {"name": "combo__high", "sourceFile": "mined_factor_library.json", "factorScore": 90.0},
+        {"name": "combo__mid", "sourceFile": "mined_factor_library.json", "factorScore": 50.0},
+    ]
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: [])
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: rows)
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+
+    page = factor_page_service.build_factor_list_page(
+        category=None, kind="combo", query=None, page=1, page_size=20
+    )
+
+    assert [row["name"] for row in page["factors"]] == ["combo__high", "combo__mid", "combo__low"]
 
 
 def test_build_factor_period_scores_from_cache(monkeypatch) -> None:
@@ -114,3 +132,70 @@ def test_combo_period_scores_use_combination_cache(monkeypatch: pytest.MonkeyPat
     payload = factors_api.factor_period_scores("combo__a__b", symbol="BTCUSDT")
 
     assert payload["scores"][0]["factorScore"] == 88.0
+
+
+def test_library_combo_detail_merges_full_backtest_without_overwriting_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = {
+        "factorName": "combo__a__b",
+        "factorScore": 65.8,
+        "winRate": 0.714,
+        "ir": 0.98,
+        "profitFactor": 2.64,
+    }
+    monkeypatch.setattr(factors_api, "get_factor_payload_by_name", lambda _name: {"name": "combo__a__b"})
+    monkeypatch.setattr(
+        factors_api,
+        "combo_metrics_for_factor",
+        lambda *_args: {
+            **row,
+            "winRate": 0.5035,
+            "icMean": 0.12,
+            "longShortReturn": 0.034,
+            "maxDrawdown": -0.08,
+            "tStat": 2.4,
+            "pValue": 0.02,
+        },
+    )
+
+    detail = factors_api.get_factor_detail("combo__a__b", symbol="BTCUSDT", duration="10m")
+
+    assert detail["factorScore"] == 65.8
+    assert detail["winRate"] == 0.5035
+    assert detail["icMean"] == 0.12
+    assert detail["longShortReturn"] == 0.034
+    assert detail["maxDrawdown"] == -0.08
+    assert detail["tStat"] == 2.4
+    assert detail["pValue"] == 0.02
+
+
+def test_library_combo_detail_uses_backtest_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = {
+        "factorName": "combo__a__b",
+        "factorDisplayName": "组合：A + B",
+        "metrics": {"winRate": 0.714, "profitFactor": 2.64, "totalPeriods": 114},
+        "score": 65.8,
+    }
+    monkeypatch.setattr(
+        "app.services.factor_combo_metrics.mined_factor_rows_for_duration",
+        lambda *_args: [row],
+    )
+    monkeypatch.setattr(
+        "app.services.factor_combo_metrics.get_cached_combination_ranking",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "app.services.factor_combo_metrics.get_usable_combo_backtest",
+        lambda *_args: {"factorName": "combo__a__b", "icMean": 0.12, "factorScore": 99.0},
+    )
+
+    def fail_backtest(*_args):
+        raise AssertionError("backtest should not run on cache hit")
+
+    monkeypatch.setattr("app.services.factor_backtest_service.run_factor_backtest", fail_backtest)
+
+    detail = factors_api.combo_metrics_for_factor("BTCUSDT", "10m", "combo__a__b")
+
+    assert detail["factorScore"] == factor_score(row["metrics"])
+    assert detail["icMean"] == 0.12

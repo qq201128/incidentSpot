@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.factor_cache_metadata import cache_is_usable
+from app.services.factor_combo_backtest_cache_service import (
+    get_usable_combo_backtest,
+    save_cached_combo_backtest,
+)
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_mined_library import mined_factor_rows_for_duration
 from app.services.factor_metric_enrichment import factor_score
@@ -35,7 +39,9 @@ def cached_combo_row_for_factor(symbol: str, duration: str, factor_name: str) ->
 def library_combo_metrics_for_factor(symbol: str, duration: str, factor_name: str) -> dict[str, Any] | None:
     for row in mined_factor_rows_for_duration(symbol, duration):
         if row.get("factorName") == factor_name:
-            return _normalize_library_metrics(row, duration)
+            normalized = _normalize_library_metrics(row, duration)
+            backtest = _standard_backtest_metrics(symbol, duration, factor_name)
+            return _merge_library_and_backtest_metrics(normalized, backtest)
     return None
 
 
@@ -67,6 +73,37 @@ def _normalize_library_metrics(row: dict[str, Any], duration: str) -> dict[str, 
     metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
     merged = {**row, **metrics}
     merged.setdefault("factorName", row.get("name"))
-    merged.setdefault("factorScore", row.get("score") or factor_score(merged))
+    merged["factorScore"] = _library_factor_score(row, merged)
+    merged.setdefault("searchScore", row.get("searchScore") or row.get("score"))
+    merged.setdefault("searchProfitFactor", row.get("searchProfitFactor"))
     merged.setdefault("duration", duration)
     return _normalize_combo_metrics(merged, duration)
+
+
+def _library_factor_score(row: dict[str, Any], metrics: dict[str, Any]) -> float:
+    if str(row.get("stabilityStatus") or "") == "rejected":
+        return 0.0
+    return factor_score(metrics)
+
+
+def _standard_backtest_metrics(symbol: str, duration: str, factor_name: str) -> dict[str, Any]:
+    cached = get_usable_combo_backtest(symbol, duration, factor_name)
+    if cached is not None:
+        return cached
+    from app.services.factor_backtest_service import run_factor_backtest
+
+    metrics = run_factor_backtest(factor_name, symbol, duration)
+    save_cached_combo_backtest(symbol, duration, factor_name, metrics)
+    return metrics
+
+
+def _merge_library_and_backtest_metrics(
+    library: dict[str, Any],
+    backtest: dict[str, Any],
+) -> dict[str, Any]:
+    merged = {**library, **backtest}
+    merged["factorScore"] = library.get("factorScore")
+    merged["searchScore"] = library.get("searchScore")
+    merged["searchProfitFactor"] = library.get("searchProfitFactor")
+    merged["stabilityStatus"] = library.get("stabilityStatus")
+    return _normalize_combo_metrics(merged, str(library.get("duration") or backtest.get("duration") or ""))

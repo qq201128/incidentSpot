@@ -77,6 +77,7 @@ export default function FactorListPanel({
 
       <FactorTable
         factors={factors}
+        listTab={listTab}
         page={listPage}
         pageSize={listPageSize}
         selectedName={selectedName}
@@ -131,23 +132,25 @@ function CategoryChips({ category, onChange }) {
   );
 }
 
-function FactorTable({ factors, page, pageSize, selectedName, onSelect }) {
+function FactorTable({ factors, listTab, page, pageSize, selectedName, onSelect }) {
   const indexOffset = (page - 1) * pageSize;
+  const showScore = listTab === "combo";
   return (
     <div className="factors-table-wrap">
-      <table className="factors-table factors-catalog-table">
+      <table className={`factors-table factors-catalog-table${showScore ? " factors-catalog-table-scored" : ""}`}>
         <thead>
           <tr>
             <th>#</th>
             <th>中文因子</th>
             <th>分类</th>
             <th>方向</th>
+            {showScore ? <th>评分</th> : null}
             <th>来源</th>
           </tr>
         </thead>
         <tbody>
           {factors.map((factor, index) =>
-            renderFactorRow(factor, indexOffset + index + 1, selectedName, onSelect),
+            renderFactorRow(factor, indexOffset + index + 1, selectedName, onSelect, showScore),
           )}
         </tbody>
       </table>
@@ -156,7 +159,7 @@ function FactorTable({ factors, page, pageSize, selectedName, onSelect }) {
   );
 }
 
-function renderFactorRow(factor, rankIndex, selectedName, onSelect) {
+function renderFactorRow(factor, rankIndex, selectedName, onSelect, showScore) {
   const direction = directionLabel(factor.direction);
   return (
     <tr
@@ -171,6 +174,7 @@ function renderFactorRow(factor, rankIndex, selectedName, onSelect) {
       </td>
       <td className="factors-category-cell">{factorTableCategoryLabel(factor)}</td>
       <td className={`factors-direction-cell${direction === "正向" ? " is-positive" : ""}`}>{direction}</td>
+      {showScore ? <td className="factors-score-cell">{formatScore(factor.factorScore)}</td> : null}
       <td className="factors-source-cell">
         <span className={`factors-source-tag ${sourceTagClass(factor)}`} title={sourceLabel(factor)}>
           {sourceLabel(factor)}
@@ -178,6 +182,11 @@ function renderFactorRow(factor, rankIndex, selectedName, onSelect) {
       </td>
     </tr>
   );
+}
+
+function formatScore(value) {
+  const score = Number(value);
+  return Number.isFinite(score) ? score.toFixed(1) : "-";
 }
 
 function Pagination({ catalogTotal, listTotal, page, pageCount, onPageChange, onRefresh }) {

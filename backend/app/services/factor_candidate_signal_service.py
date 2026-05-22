@@ -19,7 +19,7 @@ from app.services.factor_frame_service import load_factor_frame
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.factor_registry import FactorDirection
-from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+from app.services.rule_config import MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS
 
 SIGNAL_RULE_NAME = "factor_candidate_signal_v1"
 PROBABILITY_DECIMALS = 4
@@ -75,6 +75,7 @@ def predict_factor_candidate_signals(
 
 def _refresh_candidate_source_klines(symbol: str, duration: str, entry_open_time: int) -> None:
     source_open_time = duration_entry_source_open_time(entry_open_time, duration)
+    refresh_prediction_klines(symbol, "1m", int(entry_open_time) - MS_PER_MINUTE)
     refresh_prediction_klines(symbol, duration, source_open_time)
 
 
