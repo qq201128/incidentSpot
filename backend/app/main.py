@@ -27,6 +27,7 @@ from app.services.auto_settlement_service import auto_settlement_loop
 from app.services.auto_trade_service import auto_trade_loop
 from app.services.factor_combination_background import factor_combination_daily_refresh_loop
 from app.services.factor_ranking_background import factor_ranking_refresh_loop
+from app.services.market_context_background import market_context_refresh_loop
 from app.services.lstm_candidate_retry_background import (
     lstm_candidate_retry_enabled,
     lstm_candidate_retry_loop,
@@ -61,6 +62,8 @@ app.state.predict_task = None
 app.state.predict_stop_event = None
 app.state.factor_ranking_task = None
 app.state.factor_ranking_stop_event = None
+app.state.market_context_task = None
+app.state.market_context_stop_event = None
 app.state.factor_combo_daily_task = None
 app.state.factor_combo_daily_stop_event = None
 app.state.lstm_candidate_retry_task = None
@@ -74,6 +77,7 @@ STOP_EVENT_ATTRS = (
     "predict_stop_event",
     "trade_stop_event",
     "factor_ranking_stop_event",
+    "market_context_stop_event",
     "factor_combo_daily_stop_event",
     "lstm_candidate_retry_stop_event",
     "lstm_daily_review_stop_event",
@@ -83,6 +87,7 @@ BACKGROUND_TASK_ATTRS = (
     "predict_task",
     "trade_task",
     "factor_ranking_task",
+    "market_context_task",
     "factor_combo_daily_task",
     "lstm_candidate_retry_task",
     "lstm_daily_review_task",
@@ -130,6 +135,10 @@ async def on_startup() -> None:
     factor_ranking_stop = asyncio.Event()
     app.state.factor_ranking_stop_event = factor_ranking_stop
     app.state.factor_ranking_task = asyncio.create_task(factor_ranking_refresh_loop(factor_ranking_stop))
+
+    market_context_stop = asyncio.Event()
+    app.state.market_context_stop_event = market_context_stop
+    app.state.market_context_task = asyncio.create_task(market_context_refresh_loop(market_context_stop))
 
     factor_combo_stop = asyncio.Event()
     app.state.factor_combo_daily_stop_event = factor_combo_stop

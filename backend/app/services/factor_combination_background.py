@@ -26,6 +26,7 @@ from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
 from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.lstm_combo_sync_service import sync_lstm_model_to_combo_ranking
+from app.services.market_context_ingest_service import ingest_market_context_data
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
@@ -47,6 +48,7 @@ def refresh_combination_ranking_for_symbol_duration(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
     sym = symbol.strip().upper()
+    ingest_market_context_data(sym, durations=(duration,))
     _refresh_duration_klines(sym, duration)
     report = run_factor_combination_ranking(sym, duration, config)
     save_cached_combination_ranking(report)

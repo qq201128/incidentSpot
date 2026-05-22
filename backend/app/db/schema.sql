@@ -118,6 +118,11 @@ CREATE TABLE IF NOT EXISTS futures_positioning_features (
   taker_buy_sell_ratio REAL,
   taker_buy_vol REAL,
   taker_sell_vol REAL,
+  open_interest_chg_1 REAL,
+  open_interest_value_chg_1 REAL,
+  open_interest_z_20 REAL,
+  long_short_ratio_chg_1 REAL,
+  taker_buy_share REAL,
   PRIMARY KEY (symbol, open_time)
 );
 
@@ -126,6 +131,8 @@ CREATE TABLE IF NOT EXISTS market_sentiment_features (
   open_time INTEGER NOT NULL,
   fear_greed_value REAL,
   fear_greed_classification TEXT,
+  fear_greed_chg_1 REAL,
+  fear_greed_z_30 REAL,
   PRIMARY KEY (source, open_time)
 );
 
@@ -136,6 +143,9 @@ CREATE TABLE IF NOT EXISTS onchain_features (
   stablecoin_supply_ratio REAL,
   active_addresses REAL,
   transaction_count REAL,
+  exchange_netflow_z_20 REAL,
+  active_addresses_chg_1 REAL,
+  transaction_count_chg_1 REAL,
   PRIMARY KEY (symbol, open_time)
 );
 

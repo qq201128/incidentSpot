@@ -57,6 +57,16 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE orderbook_features ADD COLUMN ofi REAL",
   "ALTER TABLE orderbook_features ADD COLUMN ofi_ratio REAL",
   "ALTER TABLE orderbook_features ADD COLUMN quote_time INTEGER",
+  "ALTER TABLE futures_positioning_features ADD COLUMN open_interest_chg_1 REAL",
+  "ALTER TABLE futures_positioning_features ADD COLUMN open_interest_value_chg_1 REAL",
+  "ALTER TABLE futures_positioning_features ADD COLUMN open_interest_z_20 REAL",
+  "ALTER TABLE futures_positioning_features ADD COLUMN long_short_ratio_chg_1 REAL",
+  "ALTER TABLE futures_positioning_features ADD COLUMN taker_buy_share REAL",
+  "ALTER TABLE market_sentiment_features ADD COLUMN fear_greed_chg_1 REAL",
+  "ALTER TABLE market_sentiment_features ADD COLUMN fear_greed_z_30 REAL",
+  "ALTER TABLE onchain_features ADD COLUMN exchange_netflow_z_20 REAL",
+  "ALTER TABLE onchain_features ADD COLUMN active_addresses_chg_1 REAL",
+  "ALTER TABLE onchain_features ADD COLUMN transaction_count_chg_1 REAL",
   """
   CREATE TABLE IF NOT EXISTS futures_positioning_features (
     symbol TEXT NOT NULL,
@@ -69,6 +79,11 @@ SCHEMA_MIGRATIONS = (
     taker_buy_sell_ratio REAL,
     taker_buy_vol REAL,
     taker_sell_vol REAL,
+    open_interest_chg_1 REAL,
+    open_interest_value_chg_1 REAL,
+    open_interest_z_20 REAL,
+    long_short_ratio_chg_1 REAL,
+    taker_buy_share REAL,
     PRIMARY KEY (symbol, open_time)
   )
   """,
@@ -78,6 +93,8 @@ SCHEMA_MIGRATIONS = (
     open_time INTEGER NOT NULL,
     fear_greed_value REAL,
     fear_greed_classification TEXT,
+    fear_greed_chg_1 REAL,
+    fear_greed_z_30 REAL,
     PRIMARY KEY (source, open_time)
   )
   """,
@@ -89,6 +106,9 @@ SCHEMA_MIGRATIONS = (
     stablecoin_supply_ratio REAL,
     active_addresses REAL,
     transaction_count REAL,
+    exchange_netflow_z_20 REAL,
+    active_addresses_chg_1 REAL,
+    transaction_count_chg_1 REAL,
     PRIMARY KEY (symbol, open_time)
   )
   """,

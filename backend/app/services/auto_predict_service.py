@@ -87,11 +87,18 @@ async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
     if not active_targets:
         return
     await _prepare_prediction_inputs(active_targets)
-    if due_targets:
-        await _run_prediction_batch(due_targets)
     if collection_targets:
         await _run_candidate_collection_batch(collection_targets)
+    prediction_error = None
+    if due_targets:
+        try:
+            await _run_prediction_batch(due_targets)
+        except Exception as exc:
+            logger.exception("primary prediction batch failed; candidate collection will still run")
+            prediction_error = exc
     await _backfill_lstm_shadow_predictions(active_targets)
+    if prediction_error is not None:
+        raise prediction_error
 
 
 async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
@@ -387,7 +394,7 @@ def _ready_due_prediction_targets(targets: list[AutoTradeSettings]) -> list[Auto
             settings.strategy_key,
             settings.symbol,
             settings.duration,
-            attempt_recovery=True,
+            attempt_recovery=False,
         )
         if readiness.ready:
             ready.append(settings)
@@ -624,7 +631,7 @@ def _next_predict_wait(targets: list[AutoTradeSettings], poll_seconds: int) -> f
     min_wait = float("inf")
     for settings in targets:
         bucket = current_rule_entry_open_time_for_duration(settings.duration, now_ms)
-        if _should_predict_entry(settings):
+        if _should_predict_entry(settings) or _candidate_collection_due(_collection_settings(settings), bucket):
             min_wait = min(min_wait, float(poll_seconds))
         else:
             min_wait = min(min_wait, seconds_until_next_rule_entry_for_duration(settings.duration, now_ms))
