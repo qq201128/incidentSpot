@@ -129,6 +129,7 @@ def get_index_klines(
             interval,
             limit=limit,
             request_options=DISPLAY_KLINE_REQUEST_OPTIONS,
+            include_forming=True,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"failed to fetch index klines: {exc}") from exc

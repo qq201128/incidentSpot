@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.services.agg_trade_normalize import normalize_agg_trade_row
 from app.services.binance_http import FAPI_BASE_URL, retry_get
 from app.services.index_price_tick_service import persist_index_price_tick
 from app.services.orderbook_feature_service import OrderbookSnapshotRequest, build_orderbook_snapshot
@@ -62,7 +63,13 @@ def fetch_agg_trades_display(symbol: str, limit: int = 50) -> list[dict[str, Any
     )
     if not isinstance(rows, list):
         return []
-    out = [_agg_trade_payload(row) for row in rows]
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        normalized = normalize_agg_trade_row(row)
+        if normalized is not None:
+            out.append(normalized)
     out.sort(key=lambda row: int(row["time"]), reverse=True)
     return out
 
@@ -169,19 +176,6 @@ def _binance_depth_fetch_limit(levels: int) -> int:
         if cap >= levels:
             return cap
     return MAX_DISPLAY_DEPTH
-
-
-def _agg_trade_payload(row: dict[str, Any]) -> dict[str, Any]:
-    price = float(row.get("p", 0) or 0)
-    qty = float(row.get("q", 0) or 0)
-    buyer_maker = bool(row.get("m", False))
-    return {
-        "price": price,
-        "qty": qty,
-        "quoteQty": price * qty,
-        "time": int(row.get("T", 0) or 0),
-        "side": "sell" if buyer_maker else "buy",
-    }
 
 
 def _now_ms() -> int:

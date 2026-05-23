@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchAggTrades,
   fetchIndexKlines,
   fetchLastPrice,
+  openAggTradeSocket,
   openIndexKlineSocket,
 } from "../api/client";
+import { currentIntervalBucketMs, ensureFormingKline } from "../utils/klineFormingCandle";
 import { mergeKlineCandle, normalizeChartCandle } from "../utils/klineCandles";
 
 const PRICE_POLL_MS = 2000;
-const TRADES_POLL_MS = 3000;
+const AGG_TRADES_CAP = 40;
 
 export function useTradingMarket(symbol, interval, setStatus) {
   const [history, setHistory] = useState([]);
@@ -23,13 +24,13 @@ export function useTradingMarket(symbol, interval, setStatus) {
   useMarketClock(setPriceTick);
   useInitialKlines(symbol, interval, setHistory, setLatest, setStatus);
   usePricePolling(symbol, setTickerPrice, setStatus);
-  useTradePolling(symbol, setAggTrades, setStatus);
-  useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, chartWsGraceStartRef);
+  useAggTradeSocket(symbol, setAggTrades, setStatus);
+  useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, chartWsGraceStartRef, latest);
   useIndexKlineSocket(symbol, interval, setHistory, setLatest, setLastKlineAt, setStatus, lastKlineAtRef, chartWsGraceStartRef);
 
   const chartData = useMemo(() => history.map(normalizeChartCandle), [history]);
   const currentPrice = useCurrentPrice(latest, history, tickerPrice, lastKlineAt, priceTick);
-  const chartLatestData = useChartLatest(latest, currentPrice);
+  const chartLatestData = useChartLatest(latest, currentPrice, interval, priceTick);
 
   return { aggTrades, chartData, chartLatestData, currentPrice, lastKlineAt };
 }
@@ -77,37 +78,79 @@ function usePricePolling(symbol, setTickerPrice, setStatus) {
   }, [symbol, setTickerPrice, setStatus]);
 }
 
-function useTradePolling(symbol, setAggTrades, setStatus) {
+function useAggTradeSocket(symbol, setAggTrades, setStatus) {
   useEffect(() => {
-    let timer;
-    let stopped = false;
-    const poll = async () => {
+    const state = { retryCount: 0, retryTimer: null, stopped: false, ws: null };
+
+    const connect = () => {
+      if (state.stopped) return;
       try {
-        const rows = await fetchAggTrades(symbol, 40);
-        if (!stopped) setAggTrades(Array.isArray(rows) ? rows : []);
+        state.ws = openAggTradeSocket(
+          symbol,
+          (payload) => {
+            if (state.stopped) return;
+            if (payload?.type === "snapshot" && Array.isArray(payload.data)) {
+              setAggTrades(payload.data.slice(0, AGG_TRADES_CAP));
+              return;
+            }
+            if (payload?.type === "aggTrade" && payload.data) {
+              setAggTrades((prev) => {
+                const base = Array.isArray(prev) ? prev : [];
+                return [payload.data, ...base].slice(0, AGG_TRADES_CAP);
+              });
+            }
+          },
+          { limit: AGG_TRADES_CAP },
+        );
       } catch (err) {
-        console.error("近期成交加载失败", err);
-        if (!stopped) setStatus(`近期成交加载失败：${err.message}`);
-      } finally {
-        if (!stopped) timer = window.setTimeout(poll, TRADES_POLL_MS);
+        console.error("近期成交 WebSocket 创建失败", err);
+        setStatus(`近期成交 WebSocket 创建失败：${err.message}`);
+        scheduleRetry();
+        return;
       }
+
+      state.ws.onopen = () => {
+        state.retryCount = 0;
+      };
+      state.ws.onerror = (err) => {
+        console.error("近期成交 WebSocket 异常", err);
+      };
+      state.ws.onclose = () => {
+        if (!state.stopped) scheduleRetry();
+      };
     };
-    void poll();
+
+    const scheduleRetry = () => {
+      if (state.stopped) return;
+      const wait = Math.min(1000 * 2 ** state.retryCount, 10000);
+      state.retryCount += 1;
+      state.retryTimer = window.setTimeout(connect, wait);
+    };
+
+    setAggTrades(null);
+    connect();
     return () => {
-      stopped = true;
-      if (timer) window.clearTimeout(timer);
+      state.stopped = true;
+      if (state.retryTimer) clearTimeout(state.retryTimer);
+      if (state.ws) state.ws.close();
     };
   }, [symbol, setAggTrades, setStatus]);
 }
 
-function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef) {
+function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latest) {
   useEffect(() => {
     let timer;
     let stopped = false;
     graceRef.current = Date.now();
     lastKlineAtRef.current = 0;
     const poll = async () => {
-      if (stopped || !shouldRefreshKlines(lastKlineAtRef.current, graceRef.current)) return;
+      const latestOpenTime = latest?.openTime != null ? Number(latest.openTime) : null;
+      if (
+        stopped ||
+        !shouldRefreshKlines(lastKlineAtRef.current, graceRef.current, latestOpenTime, interval)
+      ) {
+        return;
+      }
       try {
         const rows = await fetchIndexKlines(symbol, interval, 500);
         if (stopped || !Array.isArray(rows) || !rows.length) return;
@@ -123,7 +166,7 @@ function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus,
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef]);
+  }, [symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latest]);
 }
 
 function useIndexKlineSocket(symbol, interval, setHistory, setLatest, setLastKlineAt, setStatus, lastKlineAtRef, graceRef) {
@@ -197,10 +240,14 @@ function mergeHistoryPayload(prev, payload) {
   return copy;
 }
 
-function shouldRefreshKlines(lastKlineAt, graceStartedAt) {
+function shouldRefreshKlines(lastKlineAt, graceStartedAt, latestOpenTime, interval) {
   const now = Date.now();
   const sinceKline = lastKlineAt === 0 ? now - graceStartedAt : now - lastKlineAt;
-  return sinceKline >= (lastKlineAt === 0 ? 6000 : 8000);
+  const wsQuietTooLong = sinceKline >= (lastKlineAt === 0 ? 6000 : 8000);
+  const bucket = currentIntervalBucketMs(interval, now);
+  const bucketRolled =
+    latestOpenTime != null && Number.isFinite(latestOpenTime) && latestOpenTime < bucket;
+  return wsQuietTooLong || bucketRolled;
 }
 
 function useCurrentPrice(latest, history, tickerPrice, lastKlineAt, priceTick) {
@@ -215,20 +262,21 @@ function useCurrentPrice(latest, history, tickerPrice, lastKlineAt, priceTick) {
   }, [latest, history, tickerPrice, lastKlineAt, priceTick]);
 }
 
-function useChartLatest(latest, currentPrice) {
+function useChartLatest(latest, currentPrice, interval, priceTick) {
   return useMemo(() => {
-    if (!latest) return null;
-    const base = normalizeChartCandle(latest);
-    if (latest.isClosed === true) return base;
+    const resolved = ensureFormingKline(latest, interval, currentPrice);
+    if (!resolved) return null;
+    const base = normalizeChartCandle(resolved);
+    if (resolved.isClosed === true) return base;
     const p = currentPrice;
     if (!(p > 0) || !Number.isFinite(p)) return base;
-    const h = Number(latest.high);
-    const l = Number(latest.low);
+    const h = Number(resolved.high);
+    const l = Number(resolved.low);
     return {
       ...base,
       close: p,
       high: Number.isFinite(h) ? Math.max(h, p) : p,
       low: Number.isFinite(l) ? Math.min(l, p) : p,
     };
-  }, [latest, currentPrice]);
+  }, [latest, currentPrice, interval, priceTick]);
 }

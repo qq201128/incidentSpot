@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,7 @@ class _SyntheticKlineRequest:
     start_time: int | None
     end_time: int | None
     request_options: dict[str, Any]
+    include_forming: bool = False
 
 
 def fetch_klines(
@@ -85,6 +87,7 @@ def fetch_index_price_klines(
     start_time: int | None = None,
     end_time: int | None = None,
     request_options: dict[str, Any] | None = None,
+    include_forming: bool = False,
 ) -> list[dict]:
     """
     Index price OHLCV from GET /fapi/v1/indexPriceKlines (pair + interval).
@@ -107,6 +110,7 @@ def fetch_index_price_klines(
                 start_time=start_time,
                 end_time=end_time,
                 request_options=options,
+                include_forming=include_forming,
             )
         )
 
@@ -139,8 +143,26 @@ def _fetch_synthetic_10m_klines(request: _SyntheticKlineRequest) -> list[dict]:
     )
     raw_rows = _raw_klines_from_response(rows)
     aggregated = _aggregate_1m_klines(raw_rows, TEN_MINUTE_MS)
-    trimmed = _trim_incomplete_edge_aggregates(raw_rows, aggregated, TEN_MINUTE_MS)
+    if request.include_forming:
+        trimmed = _trim_leading_aggregate_if_first_bucket_incomplete(
+            raw_rows, aggregated, TEN_MINUTE_MS
+        )
+        trimmed = _mark_forming_tail(trimmed, TEN_MINUTE_MS)
+    else:
+        trimmed = _trim_incomplete_edge_aggregates(raw_rows, aggregated, TEN_MINUTE_MS)
     return _tail_limit(trimmed, request.limit)
+
+
+def _mark_forming_tail(rows: list[dict], bar_ms: int) -> list[dict]:
+    """Mark the trailing in-progress aggregate so chart clients can overlay live price."""
+    if not rows:
+        return rows
+    bucket = (int(time.time() * 1000) // bar_ms) * bar_ms
+    if int(rows[-1]["openTime"]) != bucket:
+        return rows
+    last = dict(rows[-1])
+    last["isClosed"] = False
+    return [*rows[:-1], last]
 
 
 def _synthetic_kline_fetch_limit(limit: int) -> int:

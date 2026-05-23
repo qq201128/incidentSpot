@@ -312,6 +312,21 @@ export function openKlineSocket(symbol, interval, onMessage) {
   return ws;
 }
 
+/** 聚合成交 WebSocket（连接时 REST 快照，之后 Binance aggTrade 推送）。 */
+export function openAggTradeSocket(symbol, onMessage, { limit = 40 } = {}) {
+  const boundedLimit = Math.max(1, Math.min(Number(limit) || 40, 200));
+  const ws = new WebSocket(
+    `${WS_BASE_URL}/ws/agg-trades?symbol=${symbol.toLowerCase()}&limit=${boundedLimit}`
+  );
+
+  ws.onmessage = (event) => {
+    const payload = JSON.parse(event.data);
+    onMessage(payload);
+  };
+
+  return ws;
+}
+
 /** 指数价 K 线 WebSocket（后端用 Binance markPrice@1s 的 index price 合成）。 */
 export function openIndexKlineSocket(symbol, interval, onMessage) {
   const safeInterval = normalizeInterval(interval);

@@ -10,6 +10,7 @@ import {
   isBusinessDay,
   isUTCTimestamp,
 } from "lightweight-charts";
+import { mergeChartSeries } from "../utils/klineFormingCandle";
 import { computeMovingAverage } from "../utils/klineIndicators";
 
 const DEFAULT_CHART_HEIGHT = 440;
@@ -243,10 +244,12 @@ export default function KlineChart({
     if (lastTime != null && timeValue(next.time) < timeValue(lastTime)) return;
     seriesRef.current.update(next);
     lastTimeRef.current = next.time;
+    const merged = mergeChartSeries(normalizeSeriesData(data), next);
+    syncMovingAverages(chartRef.current, maSeriesRef, merged, indicators);
     if (settings.autoScroll && chartRef.current) {
       chartRef.current.timeScale().scrollToRealTime();
     }
-  }, [latest, settings.autoScroll]);
+  }, [latest, settings.autoScroll, data, indicators]);
 
   useEffect(() => {
     if (!chartRef.current || !fitToken) return;

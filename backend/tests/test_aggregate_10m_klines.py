@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.services.binance_service import (
     _aggregate_1m_klines,
+    _mark_forming_tail,
     _trim_leading_aggregate_if_first_bucket_incomplete,
     _trim_trailing_aggregate_if_last_bucket_incomplete,
 )
@@ -99,3 +100,34 @@ def test_no_trim_when_last_bucket_is_complete_and_closed() -> None:
     )
     assert trimmed == agg
     assert len(trimmed) == 2
+
+
+def test_mark_forming_tail_flags_current_bucket() -> None:
+    import time
+
+    bar_ms = TEN_MS
+    now_ms = int(time.time() * 1000)
+    bucket = (now_ms // bar_ms) * bar_ms
+    rows = [
+        {
+            "openTime": bucket - bar_ms,
+            "open": 1.0,
+            "high": 2.0,
+            "low": 0.5,
+            "close": 1.5,
+            "volume": 0.0,
+            "closeTime": bucket - 1,
+        },
+        {
+            "openTime": bucket,
+            "open": 2.0,
+            "high": 3.0,
+            "low": 1.5,
+            "close": 2.5,
+            "volume": 0.0,
+            "closeTime": now_ms,
+        },
+    ]
+    marked = _mark_forming_tail(rows, bar_ms)
+    assert marked[-1]["isClosed"] is False
+    assert marked[0].get("isClosed") is None

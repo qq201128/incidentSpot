@@ -1,5 +1,5 @@
 /**
- * 最新成交列表（数据由父组件轮询 /api/agg-trades 传入）。
+ * 最新成交列表（数据由父组件 WebSocket /ws/agg-trades 推送）。
  * @param {{ symbol: string, trades: null | Array<{ price: number, qty: number, quoteQty: number, time: number, side: string }> }} props
  */
 export default function RecentTrades({ symbol, trades }) {

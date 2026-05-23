@@ -11,6 +11,8 @@ from websockets.exceptions import ConnectionClosed
 from websockets.legacy.client import connect as upstream_ws_connect
 
 from app.db.session import get_conn
+from app.services.agg_trade_normalize import normalize_agg_trade_row
+from app.services.binance_market_data import fetch_agg_trades_display
 from app.services.binance_service import (
     fetch_klines,
     kline_ws_stream_name,
@@ -31,6 +33,8 @@ FSTREAM_MARKET_WS_BASE_URL = "wss://fstream.binance.com/market/ws"
 KLINE_STREAM_KIND = "kline"
 INDEX_PRICE_STREAM_KIND = "index_price_tick"
 INDEX_PRICE_STREAM_NAME = "markPrice@1s"
+AGG_TRADE_STREAM_SUFFIX = "aggTrade"
+DEFAULT_AGG_TRADE_SNAPSHOT_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,46 @@ async def proxy_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -
             state = await _backoff(state)
 
 
+@dataclass(frozen=True)
+class AggTradeStreamState:
+    symbol: str
+    stream_url: str
+    retry_wait_seconds: int
+    max_retry_wait_seconds: int
+
+
+async def proxy_agg_trade_stream(client_ws: WebSocket, symbol: str, *, limit: int = DEFAULT_AGG_TRADE_SNAPSHOT_LIMIT) -> None:
+    sym = symbol.upper()
+    state = AggTradeStreamState(
+        symbol=sym,
+        stream_url=f"{FSTREAM_MARKET_WS_BASE_URL}/{sym.lower()}@{AGG_TRADE_STREAM_SUFFIX}",
+        retry_wait_seconds=1,
+        max_retry_wait_seconds=15,
+    )
+    await client_ws.accept()
+    await _send_agg_trade_snapshot(client_ws, sym, limit=limit)
+
+    while True:
+        try:
+            state = await _run_agg_trade_stream(client_ws, state)
+        except (WebSocketDisconnect, ConnectionClosed):
+            break
+        except TimeoutError:
+            _log_agg_trade_timeout(state)
+            state = await _agg_trade_backoff(state)
+        except (ConnectionResetError, OSError) as exc:
+            _log_agg_trade_connection_error(state, exc)
+            state = await _agg_trade_backoff(state)
+        except RuntimeError as exc:
+            if "close message has been sent" in str(exc):
+                break
+            logger.exception("runtime error in agg trade stream")
+            state = await _agg_trade_backoff(state)
+        except Exception:
+            logger.exception("agg trade stream disconnected, retrying")
+            state = await _agg_trade_backoff(state)
+
+
 async def proxy_index_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -> None:
     state = _index_stream_state(symbol, interval.strip())
     await client_ws.accept()
@@ -96,6 +140,65 @@ async def proxy_index_kline_stream(client_ws: WebSocket, symbol: str, interval: 
         except Exception:
             logger.exception("index kline stream disconnected, retrying")
             state = await _backoff(state)
+
+
+async def _send_agg_trade_snapshot(client_ws: WebSocket, symbol: str, *, limit: int) -> None:
+    try:
+        rows = await asyncio.to_thread(fetch_agg_trades_display, symbol, limit=limit)
+    except Exception:
+        logger.exception("agg trade REST snapshot failed for %s", symbol)
+        return
+    await client_ws.send_json({"type": "snapshot", "data": rows})
+
+
+async def _run_agg_trade_stream(client_ws: WebSocket, state: AggTradeStreamState) -> AggTradeStreamState:
+    state = replace(state, retry_wait_seconds=1)
+    connect_kw: dict[str, Any] = await asyncio.to_thread(
+        upstream_websocket_connect_kwargs, state.stream_url
+    )
+    async with upstream_ws_connect(
+        state.stream_url,
+        ping_interval=20,
+        ping_timeout=20,
+        open_timeout=UPSTREAM_OPEN_TIMEOUT_SECONDS,
+        **connect_kw,
+    ) as ws:
+        async for message in ws:
+            await _send_agg_trade_message(client_ws, message)
+    return state
+
+
+async def _send_agg_trade_message(client_ws: WebSocket, message: str | bytes) -> None:
+    payload = unwrap_fstream_ws_message(message)
+    if payload.get("e") != "aggTrade":
+        return
+    trade = normalize_agg_trade_row(payload)
+    if trade is None:
+        return
+    await client_ws.send_json({"type": "aggTrade", "data": trade})
+
+
+async def _agg_trade_backoff(state: AggTradeStreamState) -> AggTradeStreamState:
+    await sleep(state.retry_wait_seconds)
+    next_wait = min(state.retry_wait_seconds * 2, state.max_retry_wait_seconds)
+    return replace(state, retry_wait_seconds=next_wait)
+
+
+def _log_agg_trade_timeout(state: AggTradeStreamState) -> None:
+    logger.warning(
+        "agg trade upstream connect timed out for %s, retry in %ss",
+        state.symbol,
+        state.retry_wait_seconds,
+    )
+
+
+def _log_agg_trade_connection_error(state: AggTradeStreamState, exc: BaseException) -> None:
+    logger.warning(
+        "agg trade upstream connection error for %s (%s), retry in %ss",
+        state.symbol,
+        type(exc).__name__,
+        state.retry_wait_seconds,
+    )
 
 
 def _contract_stream_state(symbol: str, interval: str) -> KlineStreamState:

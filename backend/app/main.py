@@ -36,7 +36,7 @@ from app.services.lstm_daily_review_background import (
     lstm_daily_review_enabled,
     lstm_daily_review_loop,
 )
-from app.services.ws_service import proxy_index_kline_stream, proxy_kline_stream
+from app.services.ws_service import proxy_agg_trade_stream, proxy_index_kline_stream, proxy_kline_stream
 
 load_backend_env_file()
 logger = logging.getLogger(__name__)
@@ -205,6 +205,16 @@ async def ws_klines(websocket: WebSocket, symbol: str = "btcusdt", interval: str
         await proxy_kline_stream(websocket, symbol, interval)
     except Exception:
         logger.exception("kline websocket failed: symbol=%s interval=%s", symbol, interval)
+
+
+@app.websocket("/ws/agg-trades")
+async def ws_agg_trades(websocket: WebSocket, symbol: str = "btcusdt", limit: int = 40) -> None:
+    """Proxy Binance ``aggTrade`` stream; sends REST snapshot on connect then live trades."""
+    bounded_limit = max(1, min(int(limit), 200))
+    try:
+        await proxy_agg_trade_stream(websocket, symbol, limit=bounded_limit)
+    except Exception:
+        logger.exception("agg trade websocket failed: symbol=%s", symbol)
 
 
 @app.websocket("/ws/index-klines")

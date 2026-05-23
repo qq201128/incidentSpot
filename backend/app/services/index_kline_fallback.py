@@ -35,6 +35,7 @@ async def send_index_rest_fallback(
                 interval,
                 limit=FALLBACK_KLINE_LIMIT,
                 request_options=FALLBACK_REQUEST_OPTIONS,
+                include_forming=True,
             ),
             timeout=REST_FALLBACK_TIMEOUT_SECONDS,
         )
