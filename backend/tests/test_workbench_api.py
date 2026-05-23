@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 
 from app.api import events, workbench
+from app.services import workbench_summary_service as summary_service
+from app.services.workbench_summary_cache import clear_workbench_summary_cache
 
 
 def test_workbench_summary_returns_symbol_counts_and_flags(monkeypatch) -> None:
@@ -10,9 +12,10 @@ def test_workbench_summary_returns_symbol_counts_and_flags(monkeypatch) -> None:
     _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
     _insert_event(conn, "ETHUSDT", "OPEN", with_order=True)
     _insert_event(conn, "BTCUSDT", "SETTLED", with_order=True)
-    monkeypatch.setattr(workbench, "get_conn", lambda: conn)
+    monkeypatch.setattr(summary_service, "get_conn", lambda: conn)
+    clear_workbench_summary_cache()
 
-    result = workbench.workbench_summary(symbol="btcusdt", duration="10m")
+    result = workbench.workbench_summary_sync(symbol="btcusdt", duration="10m")
 
     assert result["symbol"] == "BTCUSDT"
     assert result["dataSource"] == "Binance Index"
@@ -24,11 +27,14 @@ def test_workbench_summary_returns_symbol_counts_and_flags(monkeypatch) -> None:
 
 
 def test_list_events_returns_paginated_symbol_rows(monkeypatch) -> None:
-    conn = _memory_conn()
-    for index in range(12):
-        _insert_event(conn, "BTCUSDT", "SETTLED" if index % 2 else "OPEN")
-    _insert_event(conn, "ETHUSDT", "OPEN")
-    monkeypatch.setattr(events, "get_conn", lambda: conn)
+    def make_conn() -> sqlite3.Connection:
+        conn = _memory_conn()
+        for index in range(12):
+            _insert_event(conn, "BTCUSDT", "SETTLED" if index % 2 else "OPEN")
+        _insert_event(conn, "ETHUSDT", "OPEN")
+        return conn
+
+    monkeypatch.setattr(events, "get_conn", make_conn)
 
     page_one = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="events")
     page_two = events.list_events(symbol="BTCUSDT", page=2, pageSize=8, view="events")

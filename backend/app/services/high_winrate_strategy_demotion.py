@@ -28,6 +28,7 @@ from app.services.high_winrate_strategy_rotation import (
     next_high_winrate_candidate_rank,
     refresh_high_winrate_goal,
 )
+from app.services.event_pnl_rows import settled_event_rows_for_high_winrate_rule
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
@@ -41,6 +42,7 @@ STATUS_ACTIVE = STATUS_TRADABLE
 STATUS_COLLECTING = STATUS_PAPER_LIVE_COLLECTING
 REASON_OFFLINE_PROMOTION = "offline_promotion"
 RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
+RANKING_REFRESH_PENDING_REASON = "ranking_refresh_pending"
 RECENT_SAMPLE_LIMIT = 30
 DEFAULT_QTY = 5.0
 
@@ -61,11 +63,31 @@ def promote_high_winrate_strategy(symbol: str, duration: str) -> dict[str, Any]:
     return {"symbol": sym, "duration": duration, **payload}
 
 
-def evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any]:
-    return run_db_write_with_retry(lambda: _evaluate_high_winrate_demotion(symbol, duration))
+def evaluate_high_winrate_demotion(
+    symbol: str,
+    duration: str,
+    *,
+    allow_goal_refresh: bool = False,
+) -> dict[str, Any]:
+    return run_db_write_with_retry(
+        lambda: _evaluate_high_winrate_demotion(symbol, duration, allow_goal_refresh=allow_goal_refresh)
+    )
 
 
-def _evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any]:
+def run_pending_high_winrate_goal_refresh(symbol: str, duration: str) -> dict[str, Any] | None:
+    sym = symbol.strip().upper()
+    status = high_winrate_demotion_status(sym, duration)
+    if status.get("reason") != RANKING_REFRESH_PENDING_REASON:
+        return None
+    return run_db_write_with_retry(lambda: _execute_high_winrate_goal_refresh(sym, duration, status))
+
+
+def _evaluate_high_winrate_demotion(
+    symbol: str,
+    duration: str,
+    *,
+    allow_goal_refresh: bool = False,
+) -> dict[str, Any]:
     sym = symbol.strip().upper()
     refresh_required = False
     conn = get_conn()
@@ -78,26 +100,43 @@ def _evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any
         metrics = high_winrate_metrics(rows)
         decision = high_winrate_decision(metrics)
         payload, refresh_required = _evaluation_payload(decision, current, metrics, sym, duration, rank, rule)
+        if refresh_required and not allow_goal_refresh:
+            payload = {
+                **payload,
+                "status": STATUS_DEMOTED,
+                "reason": RANKING_REFRESH_PENDING_REASON,
+                "pendingGoalRefresh": True,
+            }
+            refresh_required = False
         _sync_strategy_slot_for_status(conn, sym, duration, payload["status"])
         _write_status(conn, sym, duration, payload)
         conn.commit()
     finally:
         conn.close()
     if refresh_required:
-        report = refresh_high_winrate_goal(sym, duration)
-        if _has_rankings(report):
-            return high_winrate_demotion_status(sym, duration)
-        payload = _refresh_failed_payload(payload, report)
-        conn = get_conn()
-        try:
-            ensure_high_winrate_status_table(conn)
-            _sync_strategy_slot_for_status(conn, sym, duration, payload["status"])
-            _write_status(conn, sym, duration, payload)
-            conn.commit()
-        finally:
-            conn.close()
-        return high_winrate_demotion_status(sym, duration)
+        return _execute_high_winrate_goal_refresh(sym, duration, payload)
     return {"symbol": sym, "duration": duration, **payload}
+
+
+def _execute_high_winrate_goal_refresh(
+    symbol: str,
+    duration: str,
+    fallback_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sym = symbol.strip().upper()
+    report = refresh_high_winrate_goal(sym, duration)
+    if _has_rankings(report):
+        return high_winrate_demotion_status(sym, duration)
+    payload = _refresh_failed_payload(fallback_payload or {}, report)
+    conn = get_conn()
+    try:
+        ensure_high_winrate_status_table(conn)
+        _sync_strategy_slot_for_status(conn, sym, duration, payload["status"])
+        _write_status(conn, sym, duration, payload)
+        conn.commit()
+    finally:
+        conn.close()
+    return high_winrate_demotion_status(sym, duration)
 
 
 def high_winrate_demotion_status(symbol: str, duration: str) -> dict[str, Any]:
@@ -123,6 +162,16 @@ def high_winrate_active_rank(symbol: str, duration: str) -> int:
 
 
 def _settled_rows(conn: Any, symbol: str, duration: str, rule: str | None) -> list[dict[str, Any]]:
+    try:
+        event_rows = settled_event_rows_for_high_winrate_rule(conn, symbol, duration, rule)
+    except Exception:
+        event_rows = []
+    if event_rows:
+        return event_rows
+    return _settled_prediction_rows(conn, symbol, duration, rule)
+
+
+def _settled_prediction_rows(conn: Any, symbol: str, duration: str, rule: str | None) -> list[dict[str, Any]]:
     rule_clause = "" if rule is None else " AND high_winrate_rule = ?"
     params = [HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, symbol, duration]
     if rule is not None:
@@ -186,6 +235,8 @@ def _status_payload(
         "winRate": metrics.get("winRate"),
         "profitFactor": metrics.get("profitFactor"),
         "consecutiveLosses": metrics.get("consecutiveLosses"),
+        "metricsSource": metrics.get("metricsSource"),
+        "totalEventPnlU": metrics.get("totalEventPnlU"),
         "requiredSampleCount": high_winrate_thresholds()["requiredSampleCount"],
         "tradable": status == STATUS_TRADABLE,
         "evaluatedAt": _utc_now(),

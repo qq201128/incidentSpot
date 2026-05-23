@@ -16,24 +16,50 @@ MIN_AGG_TRADE_LIMIT = 1
 BINANCE_DEPTH_LIMITS = (5, 10, 20, 50, 100, 500, 1000)
 DISPLAY_MAX_ATTEMPTS = 2
 DISPLAY_TIMEOUT = (3, 6)
+PREMIUM_DISPLAY_ATTEMPTS = 1
+PREMIUM_DISPLAY_TIMEOUT = (2, 4)
+PREMIUM_INDEX_TTL_SECONDS = 2.0
+PREMIUM_INDEX_STALE_MAX_SECONDS = 45.0
+PREMIUM_INDEX_PERSIST_MIN_INTERVAL = 5.0
 
 LAST_ORDERBOOK: dict[str, dict[str, Any]] = {}
 LAST_TICKER: dict[str, dict[str, Any]] = {}
 LAST_FUNDING_RATE: dict[str, float | None] = {}
+LAST_PREMIUM_INDEX: dict[str, tuple[float, dict[str, Any]]] = {}
+_LAST_PREMIUM_PERSIST_AT: dict[str, float] = {}
+
+
+def get_premium_index_display(symbol: str) -> dict[str, Any]:
+    """Fast path for UI polling: short timeout, in-memory cache, stale fallback."""
+    sym = symbol.upper()
+    now = time.monotonic()
+    cached = LAST_PREMIUM_INDEX.get(sym)
+    if cached is not None and (now - cached[0]) <= PREMIUM_INDEX_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        data = retry_get(
+            f"{FAPI_BASE_URL}/fapi/v1/premiumIndex",
+            {"symbol": sym},
+            max_attempts=PREMIUM_DISPLAY_ATTEMPTS,
+            timeout=PREMIUM_DISPLAY_TIMEOUT,
+        )
+        result = _build_premium_index_result(data)
+        LAST_PREMIUM_INDEX[sym] = (now, result)
+        _maybe_persist_premium_index(sym, now, result)
+        return result
+    except Exception:
+        if cached is not None and (now - cached[0]) <= PREMIUM_INDEX_STALE_MAX_SECONDS:
+            return {**cached[1], "stale": True}
+        raise
 
 
 def fetch_premium_index(symbol: str) -> dict:
     data = _display_retry_get("/fapi/v1/premiumIndex", {"symbol": symbol.upper()})
-    row = _premium_index_row(data)
-    result = {
-        "symbol": row.get("symbol"),
-        "markPrice": float(row.get("markPrice", 0) or 0),
-        "indexPrice": float(row.get("indexPrice", 0) or 0),
-        "lastFundingRate": float(row.get("lastFundingRate", 0) or 0),
-        "nextFundingTime": int(row.get("nextFundingTime", 0) or 0),
-        "time": int(row.get("time", 0) or 0),
-    }
-    persist_index_price_tick(result)
+    result = _build_premium_index_result(data)
+    now = time.monotonic()
+    LAST_PREMIUM_INDEX[symbol.upper()] = (now, result)
+    _maybe_persist_premium_index(symbol.upper(), now, result)
     return result
 
 
@@ -157,6 +183,29 @@ def _premium_index_row(data: dict | list) -> dict[str, Any]:
             raise ValueError("empty premium index response")
         return data[0]
     return data
+
+
+def _build_premium_index_result(data: dict | list) -> dict[str, Any]:
+    row = _premium_index_row(data)
+    return {
+        "symbol": row.get("symbol"),
+        "markPrice": float(row.get("markPrice", 0) or 0),
+        "indexPrice": float(row.get("indexPrice", 0) or 0),
+        "lastFundingRate": float(row.get("lastFundingRate", 0) or 0),
+        "nextFundingTime": int(row.get("nextFundingTime", 0) or 0),
+        "time": int(row.get("time", 0) or 0),
+    }
+
+
+def _maybe_persist_premium_index(symbol: str, now: float, result: dict[str, Any]) -> None:
+    last = _LAST_PREMIUM_PERSIST_AT.get(symbol, 0.0)
+    if now - last < PREMIUM_INDEX_PERSIST_MIN_INTERVAL:
+        return
+    _LAST_PREMIUM_PERSIST_AT[symbol] = now
+    try:
+        persist_index_price_tick(result)
+    except Exception:
+        return
 
 
 def _orderbook_snapshot(sym: str, data: dict[str, Any]) -> dict[str, Any]:

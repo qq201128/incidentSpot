@@ -150,7 +150,7 @@ def test_failed_top3_refreshes_goal_ranking(monkeypatch, tmp_path: Path) -> None
 
     monkeypatch.setattr(demotion, "refresh_high_winrate_goal", refresh)
 
-    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m")
+    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m", allow_goal_refresh=True)
 
     assert refreshed == [("BTCUSDT", "10m")]
     assert result["status"] == demotion.STATUS_BACKTEST_CANDIDATE
@@ -177,12 +177,35 @@ def test_failed_top3_records_empty_refresh_result(monkeypatch, tmp_path: Path) -
         },
     )
 
-    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m")
+    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m", allow_goal_refresh=True)
 
     assert result["status"] == demotion.STATUS_DEMOTED
     assert result["reason"] == demotion.RANKING_REFRESH_FAILED_REASON
     assert result["refreshReport"]["rankingTotal"] == 0
     assert result["refreshReport"]["rankingFailure"]["reason"] == "no_combo_met_target_gates"
+
+
+def test_failed_top3_defers_goal_refresh_by_default(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "refresh-pending.db"
+    refreshed = []
+    _init_db(db_path)
+    _insert_slot(db_path, "10m", enabled=1, live=1)
+    _insert_status(db_path, "10m", demotion.STATUS_PAPER_LIVE_COLLECTING, "rotated", active_rank=3, failed_ranks=[1, 2])
+    _insert_predictions(db_path, "10m", [False] * demotion.ACTIVE_SAMPLE_COUNT, rule="goal_combo__top3")
+    monkeypatch.setattr(demotion, "get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(demotion, "high_winrate_candidate_rule", _cached_goal_rule)
+    monkeypatch.setattr(
+        demotion,
+        "refresh_high_winrate_goal",
+        lambda *args: refreshed.append(args) or {"updatedAt": "now", "ranking": []},
+    )
+
+    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m")
+
+    assert refreshed == []
+    assert result["status"] == demotion.STATUS_DEMOTED
+    assert result["reason"] == demotion.RANKING_REFRESH_PENDING_REASON
+    assert result["pendingGoalRefresh"] is True
 
 
 def test_paused_status_requires_new_promotion_to_clear(monkeypatch, tmp_path: Path) -> None:

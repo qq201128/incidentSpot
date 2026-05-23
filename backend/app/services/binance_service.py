@@ -15,6 +15,7 @@ from app.services.binance_market_data import (
     fetch_orderbook,
     fetch_orderbook_depth_display,
     fetch_premium_index,
+    get_premium_index_display,
     get_cached_funding_rate,
     get_cached_orderbook,
     get_cached_ticker,

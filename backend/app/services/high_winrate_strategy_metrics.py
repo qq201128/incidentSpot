@@ -19,18 +19,28 @@ def high_winrate_thresholds() -> dict[str, Any]:
 
 
 def empty_high_winrate_metrics() -> dict[str, Any]:
-    return {"sampleCount": 0, "winRate": None, "profitFactor": None, "consecutiveLosses": 0, "latestRule": None}
+    return {
+        "sampleCount": 0,
+        "winRate": None,
+        "profitFactor": None,
+        "consecutiveLosses": 0,
+        "latestRule": None,
+        "metricsSource": "predictions",
+        "totalEventPnlU": None,
+    }
 
 
 def high_winrate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    returns = [float(row["actual_return"]) for row in rows if row.get("actual_return") is not None]
-    wins = sum(1 for row in rows if bool(row.get("prediction_correct")))
+    returns = [_return_value(row) for row in rows if _return_value(row) is not None]
+    wins = sum(1 for row in rows if _is_win(row))
     return {
         "sampleCount": len(rows),
         "winRate": _ratio(wins, len(rows)),
         "profitFactor": _profit_factor(returns),
         "consecutiveLosses": _consecutive_losses(rows),
         "latestRule": str(rows[0].get("high_winrate_rule") or "") if rows else None,
+        "metricsSource": _metrics_source(rows),
+        "totalEventPnlU": _total_event_pnl(rows),
     }
 
 
@@ -57,10 +67,42 @@ def _profit_factor(values: list[float]) -> float | None:
 def _consecutive_losses(rows: list[dict[str, Any]]) -> int:
     count = 0
     for row in rows:
-        if bool(row.get("prediction_correct")):
+        if _is_win(row):
             break
         count += 1
     return count
+
+
+def _is_win(row: dict[str, Any]) -> bool:
+    if row.get("event_pnl") is not None:
+        return float(row["event_pnl"]) > 0
+    return bool(row.get("prediction_correct"))
+
+
+def _return_value(row: dict[str, Any]) -> float | None:
+    if row.get("actual_return") is not None:
+        return float(row["actual_return"])
+    pnl = row.get("event_pnl")
+    qty = row.get("order_qty") or 1
+    if pnl is None:
+        return None
+    try:
+        return float(pnl) / float(qty)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _metrics_source(rows: list[dict[str, Any]]) -> str:
+    if any(row.get("event_pnl") is not None for row in rows):
+        return "events"
+    return "predictions"
+
+
+def _total_event_pnl(rows: list[dict[str, Any]]) -> float | None:
+    values = [float(row["event_pnl"]) for row in rows if row.get("event_pnl") is not None]
+    if not values:
+        return None
+    return round(sum(values), 6)
 
 
 def _ratio(numerator: int, denominator: int) -> float | None:

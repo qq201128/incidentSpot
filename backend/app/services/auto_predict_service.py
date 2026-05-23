@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from app.services.auto_trade_service import get_auto_trade_settings, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
@@ -18,7 +19,6 @@ from app.services.factor_candidate_signal_service import (
     predict_factor_candidate_signals,
 )
 from app.services.forward_validation_service import settle_due_predictions
-from app.services.high_winrate_strategy_demotion import evaluate_high_winrate_demotion
 from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
 from app.services.ensemble_judge_service import refresh_ensemble_judge
 from app.services.ensemble_ranker_prediction_service import predict_ensemble_ranker_prediction
@@ -67,7 +67,18 @@ DEFAULT_PREDICT_SECONDS = 1
 DEFAULT_DURATION = "10m"
 
 
+def _predict_initial_delay_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("PREDICT_INITIAL_DELAY_SECONDS", "8")))
+    except ValueError:
+        return 8.0
+
+
 async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAULT_PREDICT_SECONDS) -> None:
+    initial = _predict_initial_delay_seconds()
+    logger.info("predict loop: initial_delay=%ss poll=%ss", initial, poll_seconds)
+    if initial > 0:
+        await _sleep_for(stop_event, initial)
     logger.info("predict loop: running during each enabled strategy's kline entry window")
     while not stop_event.is_set():
         try:
@@ -598,7 +609,6 @@ def _run_prediction_db_side_effects(settings_list: list[AutoTradeSettings]) -> N
     for symbol, duration in _unique_symbol_durations(settings_list):
         settle_due_predictions(symbol, duration)
         refresh_ensemble_judge(symbol, duration)
-        evaluate_high_winrate_demotion(symbol, duration)
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:

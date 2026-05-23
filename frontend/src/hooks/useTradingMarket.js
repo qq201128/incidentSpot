@@ -59,13 +59,19 @@ function usePricePolling(symbol, setTickerPrice, setStatus) {
   useEffect(() => {
     let timer;
     let stopped = false;
+    let hasPrice = false;
     const tick = async () => {
       try {
         const p = await fetchLastPrice(symbol);
-        if (!stopped) setTickerPrice(p);
+        if (!stopped) {
+          setTickerPrice(p);
+          hasPrice = true;
+        }
       } catch (err) {
         console.error("最新指数价加载失败", err);
-        if (!stopped) setStatus(`最新指数价加载失败：${err.message}`);
+        if (!stopped && !hasPrice) {
+          setStatus(`最新指数价加载失败：${err.message}`);
+        }
       } finally {
         if (!stopped) timer = window.setTimeout(tick, PRICE_POLL_MS);
       }

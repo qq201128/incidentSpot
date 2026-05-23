@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS events (
   ai_high_winrate_gate TEXT,
   ai_high_winrate_rule TEXT,
   ai_high_winrate_passed INTEGER,
-  ai_high_winrate_value REAL
+  ai_high_winrate_value REAL,
+  prediction_open_time INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -319,3 +320,9 @@ CREATE TABLE IF NOT EXISTS ensemble_signal_scores (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, duration, signal_key)
 );
+
+CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time);
+CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at);
+CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time);
+CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status);
+CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id);

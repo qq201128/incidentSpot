@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWorkbenchSummary } from "./api/workbenchClient";
 import {
   createQuickTrade,
@@ -7,6 +7,7 @@ import {
   settleEvent,
 } from "./api/client";
 import AppNavigation from "./components/AppNavigation";
+import EventGovernancePage from "./pages/EventGovernancePage";
 import FactorLearningPage from "./pages/FactorLearningPage";
 import FactorsPage from "./pages/FactorsPage";
 import TradingWorkbench from "./components/TradingWorkbench";
@@ -87,6 +88,9 @@ export default function App() {
   if (appView === "factors") {
     return pageFrame(appView, setAppView, <FactorsPage />);
   }
+  if (appView === "governance") {
+    return pageFrame(appView, setAppView, <EventGovernancePage />);
+  }
   if (appView === "learning") {
     return pageFrame(appView, setAppView, <FactorLearningPage />);
   }
@@ -114,15 +118,24 @@ export default function App() {
 }
 
 function useReloadWorkbench(symbol, interval, setSummary, setLatency, setStatus, setRecordsReloadKey) {
+  const hasSummaryRef = useRef(false);
+
+  useEffect(() => {
+    hasSummaryRef.current = false;
+  }, [symbol, interval]);
+
   return useCallback(async (options = {}) => {
     try {
       const { data, latencyMs } = await fetchWorkbenchSummary(symbol, interval);
       setSummary(data);
+      hasSummaryRef.current = true;
       setLatency(latencyMs);
       setRecordsReloadKey((value) => value + 1);
     } catch (err) {
       console.error("工作台摘要加载失败", err);
-      setStatus(`工作台摘要加载失败：${err.message}`);
+      if (!hasSummaryRef.current) {
+        setStatus(`工作台摘要加载失败：${err.message}`);
+      }
       if (options.rethrow) throw err;
     }
   }, [symbol, interval, setSummary, setLatency, setStatus, setRecordsReloadKey]);

@@ -205,6 +205,12 @@ SCHEMA_MIGRATIONS = (
     PRIMARY KEY (symbol, duration, signal_key)
   )
   """,
+  "ALTER TABLE events ADD COLUMN prediction_open_time INTEGER",
+  "CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time)",
+  "CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at)",
+  "CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time)",
+  "CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status)",
+  "CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id)",
 )
 
 
@@ -273,6 +279,16 @@ def _ensure_prediction_signal_keys(conn: sqlite3.Connection) -> None:
   columns = {row["name"] for row in conn.execute("PRAGMA table_info(predictions)")}
   if "signal_key" not in columns:
     conn.execute("ALTER TABLE predictions ADD COLUMN signal_key TEXT")
+  pending = conn.execute(
+    """
+    SELECT 1
+    FROM predictions
+    WHERE signal_key IS NULL OR signal_key = ''
+    LIMIT 1
+    """
+  ).fetchone()
+  if pending is None:
+    return
   conn.execute(
     """
     UPDATE predictions

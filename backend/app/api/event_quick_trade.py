@@ -32,6 +32,7 @@ class QuickTradeContext:
     predicted: str | None
     entry_price: float
     live_trading_enabled: bool
+    prediction_open_time: int | None = None
 
 
 @dataclass(frozen=True)
@@ -121,11 +122,11 @@ def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
-          start_time, end_time, status,
+          start_time, end_time, status, prediction_open_time,
           ai_probability_up, ai_predicted_direction, ai_quality_score, ai_quality_passed,
           ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             ctx.strategy_key,
@@ -137,6 +138,7 @@ def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
             ctx.payload.event.upperBound,
             now,
             ctx.payload.event.endTime,
+            ctx.prediction_open_time,
             ctx.payload.event.aiProbabilityUp,
             ctx.predicted,
             ctx.payload.event.aiQualityScore,

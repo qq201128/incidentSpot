@@ -30,9 +30,15 @@ def ai_history_success(conn, symbol: str) -> dict:
           o.qty AS order_qty,
           o.price AS order_price
         FROM events e
-        LEFT JOIN orders o ON o.id = (
-            SELECT id FROM orders WHERE event_id = e.id ORDER BY id DESC LIMIT 1
-        )
+        LEFT JOIN (
+          SELECT o.event_id, o.side, o.qty, o.price
+          FROM orders o
+          INNER JOIN (
+            SELECT event_id, MAX(id) AS id
+            FROM orders
+            GROUP BY event_id
+          ) latest ON latest.id = o.id
+        ) o ON o.event_id = e.id
         WHERE e.symbol = ?
           AND e.status = 'SETTLED'
           AND e.ai_predicted_direction IS NOT NULL

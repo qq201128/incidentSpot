@@ -34,6 +34,7 @@ def create_trade_from_prediction(settings: AutoTradeSettings, prediction: dict[s
             predicted=prediction["direction"],
             entry_price=entry_price,
             live_trading_enabled=settings.live_trading_enabled,
+            prediction_open_time=int(prediction["open_time"]) if prediction.get("open_time") is not None else None,
         )
     )
 

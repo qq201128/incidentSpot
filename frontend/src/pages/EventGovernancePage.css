@@ -1,0 +1,248 @@
+.event-governance-page.layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - 50px);
+  min-height: 0;
+  padding: 10px 14px 12px;
+  gap: 10px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.event-gov-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 12px 14px;
+  border: 1px solid rgba(81, 100, 108, 0.55);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(243, 155, 49, 0.12), transparent 55%),
+    rgba(10, 15, 20, 0.92);
+}
+
+.event-gov-topbar-main h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.event-gov-topbar-main p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-gov-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+
+.event-gov-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.event-gov-controls select,
+.event-gov-controls button {
+  min-height: 32px;
+}
+
+.event-gov-latency {
+  font-size: 11px;
+  color: var(--muted);
+  align-self: center;
+}
+
+.event-gov-banner,
+.event-gov-loading {
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.event-gov-loading {
+  color: var(--muted);
+  background: rgba(13, 18, 23, 0.82);
+  border: 1px solid rgba(69, 88, 96, 0.5);
+}
+
+.event-gov-banner {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.12);
+  border: 1px solid rgba(243, 155, 49, 0.35);
+}
+
+.event-gov-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.event-gov-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.event-gov-kpi {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(69, 88, 96, 0.55);
+  background: rgba(13, 18, 23, 0.82);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-gov-kpi span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.event-gov-kpi strong {
+  font-size: 22px;
+}
+
+.event-gov-kpi small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.event-gov-kpi-warn {
+  border-color: rgba(243, 155, 49, 0.45);
+  background: rgba(243, 155, 49, 0.08);
+}
+
+.event-gov-panel {
+  border: 1px solid rgba(69, 88, 96, 0.55);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.92);
+  padding: 12px 14px;
+}
+
+.event-gov-panel-muted {
+  opacity: 0.92;
+}
+
+.event-gov-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.event-gov-panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.event-gov-panel-head span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.event-gov-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.event-gov-issue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-gov-issue {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(243, 155, 49, 0.35);
+  background: rgba(243, 155, 49, 0.08);
+  font-size: 13px;
+}
+
+.event-gov-issue code {
+  font-size: 11px;
+  color: #ffd9a8;
+}
+
+.event-gov-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.event-gov-table-wrap {
+  overflow: auto;
+}
+
+.event-gov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.event-gov-table th,
+.event-gov-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(69, 88, 96, 0.35);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.event-gov-table td.neg {
+  color: #ff8a8a;
+}
+
+.event-gov-table td.pos {
+  color: #8dffb0;
+}
+
+.event-gov-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.event-gov-badge.status-active {
+  background: rgba(76, 175, 80, 0.15);
+  color: #8dffb0;
+}
+
+.event-gov-badge.status-demoted {
+  background: rgba(243, 155, 49, 0.15);
+  color: #ffd9a8;
+}
+
+.event-gov-badge.status-collecting,
+.event-gov-badge.status-insufficient_samples {
+  background: rgba(120, 144, 156, 0.15);
+  color: #b0bec5;
+}
+
+@media (max-width: 960px) {
+  .event-gov-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .event-gov-kpis {
+    grid-template-columns: 1fr;
+  }
+}

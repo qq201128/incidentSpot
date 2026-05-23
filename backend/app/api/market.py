@@ -3,18 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.db.session import get_conn
-from app.services.prediction_cache_service import get_latest_prediction
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
-from app.services.prediction_policy import trade_policy_payload
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
-from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 from app.services.binance_service import (
     fetch_agg_trades_display,
     fetch_index_price_klines,
     fetch_klines,
     fetch_orderbook_depth_display,
-    fetch_premium_index,
+    get_premium_index_display,
 )
 
 router = APIRouter(prefix="/api", tags=["market"])
@@ -57,7 +54,7 @@ def _upsert_klines(symbol: str, interval: str, rows: list[dict]) -> None:
 def get_last_price(symbol: str = Query(..., min_length=6)) -> dict:
     """USD-M 指数价 + 标记价（GET /fapi/v1/premiumIndex），与指数 K、事件价口径一致。"""
     try:
-        row = fetch_premium_index(symbol.upper())
+        row = get_premium_index_display(symbol.upper())
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"binance premium index failed: {exc}") from exc
     return {
@@ -67,6 +64,7 @@ def get_last_price(symbol: str = Query(..., min_length=6)) -> dict:
         "lastFundingRate": row["lastFundingRate"],
         "nextFundingTime": row["nextFundingTime"],
         "time": row["time"],
+        "stale": bool(row.get("stale")),
     }
 
 @router.get("/depth")
@@ -102,7 +100,7 @@ def get_agg_trades(
 def get_index_price(symbol: str = Query(..., min_length=6)) -> dict:
     """Official USD-M index price + mark price (GET /fapi/v1/premiumIndex)."""
     try:
-        row = fetch_premium_index(symbol.upper())
+        row = get_premium_index_display(symbol.upper())
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"binance premium index failed: {exc}") from exc
     return {
@@ -112,6 +110,7 @@ def get_index_price(symbol: str = Query(..., min_length=6)) -> dict:
         "lastFundingRate": row["lastFundingRate"],
         "nextFundingTime": row["nextFundingTime"],
         "time": row["time"],
+        "stale": bool(row.get("stale")),
     }
 
 @router.get("/index-klines")
@@ -216,6 +215,8 @@ def latest_prediction(
             detail=f"rule engine supports only {sorted(SUPPORTED_RULE_DURATIONS)}",
         )
     try:
+        from app.services.prediction_cache_service import get_latest_prediction
+
         return get_latest_prediction(
             symbol,
             duration,
@@ -236,6 +237,8 @@ def _refresh_latest_1m_klines(symbol: str, limit: int) -> None:
         _upsert_klines(symbol, "1m", fresh)
 
 def _predict_rule(symbol: str, duration: str, strategy_key: str | None) -> dict:
+    from app.services.rule_signal_service import predict_rule_direction
+
     try:
         result = predict_rule_direction(
             symbol,
@@ -258,6 +261,8 @@ def predict_10m(
     return predict(symbol=symbol, duration="10m", limit=limit, strategyKey=strategyKey)
 
 def _rule_prediction_response(result: dict) -> dict:
+    from app.services.prediction_policy import trade_policy_payload
+
     return {
         "symbol": result["symbol"],
         "signalKey": result.get("signal_key") or result.get("strategy_key"),

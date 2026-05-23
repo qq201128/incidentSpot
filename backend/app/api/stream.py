@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.services.auto_predict_service import subscribe, unsubscribe
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 
 router = APIRouter(prefix="/ws", tags=["stream"])
+
 
 @router.websocket("/predictions")
 async def ws_predictions(
@@ -14,6 +14,8 @@ async def ws_predictions(
     duration: str = "10m",
     strategyKey: str = DEFAULT_STRATEGY_KEY,
 ) -> None:
+    from app.services.auto_predict_service import subscribe, unsubscribe
+
     await websocket.accept()
     subscribe(websocket, symbol, duration, strategyKey)
     try:
