@@ -74,6 +74,14 @@ def build_lstm_training_dataset(
     )
 
 
+def sanitize_feature_window(window: np.ndarray) -> np.ndarray:
+    """Replace NaN/inf in a live feature window; pct_change and sparse inputs can leave edge infs."""
+    cleaned = np.asarray(window, dtype=np.float32)
+    if np.isfinite(cleaned).all():
+        return cleaned
+    return np.nan_to_num(cleaned, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def build_live_feature_window(
     symbol: str,
     duration: str,
@@ -90,9 +98,9 @@ def build_live_feature_window(
     _assert_columns(sampled, feature_columns)
     if len(sampled) < feature_window:
         raise LstmDataError(f"insufficient LSTM feature rows: {len(sampled)} < {feature_window}")
-    window = sampled[feature_columns].tail(feature_window).to_numpy(dtype=np.float32)
-    if not np.isfinite(window).all():
-        raise LstmDataError("LSTM live feature window contains non-finite values")
+    window = sanitize_feature_window(
+        sampled[feature_columns].tail(feature_window).to_numpy(dtype=np.float32),
+    )
     last = sampled.iloc[-1]
     meta = {"entryOpenTime": int(last["entry_open_time"]), "entryPrice": float(last["close"])}
     return window.reshape(1, feature_window, len(feature_columns)), meta

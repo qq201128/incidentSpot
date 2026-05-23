@@ -50,6 +50,20 @@ def is_batch_combo_simulation_strategy(strategy_key: str | None) -> bool:
     return key.startswith(BATCH_COMBO_KEY_PREFIX) or key.startswith(BATCH_HIGH_WINRATE_KEY_PREFIX)
 
 
+def factor_combo_event_strategy_filter() -> tuple[str, tuple[str, ...]]:
+    """SQL clause matching factor-combo primary, shadow, and per-combo batch simulation keys."""
+    static = (
+        *factor_combo_simulation_strategy_keys(),
+        *high_winrate_factor_combo_simulation_strategy_keys(),
+    )
+    placeholders = ",".join("?" for _key in static)
+    clause = (
+        f"(strategy_key IN ({placeholders}) "
+        f"OR strategy_key LIKE ? OR strategy_key LIKE ?)"
+    )
+    return clause, (*static, f"{BATCH_COMBO_KEY_PREFIX}%", f"{BATCH_HIGH_WINRATE_KEY_PREFIX}%")
+
+
 def is_high_winrate_combo_name(factor_name: str | None) -> bool:
     return str(factor_name or "").startswith(HIGH_WINRATE_COMBO_NAME_PREFIX)
 

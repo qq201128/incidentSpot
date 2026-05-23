@@ -21,13 +21,20 @@ export default function App() {
   const [appView, setAppView] = useState("trade");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [interval, setIntervalValue] = useState("10m");
-  const [events, setEvents] = useState([]);
   const [status, setStatus] = useState("就绪");
   const [summary, setSummary] = useState(null);
   const [summaryLatencyMs, setSummaryLatencyMs] = useState(null);
+  const [recordsReloadKey, setRecordsReloadKey] = useState(0);
   const market = useTradingMarket(symbol, interval, setStatus);
   const { latestPrediction, getFreshPrediction } = useLatestPrediction(symbol, setStatus, interval);
-  const reloadWorkbench = useReloadWorkbench(symbol, interval, setEvents, setSummary, setSummaryLatencyMs, setStatus);
+  const reloadWorkbench = useReloadWorkbench(
+    symbol,
+    interval,
+    setSummary,
+    setSummaryLatencyMs,
+    setStatus,
+    setRecordsReloadKey,
+  );
 
   useEffect(() => {
     let timer;
@@ -88,7 +95,6 @@ export default function App() {
     setAppView,
     <TradingWorkbench
       {...market}
-      events={events}
       interval={interval}
       latestPrediction={latestPrediction}
       onClearAllEvents={handleClearAllEvents}
@@ -98,6 +104,7 @@ export default function App() {
       onQuickTrade={handleQuickTrade}
       onSettle={handleSettle}
       onSymbolChange={setSymbol}
+      recordsReloadKey={recordsReloadKey}
       status={status}
       summary={summary}
       summaryLatencyMs={summaryLatencyMs}
@@ -106,19 +113,19 @@ export default function App() {
   );
 }
 
-function useReloadWorkbench(symbol, interval, setEvents, setSummary, setLatency, setStatus) {
+function useReloadWorkbench(symbol, interval, setSummary, setLatency, setStatus, setRecordsReloadKey) {
   return useCallback(async (options = {}) => {
     try {
-      const { data, latencyMs } = await fetchWorkbenchSummary(symbol, interval, 20);
-      setEvents(Array.isArray(data.events) ? data.events : []);
+      const { data, latencyMs } = await fetchWorkbenchSummary(symbol, interval);
       setSummary(data);
       setLatency(latencyMs);
+      setRecordsReloadKey((value) => value + 1);
     } catch (err) {
       console.error("工作台摘要加载失败", err);
       setStatus(`工作台摘要加载失败：${err.message}`);
       if (options.rethrow) throw err;
     }
-  }, [symbol, interval, setEvents, setSummary, setLatency, setStatus]);
+  }, [symbol, interval, setSummary, setLatency, setStatus, setRecordsReloadKey]);
 }
 
 function pageFrame(appView, setAppView, children) {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.ensemble_judge_constants import (
     ENSEMBLE_MIN_SETTLED_SAMPLES,
     ENSEMBLE_RANKER_STRATEGY_KEY,
@@ -30,15 +30,19 @@ from app.services.rule_config import DURATION_TO_MINUTES
 
 def refresh_ensemble_judge(symbol: str, duration: str) -> dict[str, Any]:
     sym = _symbol(symbol)
-    conn = get_conn()
-    try:
-        scores = score_candidate_rows(_settled_candidate_rows(conn, sym, duration))
-        _replace_scores(conn, sym, duration, scores)
-        status = _upsert_stage_status(conn, sym, duration, scores)
-        conn.commit()
-        return {"status": status, "ranking": ranking_payload(scores)}
-    finally:
-        conn.close()
+
+    def _refresh() -> dict[str, Any]:
+        conn = get_conn()
+        try:
+            scores = score_candidate_rows(_settled_candidate_rows(conn, sym, duration))
+            _replace_scores(conn, sym, duration, scores)
+            status = _upsert_stage_status(conn, sym, duration, scores)
+            conn.commit()
+            return {"status": status, "ranking": ranking_payload(scores)}
+        finally:
+            conn.close()
+
+    return run_db_write_with_retry(_refresh)
 
 
 def ensemble_status(symbol: str, duration: str) -> dict[str, Any]:
@@ -131,7 +135,7 @@ def _upsert_stage_status(conn: Any, symbol: str, duration: str, scores: list[dic
         ),
     )
     row = _stage_row(conn, symbol, duration)
-    return _status_payload(dict(row), scored_rows(conn, symbol, duration))
+    return _status_payload(dict(row), scored_rows(conn, symbol, duration), conn)
 
 
 def _stage_recommendation(conn: Any, symbol: str, duration: str, scores: list[Any]) -> dict[str, str]:
@@ -168,12 +172,15 @@ def _ensemble_ready(conn: Any, symbol: str, duration: str, coverage: dict[str, A
     return all(window_return(window) > 0 for window in recent_windows(rows))
 
 
-def _status_payload(row: dict[str, Any], scores: list[Any]) -> dict[str, Any]:
-    conn = get_conn()
-    try:
+def _status_payload(row: dict[str, Any], scores: list[Any], conn: Any | None = None) -> dict[str, Any]:
+    if conn is None:
+        read_conn = get_conn()
+        try:
+            coverage = coverage_from_scores(read_conn, row["symbol"], row["duration"], scores)
+        finally:
+            read_conn.close()
+    else:
         coverage = coverage_from_scores(conn, row["symbol"], row["duration"], scores)
-    finally:
-        conn.close()
     return {
         "symbol": row["symbol"],
         "duration": row["duration"],

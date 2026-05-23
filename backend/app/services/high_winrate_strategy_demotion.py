@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.high_winrate_strategy_metrics import (
     ACTIVE_SAMPLE_COUNT,
     ACTIVE_WIN_RATE_MIN,
@@ -62,6 +62,10 @@ def promote_high_winrate_strategy(symbol: str, duration: str) -> dict[str, Any]:
 
 
 def evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any]:
+    return run_db_write_with_retry(lambda: _evaluate_high_winrate_demotion(symbol, duration))
+
+
+def _evaluate_high_winrate_demotion(symbol: str, duration: str) -> dict[str, Any]:
     sym = symbol.strip().upper()
     refresh_required = False
     conn = get_conn()

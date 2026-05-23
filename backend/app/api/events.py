@@ -13,6 +13,11 @@ from app.api.event_quick_trade import (
 )
 from app.api.event_response import event_response
 from app.db.session import get_conn
+from app.services.event_list_query import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    paginated_events,
+)
 from app.services.binance_service import fetch_premium_index
 from app.services.settlement_service import settle_event
 from app.services.strategy_registry import (
@@ -83,11 +88,28 @@ def _normalize_predicted_direction(predicted: str | None) -> str | None:
     return normalized
 
 @router.get("")
-def list_events() -> list[dict]:
+def list_events(
+    symbol: str | None = Query(None, min_length=6),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    view: str = Query("events"),
+) -> dict:
     conn = get_conn()
     try:
-        rows = conn.execute("SELECT * FROM events ORDER BY id DESC").fetchall()
-        return [event_response(conn, row) for row in rows]
+        try:
+            payload = paginated_events(
+                conn,
+                symbol=symbol,
+                page=page,
+                page_size=pageSize,
+                view=view,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            **payload,
+            "items": [event_response(conn, row) for row in payload["items"]],
+        }
     finally:
         conn.close()
 

@@ -93,7 +93,15 @@
   padding-right: 2px;
 }
 
-.panel-tab-panel--trade,
+.panel-tab-panel--trade {
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-right: 0;
+  scrollbar-gutter: stable;
+}
+
 .panel-tab-panel--judge {
   overflow-y: hidden;
   overflow-x: hidden;
@@ -143,8 +151,7 @@
 
 .symbol-row,
 .event-pagination,
-.predict-result,
-.ai-success-summary {
+.predict-result {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -180,7 +187,11 @@
     max-height: 420px;
   }
 
-  .panel-tab-panel--trade,
+  .panel-tab-panel--trade {
+    max-height: none;
+    overflow-y: auto;
+  }
+
   .panel-tab-panel--judge {
     max-height: none;
     overflow-y: hidden;

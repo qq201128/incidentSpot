@@ -67,7 +67,13 @@ def _eligible_rows_for_cache(symbol: str, duration: str, cache: dict[str, Any]) 
     rows = []
     for rank, row in enumerate(ranking, start=1):
         ranked = {**dict(row), "comboRank": rank}
-        signal = build_live_signal_from_ranking(frame, ranked, symbol=symbol, duration=duration)
+        signal = build_live_signal_from_ranking(
+            frame,
+            ranked,
+            symbol=symbol,
+            duration=duration,
+            apply_quality_gate=False,
+        )
         if signal.get("qualityPassed"):
             rows.append(ranked)
     return rows

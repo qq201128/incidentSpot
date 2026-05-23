@@ -4,35 +4,34 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.event_response import event_response
 from app.db.session import get_conn
+from app.services.event_ai_history import ai_history_success
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"])
 
 ALLOWED_DURATIONS = frozenset(("10m", "30m", "60m", "1d"))
-MAX_EVENTS_LIMIT = 50
 
 
 @router.get("/summary")
 def workbench_summary(
     symbol: str = Query("BTCUSDT", min_length=6),
     duration: str = Query("10m"),
-    limit: int = Query(20, ge=1, le=MAX_EVENTS_LIMIT),
 ) -> dict:
     safe_symbol = symbol.upper()
     safe_duration = _validate_duration(duration)
     conn = get_conn()
     try:
-        rows = _event_rows(conn, safe_symbol, limit)
-        events = [event_response(conn, row) for row in rows]
         counts = _event_counts(conn, safe_symbol)
+        event_total = sum(counts.values())
         return {
             "symbol": safe_symbol,
             "duration": safe_duration,
             "dataSource": "Binance Index",
             "serverTime": datetime.now(timezone.utc).isoformat(),
             "eventCounts": counts,
-            "events": events,
+            "eventTotal": event_total,
+            "hasOpenPosition": _has_open_position(conn, safe_symbol),
+            "aiHistorySuccess": ai_history_success(conn, safe_symbol),
         }
     finally:
         conn.close()
@@ -45,16 +44,18 @@ def _validate_duration(duration: str) -> str:
     return duration
 
 
-def _event_rows(conn, symbol: str, limit: int):
-    return conn.execute(
+def _has_open_position(conn, symbol: str) -> bool:
+    row = conn.execute(
         """
-        SELECT * FROM events
-        WHERE symbol = ?
-        ORDER BY id DESC
-        LIMIT ?
+        SELECT 1
+        FROM events e
+        INNER JOIN orders o ON o.event_id = e.id
+        WHERE e.symbol = ? AND e.status = 'OPEN'
+        LIMIT 1
         """,
-        (symbol, limit),
-    ).fetchall()
+        (symbol,),
+    ).fetchone()
+    return row is not None
 
 
 def _event_counts(conn, symbol: str) -> dict:

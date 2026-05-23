@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.event_response import event_response
-from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
+from app.services.factor_combo_simulation_keys import factor_combo_event_strategy_filter
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
@@ -51,16 +51,15 @@ def _event_rows(
     factor_name: str | None,
     limit: int,
 ) -> list[Any]:
-    strategy_keys = factor_combo_simulation_strategy_keys()
-    placeholders = ",".join("?" for _key in strategy_keys)
+    strategy_clause, strategy_params = factor_combo_event_strategy_filter()
     factor_clause = " AND ai_high_winrate_rule = ?" if factor_name else ""
     factor_params = (factor_name,) if factor_name else ()
-    params = (*strategy_keys, symbol, duration, *factor_params, int(limit))
+    params = (*strategy_params, symbol, duration, *factor_params, int(limit))
     return conn.execute(
         f"""
         SELECT *
         FROM events
-        WHERE strategy_key IN ({placeholders})
+        WHERE {strategy_clause}
           AND symbol = ?
           AND event_interval = ?
           {factor_clause}

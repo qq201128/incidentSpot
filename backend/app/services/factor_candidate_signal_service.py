@@ -8,23 +8,36 @@ from typing import Any
 
 import pandas as pd
 
+from app.services.binance_service import fetch_klines
 from app.services.factor_backtest_materialization import materialized_frame_for_factor
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_combo_scoring import oriented_zscore
-from app.services.factor_duration_alignment import duration_entry_source_open_time, live_duration_entry_index
-from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_duration_alignment import (
+    duration_entry_source_open_time,
+    live_duration_entry_index,
+)
+from app.services.factor_frame_service import FACTOR_FRAME_MIN_HISTORY, load_factor_frame
+from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.factor_registry import FactorDirection
-from app.services.rule_config import MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS
+from app.services.rule_config import MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
 
 SIGNAL_RULE_NAME = "factor_candidate_signal_v1"
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
 NEUTRAL_WIN_RATE = 0.5
+MIN_DURATION_KLINE_ROWS = 540
+DURATION_BACKFILL_LIMIT = 1000
+MAX_DURATION_BACKFILL_ROUNDS = 10
+CANDIDATE_SCORE_LOOKBACK_BARS = max(
+    BACKTEST_MIN_PERIODS * 2,
+    FACTOR_FRAME_MIN_HISTORY,
+    MIN_DURATION_KLINE_ROWS,
+)
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -57,7 +70,7 @@ def predict_factor_candidate_signals(
     del entry_grace_ms
     _refresh_candidate_source_klines(symbol, duration, entry_open_time)
     rows = _ranking_rows(symbol, duration, require_usable=True)
-    working = load_factor_frame(symbol, duration)
+    working = load_factor_frame(symbol, duration, min_history=_candidate_frame_min_history())
     predictions = []
     failures = []
     for row in rows:
@@ -75,8 +88,50 @@ def predict_factor_candidate_signals(
 
 def _refresh_candidate_source_klines(symbol: str, duration: str, entry_open_time: int) -> None:
     source_open_time = duration_entry_source_open_time(entry_open_time, duration)
-    refresh_prediction_klines(symbol, "1m", int(entry_open_time) - MS_PER_MINUTE)
+    duration_step_ms = horizon_minutes_for_duration(duration) * MS_PER_MINUTE
+    lookback_start = source_open_time - (CANDIDATE_SCORE_LOOKBACK_BARS - 1) * duration_step_ms
+    refresh_prediction_klines(symbol, duration, lookback_start)
     refresh_prediction_klines(symbol, duration, source_open_time)
+    _backfill_duration_klines_if_needed(symbol, duration)
+    one_m_lookback_start = int(entry_open_time) - CANDIDATE_SCORE_LOOKBACK_BARS * MS_PER_MINUTE
+    refresh_prediction_klines(symbol, "1m", one_m_lookback_start)
+    refresh_prediction_klines(symbol, "1m", int(entry_open_time) - MS_PER_MINUTE)
+
+
+def _candidate_frame_min_history() -> int:
+    return CANDIDATE_SCORE_LOOKBACK_BARS
+
+
+def _backfill_duration_klines_if_needed(symbol: str, duration: str) -> None:
+    sym = symbol.strip().upper()
+    end_time = _duration_backfill_end_time(sym, duration)
+    rounds = 0
+    while count_klines(sym, duration) < MIN_DURATION_KLINE_ROWS:
+        if rounds >= MAX_DURATION_BACKFILL_ROUNDS:
+            break
+        rounds += 1
+        rows = fetch_klines(sym, duration, limit=DURATION_BACKFILL_LIMIT, end_time=end_time)
+        if not rows:
+            raise ValueError(f"no historical {duration} klines returned for {sym} before {end_time}")
+        upsert_klines_rows(sym, duration, rows)
+        end_time = _next_duration_backfill_end_time(rows, end_time, sym, duration)
+
+
+def _duration_backfill_end_time(symbol: str, duration: str) -> int | None:
+    oldest = oldest_open_time(symbol, duration)
+    return int(oldest) - 1 if oldest is not None else None
+
+
+def _next_duration_backfill_end_time(
+    rows: list[dict],
+    end_time: int | None,
+    symbol: str,
+    duration: str,
+) -> int:
+    new_oldest = min(int(row["openTime"]) for row in rows)
+    if end_time is not None and new_oldest >= end_time:
+        raise ValueError(f"historical {duration} kline backfill did not move earlier for {symbol}")
+    return new_oldest - 1
 
 
 def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[dict[str, Any]]:
@@ -115,10 +170,12 @@ def _live_factor_signal(
     entry_open_time: int,
 ) -> _FactorSignal:
     orientation = _factor_orientation(row)
-    index = live_duration_entry_index(frame, duration, entry_open_time)
+    index = _strict_duration_entry_index(frame, duration, entry_open_time)
     score_series = oriented_zscore(frame[factor_name], orientation)
     score = _finite_float(_series_value_at(score_series, index))
-    median = _finite_float(_series_value_at(score_series.expanding(BACKTEST_MIN_PERIODS).median().shift(1), index))
+    median = _finite_float(
+        _series_value_at(score_series.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1), index)
+    )
     if score is None or median is None:
         raise ValueError(f"factor candidate signal has insufficient score history: {factor_name}")
     direction = "up" if score >= median else "down"
@@ -176,6 +233,22 @@ def _rule_reasons(row: dict[str, Any], signal: _FactorSignal) -> list[str]:
         f"historical_win_rate={row.get('winRate')}",
         f"historical_profit_factor={row.get('profitFactor')}",
     ]
+
+
+def _strict_duration_entry_index(
+    frame: pd.DataFrame,
+    duration: str,
+    entry_open_time: int,
+) -> Any:
+    index = live_duration_entry_index(frame, duration, entry_open_time)
+    source_open_time = duration_entry_source_open_time(entry_open_time, duration)
+    actual_open_time = int(pd.to_numeric(frame.loc[index, "open_time"], errors="raise"))
+    if actual_open_time != source_open_time:
+        raise ValueError(
+            f"factor candidate signal missing completed {duration} source row at "
+            f"open_time={source_open_time}; latest available open_time={actual_open_time}"
+        )
+    return index
 
 
 def _usable_factor_row(row: Any) -> bool:

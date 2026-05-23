@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchEventsPage } from "../api/client";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
+import { factorLabel } from "../utils/factorLearningLabels";
 import { strategyLabel } from "../utils/strategyLabels";
 import EnsembleRankingTable from "./EnsembleRankingTable";
 
@@ -16,36 +18,58 @@ const TABS = Object.freeze([
 ]);
 
 export default function EventRecordsTable({
-  events,
-  compact = false,
   symbol = "",
+  compact = false,
+  page,
+  onPageChange,
+  reloadKey = 0,
   ensembleDuration = "10m",
   ensembleReloadKey = 0,
 }) {
   const [activeTab, setActiveTab] = useState(EVENT_TAB);
-  const [page, setPage] = useState(1);
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
   const showEnsemble = !compact && activeTab === ENSEMBLE_TAB;
+  const viewKey = compact ? EVENT_TAB : activeTab;
+
+  const loadRecords = useCallback(async () => {
+    if (!symbol || showEnsemble) return;
+    try {
+      const data = await fetchEventsPage({
+        symbol,
+        page,
+        pageSize: PAGE_SIZE,
+        view: viewKey,
+      });
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setTotal(Number(data.total) || 0);
+      setPageCount(Math.max(1, Number(data.pageCount) || 1));
+    } catch (err) {
+      console.error("事件记录加载失败", err);
+      setItems([]);
+      setTotal(0);
+      setPageCount(1);
+    }
+  }, [page, showEnsemble, symbol, viewKey]);
+
+  useEffect(() => {
+    if (compact) return;
+    onPageChange?.(1);
+  }, [activeTab, compact, onPageChange, symbol]);
+
+  useEffect(() => {
+    void loadRecords();
+  }, [loadRecords, reloadKey]);
+
+  useEffect(() => {
+    if (page > pageCount) onPageChange?.(pageCount);
+  }, [onPageChange, page, pageCount]);
+
   const view = useMemo(
-    () => (showEnsemble ? null : buildView(events, compact ? EVENT_TAB : activeTab, compact)),
-    [activeTab, compact, events, showEnsemble],
+    () => (showEnsemble ? null : buildView(items, compact ? EVENT_TAB : activeTab, compact)),
+    [activeTab, compact, items, showEnsemble],
   );
-
-  const total = view?.rows.length ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  useEffect(() => {
-    setPage(1);
-  }, [activeTab, compact, events]);
-
-  useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
-
-  const pageRows = useMemo(() => {
-    if (!view) return [];
-    const start = (page - 1) * PAGE_SIZE;
-    return view.rows.slice(start, start + PAGE_SIZE);
-  }, [page, view]);
 
   const sectionClass = compact
     ? "event-records event-records--compact"
@@ -75,14 +99,14 @@ export default function EventRecordsTable({
           <div className="event-records-table" role="table" aria-label={view.title}>
             <div className="event-records-rows">
               <RecordHeader labels={view.labels} viewKey={view.key} />
-              {pageRows.map((row) => (
+              {view.rows.map((row) => (
                 <RecordRow key={row.key} cells={row.cells} viewKey={view.key} />
               ))}
             </div>
             {!total ? <p className="event-records-empty">{view.emptyText}</p> : null}
           </div>
           {total ? (
-            <RecordsPagination page={page} pageCount={pageCount} total={total} onPageChange={setPage} />
+            <RecordsPagination page={page} pageCount={pageCount} total={total} onPageChange={onPageChange} />
           ) : null}
         </>
       )}
@@ -130,10 +154,10 @@ function RecordsPagination({ page, pageCount, total, onPageChange }) {
     <nav className="event-records-pagination" aria-label="事件记录分页">
       <span className="event-records-page-total">共 {total} 条</span>
       <div className="event-records-page-actions">
-        <button type="button" disabled={page <= 1} onClick={() => onPageChange(1)} aria-label="首页">
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange?.(1)} aria-label="首页">
           «
         </button>
-        <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)} aria-label="上一页">
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange?.(page - 1)} aria-label="上一页">
           ‹
         </button>
         <strong>
@@ -142,7 +166,7 @@ function RecordsPagination({ page, pageCount, total, onPageChange }) {
         <button
           type="button"
           disabled={page >= pageCount}
-          onClick={() => onPageChange(page + 1)}
+          onClick={() => onPageChange?.(page + 1)}
           aria-label="下一页"
         >
           ›
@@ -150,7 +174,7 @@ function RecordsPagination({ page, pageCount, total, onPageChange }) {
         <button
           type="button"
           disabled={page >= pageCount}
-          onClick={() => onPageChange(pageCount)}
+          onClick={() => onPageChange?.(pageCount)}
           aria-label="末页"
         >
           »
@@ -189,27 +213,16 @@ function buildView(events, activeTab, compact) {
   if (compact) {
     return view("compact", compactLabels(), source.map(compactRow), "暂无事件", "事件列表");
   }
-  if (activeTab === "orders") return ordersView(source);
-  if (activeTab === "settlements") return settlementsView(source);
-  if (activeTab === "failures") return failuresView(source);
+  if (activeTab === "orders") {
+    return view("orders", orderLabels(), source.map(orderRow), "暂无订单记录", "订单记录");
+  }
+  if (activeTab === "settlements") {
+    return view("settlements", settlementLabels(), source.map(settlementRow), "暂无结算记录", "结算验证");
+  }
+  if (activeTab === "failures") {
+    return view("failures", failureLabels(), source.map(failureRow), "暂无失败记录", "失败原因");
+  }
   return view("events", eventLabels(), source.map(eventRow), "暂无事件", "事件合约记录");
-}
-
-function ordersView(events) {
-  const rows = events.filter((event) => event.orderSide).map(orderRow);
-  return view("orders", orderLabels(), rows, "暂无订单记录", "订单记录");
-}
-
-function settlementsView(events) {
-  const rows = events
-    .filter((event) => event.status === "SETTLED" || event.settlementPrice != null)
-    .map(settlementRow);
-  return view("settlements", settlementLabels(), rows, "暂无结算记录", "结算验证");
-}
-
-function failuresView(events) {
-  const rows = events.filter(hasFailure).map(failureRow);
-  return view("failures", failureLabels(), rows, "暂无失败记录", "失败原因");
 }
 
 function view(key, labels, rows, emptyText, title) {
@@ -328,13 +341,6 @@ function confidenceCell(event) {
   return text("confidence", `${Math.round(Math.max(p, 1 - p) * 1000) / 10}%`);
 }
 
-function hasFailure(event) {
-  const status = String(event.status || "").toUpperCase();
-  const orderStatus = String(event.orderStatus || "").toUpperCase();
-  const externalStatus = String(event.externalStatus || "").toUpperCase();
-  return status === "FAILED" || orderStatus === "FAILED" || /FAIL|ERROR|REJECT/.test(externalStatus);
-}
-
 function failureReason(event) {
   return event.externalResponse || event.settlementSource || event.title || "—";
 }
@@ -385,6 +391,9 @@ function signed(value) {
 }
 
 function ruleName(event) {
+  if (event.aiHighWinrateRule) {
+    return factorLabel(event.aiHighWinrateRule);
+  }
   if (event.strategyKey) return strategyLabel(event.strategyKey);
   return event.title || "手动";
 }

@@ -30,7 +30,7 @@
 - Binance USD-M Futures Taker Buy/Sell Volume：`/futures/data/takerlongshortRatio`，用于主动买卖量比、主动买入占比。
 - Alternative.me Fear & Greed Index：`/fng/`，用于币圈情绪因子。
 
-股票基本面、财务质量、估值、规模、卖空、新闻 NLP、链上地址行为等因子需要对应的 point-in-time 数据源。当前已预留 `onchain_features` 表和链上因子定义；没有真实链上数据入库前不生成空值假信号。
+链上外部数据（`onchain_features`）由 CoinMetrics Community API 按日采集：`exchange_netflow`（交易所净流入 = FlowInExNtv - FlowOutExNtv）、`active_addresses`、`transaction_count`、`stablecoin_supply_ratio`（USDT+USDC 流通量 / 标的市值）。采集入口为 `market_context_ingest_service.ingest_market_context_data`，与持仓/情绪数据一同由后台 `market_context_refresh_loop` 周期刷新。当前支持 `BTCUSDT`、`ETHUSDT`；无真实链上数据入库前不生成空值假信号。
 
 ## 防未来函数规则
 

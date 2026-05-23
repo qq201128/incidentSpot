@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
-import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
+import { useCallback, useEffect, useState } from "react";
 import AutoStrategyControls from "./AutoStrategyControls";
 import EnsembleJudgePanel from "./EnsembleJudgePanel";
 import TradeControls from "./TradeControls";
 const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
+const EMPTY_AI_HISTORY = Object.freeze({
+  overall: { total: 0, hits: 0, rate: null, pnlU: 0 },
+  byStrategy: [],
+});
 
 const PANEL_TABS = /** @type {const} */ (["execution", "judge", "trade"]);
 
@@ -14,7 +16,8 @@ export default function EventContractPanel({
   symbol,
   chartInterval = "10m",
   currentPrice,
-  events,
+  hasOpenPosition: dbHasOpenPosition = false,
+  aiHistorySuccess = EMPTY_AI_HISTORY,
   onQuickTrade,
   onPredict,
   latestPrediction,
@@ -36,12 +39,6 @@ export default function EventContractPanel({
   const [clearAllLoading, setClearAllLoading] = useState(false);
   const [panelTab, setPanelTab] = useState(() => _initialPanelTab());
   const [strategyReloadKey, setStrategyReloadKey] = useState(0);
-
-  const aiHistorySuccess = useMemo(() => _aiHistorySuccessByStrategy(events, symbol), [events, symbol]);
-  const dbHasOpenPosition = useMemo(
-    () => events.some((event) => event.symbol === symbol && event.status === "OPEN" && event.orderSide),
-    [events, symbol],
-  );
   const hasOpenPosition = dbHasOpenPosition || localOpenPositionPending;
 
   useEffect(() => {
@@ -347,64 +344,6 @@ function orderPayload(amount, sideUp) {
 
 function _blockTrade(setPredictInfo) {
   setPredictInfo("已有进行中持仓，等待上一笔结束后再规则计算下单"); return "blocked";
-}
-function _aiHistorySuccessByStrategy(events, symbol) {
-  const settled = events.filter((event) => _isSettledAiEvent(event, symbol));
-  const overallHits = settled.filter((event) => Number(event.aiPredictionCorrect) === 1).length;
-  let overallPnl = 0;
-  for (const event of settled) {
-    const pnl = settledExpectedProfitUsdt(event);
-    if (pnl != null) overallPnl += pnl;
-  }
-  const overall = {
-    total: settled.length,
-    hits: overallHits,
-    rate: settled.length > 0 ? overallHits / settled.length : null,
-    pnlU: overallPnl,
-  };
-  const UNKNOWN_DURATION = -1;
-  const byKey = new Map();
-  for (const event of settled) {
-    const strategyKey = event.strategyKey || "manual";
-    const durationMinutes = eventDurationMinutesFromWindow(event) ?? UNKNOWN_DURATION;
-    const key = `${strategyKey}\t${durationMinutes}`;
-    let bucket = byKey.get(key);
-    if (!bucket) {
-      bucket = { total: 0, hits: 0, pnlU: 0 };
-      byKey.set(key, bucket);
-    }
-    bucket.total += 1;
-    if (Number(event.aiPredictionCorrect) === 1) bucket.hits += 1;
-    const pnl = settledExpectedProfitUsdt(event);
-    if (pnl != null) bucket.pnlU += pnl;
-  }
-  const byStrategy = [...byKey.entries()]
-    .map(([compoundKey, { total, hits, pnlU }]) => {
-      const tab = compoundKey.lastIndexOf("\t");
-      const strategyKey = tab >= 0 ? compoundKey.slice(0, tab) : compoundKey;
-      const durStr = tab >= 0 ? compoundKey.slice(tab + 1) : "";
-      const durationMinutes = Number(durStr);
-      return {
-        strategyKey,
-        durationMinutes: Number.isFinite(durationMinutes) ? durationMinutes : UNKNOWN_DURATION,
-        total,
-        hits,
-        pnlU,
-        rate: total > 0 ? hits / total : null,
-      };
-    })
-    .sort(
-      (a, b) =>
-        (a.durationMinutes === UNKNOWN_DURATION ? 1e9 : a.durationMinutes) -
-          (b.durationMinutes === UNKNOWN_DURATION ? 1e9 : b.durationMinutes) ||
-        b.pnlU - a.pnlU ||
-        a.strategyKey.localeCompare(b.strategyKey),
-    );
-  return { overall, byStrategy };
-}
-
-function _isSettledAiEvent(event, symbol) {
-  return event.symbol === symbol && event.status === "SETTLED" && event.aiPredictedDirection && event.aiPredictionCorrect != null;
 }
 
 function aiBestSideProbability(probabilityUp) {

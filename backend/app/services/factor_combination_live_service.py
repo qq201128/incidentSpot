@@ -86,6 +86,7 @@ def rebuild_combination_signal_watchlist(
                     symbol=symbol,
                     duration=duration,
                     context=context,
+                    apply_quality_gate=False,
                 )
                 if signal.get("qualityPassed"):
                     signals.append(_simulation_signal(signal, rank))

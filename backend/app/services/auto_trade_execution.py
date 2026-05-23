@@ -12,6 +12,7 @@ from app.services.auto_trade_types import (
 )
 from app.services.binance_service import fetch_premium_index
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.strategy_registry import strategy_definition
 
 PERCENT_SCALE = 1000
@@ -72,8 +73,17 @@ def _event_title(settings: AutoTradeSettings, prediction: dict[str, Any], side: 
     probability = _side_probability(float(prediction["probability_up"]), side)
     confidence = round(probability * PERCENT_SCALE) / PERCENT_DECIMALS
     direction = "看涨" if side == "BUY" else "看跌"
-    strategy_name = strategy_definition(settings.strategy_key).name
+    strategy_name = _event_strategy_label(settings, prediction)
     return f"{settings.symbol} {strategy_name}{_duration_label(settings.duration_minutes)} {direction} 置信{confidence:.1f}%"
+
+
+def _event_strategy_label(settings: AutoTradeSettings, prediction: dict[str, Any]) -> str:
+    combo_rule = str(prediction.get("high_winrate_rule") or "").strip()
+    if is_batch_combo_simulation_strategy(settings.strategy_key) and combo_rule:
+        if combo_rule.startswith("goal_combo__"):
+            return f"GE70·{combo_rule.removeprefix('goal_combo__')[:48]}"
+        return f"组合·{combo_rule[:48]}"
+    return strategy_definition(settings.strategy_key).name
 
 
 def _fetch_latest_entry_price(symbol: str) -> float:

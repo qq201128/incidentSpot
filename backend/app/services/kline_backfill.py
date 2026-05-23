@@ -1,38 +1,43 @@
 from __future__ import annotations
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.binance_service import fetch_klines
 
 
 def upsert_klines_rows(symbol: str, interval: str, rows: list[dict]) -> None:
-    conn = get_conn()
-    for item in rows:
-        conn.execute(
-            """
-            INSERT INTO klines(symbol, interval, open_time, open, high, low, close, volume, close_time)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol, interval, open_time) DO UPDATE SET
-              open=excluded.open,
-              high=excluded.high,
-              low=excluded.low,
-              close=excluded.close,
-              volume=excluded.volume,
-              close_time=excluded.close_time
-            """,
-            (
-                symbol.upper(),
-                interval,
-                item["openTime"],
-                item["open"],
-                item["high"],
-                item["low"],
-                item["close"],
-                item["volume"],
-                item["closeTime"],
-            ),
-        )
-    conn.commit()
-    conn.close()
+    def _upsert() -> None:
+        conn = get_conn()
+        try:
+            for item in rows:
+                conn.execute(
+                    """
+                    INSERT INTO klines(symbol, interval, open_time, open, high, low, close, volume, close_time)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol, interval, open_time) DO UPDATE SET
+                      open=excluded.open,
+                      high=excluded.high,
+                      low=excluded.low,
+                      close=excluded.close,
+                      volume=excluded.volume,
+                      close_time=excluded.close_time
+                    """,
+                    (
+                        symbol.upper(),
+                        interval,
+                        item["openTime"],
+                        item["open"],
+                        item["high"],
+                        item["low"],
+                        item["close"],
+                        item["volume"],
+                        item["closeTime"],
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_upsert)
 
 
 def count_klines(symbol: str, interval: str) -> int:

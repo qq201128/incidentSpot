@@ -11,6 +11,7 @@ from app.services.lstm_feature_builder import (
     _assert_columns,
     build_live_feature_window,
     duration_feature_frame,
+    sanitize_feature_window,
 )
 from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, shadow_predictable_status, trade_active_status
 from app.services.lstm_market_feature_builder import load_lstm_market_frame
@@ -121,9 +122,7 @@ def _live_feature_windows(symbol: str, duration: str, columns: list[str], featur
             raise ValueError(f"missing completed model feature row for entry_open_time={entry}")
         if idx + 1 < feature_window:
             raise ValueError(f"insufficient model feature rows before entry_open_time={entry}")
-        window = values[idx - feature_window + 1: idx + 1]
-        if not np.isfinite(window).all():
-            raise ValueError(f"model feature window contains non-finite values at entry_open_time={entry}")
+        window = sanitize_feature_window(values[idx - feature_window + 1: idx + 1])
         row = sampled.iloc[idx]
         windows.append(window)
         metas.append({"entryOpenTime": int(row["entry_open_time"]), "entryPrice": float(row["close"])})

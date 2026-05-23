@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data.db"
+_DB_WRITE_LOCK = threading.Lock()
 
 # 与 auto_trade_service.SUPPORTED_AUTO_DURATIONS、rule_config.DURATION_TO_MINUTES 对齐
 _AUTO_TRADE_SLOT_DURATIONS: tuple[str, ...] = ("10m", "30m", "60m", "1d")
@@ -217,6 +221,30 @@ def get_conn() -> sqlite3.Connection:
   except sqlite3.Error:
     pass
   return conn
+
+
+@contextmanager
+def db_write_lock():
+  """Serialize SQLite writes across threads."""
+  _DB_WRITE_LOCK.acquire()
+  try:
+    yield
+  finally:
+    _DB_WRITE_LOCK.release()
+
+
+def run_db_write_with_retry(operation, *, attempts: int = 6, base_delay: float = 0.05):
+  delay = base_delay
+  for attempt in range(attempts):
+    try:
+      with db_write_lock():
+        return operation()
+    except sqlite3.OperationalError as exc:
+      message = str(exc).lower()
+      if "locked" not in message or attempt == attempts - 1:
+        raise
+      time.sleep(delay)
+      delay = min(delay * 2, 1.0)
 
 
 def init_db() -> None:

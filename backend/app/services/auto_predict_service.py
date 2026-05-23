@@ -126,24 +126,7 @@ async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> 
                 if buckets
             )
         )
-    await asyncio.gather(
-        *(
-            asyncio.to_thread(settle_due_predictions, symbol, duration)
-            for symbol, duration in _unique_symbol_durations(settings_list)
-        )
-    )
-    await asyncio.gather(
-        *(
-            asyncio.to_thread(refresh_ensemble_judge, symbol, duration)
-            for symbol, duration in _unique_symbol_durations(settings_list)
-        )
-    )
-    await asyncio.gather(
-        *(
-            asyncio.to_thread(evaluate_high_winrate_demotion, symbol, duration)
-            for symbol, duration in _unique_symbol_durations(settings_list)
-        )
-    )
+    await asyncio.to_thread(_run_prediction_db_side_effects, settings_list)
 
 
 async def _run_prediction_batch(settings_list: list[AutoTradeSettings]) -> None:
@@ -523,7 +506,7 @@ def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:
 
 
 async def _backfill_lstm_shadow_predictions(settings_list: list[AutoTradeSettings]) -> None:
-    targets = _unique_model_family_shadow_targets(settings_list)
+    targets = _ready_model_family_shadow_backfill_targets(settings_list)
     if not targets:
         return
     summaries = await asyncio.gather(
@@ -536,11 +519,24 @@ async def _backfill_lstm_shadow_predictions(settings_list: list[AutoTradeSetting
                 current_rule_entry_open_time_for_duration(duration),
             )
             for family, symbol, duration in targets
-        )
+        ),
+        return_exceptions=True,
     )
     for summary in summaries:
+        if isinstance(summary, Exception):
+            logger.exception("model family shadow backfill failed")
+            continue
         if summary["savedCount"]:
             logger.info("predict: model family shadow backfill summary=%s", summary)
+
+
+def _ready_model_family_shadow_backfill_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str, str]]:
+    ready = []
+    for family, symbol, duration in _unique_model_family_shadow_targets(settings_list):
+        status = lstm_model_status(symbol, duration) if family == "lstm" else model_family_status(family, symbol, duration)
+        if status.get("shadowPredictionReady"):
+            ready.append((family, symbol, duration))
+    return ready
 
 
 def _unique_lstm_shadow_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
@@ -596,6 +592,13 @@ def predict_lstm_shadow_prediction(symbol: str, duration: str, *, entry_open_tim
 
 def missing_lstm_shadow_entry_times(symbol: str, duration: str, current_entry_open_time: int) -> tuple[int, ...]:
     return missing_model_family_shadow_entry_times("lstm", symbol, duration, current_entry_open_time)
+
+
+def _run_prediction_db_side_effects(settings_list: list[AutoTradeSettings]) -> None:
+    for symbol, duration in _unique_symbol_durations(settings_list):
+        settle_due_predictions(symbol, duration)
+        refresh_ensemble_judge(symbol, duration)
+        evaluate_high_winrate_demotion(symbol, duration)
 
 
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:

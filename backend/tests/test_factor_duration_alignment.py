@@ -35,6 +35,16 @@ def test_live_duration_entry_index_uses_entry_previous_completed_minute() -> Non
     assert frame.at[index, "open_time"] == duration_entry_source_open_time(entry_open_time, "10m")
 
 
+def test_live_duration_entry_index_falls_back_to_latest_row_at_or_before_source() -> None:
+    frame = _frame(ROWS)
+    missing_source = duration_entry_source_open_time(30 * ONE_MINUTE_MS, "10m")
+    frame = frame[frame["open_time"] != missing_source].reset_index(drop=True)
+
+    index = live_duration_entry_index(frame, "10m", 30 * ONE_MINUTE_MS)
+
+    assert int(frame.at[index, "open_time"]) == 1 * TEN_MINUTES * ONE_MINUTE_MS
+
+
 def _frame(rows: int) -> pd.DataFrame:
     index = np.arange(rows, dtype=float)
     return pd.DataFrame(

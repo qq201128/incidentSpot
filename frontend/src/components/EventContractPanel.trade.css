@@ -2,12 +2,12 @@
   gap: 8px;
   padding: 10px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .panel-tab-panel--trade .trade-card {
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: auto;
   display: flex;
   flex-direction: column;
 }
@@ -876,11 +876,8 @@
   display: grid;
   gap: 6px;
   min-width: 0;
-  min-height: 0;
-  flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .predict-btn {

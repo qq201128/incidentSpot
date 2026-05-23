@@ -2,22 +2,54 @@ from __future__ import annotations
 
 import sqlite3
 
-from app.api import workbench
+from app.api import events, workbench
 
 
-def test_workbench_summary_returns_recent_symbol_events(monkeypatch) -> None:
+def test_workbench_summary_returns_symbol_counts_and_flags(monkeypatch) -> None:
     conn = _memory_conn()
-    _insert_event(conn, "BTCUSDT", "OPEN")
-    _insert_event(conn, "ETHUSDT", "OPEN")
-    _insert_event(conn, "BTCUSDT", "SETTLED")
+    _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
+    _insert_event(conn, "ETHUSDT", "OPEN", with_order=True)
+    _insert_event(conn, "BTCUSDT", "SETTLED", with_order=True)
     monkeypatch.setattr(workbench, "get_conn", lambda: conn)
 
-    result = workbench.workbench_summary(symbol="btcusdt", duration="10m", limit=20)
+    result = workbench.workbench_summary(symbol="btcusdt", duration="10m")
 
     assert result["symbol"] == "BTCUSDT"
     assert result["dataSource"] == "Binance Index"
     assert result["eventCounts"] == {"OPEN": 1, "SETTLED": 1, "FAILED": 0}
-    assert [event["symbol"] for event in result["events"]] == ["BTCUSDT", "BTCUSDT"]
+    assert result["eventTotal"] == 2
+    assert result["hasOpenPosition"] is True
+    assert "overall" in result["aiHistorySuccess"]
+    assert "events" not in result
+
+
+def test_list_events_returns_paginated_symbol_rows(monkeypatch) -> None:
+    conn = _memory_conn()
+    for index in range(12):
+        _insert_event(conn, "BTCUSDT", "SETTLED" if index % 2 else "OPEN")
+    _insert_event(conn, "ETHUSDT", "OPEN")
+    monkeypatch.setattr(events, "get_conn", lambda: conn)
+
+    page_one = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="events")
+    page_two = events.list_events(symbol="BTCUSDT", page=2, pageSize=8, view="events")
+
+    assert page_one["total"] == 12
+    assert page_one["pageCount"] == 2
+    assert len(page_one["items"]) == 8
+    assert len(page_two["items"]) == 4
+    assert all(item["symbol"] == "BTCUSDT" for item in page_one["items"])
+
+
+def test_list_events_orders_view_filters_to_rows_with_orders(monkeypatch) -> None:
+    conn = _memory_conn()
+    _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
+    _insert_event(conn, "BTCUSDT", "OPEN", with_order=False)
+    monkeypatch.setattr(events, "get_conn", lambda: conn)
+
+    result = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="orders")
+
+    assert result["total"] == 1
+    assert result["items"][0]["orderSide"] is not None
 
 
 def _memory_conn() -> sqlite3.Connection:
@@ -46,15 +78,29 @@ def _memory_conn() -> sqlite3.Connection:
     return conn
 
 
-def _insert_event(conn: sqlite3.Connection, symbol: str, status: str) -> None:
-    conn.execute(
+def _insert_event(
+    conn: sqlite3.Connection,
+    symbol: str,
+    status: str,
+    *,
+    with_order: bool = True,
+) -> None:
+    cursor = conn.execute(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value,
-          start_time, end_time, status
+          start_time, end_time, status, ai_predicted_direction, ai_prediction_correct, result
         )
-        VALUES('manual', ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', ?, ?)
+        VALUES('manual', ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', ?, ?, 'up', 1, 'YES')
         """,
         (symbol, "2026-05-21T14:20:00Z", status),
     )
+    if with_order:
+        conn.execute(
+            """
+            INSERT INTO orders(event_id, side, price, qty, status, created_at)
+            VALUES(?, 'BUY', 0.8, 5, 'OPEN', '2026-05-21T14:10:00Z')
+            """,
+            (cursor.lastrowid,),
+        )
     conn.commit()

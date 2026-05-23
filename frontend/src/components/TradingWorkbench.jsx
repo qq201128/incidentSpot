@@ -12,10 +12,15 @@ import WorkbenchStatusBar from "./WorkbenchStatusBar";
 export default function TradingWorkbench(props) {
   const chartUi = useKlineChartUi();
   const [ensembleReloadKey, setEnsembleReloadKey] = useState(0);
+  const [recordsPage, setRecordsPage] = useState(1);
+
+  useEffect(() => {
+    setRecordsPage(1);
+  }, [props.symbol]);
 
   return (
     <main className="terminal-layout">
-      <WorkbenchHeader events={props.events} status={props.status} summary={props.summary} />
+      <WorkbenchHeader status={props.status} summary={props.summary} />
       <div className="terminal-grid">
         <section className="market terminal-card">
           <MarketToolbar
@@ -61,7 +66,8 @@ export default function TradingWorkbench(props) {
             symbol={props.symbol}
             chartInterval={props.interval}
             currentPrice={props.currentPrice}
-            events={props.events}
+            hasOpenPosition={Boolean(props.summary?.hasOpenPosition)}
+            aiHistorySuccess={props.summary?.aiHistorySuccess}
             onQuickTrade={props.onQuickTrade}
             onPredict={props.onPredict}
             latestPrediction={props.latestPrediction}
@@ -71,16 +77,21 @@ export default function TradingWorkbench(props) {
         </section>
         <div className="records-column">
           <EventRecordsTable
-            events={props.events}
             symbol={props.symbol}
+            page={recordsPage}
+            onPageChange={setRecordsPage}
+            reloadKey={props.recordsReloadKey}
             ensembleDuration={durationKeyFromChartInterval(props.interval)}
             ensembleReloadKey={ensembleReloadKey}
           />
         </div>
         <div className="records-side">
           <EventRecordsTable
-            events={props.events}
+            symbol={props.symbol}
             compact
+            page={recordsPage}
+            onPageChange={setRecordsPage}
+            reloadKey={props.recordsReloadKey}
             ensembleReloadKey={ensembleReloadKey}
           />
         </div>
@@ -90,12 +101,10 @@ export default function TradingWorkbench(props) {
   );
 }
 
-function WorkbenchHeader({ events, status, summary }) {
+function WorkbenchHeader({ status, summary }) {
   const [open, setOpen] = useState(false);
-  const eventCount = Array.isArray(events) ? events.length : summary?.eventCount;
-  const openCount = Array.isArray(events)
-    ? events.filter((item) => String(item?.status || "").toUpperCase() === "OPEN").length
-    : summary?.openCount;
+  const eventCount = summary?.eventTotal;
+  const openCount = summary?.eventCounts?.OPEN;
   return (
     <header className="topbar">
       <div>
@@ -326,7 +335,8 @@ function panelProps(props) {
   return {
     chartInterval: props.interval,
     currentPrice: props.currentPrice,
-    events: props.events,
+    hasOpenPosition: Boolean(props.summary?.hasOpenPosition),
+    aiHistorySuccess: props.summary?.aiHistorySuccess,
     latestPrediction: props.latestPrediction,
     onClearAllEvents: props.onClearAllEvents,
     onPredict: props.onPredict,

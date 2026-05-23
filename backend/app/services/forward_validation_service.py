@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 DAY_MS = 86_400_000
@@ -15,14 +15,17 @@ WINDOW_DAYS = (1, 3, 7, 30)
 
 
 def settle_due_predictions(symbol: str, duration: str) -> dict[str, int]:
-    conn = get_conn()
-    try:
-        rows = _due_prediction_rows(conn, symbol, duration)
-        settled = sum(1 for row in rows if _settle_prediction(conn, row, duration))
-        conn.commit()
-        return {"checked": len(rows), "settled": settled, "pendingData": len(rows) - settled}
-    finally:
-        conn.close()
+    def _settle() -> dict[str, int]:
+        conn = get_conn()
+        try:
+            rows = _due_prediction_rows(conn, symbol, duration)
+            settled = sum(1 for row in rows if _settle_prediction(conn, row, duration))
+            conn.commit()
+            return {"checked": len(rows), "settled": settled, "pendingData": len(rows) - settled}
+        finally:
+            conn.close()
+
+    return run_db_write_with_retry(_settle)
 
 
 def forward_validation_summary(symbol: str, duration: str, meta: dict[str, Any]) -> dict[str, Any]:

@@ -10,8 +10,10 @@ from app.services.binance_context_data import (
     fetch_open_interest_statistics,
     fetch_taker_buy_sell_volume,
 )
+from app.services.coinmetrics_onchain_data import fetch_onchain_feature_rows
 from app.services.external_factor_data import (
     upsert_funding_rows,
+    upsert_onchain_rows,
     upsert_positioning_rows,
     upsert_sentiment_rows,
 )
@@ -34,14 +36,17 @@ def ingest_market_context_data(
     sym = symbol.upper()
     positioning_rows = _merged_positioning_rows(sym, period, limit)
     sentiment_rows = fetch_fear_greed_index(limit=60)
+    onchain_rows = fetch_onchain_feature_rows(sym)
     upsert_positioning_rows(sym, positioning_rows)
     upsert_sentiment_rows(sentiment_rows)
+    upsert_onchain_rows(sym, onchain_rows)
     realtime = _persist_realtime_market_rows(sym, _context_durations(durations))
     return {
         "symbol": sym,
         "period": period,
         "positioningRows": len(positioning_rows),
         "sentimentRows": len(sentiment_rows),
+        "onchainRows": len(onchain_rows),
         **realtime,
     }
 

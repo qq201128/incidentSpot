@@ -10,6 +10,7 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.factor_combination_live_service import build_combination_signal_watchlist
 from app.services.data_coverage_report import CoverageOptions, build_data_coverage_report
 from app.services.experiment_profiles import combination_search_config_for_profile, normalize_experiment_profile
+from app.services.ge70_combo_paper_live_cohort_service import bootstrap_ge70_paper_live_cohort
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_strategy_demotion import high_winrate_demotion_status
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
@@ -64,6 +65,28 @@ def factor_combination_signals(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ge70-paper-live/bootstrap")
+def ge70_paper_live_bootstrap(
+    symbol: str = Query(..., min_length=6),
+    duration: str | None = Query(None, description="omit to bootstrap all durations with ≥70% combos"),
+    seed_predictions: bool = Query(False, alias="seedPredictions"),
+    rebuild_watchlist: bool = Query(False, alias="rebuildWatchlist"),
+) -> dict:
+    _validate_optional_duration(duration)
+    try:
+        return bootstrap_ge70_paper_live_cohort(
+            symbol.upper(),
+            duration=duration,
+            seed_predictions=seed_predictions,
+            rebuild_watchlist=rebuild_watchlist,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("ge70 paper-live bootstrap failed: %s", symbol)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/refresh")

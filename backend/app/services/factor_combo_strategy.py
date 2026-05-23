@@ -8,7 +8,10 @@ from app.services.factor_cache_metadata import (
 )
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
+from app.services.factor_duration_alignment import duration_entry_source_open_time
 from app.services.factor_frame_service import load_factor_frame
+from app.services.kline_prediction_refresh import refresh_prediction_klines
+from app.services.kline_timing import MS_PER_MINUTE, current_rule_entry_open_time_for_duration
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
@@ -79,6 +82,7 @@ def predict_factor_combo_rank_direction(
     top = _ranked_combo(cached, combo_rank)
     if require_high_winrate_goal:
         _assert_high_winrate_combo(top, combo_rank, symbol, duration)
+    _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
     frame = materialize_mined_factor_frame(
         load_factor_frame(symbol, duration),
         symbol=symbol,
@@ -91,6 +95,7 @@ def predict_factor_combo_rank_direction(
         duration=duration,
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,
+        apply_quality_gate=False,
     )
     return _prediction_payload(
         signal,
@@ -115,6 +120,7 @@ def predict_factor_combo_row_direction(
     if cached is None:
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
     assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
+    _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
     frame = materialize_mined_factor_frame(
         load_factor_frame(symbol, duration),
         symbol=symbol,
@@ -127,6 +133,7 @@ def predict_factor_combo_row_direction(
         duration=duration,
         entry_open_time=entry_open_time,
         entry_grace_ms=entry_grace_ms,
+        apply_quality_gate=False,
     )
     return _prediction_payload(
         signal,
@@ -263,3 +270,19 @@ def _factor_learning_reasons(learning: dict[str, Any]) -> list[str]:
         f"factor_learning_confirmations={learning.get('confirmationCount')}",
         f"factor_learning_loss_matches={len(matches) if isinstance(matches, list) else 0}",
     ]
+
+
+def _refresh_factor_combo_source_klines(
+    symbol: str,
+    duration: str,
+    entry_open_time: int | None,
+) -> None:
+    entry = (
+        int(entry_open_time)
+        if entry_open_time is not None
+        else current_rule_entry_open_time_for_duration(duration)
+    )
+    sym = symbol.strip().upper()
+    source_open_time = duration_entry_source_open_time(entry, duration)
+    refresh_prediction_klines(sym, "1m", entry - MS_PER_MINUTE)
+    refresh_prediction_klines(sym, duration, source_open_time)

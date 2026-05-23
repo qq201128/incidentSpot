@@ -198,7 +198,9 @@ def _add_orderbook_features(base_df: pd.DataFrame, ob_df: pd.DataFrame | None) -
     for col in ORDERBOOK_COLUMNS:
         out[col] = out[col].fillna(0.0)
         out[f"{col}_ma_5"] = out[col].rolling(5, min_periods=1).mean()
-        out[f"{col}_chg_1"] = out[col].pct_change(1).fillna(0.0)
+        out[f"{col}_chg_1"] = (
+            out[col].pct_change(1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        )
     return out
 
 

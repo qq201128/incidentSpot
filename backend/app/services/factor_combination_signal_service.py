@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any
@@ -62,6 +63,7 @@ def build_live_signal_from_ranking(
     entry_open_time: int | None = None,
     entry_grace_ms: int | None = None,
     context: SignalBuildContext | None = None,
+    apply_quality_gate: bool = True,
 ) -> dict[str, Any]:
     signal = _combo_signal_at_duration_entry(
         frame,
@@ -78,7 +80,12 @@ def build_live_signal_from_ranking(
         duration=duration,
         mined_by_name=None if context is None else context.mined_by_name,
     )
-    quality = _quality_gate(row, confidence, window, timing=timing, score=signal.score)
+    use_quality_gate = _resolve_apply_quality_gate(apply_quality_gate)
+    quality = (
+        _quality_gate(row, confidence, window, timing=timing, score=signal.score)
+        if use_quality_gate
+        else _backtest_aligned_quality()
+    )
     payload = _live_signal_payload(
         _SignalContext(
             row=row,
@@ -106,6 +113,7 @@ def build_live_signal_from_ranking(
         duration=duration,
         memory=MEMORY_NOT_PROVIDED if context is None else context.learning_memory,
         zscore_cache=None if context is None else context.zscore_cache,
+        enforce_quality_gate=use_quality_gate,
     )
 
 
@@ -249,6 +257,27 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityMinProfitFactor": LIVE_MIN_PROFIT_FACTOR,
         "qualityMinPeriods": _min_total_periods(ctx.row),
         "frameIndex": str(ctx.index),
+    }
+
+
+def _resolve_apply_quality_gate(requested: bool) -> bool:
+    env = os.getenv("FACTOR_COMBO_LIVE_QUALITY_GATE", "").strip().lower()
+    if env in {"1", "true", "yes"}:
+        return True
+    if env in {"0", "false", "no"}:
+        return False
+    return requested
+
+
+def _backtest_aligned_quality() -> dict[str, Any]:
+    """Combo backtests do not apply live trade-quality gates; keep SIM aligned with that path."""
+    return {
+        "passed": True,
+        "metricsPassed": True,
+        "thresholdPassed": True,
+        "entryWindowPassed": True,
+        "factorTimingPassed": True,
+        "reason": "backtest_aligned",
     }
 
 

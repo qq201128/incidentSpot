@@ -24,11 +24,19 @@ def enrich_signal_with_factor_learning(
     duration: str,
     memory: dict[str, Any] | None | object = MEMORY_NOT_PROVIDED,
     zscore_cache: dict[tuple[str, int], pd.Series] | None = None,
+    enforce_quality_gate: bool = True,
 ) -> dict[str, Any]:
     resolved_memory = _resolve_memory(memory, symbol, duration)
     if resolved_memory is None:
         return _with_missing_memory(payload)
-    return apply_factor_learning_memory(payload, frame, index, resolved_memory, zscore_cache=zscore_cache)
+    return apply_factor_learning_memory(
+        payload,
+        frame,
+        index,
+        resolved_memory,
+        zscore_cache=zscore_cache,
+        enforce_quality_gate=enforce_quality_gate,
+    )
 
 
 def apply_factor_learning_memory(
@@ -38,6 +46,7 @@ def apply_factor_learning_memory(
     memory: dict[str, Any],
     *,
     zscore_cache: dict[tuple[str, int], pd.Series] | None = None,
+    enforce_quality_gate: bool = True,
 ) -> dict[str, Any]:
     members = _members(payload)
     blocked_members = _blocked_member_matches(members, memory)
@@ -52,9 +61,12 @@ def apply_factor_learning_memory(
         loss_matches,
         blocked_members,
     )
-    enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
-    if payload["qualityPassed"] and not filter_passed:
-        enriched["qualityGateReason"] = "factor_learning_filter_blocked"
+    if enforce_quality_gate:
+        enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
+        if payload["qualityPassed"] and not filter_passed:
+            enriched["qualityGateReason"] = "factor_learning_filter_blocked"
+    else:
+        enriched["qualityPassed"] = bool(payload["qualityPassed"])
     enriched["factorLearning"] = _learning_payload(
         memory,
         payload,

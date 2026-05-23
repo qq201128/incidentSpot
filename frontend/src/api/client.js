@@ -134,8 +134,9 @@ export async function settleEvent(eventId) {
   return data;
 }
 
-export async function fetchEvents() {
+export async function fetchEventsPage({ symbol, page = 1, pageSize = 8, view = "events" } = {}) {
   const { data } = await axios.get(`${BASE_URL}/api/events`, {
+    params: { symbol, page, pageSize, view },
     timeout: LOCAL_REQUEST_TIMEOUT_MS,
   });
   return data;
