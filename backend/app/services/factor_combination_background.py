@@ -27,6 +27,7 @@ from app.services.factor_ranking_cache_service import factor_ranking_precomputed
 from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.lstm_combo_sync_service import sync_lstm_model_to_combo_ranking
 from app.services.market_context_ingest_service import ingest_market_context_data
+from app.services.qualified_factor_simulation_slots import sync_qualified_simulation_slots
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
@@ -69,6 +70,15 @@ def refresh_combination_ranking_for_symbol_duration(
     )
     if refresh_signal_cache:
         _refresh_signal_watchlist_cache(sym)
+    slot_report = sync_qualified_simulation_slots(sym, duration)
+    logger.info(
+        "qualified simulation slots synced: %s %s single=%s combo=%s enabled=%s",
+        sym,
+        duration,
+        slot_report["singleFactorSlots"],
+        slot_report["comboFactorSlots"],
+        slot_report["enabledSlots"],
+    )
 
 
 def _refresh_duration_klines(symbol: str, duration: str) -> None:

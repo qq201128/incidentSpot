@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 ACTIVE_SAMPLE_COUNT = 20
-ACTIVE_WIN_RATE_MIN = 0.70
-MIN_PROFIT_FACTOR = 1.0
+ACTIVE_WIN_RATE_MIN = 0.62
+MIN_PROFIT_FACTOR = 1.05
 LOSS_STREAK_LIMIT = 5
 
 

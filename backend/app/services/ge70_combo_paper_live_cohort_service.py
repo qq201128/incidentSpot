@@ -24,7 +24,7 @@ from app.services.prediction_cache_service import save_prediction
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms
 
-GE70_MIN_WIN_RATE = 0.70
+GE70_MIN_WIN_RATE = 0.62
 COHORT_VERSION = "ge70_mined_library_paper_live_v1"
 # Batch shadow path only runs comboRank > 1; start at 2 so every cohort combo is simulated.
 COHORT_COMBO_RANK_START = 2
@@ -116,7 +116,7 @@ def bootstrap_ge70_paper_live_cohort(
         },
         "predictions": prediction_report,
         "message": (
-            f"已将 {len(selected)} 条 ≥70% 组合写入高胜率模拟缓存并启用批量模拟策略；"
+            f"已将 {len(selected)} 条 ≥62% 组合写入高胜率模拟缓存并启用批量模拟策略；"
             "信号触发后会在「事件合约记录」生成 SIM 模拟事件（规则列显示组合名）。"
             "请保持后端自动预测运行。"
         ),

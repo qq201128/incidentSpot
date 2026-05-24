@@ -62,7 +62,7 @@ def test_evaluation_counts_only_current_records(monkeypatch, tmp_path: Path) -> 
     assert "formula column not found" in evaluation["engineSupportBacklog"][0]["error"]
 
 
-def test_rejected_metrics_candidate_is_stored(monkeypatch, tmp_path: Path) -> None:
+def test_weak_metrics_candidate_is_stored_and_ingested(monkeypatch, tmp_path: Path) -> None:
     _patch_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(agent_lib, "run_factor_backtest_on_frame", _weak_backtest)
     monkeypatch.setattr(agent_lib, "enrich_factor_results", lambda *_args, **_kwargs: None)
@@ -72,26 +72,26 @@ def test_rejected_metrics_candidate_is_stored(monkeypatch, tmp_path: Path) -> No
 
     record = result["agentCandidatePromotion"]["records"][0]
     row = library["factors"][0]
-    assert record["status"] == "rejected_metrics"
-    assert result["agentMinedFactorLibrary"]["total"] == 0
-    assert result["agentMinedFactorLibrary"]["candidateTotal"] == 1
+    assert record["status"] == "promoted"
+    assert result["agentMinedFactorLibrary"]["total"] == 1
+    assert result["agentMinedFactorLibrary"]["simulationEligibleTotal"] == 0
     assert result["agentMinedFactorLibrary"]["rejectedTotal"] == 1
-    assert result["agentMinedFactorLibrary"]["factors"] == []
-    assert row["candidateStatus"] == "rejected_metrics"
+    assert row["candidateStatus"] == "promoted"
     assert row["qualityPassed"] is False
     assert row["promotionCount"] == 0
 
 
-def test_agent_library_summary_counts_only_promoted_rows(monkeypatch, tmp_path: Path) -> None:
+def test_agent_library_summary_counts_ingested_rows(monkeypatch, tmp_path: Path) -> None:
     _patch_paths(monkeypatch, tmp_path)
     _write_existing_library(tmp_path, count=2, rejected_count=3)
 
     summary = agent_lib.agent_mined_factor_library_summary("BTCUSDT", "10m")
 
-    assert summary["total"] == 2
+    assert summary["total"] == 5
+    assert summary["simulationEligibleTotal"] == 2
     assert summary["candidateTotal"] == 5
     assert summary["rejectedTotal"] == 3
-    assert [row["qualityPassed"] for row in summary["factors"]] == [True, True]
+    assert len(summary["factors"]) == 5
 
 
 def test_agent_library_summary_recomputes_null_quality_flag(monkeypatch, tmp_path: Path) -> None:
@@ -106,7 +106,8 @@ def test_agent_library_summary_recomputes_null_quality_flag(monkeypatch, tmp_pat
 
     summary = agent_lib.agent_mined_factor_library_summary("BTCUSDT", "10m")
 
-    assert summary["total"] == 1
+    assert summary["total"] == 2
+    assert summary["simulationEligibleTotal"] == 1
     assert summary["candidateTotal"] == 2
     assert summary["rejectedTotal"] == 1
 
@@ -123,7 +124,7 @@ def test_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_pa
     assert names == [agent_lib.load_agent_factor_library()["factors"][0]["factorName"]]
 
 
-def test_rejected_agent_factor_does_not_participate_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
+def test_weak_agent_factor_participates_in_combination_candidates(monkeypatch, tmp_path: Path) -> None:
     _patch_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(agent_lib, "run_factor_backtest_on_frame", _weak_backtest)
     monkeypatch.setattr(agent_lib, "enrich_factor_results", lambda *_args, **_kwargs: None)
@@ -132,8 +133,8 @@ def test_rejected_agent_factor_does_not_participate_in_combination_candidates(mo
 
     result = factor_mined_candidates.build_mined_candidates(_frame(), symbol="BTCUSDT", duration="10m")
 
-    assert result.source_count == 0
-    assert result.candidates == ()
+    assert result.source_count == 1
+    assert len(result.candidates) == 1
 
 
 def test_agent_candidate_with_ema_can_materialize_and_reach_backtest(monkeypatch, tmp_path: Path) -> None:
@@ -178,7 +179,7 @@ def _existing_library_row(index: int) -> dict:
         "formula": f"existing_formula_{index}",
         "source": agent_lib.AGENT_FACTOR_SOURCE_FILE,
         "idea": {},
-        "metrics": {"winRate": 0.6, "profitFactor": 1.2},
+        "metrics": {"winRate": 0.65, "profitFactor": 1.2, "totalPeriods": ROWS},
         "score": 10.0,
         "candidateStatus": "promoted",
         "qualityPassed": True,

@@ -7,7 +7,7 @@ from app.services.factor_combo_simulation_keys import simulation_strategy_key_fo
 def test_load_ge70_mined_combo_rows_filters_by_win_rate() -> None:
     rows = cohort.load_ge70_mined_combo_rows()
     assert rows
-    assert all(float((row.get("metrics") or {})["winRate"]) >= 0.70 for row in rows)
+    assert all(float((row.get("metrics") or {})["winRate"]) >= 0.62 for row in rows)
     assert all(row.get("members") for row in rows)
 
 

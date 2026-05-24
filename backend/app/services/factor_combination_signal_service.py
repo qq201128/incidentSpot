@@ -17,8 +17,7 @@ from app.services.factor_learning_signal_filter import MEMORY_NOT_PROVIDED, enri
 from app.services.factor_signal_timing import FactorSignalTiming, combination_kline_close_timing
 from app.services.kline_timing import is_within_entry_grace
 
-STRICT_LIVE_MIN_WIN_RATE = 0.60
-LIVE_MIN_WIN_RATE = max(SUCCESS_WIN_RATE_MIN, STRICT_LIVE_MIN_WIN_RATE)
+LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
 LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
 LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4

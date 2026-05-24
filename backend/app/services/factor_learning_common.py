@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-SUCCESS_WIN_RATE_MIN = 0.52
+SUCCESS_WIN_RATE_MIN = 0.62
 SUCCESS_PROFIT_FACTOR_MIN = 1.05
 SUCCESS_SHARPE_MIN = 0.50
 SUCCESS_IR_MIN = 0.20

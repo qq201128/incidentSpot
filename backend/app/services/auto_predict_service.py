@@ -279,7 +279,9 @@ async def _save_factor_candidate_signals(
         entry_grace_ms=strategy_entry_grace_ms(settings.strategy_key),
     )
     for result in results:
-        await _save_prediction(result, write_lock)
+        saved = await _save_prediction(result, write_lock)
+        if saved and result.get("trade_quality_passed"):
+            await asyncio.to_thread(create_batch_combo_simulation_trade, settings, result)
 
 
 async def _save_lstm_shadow_prediction(settings, entry_open_time, write_lock) -> None:

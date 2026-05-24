@@ -23,7 +23,7 @@ from app.services.high_winrate_combo_goal_config import (
 )
 from app.services import high_winrate_combo_goal_diagnostics as diag
 
-TARGET_WIN_RATE = 0.70
+TARGET_WIN_RATE = 0.62
 TARGET_COUNT = 5
 TARGET_MIN_TRADES = BACKTEST_MIN_PERIODS
 NEXT_ENTRY_HORIZON_BARS = 1

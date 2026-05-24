@@ -62,19 +62,24 @@ def process_agent_factor_candidates(memory: dict[str, Any], frame: pd.DataFrame)
         append_agent_candidate_history(updated, records, evaluation, AGENT_CANDIDATE_HISTORY_PATH)
     summary = agent_mined_factor_library_summary(str(updated["symbol"]), str(updated["duration"]))
     updated["agentMinedFactorLibrary"] = summary
+    from app.services.qualified_factor_simulation_slots import sync_qualified_simulation_slots
+
+    updated["simulationSlotSync"] = sync_qualified_simulation_slots(symbol, duration)
     return updated
 
 def agent_mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     rows = agent_factor_rows_for_duration(symbol, duration)
-    promoted = _promoted_agent_rows(rows)
+    promoted = _ingested_agent_rows(rows)
+    simulation_eligible = [row for row in promoted if _simulation_eligible(row.get("metrics") or {})]
     promoted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
     return {
         "version": AGENT_FACTOR_LIBRARY_VERSION,
         "symbol": symbol.strip().upper(),
         "duration": duration,
         "total": len(promoted),
+        "simulationEligibleTotal": len(simulation_eligible),
         "candidateTotal": len(rows),
-        "rejectedTotal": len(rows) - len(promoted),
+        "rejectedTotal": len(promoted) - len(simulation_eligible),
         "thresholds": _threshold_payload(),
         "factors": promoted[:SUMMARY_LIMIT],
     }
@@ -87,7 +92,7 @@ def materialize_agent_factor_frame(
     excluded_factor_names: set[str] | None = None,
 ) -> AgentFactorFrameResult:
     excluded = excluded_factor_names or set()
-    rows = _promoted_agent_rows(agent_factor_rows_for_duration(symbol, duration))
+    rows = _ingested_agent_rows(agent_factor_rows_for_duration(symbol, duration))
     failures: list[dict[str, Any]] = []
     working = frame
     for row in rows:
@@ -108,7 +113,7 @@ def build_agent_mined_candidates_from_frame(
 ) -> tuple[AgentMinedCandidate, ...]:
     excluded = excluded_factor_names or set()
     candidates = []
-    for row in _promoted_agent_rows(agent_factor_rows_for_duration(symbol, duration)):
+    for row in _ingested_agent_rows(agent_factor_rows_for_duration(symbol, duration)):
         factor_name = str(row.get("factorName"))
         if factor_name in excluded or factor_name not in frame.columns:
             continue
@@ -170,7 +175,7 @@ def _record_for_idea(
     try:
         working = _with_agent_column(frame, base)
         metrics = _backtest_record(base, working)
-        return {**base, "metrics": metrics, "status": _status(metrics)}
+        return {**base, "metrics": metrics, "status": "promoted"}
     except Exception as exc:
         return {**base, "status": "failed", "error": str(exc)}
 
@@ -197,7 +202,7 @@ def _library_row(record: dict[str, Any]) -> dict[str, Any] | None:
         "metrics": metrics,
         "score": factor_score(metrics),
         "candidateStatus": str(record.get("status") or "unknown"),
-        "qualityPassed": _promotable(metrics),
+        "qualityPassed": _simulation_eligible(metrics),
         "firstSeenAt": now,
         "lastSeenAt": now,
         "promotionCount": 1 if record.get("status") == "promoted" else 0,
@@ -251,7 +256,9 @@ def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]
         previous = by_key.get(_row_key(row))
         if previous:
             row["firstSeenAt"] = previous.get("firstSeenAt") or row["firstSeenAt"]
-            row["promotionCount"] = int(previous.get("promotionCount") or 0) + int(row["qualityPassed"])
+            row["promotionCount"] = int(previous.get("promotionCount") or 0) + (
+                1 if row.get("qualityPassed") else 0
+            )
         by_key[_row_key(row)] = row
     return sorted(by_key.values(), key=lambda row: float(row.get("score") or 0.0), reverse=True)
 
@@ -268,28 +275,29 @@ def _candidate_ideas(memory: dict[str, Any]) -> list[dict[str, Any]]:
     plan = (((memory.get("llmAgent") or {}).get("review") or {}).get("factorMiningPlan") or {})
     return [dict(item) for item in plan.get("candidateFactorIdeas") or []]
 
-def _status(metrics: dict[str, Any]) -> str:
-    return "promoted" if _promotable(metrics) else "rejected_metrics"
-
-def _promotable(metrics: dict[str, Any]) -> bool:
+def _simulation_eligible(metrics: dict[str, Any]) -> bool:
     return _num(metrics.get("winRate")) >= SUCCESS_WIN_RATE_MIN and _num(metrics.get("profitFactor")) >= SUCCESS_PROFIT_FACTOR_MIN
+
 
 def _usable_metrics(metrics: dict[str, Any]) -> bool:
     return int(metrics.get("totalPeriods") or 0) >= BACKTEST_MIN_PERIODS and metrics.get("winRate") is not None
+
 
 def _orientation(metrics: dict[str, Any]) -> int:
     return 1 if _num(metrics.get("ir")) >= 0 else -1
 
 
-def _promoted_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [row for row in rows if _row_quality_passed(row)]
+def _ingested_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if _row_ingested(row)]
 
 
-def _row_quality_passed(row: dict[str, Any]) -> bool:
-    if isinstance(row.get("qualityPassed"), bool):
-        return bool(row.get("qualityPassed"))
-    metrics = row.get("metrics")
-    return isinstance(metrics, dict) and _promotable(metrics)
+def _row_ingested(row: dict[str, Any]) -> bool:
+    if str(row.get("candidateStatus") or "") == "promoted":
+        return True
+    return isinstance(row.get("metrics"), dict) and str(row.get("candidateStatus") or "") not in {
+        "failed",
+        "duplicate_existing",
+    }
 
 
 def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:

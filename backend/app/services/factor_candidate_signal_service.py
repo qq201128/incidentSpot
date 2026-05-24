@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 
 from app.services.binance_service import fetch_klines
+from app.services.agent_mined_factor_library import agent_factor_rows_for_duration
+from app.services.factor_backtest_gate import meets_backtest_gate
 from app.services.factor_backtest_materialization import materialized_frame_for_factor
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
@@ -137,14 +139,27 @@ def _next_duration_backfill_end_time(
 def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[dict[str, Any]]:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    cache = get_cached_ranking(symbol.strip().upper(), duration)
-    if cache is None:
-        if require_usable:
-            raise ValueError(f"factor ranking cache missing for {symbol.upper()} {duration}")
-        return []
-    if require_usable:
-        assert_cache_usable_for_live_signal(cache, f"factor ranking {symbol.upper()} {duration}")
-    return [dict(row) for row in cache.get("ranking") or [] if _usable_factor_row(row)]
+    sym = symbol.strip().upper()
+    cache = get_cached_ranking(sym, duration)
+    if require_usable and cache is not None:
+        assert_cache_usable_for_live_signal(cache, f"factor ranking {sym} {duration}")
+    rows: list[dict[str, Any]] = []
+    if cache is not None:
+        rows.extend(dict(row) for row in cache.get("ranking") or [] if _usable_factor_row(row))
+    for row in agent_factor_rows_for_duration(sym, duration):
+        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+        candidate = {
+            **row,
+            "winRate": metrics.get("winRate"),
+            "profitFactor": metrics.get("profitFactor"),
+            "totalPeriods": metrics.get("totalPeriods"),
+            "backtestValid": True,
+        }
+        if _usable_factor_row(candidate):
+            rows.append(candidate)
+    if require_usable and not rows and cache is None:
+        raise ValueError(f"factor ranking cache missing for {sym} {duration}")
+    return [row for row in rows if meets_backtest_gate(row)]
 
 
 def _prediction_for_row(
@@ -203,7 +218,7 @@ def _prediction_payload(
         "confidence": round(signal.confidence, PROBABILITY_DECIMALS),
         "certainty_label": "FACTOR_CANDIDATE_OBSERVE",
         "trade_quality_score": round(signal.confidence, PROBABILITY_DECIMALS),
-        "trade_quality_passed": True,
+        "trade_quality_passed": meets_backtest_gate(row),
         "trade_quality_gate": SIGNAL_RULE_NAME,
         "high_winrate_gate": SIGNAL_RULE_NAME,
         "high_winrate_rule": str(row["factorName"]),
