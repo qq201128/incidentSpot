@@ -89,7 +89,7 @@
 
 .event-gov-kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -233,6 +233,12 @@
 .event-gov-badge.status-insufficient_samples {
   background: rgba(120, 144, 156, 0.15);
   color: #b0bec5;
+}
+
+@media (max-width: 1200px) {
+  .event-gov-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 960px) {

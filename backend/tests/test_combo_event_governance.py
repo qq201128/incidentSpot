@@ -82,6 +82,56 @@ def test_batch_combo_event_demotion_marks_bad_strategy_without_disabling(monkeyp
     assert row["enabled"] == 1
 
 
+FACTOR_CANDIDATE_KEY = "factor_candidate_signal_deadbeef0002"
+
+
+def test_factor_candidate_event_demotion_marks_bad_strategy_without_disabling(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "single-demote.db"
+    _init_db(db_path)
+    _insert_slot(db_path, "10m", strategy_key=FACTOR_CANDIDATE_KEY, enabled=1)
+    for index in range(ACTIVE_SAMPLE_COUNT):
+        _insert_event(
+            db_path,
+            strategy_key=FACTOR_CANDIDATE_KEY,
+            open_time=30_000 + index,
+            direction="up",
+            result="NO",
+            side="BUY",
+            rule="rsi_14",
+        )
+    monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
+
+    from app.services.factor_candidate_event_demotion import evaluate_factor_candidate_event_demotion
+
+    report = evaluate_factor_candidate_event_demotion("BTCUSDT", "10m")
+    row = _slot(db_path, "10m", FACTOR_CANDIDATE_KEY)
+
+    assert report["source"] == "factor_candidate"
+    assert report["observeOnly"] is True
+    assert report["watchlistCount"] == 1
+    assert report["evaluations"][0]["status"] == "demoted"
+    assert report["evaluations"][0]["displayRule"] == "rsi_14"
+    assert row["enabled"] == 1
+
+
+def test_combo_event_monitoring_includes_single_and_batch_sections(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "monitoring.db"
+    _init_db(db_path)
+    monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(
+        "app.services.combo_event_governance.shadow_event_deviation_report",
+        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}, "issues": []},
+    )
+
+    from app.services.combo_event_governance import compute_combo_event_monitoring
+
+    payload = compute_combo_event_monitoring("BTCUSDT", "10m")
+
+    assert "batchComboDemotion" in payload
+    assert "factorCandidateDemotion" in payload
+    assert payload["simulationObservation"]["evaluatedCount"] == 0
+
+
 def _init_db(path: Path) -> None:
     conn = _connect(path)
     try:

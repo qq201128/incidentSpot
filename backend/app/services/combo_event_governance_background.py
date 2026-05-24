@@ -41,6 +41,7 @@ def refresh_combo_event_governance_all() -> None:
                     "symbol": monitoring["symbol"],
                     "duration": monitoring["duration"],
                     "batchComboDemotion": monitoring["batchComboDemotion"],
+                    "factorCandidateDemotion": monitoring["factorCandidateDemotion"],
                 }
                 store_monitoring(symbol, duration, monitoring)
                 store_governance(symbol, duration, governance)
@@ -50,11 +51,12 @@ def refresh_combo_event_governance_all() -> None:
 
                 store_workbench_summary(symbol, duration, build_workbench_summary(symbol, duration))
                 logger.info(
-                    "combo event governance refreshed: %s %s paired=%s watchlist=%s",
+                    "combo event governance refreshed: %s %s paired=%s batch_watch=%s single_watch=%s",
                     symbol,
                     duration,
                     monitoring.get("shadowEventDeviation", {}).get("summary", {}).get("pairedCount"),
                     monitoring.get("batchComboDemotion", {}).get("watchlistCount"),
+                    monitoring.get("factorCandidateDemotion", {}).get("watchlistCount"),
                 )
             except Exception:
                 logger.exception("combo event governance refresh failed: %s %s", symbol, duration)

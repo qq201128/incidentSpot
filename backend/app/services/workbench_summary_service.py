@@ -26,6 +26,8 @@ def build_workbench_summary(symbol: str, duration: str) -> dict:
             "aiHistorySuccess": ai_history_success(conn, safe_symbol),
             "shadowEventDeviation": monitoring["shadowEventDeviation"],
             "batchComboEventDemotion": monitoring["batchComboDemotion"],
+            "factorCandidateEventDemotion": monitoring.get("factorCandidateDemotion"),
+            "simulationObservation": monitoring.get("simulationObservation"),
             "governanceWarming": bool(monitoring.get("warming")),
         }
     finally:

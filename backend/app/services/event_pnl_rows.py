@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.event_ai_history import settled_expected_profit_usdt
+from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_strategy
 from app.services.factor_combo_simulation_keys import (
     BATCH_COMBO_KEY_PREFIX,
     BATCH_HIGH_WINRATE_KEY_PREFIX,
@@ -155,6 +156,24 @@ def batch_combo_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str
         ),
     ).fetchall()
     return [str(row["strategy_key"]) for row in rows if is_batch_combo_simulation_strategy(row["strategy_key"])]
+
+
+def factor_candidate_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str]:
+    if not _events_table_available(conn):
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT e.strategy_key
+        {SETTLED_EVENT_JOIN}
+          AND e.strategy_key LIKE ?
+        """,
+        (
+            symbol.strip().upper(),
+            duration,
+            "factor_candidate_signal_%",
+        ),
+    ).fetchall()
+    return [str(row["strategy_key"]) for row in rows if is_factor_candidate_signal_strategy(row["strategy_key"])]
 
 
 def _metric_row(row: dict[str, Any]) -> dict[str, Any]:

@@ -77,6 +77,19 @@ def _warming_monitoring_payload(symbol: str, duration: str) -> dict[str, Any]:
             "watchlist": [],
             "observeOnly": True,
         },
+        "factorCandidateDemotion": {
+            "symbol": symbol,
+            "duration": duration,
+            "evaluations": [],
+            "watchlist": [],
+            "observeOnly": True,
+        },
+        "simulationObservation": {
+            "evaluatedCount": 0,
+            "watchlistCount": 0,
+            "batchComboWatchlistCount": 0,
+            "factorCandidateWatchlistCount": 0,
+        },
         "cache": {"cached": False, "warming": True, "ageSeconds": 0.0},
     }
 
