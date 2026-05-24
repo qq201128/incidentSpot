@@ -48,7 +48,6 @@ from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     FACTOR_COMBO_STRATEGY_KEY,
-    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
     strategy_entry_grace_ms,
     strategy_supports_duration,
 )
@@ -227,7 +226,7 @@ async def _save_factor_combo_shadow_predictions(
     entry_open_time: int,
     write_lock: asyncio.Lock,
 ) -> None:
-    if settings.strategy_key not in {FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return
     results = await asyncio.to_thread(
         predict_eligible_factor_combo_rows,
@@ -247,7 +246,7 @@ async def _save_model_family_shadow_predictions(
     entry_open_time: int,
     write_lock: asyncio.Lock,
 ) -> None:
-    if settings.strategy_key not in {FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
         return
     for family in MODEL_FAMILIES:
         if family == "lstm":

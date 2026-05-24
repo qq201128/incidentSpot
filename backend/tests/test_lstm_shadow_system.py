@@ -266,15 +266,14 @@ def test_auto_predict_saves_lstm_shadow_after_factor_combo(monkeypatch) -> None:
     assert saved == [lstm_shadow_strategy_key("10m")]
 
 
-def test_lstm_shadow_strategy_is_visible_for_simulation() -> None:
+def test_lstm_shadow_strategy_definition_remains_available_for_sidecar() -> None:
     key = lstm_shadow_strategy_key("10m")
     payloads = {payload["key"]: payload for payload in strategy_payloads()}
     strategy = strategy_definition(key)
 
-    assert key in payloads
+    assert key not in payloads
     assert strategy.tradable is True
     assert strategy.signal_source == "factor_lstm_shadow"
-    assert payloads[key]["supportedDurations"] == ["10m"]
 
 
 def test_rule_signal_routes_lstm_shadow_prediction(monkeypatch) -> None:

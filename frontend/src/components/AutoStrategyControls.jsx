@@ -179,7 +179,6 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
                   </button>
                 ))}
               </div>
-              <StrategyDemotionSummary slots={group.slots} />
             </div>
           </div>
         </div>
@@ -243,58 +242,6 @@ function StrategyBacktestSummary({ summary }) {
       回测 {summary.trades} 单 / {summary.wins} 胜 / 胜率 {winRate} / 最低单日 {minDay}
     </span>
   );
-}
-
-function StrategyDemotionSummary({ slots }) {
-  const rows = slots.filter((slot) => slot.demotion?.status && slot.demotion.status !== "unknown");
-  if (!rows.length) return null;
-  return (
-    <div className="strategy-demotion-list">
-      {rows.map((slot) => (
-        <span key={slot.duration} className={`strategy-demotion ${slot.demotion.status}`}>
-          {_durationChipLabel(slot.durationMinutes)} {demotionRankText(slot.demotion)}
-          {demotionStatusText(slot.demotion)}：
-          {demotionReason(slot.demotion)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function demotionRankText(demotion) {
-  return demotion?.activeRank ? `Top${demotion.activeRank} ` : "";
-}
-
-function demotionStatusText(demotion) {
-  if (demotion?.status === "active") return "高胜率可用";
-  if (demotion?.status === "collecting") return "持续观察";
-  if (demotion?.status === "demoted") return "已降级";
-  if (demotion?.status === "paused") return "已暂停";
-  return demotion?.status || "未评估";
-}
-
-function demotionReason(demotion) {
-  const metrics = demotion?.metrics || {};
-  const winRate = metrics.winRate == null ? "--" : `${(Number(metrics.winRate) * 100).toFixed(1)}%`;
-  const losses = metrics.consecutiveLosses ?? 0;
-  if (demotion?.reason === "consecutive_losses") return `连续亏损 ${losses} 次`;
-  if (demotion?.reason === "rotated_after_candidate_failed") return "上一候选未达标，切换后重新观察";
-  if (demotion?.reason === "candidate_pool_exhausted_refreshing") return "候选已用尽，正在刷新榜单";
-  if (demotion?.reason === "candidate_pool_exhausted_refresh_failed") {
-    const refresh = demotion?.refreshReport || {};
-    const failure = refresh.rankingFailure || {};
-    const validation = refresh.validationGate || {};
-    const detail = failure.reason || failure.stage || validation.failureReason || "暂无可用候选";
-    return `候选已用尽，刷新后仍无新榜单（${detail}）`;
-  }
-  if (demotion?.reason === "insufficient_settled_samples") {
-    return `样本 ${metrics.sampleCount ?? 0}，当前胜率 ${winRate}，满 ${demotion.thresholds?.activeSampleCount ?? 20} 单再判定`;
-  }
-  if (demotion?.reason === "stable_live_target_met") return `最近胜率 ${winRate}`;
-  if (demotion?.reason === "profit_factor_below_one") return `盈亏比 ${metrics.profitFactor}`;
-  if (demotion?.reason?.includes("win_rate")) return `最近胜率 ${winRate}`;
-  if (demotion?.reason === "offline_promotion") return "离线达标，等待实盘模拟样本";
-  return demotion?.reason || "等待评估";
 }
 
 function _errorMessage(err, fallback) {

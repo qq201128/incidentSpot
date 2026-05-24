@@ -374,7 +374,9 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
 
 
 def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:
-  for key in (
+  from app.services.model_family_config import MODEL_FAMILIES, model_family_strategy_key
+
+  retired_keys = [
       "complete_day_10m_production",
       "vegas_fib_resonance",
       "high_winrate_rules",
@@ -393,7 +395,12 @@ def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:
       "three_bar_10m_reverse_martingale_v1",
       "four_bar_10m_reverse_martingale_v1",
       "five_bar_10m_reverse_martingale_v1",
-  ):
+      "high_winrate_factor_combo_v1",
+  ]
+  for family in MODEL_FAMILIES:
+    for duration in _AUTO_TRADE_SLOT_DURATIONS:
+      retired_keys.append(model_family_strategy_key(family, duration))
+  for key in retired_keys:
     conn.execute(
         "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
         (key,),

@@ -84,11 +84,13 @@ STRATEGIES = (
         name="高胜率目标组合执行",
         description=(
             "只读取 high-winrate goal 搜索写入的 goal_combo 组合；"
-            "用于把 10m/30m 70%+ 目标组合与普通多因子组合分开观察。"
+            "已并入综合裁判信号层，不再作为独立执行项。"
         ),
         requires_vegas_confirmation=False,
         signal_source="high_winrate_factor_combo_goal",
         rule_names=(HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,),
+        tradable=False,
+        disabled_reason="已并入综合裁判信号层，请使用多因子组合执行 + 综合裁判模拟。",
         requires_kline_features=True,
         uses_trade_policy_gates=False,
     ),
@@ -229,17 +231,11 @@ def strategy_payloads() -> list[dict]:
 
 
 def _tradable_strategy_definitions() -> tuple[StrategyDefinition, ...]:
-    static = tuple(
+    return tuple(
         strategy
         for strategy in STRATEGIES
         if strategy.tradable and strategy.key != ENSEMBLE_RANKER_STRATEGY_KEY
     )
-    model_families = tuple(
-        _model_family_shadow_strategy_definition(model_family_strategy_key(family, duration))
-        for family in MODEL_FAMILIES
-        for duration in MODEL_SHADOW_DURATIONS
-    )
-    return (*static, *model_families)
 
 
 def _strategy_payload(strategy: StrategyDefinition) -> dict:

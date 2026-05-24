@@ -5,18 +5,12 @@ import sqlite3
 from app.db.session import _ensure_auto_trade_strategies
 from app.services import auto_trade_service, auto_trade_status
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.high_winrate_strategy_demotion import (
-    STATUS_BACKTEST_CANDIDATE,
-    STATUS_DEMOTED,
-    STATUS_PAPER_LIVE_COLLECTING,
-    STATUS_PAPER_LIVE_PASSED,
-    STATUS_TRADABLE,
-)
 from app.services.auto_trade_service import AUTO_TRADE_SLOT_DURATIONS
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+    strategy_payloads,
 )
 from app.services.model_family_config import MODEL_FAMILIES, model_family_strategy_key
 
@@ -43,72 +37,21 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert _strategy_count(conn, "orderbook_notional_40m") == 0
 
 
-def test_db_seed_enables_model_family_10m_and_60m_sim_slots() -> None:
+def test_db_seed_removes_legacy_execution_slots() -> None:
     conn = _auto_trade_conn()
-    for family in MODEL_FAMILIES:
-        for duration in ("10m", "60m"):
-            _insert_strategy(conn, model_family_strategy_key(family, duration), duration, enabled=0, live=0)
+    _insert_strategy(conn, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, "10m", enabled=1, live=0)
+    _insert_strategy(conn, model_family_strategy_key("lstm", "10m"), "10m", enabled=1, live=0)
 
     _ensure_auto_trade_strategies(conn)
 
-    for family in MODEL_FAMILIES:
-        enabled = _strategy_rows(conn, model_family_strategy_key(family, "10m"))
-        assert enabled["10m"]["enabled"] == 1
-        assert enabled["10m"]["live_trading_enabled"] == 0
-        enabled = _strategy_rows(conn, model_family_strategy_key(family, "60m"))
-        assert enabled["60m"]["enabled"] == 1
-        assert enabled["60m"]["live_trading_enabled"] == 0
+    assert _strategy_count(conn, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY) == 0
+    assert _strategy_count(conn, model_family_strategy_key("lstm", "10m")) == 0
 
 
-def test_db_seed_keeps_model_family_30m_and_1d_disabled() -> None:
-    conn = _auto_trade_conn()
+def test_strategy_payloads_only_expose_factor_combo_execution_item() -> None:
+    keys = {payload["key"] for payload in strategy_payloads()}
 
-    _ensure_auto_trade_strategies(conn)
-
-    for family in MODEL_FAMILIES:
-        assert _strategy_rows(conn, model_family_strategy_key(family, "30m"))["30m"]["enabled"] == 0
-        assert _strategy_rows(conn, model_family_strategy_key(family, "1d"))["1d"]["enabled"] == 0
-
-
-def test_high_winrate_live_trade_rejects_non_tradable_statuses(monkeypatch) -> None:
-    settings = _high_winrate_settings(live=True)
-    prediction = _passing_prediction()
-    for status in (
-        STATUS_BACKTEST_CANDIDATE,
-        STATUS_PAPER_LIVE_COLLECTING,
-        STATUS_PAPER_LIVE_PASSED,
-        STATUS_DEMOTED,
-    ):
-        monkeypatch.setattr(
-            auto_trade_service,
-            "high_winrate_demotion_status",
-            lambda *_args, value=status: {"status": value},
-        )
-        assert auto_trade_service._is_prediction_tradable(prediction, settings) is False
-
-
-def test_high_winrate_sim_trade_keeps_collecting_when_demoted(monkeypatch) -> None:
-    settings = _high_winrate_settings(live=False)
-    prediction = _passing_prediction()
-    monkeypatch.setattr(
-        auto_trade_service,
-        "high_winrate_demotion_status",
-        lambda *_args: {"status": STATUS_DEMOTED},
-    )
-
-    assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
-
-
-def test_high_winrate_live_trade_allowed_when_tradable(monkeypatch) -> None:
-    settings = _high_winrate_settings(live=True)
-    prediction = _passing_prediction()
-    monkeypatch.setattr(
-        auto_trade_service,
-        "high_winrate_demotion_status",
-        lambda *_args: {"status": STATUS_TRADABLE},
-    )
-
-    assert auto_trade_service._is_prediction_tradable(prediction, settings) is True
+    assert keys == {FACTOR_COMBO_STRATEGY_KEY}
 
 
 def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:
@@ -154,7 +97,6 @@ def test_status_treats_current_bucket_prediction_as_fresh(monkeypatch) -> None:
         "settings": settings.to_response(),
         "openPosition": False,
         "latestPrediction": auto_trade_status._prediction_status(prediction, settings),
-        "highWinrateStatus": None,
     }
 
     assert status["latestPrediction"]["fresh"] is True
@@ -179,13 +121,12 @@ def _auto_trade_conn() -> sqlite3.Connection:
         )
         """
     )
-    _insert_strategy(conn, "orderbook_notional_40m", "10m", enabled=0, live=0)
     return conn
 
 
 def _insert_strategy(
     conn: sqlite3.Connection,
-    key: str,
+    strategy_key: str,
     duration: str,
     *,
     enabled: int,
@@ -196,65 +137,28 @@ def _insert_strategy(
         INSERT INTO auto_trade_strategies(
           strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
         )
-        VALUES(?, ?, ?, ?, 'BTCUSDT', ?, 5, '2026-05-13T00:00:00+00:00')
+        VALUES(?, ?, ?, ?, 'BTCUSDT', ?, 5, '2026-01-01T00:00:00+00:00')
         """,
-        (key, duration, enabled, live, DURATION_TO_MINUTES[duration]),
+        (strategy_key, duration, enabled, live, DURATION_TO_MINUTES[duration]),
     )
+    conn.commit()
 
 
-def _strategy_count(conn: sqlite3.Connection, key: str) -> int:
+def _strategy_count(conn: sqlite3.Connection, strategy_key: str) -> int:
     row = conn.execute(
-        "SELECT COUNT(*) AS count FROM auto_trade_strategies WHERE strategy_key = ?",
-        (key,),
+        "SELECT COUNT(*) AS total FROM auto_trade_strategies WHERE strategy_key = ?",
+        (strategy_key,),
     ).fetchone()
-    return int(row["count"])
-
-
-def _strategy_rows(conn: sqlite3.Connection, key: str) -> dict[str, sqlite3.Row]:
-    rows = conn.execute(
-        """
-        SELECT duration, enabled, live_trading_enabled
-        FROM auto_trade_strategies
-        WHERE strategy_key = ?
-        """,
-        (key,),
-    ).fetchall()
-    return {row["duration"]: row for row in rows}
-
-
-def _high_winrate_settings(*, live: bool) -> AutoTradeSettings:
-    return AutoTradeSettings(
-        strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-        enabled=True,
-        symbol="BTCUSDT",
-        duration="10m",
-        duration_minutes=10,
-        qty=5.0,
-        live_trading_enabled=live,
-    )
-
-
-def _passing_prediction() -> dict:
-    return {
-        "probability_up": 0.8,
-        "trade_quality_passed": 1,
-        "trade_quality_score": 0.8,
-    }
+    return int(row["total"])
 
 
 def _status_prediction(*, open_time: int, quality_passed: bool) -> dict:
     return {
         "id": 1,
-        "strategy_key": FACTOR_COMBO_STRATEGY_KEY,
-        "symbol": "BTCUSDT",
-        "duration": "10m",
+        "created_at": "2026-01-01T00:00:00+00:00",
         "open_time": open_time,
+        "probability_up": 0.8,
         "direction": "up",
-        "probability_up": 0.51,
-        "trade_quality_score": 0.51,
+        "trade_quality_score": 0.5,
         "trade_quality_passed": int(quality_passed),
-        "high_winrate_gate": "test_gate",
-        "high_winrate_gate_passed": int(quality_passed),
-        "high_winrate_gate_value": 0.51,
-        "created_at": "2026-05-13T00:00:00+00:00",
     }

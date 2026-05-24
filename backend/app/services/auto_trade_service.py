@@ -13,14 +13,12 @@ from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.rule_config import DURATION_TO_MINUTES
-from app.services.high_winrate_strategy_demotion import STATUS_TRADABLE, high_winrate_demotion_status
 from app.services.ensemble_judge_constants import (
     ENSEMBLE_RANKER_STRATEGY_KEY,
     STAGE_ENSEMBLE_READY,
 )
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
-    HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
@@ -163,8 +161,6 @@ def _prediction_matches_current_kline_bucket(
 
 
 def _is_prediction_tradable(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:
-    if _blocked_by_high_winrate_live_state(settings):
-        return False
     if not strategy_uses_trade_policy_gates(settings.strategy_key):
         return _as_bool(prediction.get("trade_quality_passed")) is True
     probability = float(prediction["probability_up"])
@@ -178,15 +174,6 @@ def _is_prediction_tradable(prediction: dict[str, Any], settings: AutoTradeSetti
     score_min = float(policy.get("tradeQualityScoreMin") or 0)
     score = float(prediction.get("trade_quality_score") or 0)
     return confidence_passed and _as_bool(prediction.get("trade_quality_passed")) and score >= score_min
-
-
-def _blocked_by_high_winrate_live_state(settings: AutoTradeSettings) -> bool:
-    if settings.strategy_key != HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
-        return False
-    if not settings.live_trading_enabled:
-        return False
-    status = high_winrate_demotion_status(settings.symbol, settings.duration)
-    return status.get("status") != STATUS_TRADABLE
 
 
 def _latest_prediction_row(settings: AutoTradeSettings) -> dict[str, Any] | None:
@@ -334,14 +321,7 @@ def _strategy_payload(settings: AutoTradeSettings) -> dict[str, Any]:
         "usesTradePolicyGates": strategy.uses_trade_policy_gates,
         "entryGraceMs": strategy.entry_grace_ms,
         "supportedDurations": sorted(strategy.supported_durations),
-        "demotion": _demotion_payload(settings),
     }
-
-
-def _demotion_payload(settings: AutoTradeSettings) -> dict[str, Any] | None:
-    if settings.strategy_key != HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY:
-        return None
-    return high_winrate_demotion_status(settings.symbol, settings.duration)
 
 
 def _payload_durations(payload: dict[str, Any]) -> list[str]:

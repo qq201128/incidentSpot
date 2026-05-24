@@ -143,7 +143,6 @@ async function loadRankingState({ symbol, duration, signal, setBaseSummary, setS
       items,
       highWinrateItems,
       highWinrateSummary: data.highWinrateSummary || null,
-      highWinrateStatus: data.highWinrateStatus || null,
       dataCoverage: data.dataCoverage || null,
       status: rankingStatus(data, symbol, duration),
       updatedAt: data.updatedAt,
@@ -247,7 +246,6 @@ function ComboPanelHeader({
         </div>
         {baseSummary ? <p className="factor-combo-hero-summary">{baseSummary}</p> : null}
         <div className="factor-combo-meta-grid">
-          <HighWinrateMeta data={rankingState.highWinrateStatus} />
           <CoverageMeta data={rankingState.dataCoverage} />
         </div>
       </div>
@@ -283,26 +281,6 @@ function StatusPill({ label, text }) {
       <span>{label}</span>
       <p title={text}>{text}</p>
     </div>
-  );
-}
-
-function HighWinrateMeta({ data }) {
-  if (!data) return null;
-  const metrics = data.metrics || {};
-  const settled = data.settledSampleCount ?? data.sampleCount ?? metrics.sampleCount ?? 0;
-  const required = data.requiredSampleCount ?? data.thresholds?.requiredSampleCount ?? data.thresholds?.activeSampleCount ?? "—";
-  const winRate = formatPct(data.winRate ?? metrics.winRate, 1);
-  return (
-    <article className="factor-combo-meta-card is-goal">
-      <dt>高胜率门控</dt>
-      <dd>
-        <strong>{data.status || "unknown"}</strong>
-        <span>
-          已结算 {settled}/{required} · 胜率 {winRate}
-        </span>
-        <small>{highWinrateReasonText(data)}</small>
-      </dd>
-    </article>
   );
 }
 
@@ -366,25 +344,6 @@ function cacheReasonText(reason) {
   return texts[reason] || reason;
 }
 
-function highWinrateReasonText(data) {
-  if (data?.reason === "candidate_pool_exhausted_refresh_failed") {
-    const refresh = data.refreshReport || {};
-    const failure = refresh.rankingFailure || {};
-    const validation = refresh.validationGate || {};
-    const detail = failure.reason || failure.stage || validation.failureReason || "暂无可用候选";
-    return `候选已用尽，刷新后仍无新榜单（${detail}）`;
-  }
-  if (data?.reason === "candidate_pool_exhausted_refreshing") {
-    return "候选已用尽，正在刷新榜单";
-  }
-  return data?.reason || "无附加说明";
-}
-
-function formatPct(value, digits) {
-  if (value == null || Number.isNaN(Number(value))) return "—";
-  return `${(Number(value) * 100).toFixed(digits)}%`;
-}
-
 function formatDate(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -405,7 +364,6 @@ function initialRankingState() {
     items: [],
     highWinrateItems: [],
     highWinrateSummary: null,
-    highWinrateStatus: null,
     dataCoverage: null,
     status: "",
     updatedAt: null,
