@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
 
 const ENSEMBLE_RANKER_STRATEGY_KEY = "ensemble_ranker_v1";
+const MODEL_FAMILY_SHADOW_PATTERN = /^factor_.+_shadow_/;
 
 export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) {
   const [strategies, setStrategies] = useState([]);
@@ -76,7 +77,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   const toggleStrategyLive = useCallback(
     async (group) => {
       if (group.tradable === false) return;
-      if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return;
+      if (_simulationOnlyGroup(group)) return;
       const nextLive = !group.slots.some((s) => s.liveTradingEnabled);
       const busyKey = `${group.strategyKey}:__live__`;
       setUpdatingKey(busyKey);
@@ -143,7 +144,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
                 disabled={
                   updatingKey === `${group.strategyKey}:__live__` ||
                   group.tradable === false ||
-                  group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY
+                  _simulationOnlyGroup(group)
                 }
                 onClick={() => void toggleStrategyLive(group)}
                 title={_liveButtonTitle(group)}
@@ -224,13 +225,18 @@ function _mergeStrategyRows(setStrategies, rows) {
 }
 
 function _liveButtonLabel(group) {
-  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "仅模拟";
+  if (_simulationOnlyGroup(group)) return "仅模拟";
   return group.slots.some((s) => s.liveTradingEnabled) ? "实盘" : "模拟";
 }
 
 function _liveButtonTitle(group) {
   if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "综合裁判后端强制仅模拟。";
+  if (MODEL_FAMILY_SHADOW_PATTERN.test(group.strategyKey)) return "模型族执行项后端强制仅模拟。";
   return "该执行项下所有结算周期共用此开关；仅对已点亮的周期自动下单。";
+}
+
+function _simulationOnlyGroup(group) {
+  return group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY || MODEL_FAMILY_SHADOW_PATTERN.test(group.strategyKey);
 }
 
 function StrategyBacktestSummary({ summary }) {

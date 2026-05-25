@@ -37,21 +37,28 @@ def test_db_seed_enables_existing_factor_combo_sim_slots() -> None:
     assert _strategy_count(conn, "orderbook_notional_40m") == 0
 
 
-def test_db_seed_removes_legacy_execution_slots() -> None:
+def test_db_seed_keeps_model_family_simulation_slots() -> None:
     conn = _auto_trade_conn()
     _insert_strategy(conn, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, "10m", enabled=1, live=0)
-    _insert_strategy(conn, model_family_strategy_key("lstm", "10m"), "10m", enabled=1, live=0)
+    model_key = model_family_strategy_key("lstm", "10m")
+    _insert_strategy(conn, model_key, "10m", enabled=1, live=1)
 
     _ensure_auto_trade_strategies(conn)
 
     assert _strategy_count(conn, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY) == 0
-    assert _strategy_count(conn, model_family_strategy_key("lstm", "10m")) == 0
+    assert _strategy_count(conn, model_key) == 1
+    assert _strategy_live_enabled(conn, model_key) == 0
 
 
-def test_strategy_payloads_only_expose_factor_combo_execution_item() -> None:
+def test_strategy_payloads_expose_factor_combo_and_model_family_simulation_items() -> None:
     keys = {payload["key"] for payload in strategy_payloads()}
+    expected_model_keys = {
+        model_family_strategy_key(family, duration)
+        for family in MODEL_FAMILIES
+        for duration in AUTO_TRADE_SLOT_DURATIONS
+    }
 
-    assert keys == {FACTOR_COMBO_STRATEGY_KEY}
+    assert keys == {FACTOR_COMBO_STRATEGY_KEY, *expected_model_keys}
 
 
 def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:
@@ -150,6 +157,14 @@ def _strategy_count(conn: sqlite3.Connection, strategy_key: str) -> int:
         (strategy_key,),
     ).fetchone()
     return int(row["total"])
+
+
+def _strategy_live_enabled(conn: sqlite3.Connection, strategy_key: str) -> int:
+    row = conn.execute(
+        "SELECT live_trading_enabled FROM auto_trade_strategies WHERE strategy_key = ?",
+        (strategy_key,),
+    ).fetchone()
+    return int(row["live_trading_enabled"])
 
 
 def _status_prediction(*, open_time: int, quality_passed: bool) -> dict:

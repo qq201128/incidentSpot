@@ -271,7 +271,7 @@ def test_lstm_shadow_strategy_definition_remains_available_for_sidecar() -> None
     payloads = {payload["key"]: payload for payload in strategy_payloads()}
     strategy = strategy_definition(key)
 
-    assert key not in payloads
+    assert key in payloads
     assert strategy.tradable is True
     assert strategy.signal_source == "factor_lstm_shadow"
 

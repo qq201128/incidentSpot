@@ -226,15 +226,24 @@ def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
 def strategy_payloads() -> list[dict]:
     return [
         _strategy_payload(strategy)
-        for strategy in _tradable_strategy_definitions()
+        for strategy in _visible_strategy_definitions()
     ]
 
 
-def _tradable_strategy_definitions() -> tuple[StrategyDefinition, ...]:
+def _visible_strategy_definitions() -> tuple[StrategyDefinition, ...]:
+    base = tuple(
+        item
+        for item in STRATEGIES
+        if item.tradable and item.key != ENSEMBLE_RANKER_STRATEGY_KEY
+    )
+    return base + _model_family_shadow_strategy_definitions()
+
+
+def _model_family_shadow_strategy_definitions() -> tuple[StrategyDefinition, ...]:
     return tuple(
-        strategy
-        for strategy in STRATEGIES
-        if strategy.tradable and strategy.key != ENSEMBLE_RANKER_STRATEGY_KEY
+        _model_family_shadow_strategy_definition(model_family_strategy_key(family, duration))
+        for family in MODEL_FAMILIES
+        for duration in MODEL_SHADOW_DURATIONS
     )
 
 
