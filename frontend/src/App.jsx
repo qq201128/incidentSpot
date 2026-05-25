@@ -22,7 +22,7 @@ export default function App() {
   const [appView, setAppView] = useState("trade");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [interval, setIntervalValue] = useState("10m");
-  const [status, setStatus] = useState("就绪");
+  const [status, setStatus] = useState("正在初始化工作台…");
   const [summary, setSummary] = useState(null);
   const [summaryLatencyMs, setSummaryLatencyMs] = useState(null);
   const [recordsReloadKey, setRecordsReloadKey] = useState(0);

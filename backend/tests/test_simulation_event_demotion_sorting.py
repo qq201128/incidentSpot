@@ -26,6 +26,10 @@ def test_simulation_observation_rows_are_sorted_by_win_rate(monkeypatch, tmp_pat
 
     assert [row["strategyKey"] for row in result["evaluations"]] == [HIGHER_WIN_KEY, LOWER_WIN_KEY]
     assert [row["strategyKey"] for row in result["watchlist"]] == [HIGHER_WIN_KEY, LOWER_WIN_KEY]
+    assert result["evaluations"][0]["maxConsecutiveWins"] == 12
+    assert result["evaluations"][0]["maxConsecutiveLosses"] == 8
+    assert result["evaluations"][0]["currentConsecutiveWins"] == 12
+    assert result["evaluations"][0]["currentConsecutiveLosses"] == 0
 
 
 class _Conn:

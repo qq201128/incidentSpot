@@ -20,7 +20,10 @@ export function useLatestPrediction(symbol, onStatus, predictionDuration = "10m"
         retryCount = 0;
         onStatus("预测实时连接已建立");
       };
-      ws.onerror = () => onStatus("预测实时连接异常");
+      ws.onerror = (err) => {
+        // 浏览器常在 onclose 之前误报 onerror；勿用其覆盖首页其它加载状态
+        console.error("预测 WebSocket 异常", err);
+      };
       ws.onclose = () => {
         if (stopped) return;
         const wait = Math.min(1000 * 2 ** retryCount, 10000);

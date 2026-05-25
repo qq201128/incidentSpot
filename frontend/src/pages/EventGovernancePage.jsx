@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchEventGovernance } from "../api/workbenchClient";
-import { factorLabel } from "../utils/factorLearningLabels";
 import { strategyLabel } from "../utils/strategyLabels";
+import {
+  AllEvaluationsSection,
+  SimulationObservationSection,
+} from "./EventGovernanceTables";
 import "./EventGovernancePage.css";
 
 const DURATIONS = [
@@ -16,16 +19,6 @@ const POLL_MS = 8000;
 const ISSUE_LABELS = {
   systemic_shadow_win_event_loss: "系统性：Shadow 正确但 Event 亏损",
   strategy_shadow_win_event_loss: "策略级：Shadow 与 Event 偏差偏高",
-};
-
-const REASON_LABELS = {
-  consecutive_losses: "连续亏损",
-  insufficient_event_samples: "Event 样本不足",
-  insufficient_settled_samples: "已结算样本不足",
-  live_win_rate_below_target: "Event 胜率低于 62%",
-  profit_factor_below_one: "Event 盈亏比低于 1.05",
-  stable_live_target_met: "Event 指标达标",
-  unsupported_strategy_key: "非模拟策略",
 };
 
 export default function EventGovernancePage() {
@@ -173,115 +166,13 @@ export default function EventGovernancePage() {
             kind="single"
           />
 
-          <AllEvaluationsSection
-            title="全部多因子组合评估"
-            demotion={batch}
-            watchlistCount={batchWatchlist.length}
-          />
+          <AllEvaluationsSection title="全部多因子组合评估" demotion={batch} watchlistCount={batchWatchlist.length} />
 
-          <AllEvaluationsSection
-            title="全部单因子模拟评估"
-            demotion={singleFactor}
-            watchlistCount={singleWatchlist.length}
-          />
+          <AllEvaluationsSection title="全部单因子模拟评估" demotion={singleFactor} watchlistCount={singleWatchlist.length} />
         </div>
       ) : null}
     </main>
   );
-}
-
-function SimulationObservationSection({ title, emptyText, demotion, watchlist, kind }) {
-  return (
-    <section className="event-gov-panel">
-      <div className="event-gov-panel-head">
-        <h2>{title}</h2>
-        <span>观察模式 · 已评估 {demotion?.evaluatedCount ?? 0} 个 · 不自动 disable</span>
-      </div>
-      {watchlist.length === 0 ? (
-        <p className="event-gov-empty">{emptyText}</p>
-      ) : (
-        <div className="event-gov-table-wrap">
-          <table className="event-gov-table">
-            <thead>
-              <tr>
-                <th>{kind === "single" ? "因子" : "策略"}</th>
-                <th>原因</th>
-                <th>样本</th>
-                <th>胜率</th>
-                <th>盈亏比</th>
-                <th>连亏</th>
-                <th>Event PnL (U)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlist.map((row) => (
-                <tr key={row.strategyKey}>
-                  <td title={row.strategyKey}>{rowDisplayName(row, kind)}</td>
-                  <td>{REASON_LABELS[row.reason] ?? row.reason}</td>
-                  <td>{row.sampleCount ?? "—"}</td>
-                  <td>{formatRate(row.winRate)}</td>
-                  <td>{formatNumber(row.profitFactor)}</td>
-                  <td>{row.consecutiveLosses ?? "—"}</td>
-                  <td className={Number(row.totalPnlU) < 0 ? "neg" : "pos"}>{formatNumber(row.totalPnlU)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function AllEvaluationsSection({ title, demotion, watchlistCount }) {
-  const evaluations = demotion?.evaluations ?? [];
-  if (evaluations.length <= watchlistCount) {
-    return null;
-  }
-  return (
-    <section className="event-gov-panel event-gov-panel-muted">
-      <div className="event-gov-panel-head">
-        <h2>{title}</h2>
-        <span>{evaluations.length} 个</span>
-      </div>
-      <div className="event-gov-table-wrap">
-        <table className="event-gov-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>状态</th>
-              <th>样本</th>
-              <th>胜率</th>
-              <th>Event PnL (U)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {evaluations.map((row) => (
-              <tr key={row.strategyKey}>
-                <td title={row.strategyKey}>{rowDisplayName(row)}</td>
-                <td>
-                  <StatusBadge status={row.status} />
-                </td>
-                <td>{row.sampleCount ?? "—"}</td>
-                <td>{formatRate(row.winRate)}</td>
-                <td className={Number(row.totalPnlU) < 0 ? "neg" : "pos"}>{formatNumber(row.totalPnlU)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function rowDisplayName(row, kind = "auto") {
-  if (row.displayRule) {
-    return factorLabel(row.displayRule);
-  }
-  if (kind === "single" || String(row.strategyKey || "").startsWith("factor_candidate_signal_")) {
-    return strategyLabel(row.strategyKey);
-  }
-  return strategyLabel(row.strategyKey);
 }
 
 function KpiCard({ label, value, hint, warn = false }) {
@@ -292,16 +183,6 @@ function KpiCard({ label, value, hint, warn = false }) {
       {hint ? <small>{hint}</small> : null}
     </article>
   );
-}
-
-function StatusBadge({ status }) {
-  const labels = {
-    active: "正常",
-    demoted: "需关注",
-    collecting: "收集中",
-    insufficient_samples: "样本不足",
-  };
-  return <span className={`event-gov-badge status-${status}`}>{labels[status] ?? status}</span>;
 }
 
 function formatRate(value) {

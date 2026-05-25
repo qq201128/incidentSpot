@@ -109,6 +109,10 @@ def _evaluation_payload(
         "winRate": metrics.get("winRate"),
         "profitFactor": metrics.get("profitFactor"),
         "consecutiveLosses": metrics.get("consecutiveLosses", 0),
+        "currentConsecutiveWins": metrics.get("currentConsecutiveWins", 0),
+        "currentConsecutiveLosses": metrics.get("currentConsecutiveLosses", 0),
+        "maxConsecutiveWins": metrics.get("maxConsecutiveWins", 0),
+        "maxConsecutiveLosses": metrics.get("maxConsecutiveLosses", 0),
         "totalPnlU": _total_pnl(rows),
         "autoTradeAction": "none",
     }

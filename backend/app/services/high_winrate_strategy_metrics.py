@@ -24,6 +24,10 @@ def empty_high_winrate_metrics() -> dict[str, Any]:
         "winRate": None,
         "profitFactor": None,
         "consecutiveLosses": 0,
+        "currentConsecutiveWins": 0,
+        "currentConsecutiveLosses": 0,
+        "maxConsecutiveWins": 0,
+        "maxConsecutiveLosses": 0,
         "latestRule": None,
         "metricsSource": "predictions",
         "totalEventPnlU": None,
@@ -33,11 +37,13 @@ def empty_high_winrate_metrics() -> dict[str, Any]:
 def high_winrate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     returns = [_return_value(row) for row in rows if _return_value(row) is not None]
     wins = sum(1 for row in rows if _is_win(row))
+    streaks = _streak_metrics(rows)
     return {
         "sampleCount": len(rows),
         "winRate": _ratio(wins, len(rows)),
         "profitFactor": _profit_factor(returns),
-        "consecutiveLosses": _consecutive_losses(rows),
+        "consecutiveLosses": streaks["currentConsecutiveLosses"],
+        **streaks,
         "latestRule": str(rows[0].get("high_winrate_rule") or "") if rows else None,
         "metricsSource": _metrics_source(rows),
         "totalEventPnlU": _total_event_pnl(rows),
@@ -64,13 +70,49 @@ def _profit_factor(values: list[float]) -> float | None:
     return round(gains / losses, 4)
 
 
-def _consecutive_losses(rows: list[dict[str, Any]]) -> int:
-    count = 0
+def _streak_metrics(rows: list[dict[str, Any]]) -> dict[str, int]:
+    current = _current_streak(rows)
+    max_streaks = _max_streaks(rows)
+    return {
+        "currentConsecutiveWins": current["wins"],
+        "currentConsecutiveLosses": current["losses"],
+        "maxConsecutiveWins": max_streaks["wins"],
+        "maxConsecutiveLosses": max_streaks["losses"],
+    }
+
+
+def _current_streak(rows: list[dict[str, Any]]) -> dict[str, int]:
+    if not rows:
+        return {"wins": 0, "losses": 0}
+    first_is_win = _is_win(rows[0])
+    count = _same_outcome_prefix_count(rows, first_is_win)
+    return {"wins": count if first_is_win else 0, "losses": 0 if first_is_win else count}
+
+
+def _same_outcome_prefix_count(rows: list[dict[str, Any]], expected_win: bool) -> int:
+    total = 0
+    for row in rows:
+        if _is_win(row) != expected_win:
+            break
+        total += 1
+    return total
+
+
+def _max_streaks(rows: list[dict[str, Any]]) -> dict[str, int]:
+    best_wins = 0
+    best_losses = 0
+    current_wins = 0
+    current_losses = 0
     for row in rows:
         if _is_win(row):
-            break
-        count += 1
-    return count
+            current_wins += 1
+            current_losses = 0
+        else:
+            current_losses += 1
+            current_wins = 0
+        best_wins = max(best_wins, current_wins)
+        best_losses = max(best_losses, current_losses)
+    return {"wins": best_wins, "losses": best_losses}
 
 
 def _is_win(row: dict[str, Any]) -> bool:
