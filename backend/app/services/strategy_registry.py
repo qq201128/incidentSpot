@@ -208,11 +208,11 @@ def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
     if parsed is None:
         raise ValueError(f"not a model family shadow strategy: {strategy_key}")
     family, duration = parsed
-    label = family.upper() if family != "random_forest" else "RandomForest"
+    label = _model_family_label(family)
     return StrategyDefinition(
         key=strategy_key,
         name=f"{label}模拟执行·{duration}",
-        description=f"{family} 候选算法可开启模拟执行，每个算法族独立训练、预测和缓存。",
+        description=f"{label} 候选算法可开启模拟执行，每个算法族独立训练、预测和缓存。",
         requires_vegas_confirmation=False,
         signal_source=f"factor_{family}_shadow",
         rule_names=(model_family_rule_name(family),),
@@ -221,6 +221,14 @@ def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
         uses_trade_policy_gates=False,
         supported_durations=frozenset({duration}),
     )
+
+
+def _model_family_label(family: str) -> str:
+    if family == "random_forest":
+        return "RandomForest"
+    if family == "rl_strategy":
+        return "QTable方向分类器"
+    return family.upper()
 
 
 def strategy_payloads() -> list[dict]:

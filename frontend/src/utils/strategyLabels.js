@@ -45,7 +45,7 @@ const MODEL_FAMILY_LABELS = {
   svm: "SVM",
   bayesian: "贝叶斯",
   knn: "KNN",
-  rl_strategy: "强化学习",
+  rl_strategy: "QTable方向分类器",
 };
 
 const DURATION_LABELS = {

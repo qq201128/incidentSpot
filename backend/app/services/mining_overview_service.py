@@ -28,7 +28,7 @@ FAMILY_LABELS = {
     "random_forest": "RandomForest",
     "xgboost": "XGBoost",
     "svm": "SVM",
-    "rl_strategy": "RL",
+    "rl_strategy": "QTableDirection",
     "bayesian": "Bayesian",
     "knn": "KNN",
 }

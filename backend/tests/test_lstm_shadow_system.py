@@ -42,6 +42,34 @@ def test_duration_labeled_frame_uses_period_specific_future_return() -> None:
     assert labeled.loc[0, "future_return"] == pytest.approx(101 / 100 - 1)
 
 
+def test_duration_labeled_frame_uses_custom_horizon_minutes() -> None:
+    frame = pd.DataFrame({
+        "open_time": np.arange(30) * 10 * 60_000,
+        "close": 100 + np.arange(30),
+        "feature_a": np.arange(30, dtype=float),
+    })
+
+    one_bar = duration_labeled_frame(frame, "10m", 10, 0.0)
+    two_bar = duration_labeled_frame(frame, "10m", 20, 0.0)
+
+    assert one_bar.loc[0, "future_return"] == pytest.approx(101 / 100 - 1)
+    assert two_bar.loc[0, "future_return"] == pytest.approx(102 / 100 - 1)
+    assert set(one_bar["label_up"]) == {1.0}
+    assert set(two_bar["label_up"]) == {1.0}
+    assert two_bar["open_time"].iloc[-1] == 27 * 10 * 60_000
+
+
+def test_duration_labeled_frame_rejects_unaligned_horizon_minutes() -> None:
+    frame = pd.DataFrame({
+        "open_time": np.arange(30) * 10 * 60_000,
+        "close": 100 + np.arange(30),
+        "feature_a": np.arange(30, dtype=float),
+    })
+
+    with pytest.raises(ValueError, match="must be a multiple"):
+        duration_labeled_frame(frame, "10m", 15, 0.0)
+
+
 def test_candidate_feature_columns_exclude_raw_combo_library_features() -> None:
     frame = pd.DataFrame({
         "open_time": np.arange(5),

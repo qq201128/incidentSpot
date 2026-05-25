@@ -136,6 +136,10 @@ def test_ranked_hits_can_select_four_member_combo(monkeypatch: pytest.MonkeyPatc
     hits = goal._ranked_hits(frame, scores)
 
     assert any(len(row.members) == 4 for row in hits)
+    ranked = goal._ranked_hit_search(frame, scores)
+    assert ranked.diagnostics["selectionMode"] == "train_threshold_validation_combo_v1"
+    assert set(ranked.diagnostics["nestedSplit"]["rows"]) == {"train", "validation", "test"}
+    assert ranked.diagnostics["testedValidationEvaluations"] > 0
 
 
 def test_empty_ranking_exposes_combo_gate_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,6 +177,9 @@ def test_validation_rejects_goal_combo_when_oos_win_rate_falls_below_target() ->
     assert rejection["status"] == "rejected"
     assert any("winRate" in reason and "< 0.7" in reason for reason in rejection["reasons"])
     assert validation.payload["thresholds"]["recomputedMinWinRate"] == goal.TARGET_WIN_RATE
+    assert validation.payload["thresholds"]["oosMinWinRate"] == 0.70
+    assert set(rejection["recomputed"]["nested"]) == {"train", "validation", "test"}
+    assert rejection["recomputed"]["nested"]["test"]["winRate"] < 0.70
 
 
 def test_empty_candidate_factors_expose_filter_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,7 +200,7 @@ def test_empty_candidate_factors_expose_filter_reason(monkeypatch: pytest.Monkey
     assert payload["ranking"] == []
     assert payload["rankingFailure"]["stage"] == "candidate_factor_filter"
     assert payload["rankingFailure"]["reason"] == "no_candidate_factors_met_min_periods"
-    assert payload["candidateDiagnostics"]["maxValidPairs"] == 50
+    assert payload["candidateDiagnostics"]["maxValidPairs"] == 30
 
 
 def test_empty_ranking_does_not_create_silent_success_row() -> None:

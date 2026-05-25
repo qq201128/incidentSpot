@@ -16,7 +16,7 @@ from app.services.lstm_feature_builder import (
 from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, shadow_predictable_status, trade_active_status
 from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import validation_gate_payload, validation_threshold
-from app.services.lstm_validation import apply_standardizer
+from app.services.lstm_validation import apply_probability_calibrator, apply_standardizer
 from app.services.model_family_config import (
     JOBLIB_MODEL_FAMILIES,
     model_family_rule_name,
@@ -56,9 +56,11 @@ def predict_model_family_signal(
         int(features["featureWindow"]),
         entry_open_time,
     )
-    probability_up = float((backend or _default_backend(selected)).predict(paths.model, apply_standardizer(window, scaler))[0])
+    raw_probability = float((backend or _default_backend(selected)).predict(paths.model, apply_standardizer(window, scaler))[0])
     status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
-    return _signal_payload(selected, sym, duration, probability_up, meta, features, _version_payload(version, report), status)
+    payload = _version_payload(version, report)
+    probability_up = _calibrated_probability(raw_probability, payload)
+    return _signal_payload(selected, sym, duration, probability_up, meta, features, payload, status)
 
 
 def predict_model_family_shadow_prediction(family: str, symbol: str, duration: str, *, entry_open_time: int | None = None) -> dict:
@@ -86,9 +88,10 @@ def predict_model_family_shadow_predictions(
     version = require_json(paths.version, "version")
     report = require_json(paths.report, "training report")
     windows, metas = _live_feature_windows(sym, duration, list(features["columns"]), int(features["featureWindow"]), entries)
-    probabilities = (backend or _default_backend(selected)).predict(paths.model, apply_standardizer(windows, scaler))
+    raw_probabilities = (backend or _default_backend(selected)).predict(paths.model, apply_standardizer(windows, scaler))
     status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
     version_payload = _version_payload(version, report)
+    probabilities = _calibrated_probabilities(raw_probabilities, version_payload)
     return [
         _prediction_payload(_signal_payload(selected, sym, duration, float(prob), meta, features, version_payload, status))
         for prob, meta in zip(probabilities, metas)
@@ -206,6 +209,18 @@ def _expected_return(probability_up: float, version: dict) -> float:
 def _selected_confidence_threshold(version: dict) -> float | None:
     threshold = version.get("selectedConfidenceThreshold")
     return None if threshold is None else float(threshold)
+
+
+def _calibrated_probability(probability: float, version: dict[str, Any]) -> float:
+    return float(_calibrated_probabilities(np.asarray([probability], dtype=np.float32), version)[0])
+
+
+def _calibrated_probabilities(probabilities: np.ndarray, version: dict[str, Any]) -> np.ndarray:
+    calibration = version.get("probabilityCalibration") or {}
+    calibrator = calibration.get("calibrator") if isinstance(calibration, dict) else None
+    if not isinstance(calibrator, dict):
+        return probabilities.astype(np.float32)
+    return apply_probability_calibrator(probabilities.astype(np.float32), calibrator)
 
 
 def _trade_gate_passed(confidence: float, threshold: float | None, status: dict, version: dict) -> bool:

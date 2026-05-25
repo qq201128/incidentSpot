@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 
 from app.services.trade_quality_gate import load_quality_gate, quality_score
+from app.services.trading_costs import default_backtest_cost_config, roundtrip_cost_rate
 
 MS_PER_DAY = 1000.0 * 60 * 60 * 24
-ROUNDTRIP_COST = 0.0
 CONFIDENCE_THRESHOLDS = (0.80, 0.85, 0.90, 0.93, 0.95, 0.97, 0.98, 0.99, 0.995, 0.997, 0.999)
 QUALITY_THRESHOLDS = (0.50, 0.60, 0.70, 0.75, 0.78, 0.80, 0.85, 0.90, 0.95, 0.99)
 
@@ -76,19 +76,21 @@ def _build_profile(
     threshold_key: str,
     threshold: float,
 ) -> dict:
-    tradable = _apply_trade_gap(candidate, context.test_frame["open_time"], context.min_trade_gap_minutes)
+    min_gap = _profile_min_trade_gap(context.min_trade_gap_minutes)
+    cost = roundtrip_cost_rate()
+    tradable = _apply_trade_gap(candidate, context.test_frame["open_time"], min_gap)
     pnl = np.zeros_like(context.test_fwd_ret, dtype=float)
-    pnl[tradable] = context.test_side[tradable] * context.test_fwd_ret[tradable] - ROUNDTRIP_COST
+    pnl[tradable] = context.test_side[tradable] * context.test_fwd_ret[tradable] - cost
     traded_pnl = pnl[tradable]
     hit = _direction_hits(context, tradable)
     trades = int(tradable.sum())
     return {
         threshold_key: float(threshold),
-        "min_trade_gap_minutes": int(context.min_trade_gap_minutes),
+        "min_trade_gap_minutes": int(min_gap),
         "test_rows": int(len(pnl)),
         "test_trades": trades,
         "trades_per_day": float(trades / _span_days(context.test_frame["open_time"])),
-        "roundtrip_cost_rate": ROUNDTRIP_COST,
+        "roundtrip_cost_rate": cost,
         "strategy_return": _strategy_return(pnl),
         "buy_hold_return": _buy_hold_return(context.test_fwd_ret),
         "win_rate": float((traded_pnl > 0).mean()) if len(traded_pnl) else 0.0,
@@ -111,6 +113,13 @@ def _apply_trade_gap(candidate: np.ndarray, open_time: pd.Series, gap_minutes: i
             tradable[index] = True
             last_trade_time = current_time
     return tradable
+
+
+def _profile_min_trade_gap(requested_minutes: int) -> int:
+    explicit = int(requested_minutes)
+    if explicit > 0:
+        return explicit
+    return default_backtest_cost_config().min_trade_gap_minutes
 
 
 def _direction_hits(context: BacktestProfileContext, tradable: np.ndarray) -> np.ndarray:

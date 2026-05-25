@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+from app.services.mining_overview_service import FAMILY_LABELS
+from app.services.model_family_candidate_search_service import model_training_config_for_profile
+from app.services.model_family_joblib_backend import JoblibModelOptions, QTableDirectionClassifier, _estimator
+from app.services.strategy_registry import strategy_definition
+
+
+def test_rl_strategy_is_labeled_as_qtable_direction_classifier() -> None:
+    strategy = strategy_definition("factor_rl_strategy_shadow_10m")
+
+    assert FAMILY_LABELS["rl_strategy"] == "QTableDirection"
+    assert "QTable方向分类器" in strategy.name
+    assert "QTable方向分类器" in strategy.description
+
+
+def test_rl_strategy_backend_uses_qtable_classifier_name() -> None:
+    config = model_training_config_for_profile("rl_strategy", "BTCUSDT", "10m", "fast")
+    model = _estimator(JoblibModelOptions(config.family, config.seed, config.params))
+    assert isinstance(model, QTableDirectionClassifier)
+    assert model.model_kind == "q_table_direction_classifier"

@@ -163,7 +163,7 @@ def _knn(options: JoblibModelOptions):
 
 
 def _rl_strategy(options: JoblibModelOptions):
-    return QLearningDirectionClassifier(
+    return QTableDirectionClassifier(
         state_bins=int(options.params.get("state_bins", 5)),
         alpha=float(options.params.get("alpha", 0.2)),
         gamma=float(options.params.get("gamma", 0.8)),
@@ -196,7 +196,9 @@ class AutoGammaRBFSampler(BaseEstimator, TransformerMixin):
         return self.gamma
 
 
-class QLearningDirectionClassifier:
+class QTableDirectionClassifier:
+    model_kind = "q_table_direction_classifier"
+
     def __init__(self, state_bins: int, alpha: float, gamma: float, epsilon: float, episodes: int, seed: int) -> None:
         self.state_bins = state_bins
         self.alpha = alpha
@@ -238,7 +240,7 @@ def _flat(x: np.ndarray) -> np.ndarray:
 
 
 def _predict_model(model, x: np.ndarray) -> np.ndarray:
-    if isinstance(model, QLearningDirectionClassifier):
+    if isinstance(model, QTableDirectionClassifier):
         return model.predict_proba(x)[:, 1].astype(np.float32)
     flat = _flat(x)
     if hasattr(model, "predict_proba"):

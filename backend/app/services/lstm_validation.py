@@ -10,6 +10,7 @@ from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 EPSILON = 1e-12
 CONFIDENCE_THRESHOLDS = (0.55, 0.60, 0.65, 0.70)
+CALIBRATION_BUCKETS = (0.50, 0.60, 0.70, 0.80, 0.90, 1.01)
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,50 @@ def binary_classification_metrics(
     }
 
 
+def fit_probability_calibrator(y_true: np.ndarray, probability_up: np.ndarray) -> dict[str, Any]:
+    labels = y_true.astype(int)
+    if len(np.unique(labels)) < 2:
+        return _identity_calibrator("calibration_requires_two_classes")
+    try:
+        from sklearn.linear_model import LogisticRegression
+    except ImportError as exc:
+        raise ImportError("missing dependency: scikit-learn is required for probability calibration") from exc
+    model = LogisticRegression(solver="lbfgs")
+    model.fit(probability_up.reshape(-1, 1), labels)
+    return {
+        "method": "platt_logistic",
+        "status": "fitted",
+        "coef": float(model.coef_[0][0]),
+        "intercept": float(model.intercept_[0]),
+        "source": "validation",
+    }
+
+
+def apply_probability_calibrator(probability_up: np.ndarray, calibrator: dict[str, Any]) -> np.ndarray:
+    if calibrator.get("status") != "fitted":
+        return probability_up.astype(np.float32)
+    logits = probability_up * float(calibrator["coef"]) + float(calibrator["intercept"])
+    return (1.0 / (1.0 + np.exp(-logits))).astype(np.float32)
+
+
+def calibration_report(
+    y_true: np.ndarray,
+    probability_up: np.ndarray,
+    future_returns: np.ndarray,
+) -> dict[str, Any]:
+    pred_up = probability_up >= 0.5
+    confidence = np.maximum(probability_up, 1.0 - probability_up)
+    directional = _directional_returns(pred_up, future_returns)
+    return {
+        "brierScore": brier_score(y_true, probability_up),
+        "buckets": [_bucket_payload(confidence, directional, left, right) for left, right in _bucket_ranges()],
+    }
+
+
+def brier_score(y_true: np.ndarray, probability_up: np.ndarray) -> float:
+    return float(np.mean((probability_up - y_true) ** 2))
+
+
 def confidence_threshold_metrics(
     probability_up: np.ndarray,
     future_returns: np.ndarray,
@@ -100,6 +145,27 @@ def confidence_threshold_metrics(
         _confidence_threshold_payload(threshold, directional[confidence >= threshold])
         for threshold in CONFIDENCE_THRESHOLDS
     ]
+
+
+def _identity_calibrator(reason: str) -> dict[str, Any]:
+    return {"method": "identity", "status": "not_fitted", "reason": reason}
+
+
+def _bucket_ranges() -> list[tuple[float, float]]:
+    return list(zip(CALIBRATION_BUCKETS[:-1], CALIBRATION_BUCKETS[1:]))
+
+
+def _bucket_payload(confidence: np.ndarray, returns: np.ndarray, left: float, right: float) -> dict[str, Any]:
+    mask = (confidence >= left) & (confidence < right)
+    selected = returns[mask]
+    return {
+        "confidenceMin": float(left),
+        "confidenceMax": 1.0 if right > 1.0 else float(right),
+        "sampleCount": int(len(selected)),
+        "winRate": _ratio(int((selected > 0).sum()), len(selected)),
+        "profitFactor": None if len(selected) == 0 else profit_factor(selected),
+        "avgReturn": _mean_or_none(selected),
+    }
 
 
 def profit_factor(returns: np.ndarray) -> float | None:

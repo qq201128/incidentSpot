@@ -7,6 +7,7 @@ from app.services.model_family_config import normalize_model_family
 
 DEFAULT_PARALLEL_WORKERS = 10
 TARGET_WIN_RATE_EXCLUSIVE = 0.70
+SUCCESSIVE_HALVING_SURVIVAL_RATE = 0.50
 COMMON_FEATURE_WINDOWS = (24, 32, 48, 64, 96)
 COMMON_MIN_MOVE_BPS = (8.0, 10.0, 12.0, 15.0, 20.0)
 COMMON_SEEDS = (20260513, 20260519, 20260601)
@@ -35,13 +36,37 @@ def model_family_training_rules(family: str) -> dict[str, Any]:
     grid = model_family_search_grid(selected)
     return {
         "modelFamily": selected,
-        "searchMode": "full_parallel",
+        "searchMode": "successive_halving",
         "searchSpaceTotal": len(grid),
         "parallelWorkers": DEFAULT_PARALLEL_WORKERS,
         "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
         "requiresValidationAndTestAboveTarget": True,
+        "successiveHalving": _successive_halving_rules(),
         "candidateSearchAxes": _axes_for_family(selected),
     }
+
+
+def _successive_halving_rules() -> list[dict[str, Any]]:
+    return [
+        {
+            "stage": "coarse",
+            "purpose": "short_epoch_or_reduced_sample_screen",
+            "survivalRate": SUCCESSIVE_HALVING_SURVIVAL_RATE,
+            "publishesArtifacts": False,
+        },
+        {
+            "stage": "full",
+            "purpose": "complete_training_for_survivors",
+            "survivalRate": SUCCESSIVE_HALVING_SURVIVAL_RATE,
+            "publishesArtifacts": False,
+        },
+        {
+            "stage": "walk_forward",
+            "purpose": "final_oos_validation_and_serial_publish",
+            "survivalRate": 1.0,
+            "publishesArtifacts": True,
+        },
+    ]
 
 
 def _neural_grid() -> list[dict[str, Any]]:

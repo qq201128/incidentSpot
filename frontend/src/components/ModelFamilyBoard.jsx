@@ -23,14 +23,14 @@ export default function ModelFamilyBoard({ families, onSearchCandidates, onResca
   return (
     <div className="factor-model-board">
       <div className="factor-model-board-head">
-        <span>训练规则：validation 与 test 胜率都必须 &gt; 70%，全量 search grid 并行执行。</span>
+        <span>训练规则：validation 与 test 胜率都必须 &gt; 70%，候选按 successive-halving 分阶段筛选。</span>
         <button
           type="button"
           className="factor-lstm-search-button"
           disabled={allRunning || !onSearchCandidates}
           onClick={() => onSearchCandidates?.("__all__")}
         >
-          {allRunning ? "全部排队中" : "全量搜索全部算法"}
+          {allRunning ? "全部排队中" : "分阶段搜索全部算法"}
         </button>
       </div>
       <div className="factor-model-card-list">

@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-import os
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from collections.abc import Iterator
-from threading import Lock
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
-from app.services.lstm_feature_builder import LstmDataset, build_lstm_training_dataset
+from app.services.model_family_candidate_executor import (
+    CandidateDatasetCache,
+    CandidateTrainingResult,
+    train_candidate_reports,
+)
+from app.services.model_family_candidate_halving import (
+    close_halving_stage,
+    coarse_candidate_config,
+    walk_forward_stage_payload,
+)
 from app.services.model_family_candidates import (
     attempted_model_search_keys,
     complete_model_candidate_progress,
     finish_model_candidate_progress,
     finish_model_candidate_progress_from_library,
-    model_search_key,
     model_search_space_size,
     next_model_candidate_configs,
     read_model_candidate_library,
@@ -22,17 +26,12 @@ from app.services.model_family_candidates import (
     record_model_candidate,
     start_model_candidate_progress,
 )
-from app.services.model_family_candidate_process import train_candidate_in_process
 from app.services.model_family_candidate_publisher import publish_best_model_candidate
 from app.services.model_family_config import ModelFamilyTrainingConfig, normalize_model_family
 from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_training_rules,
 )
-from app.services.model_family_training_service import train_model_family
-
-PROCESS_EXECUTOR_FAMILIES = frozenset({"xgboost"})
-XGBOOST_PROCESS_WORKERS_ENV = "MODEL_FAMILY_XGBOOST_PROCESS_WORKERS"
 
 
 @dataclass(frozen=True)
@@ -43,25 +42,6 @@ class ModelCandidateSearchConfig:
     profile: str
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS
     reset_history: bool = False
-
-
-@dataclass(frozen=True)
-class CandidateTrainingResult:
-    config: ModelFamilyTrainingConfig
-    report: dict[str, Any]
-
-
-@dataclass
-class CandidateDatasetCache:
-    datasets: dict[tuple, LstmDataset] = field(default_factory=dict)
-    lock: Lock = field(default_factory=Lock)
-
-    def build(self, config: ModelFamilyTrainingConfig) -> LstmDataset:
-        key = _dataset_cache_key(config)
-        with self.lock:
-            if key not in self.datasets:
-                self.datasets[key] = build_lstm_training_dataset(config)
-            return self.datasets[key]
 
 
 def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, Any]:
@@ -94,17 +74,20 @@ def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, 
         total=len(candidates),
         parallel_workers=cfg.parallel_workers,
     )
-    trainings: list[CandidateTrainingResult] = []
     dataset_cache = CandidateDatasetCache()
     try:
-        for result in _train_candidate_reports(candidates, cfg.profile, cfg.parallel_workers, dataset_cache.build):
-            trainings.append(result)
-            complete_model_candidate_progress(result.config, cfg.profile, result.report, len(trainings), len(candidates))
-        published = publish_best_model_candidate(trainings)
-        reports = [item.report for item in trainings]
+        evaluation = _run_successive_halving(candidates, cfg, dataset_cache.build)
+        published = publish_best_model_candidate(evaluation["finalists"])
+        reports = [item.report for item in evaluation["reports"]]
         status = _batch_status(reports, published)
         finish_model_candidate_progress(cfg.family, symbol=cfg.symbol, duration=cfg.duration, status=status)
-        return {"status": status, "family": cfg.family, "reports": reports, "trainingRules": model_family_training_rules(cfg.family)}
+        return {
+            "status": status,
+            "family": cfg.family,
+            "reports": reports,
+            "trainingRules": model_family_training_rules(cfg.family),
+            "successiveHalvingStages": evaluation["stages"],
+        }
     except Exception:
         finish_model_candidate_progress(cfg.family, symbol=cfg.symbol, duration=cfg.duration, status="failed")
         raise
@@ -148,69 +131,50 @@ def training_rules_for_family(family: str) -> dict[str, Any]:
     return model_family_training_rules(family)
 
 
-def _train_candidate(config: ModelFamilyTrainingConfig, profile: str, dataset_builder) -> dict[str, Any]:
-    try:
-        report = train_model_family(
-            config,
-            dataset_builder=dataset_builder,
-            publish_shadow_active=False,
-            publish_trade_active=False,
-            write_attempt=False,
-            persist_artifacts=False,
-        )
-    except Exception as exc:
-        report = _failed_report(config, profile, exc)
-    report = {**report, "searchKey": model_search_key(config, profile)}
-    record_model_candidate(config, profile, report)
-    return report
+def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset_builder) -> dict[str, Any]:
+    reports: list[CandidateTrainingResult] = []
+    stages = []
+    completed = 0
+    coarse_configs = [coarse_candidate_config(item) for item in candidates]
+    coarse = _collect_stage(coarse_configs, candidates, cfg, dataset_builder, "coarse", completed, len(candidates))
+    completed += len(coarse)
+    coarse_closed = close_halving_stage(coarse, "coarse")
+    _record_stage_reports(coarse_closed.reports, cfg.profile)
+    reports.extend(coarse_closed.reports)
+    stages.append(coarse_closed.payload)
+    total = completed + len(coarse_closed.survivors)
+    full = _collect_stage(_configs(coarse_closed.survivors), None, cfg, dataset_builder, "full", completed, total)
+    full_closed = close_halving_stage(full, "full")
+    _record_stage_reports(full_closed.reports, cfg.profile)
+    reports.extend(full_closed.reports)
+    stages.append(full_closed.payload)
+    stages.append(walk_forward_stage_payload(full_closed.survivors))
+    return {"reports": reports, "finalists": full_closed.survivors, "stages": stages}
 
 
-def _train_candidate_reports(
-    configs: list[ModelFamilyTrainingConfig],
-    profile: str,
-    workers: int,
-    dataset_builder,
-) -> Iterator[CandidateTrainingResult]:
-    if workers <= 1 or len(configs) <= 1:
-        for config in configs:
-            yield CandidateTrainingResult(config, _train_candidate(config, profile, dataset_builder))
-        return
-    max_workers = min(int(workers), len(configs))
-    if _uses_process_executor(configs):
-        yield from _train_candidate_reports_in_processes(configs, profile, _process_worker_count(max_workers))
-        return
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {executor.submit(_train_candidate, config, profile, dataset_builder): config for config in configs}
-        for future in as_completed(future_map):
-            yield CandidateTrainingResult(future_map[future], future.result())
+def _collect_stage(train_configs, record_configs, cfg, dataset_builder, stage: str, completed: int, total: int):
+    results = []
+    for result in train_candidate_reports(
+        train_configs,
+        cfg.profile,
+        cfg.parallel_workers,
+        dataset_builder,
+        stage=stage,
+        record_configs=record_configs,
+    ):
+        results.append(result)
+        completed += 1
+        complete_model_candidate_progress(result.config, cfg.profile, result.report, completed, max(total, completed))
+    return results
 
 
-def _train_candidate_reports_in_processes(
-    configs: list[ModelFamilyTrainingConfig],
-    profile: str,
-    workers: int,
-) -> Iterator[CandidateTrainingResult]:
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        future_map = {executor.submit(train_candidate_in_process, config, profile): config for config in configs}
-        for future in as_completed(future_map):
-            config = future_map[future]
-            report = future.result()
-            record_model_candidate(config, profile, report)
-            yield CandidateTrainingResult(config, report)
+def _record_stage_reports(results: list[CandidateTrainingResult], profile: str) -> None:
+    for item in results:
+        record_model_candidate(item.config, profile, item.report)
 
 
-def _uses_process_executor(configs: list[ModelFamilyTrainingConfig]) -> bool:
-    return bool(configs) and configs[0].family in PROCESS_EXECUTOR_FAMILIES
-
-
-def _process_worker_count(max_workers: int) -> int:
-    raw = os.environ.get(XGBOOST_PROCESS_WORKERS_ENV)
-    if raw is None:
-        return max_workers
-    selected = int(raw)
-    if selected <= 0:
-        raise ValueError(f"{XGBOOST_PROCESS_WORKERS_ENV} must be positive")
-    return min(max_workers, selected)
+def _configs(results: list[CandidateTrainingResult]) -> list[ModelFamilyTrainingConfig]:
+    return [item.config for item in results]
 
 
 def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig:
@@ -247,19 +211,6 @@ def _preserve_exhausted_progress(progress: dict[str, Any]) -> bool:
     return completed > 0 and status not in {"failed", "idle", "queued", "running"}
 
 
-def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Exception) -> dict[str, Any]:
-    return {
-        "status": "failed",
-        "candidateStatus": "failed",
-        "modelFamily": config.family,
-        "symbol": config.symbol,
-        "duration": config.duration,
-        "modelVersion": None,
-        "searchKey": model_search_key(config, profile),
-        "validationFailureReason": str(exc),
-    }
-
-
 def _family_default_params(family: str) -> dict[str, Any]:
     return {
         "random_forest": {"n_estimators": 120, "max_depth": None, "min_samples_leaf": 2},
@@ -269,16 +220,3 @@ def _family_default_params(family: str) -> dict[str, Any]:
         "knn": {"n_neighbors": 7, "weights": "distance"},
         "rl_strategy": {"state_bins": 5, "alpha": 0.2, "gamma": 0.8, "epsilon": 0.1, "episodes": 20},
     }.get(family, {})
-
-
-def _dataset_cache_key(config: ModelFamilyTrainingConfig) -> tuple:
-    return (
-        config.symbol,
-        config.duration,
-        config.feature_window,
-        config.horizon_minutes,
-        config.min_samples,
-        config.train_ratio,
-        config.val_ratio,
-        config.min_move_bps,
-    )

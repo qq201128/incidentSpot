@@ -19,14 +19,16 @@ def combination_search_diagnostics(
     rows: list[dict[str, Any]],
     failures: list[dict[str, Any]],
     generated_count: int,
+    stages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
-        "mode": "targeted_layered_parallel_v1",
+        "mode": "staged_layered_pairwise_diversity_v1",
         "baseCandidateCount": len(candidates),
         "fullCombinationEstimate": _full_combination_estimate(len(candidates), config.combo_sizes),
         "generatedCombinationCount": generated_count,
         "evaluatedCombinationCount": len(plan),
         "prefilteredCombinationCount": max(generated_count - len(plan), 0),
+        "searchStages": stages or [],
         "prefilterLimit": config.prefilter_limit,
         "beamWidth": config.beam_width,
         "parallelWorkers": config.parallel_workers,

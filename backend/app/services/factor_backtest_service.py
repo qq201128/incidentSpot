@@ -190,19 +190,26 @@ def _ic_metrics(ic_series: pd.Series) -> dict[str, float | None]:
 
 
 def _compute_rolling_ic(factor: pd.Series, fwd_ret: pd.Series) -> pd.Series:
-    ranked = pd.DataFrame({
-        "factor": factor.rank(method="average"),
-        "fwd_ret": fwd_ret.rank(method="average"),
-    })
-    x = ranked["factor"]
-    y = ranked["fwd_ret"]
-    x_mean = x.rolling(IC_ROLLING_WINDOW).mean()
-    y_mean = y.rolling(IC_ROLLING_WINDOW).mean()
-    covariance = (x * y).rolling(IC_ROLLING_WINDOW).mean() - x_mean * y_mean
-    x_var = ((x * x).rolling(IC_ROLLING_WINDOW).mean() - x_mean * x_mean).clip(lower=0.0)
-    y_var = ((y * y).rolling(IC_ROLLING_WINDOW).mean() - y_mean * y_mean).clip(lower=0.0)
-    denominator = np.sqrt(x_var * y_var).replace(0.0, np.nan)
-    return (covariance / denominator).dropna()
+    values = pd.DataFrame({"factor": factor, "fwd_ret": fwd_ret}).replace([np.inf, -np.inf], np.nan)
+    correlations: list[float] = []
+    indices = []
+    for end in range(IC_ROLLING_WINDOW - 1, len(values)):
+        window = values.iloc[end - IC_ROLLING_WINDOW + 1:end + 1].dropna()
+        corr = _window_spearman_ic(window)
+        if corr is None:
+            continue
+        correlations.append(corr)
+        indices.append(values.index[end])
+    return pd.Series(correlations, index=indices, dtype=float)
+
+
+def _window_spearman_ic(window: pd.DataFrame) -> float | None:
+    if len(window) < IC_ROLLING_WINDOW:
+        return None
+    if window["factor"].nunique(dropna=True) < 2 or window["fwd_ret"].nunique(dropna=True) < 2:
+        return None
+    corr = window["factor"].rank(method="average").corr(window["fwd_ret"].rank(method="average"))
+    return float(corr) if corr is not None and math.isfinite(float(corr)) else None
 
 
 def _compute_ic_ttest(ic_series: pd.Series) -> tuple[float | None, float | None]:

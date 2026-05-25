@@ -5,8 +5,9 @@ import pandas as pd
 import pytest
 
 from app.services.factor_metric_enrichment import backtest_validity, factor_score
-from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
+from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics, signal_returns
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
+from app.services.trading_costs import roundtrip_cost_rate
 
 
 def test_insufficient_backtest_periods_cannot_receive_factor_score() -> None:
@@ -63,12 +64,12 @@ def test_profit_factor_component_is_capped() -> None:
     assert factor_score(extreme) == factor_score(normal)
 
 
-def test_factor_signal_metrics_use_gross_returns_without_roundtrip_cost() -> None:
+def test_factor_signal_metrics_apply_roundtrip_cost() -> None:
     rows = BACKTEST_MIN_PERIODS + 20
     df = pd.DataFrame(
         {
             "factor_a": np.arange(rows, dtype=float),
-            "fwd_ret": np.full(rows, 0.001, dtype=float),
+            "fwd_ret": np.full(rows, 0.002, dtype=float),
         }
     )
     factor = FactorDefinition(
@@ -80,7 +81,9 @@ def test_factor_signal_metrics_use_gross_returns_without_roundtrip_cost() -> Non
     )
 
     _sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor, horizon=1)
+    returns = signal_returns(df, factor)
 
     assert win_rate == pytest.approx(1.0)
+    assert returns.iloc[0] == pytest.approx(0.002 - roundtrip_cost_rate())
     assert profit_factor is None
     assert max_drawdown == pytest.approx(0.0)

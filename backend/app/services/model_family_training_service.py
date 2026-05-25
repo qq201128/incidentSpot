@@ -25,8 +25,11 @@ from app.services.lstm_lifecycle import (
 from app.services.lstm_training_gate import validation_failure_reason, validation_gate
 from app.services.lstm_validation import (
     apply_standardizer,
+    apply_probability_calibrator,
     binary_classification_metrics,
+    calibration_report,
     chronological_split,
+    fit_probability_calibrator,
     fit_standardizer,
 )
 from app.services.model_family_config import (
@@ -143,8 +146,11 @@ def _train_with_dataset(
 def _training_report(cfg, dataset, split, backend, model_path, losses, version) -> dict[str, Any]:
     val_prob = _predict_backend(backend, model_path, split.val_x)
     test_prob = _predict_backend(backend, model_path, split.test_x)
-    val_metrics = binary_classification_metrics(split.val_y, val_prob, split.val_returns)
-    test_metrics = binary_classification_metrics(split.test_y, test_prob, split.test_returns)
+    calibrator = fit_probability_calibrator(split.val_y, val_prob)
+    calibrated_val_prob = apply_probability_calibrator(val_prob, calibrator)
+    calibrated_test_prob = apply_probability_calibrator(test_prob, calibrator)
+    val_metrics = binary_classification_metrics(split.val_y, calibrated_val_prob, split.val_returns)
+    test_metrics = binary_classification_metrics(split.test_y, calibrated_test_prob, split.test_returns)
     gate = validation_gate(val_metrics, test_metrics)
     status = lifecycle_status(gate, val_metrics, test_metrics)
     return _finite_payload({
@@ -161,6 +167,15 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version) 
         "sampleCounts": _sample_counts(split),
         "validation": val_metrics,
         "test": test_metrics,
+        "rawValidation": binary_classification_metrics(split.val_y, val_prob, split.val_returns),
+        "rawTest": binary_classification_metrics(split.test_y, test_prob, split.test_returns),
+        "probabilityCalibration": {
+            "calibrator": calibrator,
+            "validation": calibration_report(split.val_y, calibrated_val_prob, split.val_returns),
+            "test": calibration_report(split.test_y, calibrated_test_prob, split.test_returns),
+            "rawValidation": calibration_report(split.val_y, val_prob, split.val_returns),
+            "rawTest": calibration_report(split.test_y, test_prob, split.test_returns),
+        },
         "outOfSample": {"validation": val_metrics, "test": test_metrics},
         "validationGate": gate,
         "selectedConfidenceThreshold": gate.get("minConfidence"),
@@ -170,6 +185,7 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version) 
         "losses": losses,
         "returnStats": return_stats(dataset.future_returns),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
+        "probabilitySource": "calibrated_platt" if calibrator.get("status") == "fitted" else "raw_uncalibrated",
         "params": cfg.params,
     })
 
@@ -205,6 +221,7 @@ def _version_payload(report: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "modelFamily", "modelVersion", "trainedAt", "returnStats", "minMoveBps",
         "validationGate", "selectedConfidenceThreshold", "candidateStatus", "promotionReason",
+        "probabilityCalibration", "probabilitySource",
     )
     return {key: report.get(key) for key in keys}
 

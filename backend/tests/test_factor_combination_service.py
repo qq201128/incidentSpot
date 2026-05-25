@@ -17,6 +17,7 @@ from app.services.factor_combination_signal_service import (
     LIVE_MIN_WIN_RATE,
     build_live_signal_from_ranking,
 )
+from app.services.factor_combination_ranker import pairwise_diversity_payload
 from app.services.factor_combo_simulation_keys import (
     factor_combo_shadow_strategy_key,
     high_winrate_factor_combo_simulation_strategy_key,
@@ -325,11 +326,48 @@ def test_combination_search_reports_prefilter_diagnostics(
 
     assert result.tested_count == 2
     assert len(seen) == 2
-    assert diagnostics["mode"] == "targeted_layered_parallel_v1"
+    assert diagnostics["mode"] == "staged_layered_pairwise_diversity_v1"
     assert diagnostics["fullCombinationEstimate"] == 6
     assert diagnostics["generatedCombinationCount"] == 6
     assert diagnostics["prefilteredCombinationCount"] == 4
     assert diagnostics["parallelWorkers"] == 1
+    assert diagnostics["searchStages"][0]["stage"] == "size_2"
+    assert diagnostics["searchStages"][0]["generated"] == 6
+
+
+def test_combination_search_expands_only_surviving_previous_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    candidates = [_rank_filter_candidate(name) for name in ("factor_a", "factor_b", "factor_c", "factor_d")]
+    seen = []
+
+    def fake_result(_context, members):
+        names = tuple(member.factor.name for member in members)
+        seen.append(names)
+        passed = len(names) == 3 or names == ("factor_a", "factor_b")
+        return _rank_filter_row("__".join(names), passed), None
+
+    monkeypatch.setattr(combo_service, "_combination_result", fake_result)
+    result = combo_service._rank_combinations_with_diagnostics(
+        combo_service._CombinationContext(synthetic_frame, "BTCUSDT", "10m"),
+        candidates,
+        CombinationSearchConfig(
+            base_factor_limit=4,
+            combo_sizes=(2, 3),
+            result_limit=10,
+            prefilter_limit=10,
+            beam_width=10,
+            parallel_workers=1,
+        ),
+    )
+
+    size_three = [names for names in seen if len(names) == 3]
+
+    assert size_three
+    assert all({"factor_a", "factor_b"} <= set(names) for names in size_three)
+    assert result.diagnostics["searchStages"][0]["survivors"] == 1
+    assert result.diagnostics["searchStages"][1]["evaluated"] == len(size_three)
 
 
 def test_combination_ranking_report_includes_search_diagnostics(
@@ -358,6 +396,25 @@ def test_combination_ranking_report_includes_search_diagnostics(
     assert report["searchConfig"]["parallelWorkers"] == 1
     assert report["searchDiagnostics"]["evaluatedCombinationCount"] == 3
     assert "failureReasonCounts" in report["searchDiagnostics"]
+
+
+def test_pairwise_diversity_uses_member_to_member_correlation() -> None:
+    frame = pd.DataFrame(
+        {
+            "factor_a": np.arange(ROWS, dtype=float),
+            "factor_b": np.arange(ROWS, dtype=float) * 2.0,
+            "factor_c": np.sin(np.arange(ROWS, dtype=float)),
+        }
+    )
+    correlated = (_rank_filter_candidate("factor_a"), _rank_filter_candidate("factor_b"))
+    mixed = (_rank_filter_candidate("factor_a"), _rank_filter_candidate("factor_c"))
+
+    correlated_payload = pairwise_diversity_payload(frame, correlated)
+    mixed_payload = pairwise_diversity_payload(frame, mixed)
+
+    assert correlated_payload["pairwiseMaxAbsCorrelation"] == pytest.approx(1.0)
+    assert correlated_payload["pairwiseDiversityScore"] == pytest.approx(0.0)
+    assert mixed_payload["pairwiseDiversityScore"] > correlated_payload["pairwiseDiversityScore"]
 
 
 def test_live_signal_requires_profitable_combo_for_sim_candidate(

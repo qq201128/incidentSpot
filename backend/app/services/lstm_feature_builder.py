@@ -113,7 +113,8 @@ def duration_labeled_frame(
     min_move_bps: float,
 ) -> pd.DataFrame:
     sampled = duration_feature_frame(frame, duration).sort_values("open_time").reset_index(drop=True).copy()
-    sampled["future_return"] = sampled["close"].shift(-1) / sampled["close"] - 1.0
+    horizon_bars = _horizon_bar_count(duration, horizon_minutes)
+    sampled["future_return"] = sampled["close"].shift(-horizon_bars) / sampled["close"] - 1.0
     sampled["future_return_bps"] = sampled["future_return"] * 10_000.0
     sampled["future_return_abs_bps"] = sampled["future_return_bps"].abs()
     sampled["label_threshold_bps"] = _label_threshold_bps(sampled, min_move_bps)
@@ -247,6 +248,18 @@ def _duration_ms(duration: str) -> int:
 
 def _horizon_minutes(config: LstmTrainingConfig) -> int:
     return int(config.horizon_minutes or horizon_minutes_for_duration(config.duration))
+
+
+def _horizon_bar_count(duration: str, horizon_minutes: int) -> int:
+    duration_minutes = horizon_minutes_for_duration(duration)
+    horizon = int(horizon_minutes)
+    if horizon <= 0:
+        raise ValueError("horizon_minutes must be positive")
+    if horizon % duration_minutes != 0:
+        raise ValueError(
+            f"horizon_minutes={horizon} must be a multiple of duration minutes={duration_minutes}"
+        )
+    return max(1, horizon // duration_minutes)
 
 
 def _label_series(future_return: pd.Series, threshold: float | pd.Series) -> pd.Series:

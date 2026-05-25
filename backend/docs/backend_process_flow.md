@@ -391,7 +391,7 @@ SVM 模型族使用可扩展 hinge-loss 实现：线性核走 `SGDClassifier(los
 - 构造 quick-trade payload
 - 写入本地事件和订单记录
 
-模型族 shadow 策略默认启用 `10m` 和 `60m` 模拟实盘槽位，覆盖 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、SVM、RL、Bayesian、KNN。后端会强制这些模型族策略保持 `live_trading_enabled = false`，只写本地模拟事件/订单；预测结算会进入学习记忆和后续训练输入。
+模型族 shadow 策略默认启用 `10m` 和 `60m` 模拟实盘槽位，覆盖 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、SVM、QTable 方向分类器、Bayesian、KNN。`rl_strategy` 仅作为历史策略 key 保留；当前实现不是完整 RL 环境。后端会强制这些模型族策略保持 `live_trading_enabled = false`，只写本地模拟事件/订单；预测结算会进入学习记忆和后续训练输入。
 
 `GET /api/auto-trade/status` 会把每个策略的：
 

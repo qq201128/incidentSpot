@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
@@ -11,6 +10,7 @@ import pandas as pd
 from app.services.factor_duration_alignment import duration_entry_rows
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
+from app.services.trading_costs import roundtrip_cost_rate
 from app.services.high_winrate_combo_goal_config import (
     GoalSearchConfig,
     SEARCH_CANDIDATE_LIMIT,
@@ -21,6 +21,15 @@ from app.services.high_winrate_combo_goal_config import (
     signal_thresholds,
     validated_search_config as _validated_search_config,
 )
+from app.services.high_winrate_combo_goal_utils import (
+    combo_rejection,
+    combo_return_metrics,
+    nested_frames,
+    nested_split_payload,
+    profit_factor,
+    selected_hits,
+)
+from app.services.high_winrate_combo_goal_types import ComboHit, OrientedScore, RankedSearch, ScoreSearch
 from app.services import high_winrate_combo_goal_diagnostics as diag
 
 TARGET_WIN_RATE = 0.62
@@ -30,36 +39,10 @@ NEXT_ENTRY_HORIZON_BARS = 1
 ZSCORE_CLIP = 4.0
 COMBO_SIZES = (2, 3, 4)
 EXCLUDED_COLUMNS = frozenset({"open_time", "open", "high", "low", "close", "volume", "fwd_ret"})
-
-
-@dataclass(frozen=True)
-class OrientedScore:
-    score: pd.Series
-    orientation: int
-
-
-@dataclass(frozen=True)
-class ComboHit:
-    members: tuple[str, ...]
-    orientations: tuple[int, ...]
-    threshold: float
-    win_rate: float
-    profit_factor: float
-    trades: int
-    avg_return: float
-    score: pd.Series
-
-
-@dataclass(frozen=True)
-class ScoreSearch:
-    scores: dict[str, OrientedScore]
-    diagnostics: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class RankedSearch:
-    hits: list[ComboHit]
-    diagnostics: dict[str, Any]
+TRAIN_RATIO = 0.60
+VALIDATION_RATIO = 0.20
+NESTED_VALIDATION_MIN_TRADES = 20
+NESTED_TRAIN_MIN_TRADES = 20
 
 
 def set_target_min_trades(value: int) -> None:
@@ -81,14 +64,16 @@ def oriented_score_search(frame: pd.DataFrame) -> ScoreSearch:
     scores: dict[str, OrientedScore] = {}
     rejected: list[tuple[str, int]] = []
     max_valid_pairs = 0
+    training_frame = _nested_frames(frame)["train"]
     for name in numeric_factor_columns(frame):
         series = pd.to_numeric(frame[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
-        usable_pairs = usable_pair_count(series, frame["fwd_ret"])
+        train_series = series.reindex(training_frame.index)
+        usable_pairs = usable_pair_count(train_series, training_frame["fwd_ret"])
         max_valid_pairs = max(max_valid_pairs, usable_pairs)
         if usable_pairs < BACKTEST_MIN_PERIODS:
             rejected.append((name, usable_pairs))
             continue
-        orientation = orientation_for_series(series, frame["fwd_ret"])
+        orientation = orientation_for_series(train_series, training_frame["fwd_ret"])
         scores[name] = OrientedScore(expanding_zscore(series) * orientation, orientation)
     numeric_columns = numeric_factor_columns(frame)
     payload = diag.candidate_diagnostics(len(numeric_columns), len(scores), rejected, max_valid_pairs)
@@ -136,13 +121,31 @@ def ranked_hit_search(
 ) -> RankedSearch:
     hits: dict[tuple[str, ...], ComboHit] = {}
     cfg = validated_search_config(config)
-    names = search_candidate_names(frame, scores, cfg)
+    split = _nested_frames(frame)
+    train_min_trades = min(cfg.min_trades, NESTED_TRAIN_MIN_TRADES)
+    names = search_candidate_names(split["train"], scores, cfg, train_min_trades)
     payload = diag.ranked_search_diagnostics(names, cfg.candidate_limit)
+    payload["selectionMode"] = "train_threshold_validation_combo_v1"
+    payload["nestedSplit"] = _nested_split_payload(frame, split)
+    payload["testedValidationEvaluations"] = 0
     for size in COMBO_SIZES:
         for members in combinations(names, size):
-            best = best_combo_hit_with_diagnostics(frame, members, scores, payload, cfg)
-            if best is not None:
-                hits[best.members] = best
+            train_best = best_combo_hit_with_diagnostics(split["train"], members, scores, payload, cfg, min_trades=train_min_trades)
+            if train_best is None:
+                continue
+            validation_hit, rejected = combo_hit_result(
+                split["validation"],
+                members,
+                train_best.orientations,
+                train_best.score,
+                train_best.threshold,
+                cfg,
+                min_trades=min(cfg.min_trades, NESTED_VALIDATION_MIN_TRADES),
+            )
+            payload["testedValidationEvaluations"] += 1
+            diag.record_combo_gate_result(payload, validation_hit, rejected)
+            if validation_hit is not None:
+                hits[validation_hit.members] = validation_hit
     rows = list(hits.values())
     rows.sort(key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), reverse=True)
     payload["hitCount"] = len(rows)
@@ -160,10 +163,14 @@ def search_candidate_names(
     frame: pd.DataFrame,
     scores: dict[str, OrientedScore],
     config: GoalSearchConfig | None = None,
+    min_trades: int | None = None,
 ) -> list[str]:
     cfg = validated_search_config(config)
     hits = [
-        row for row in (best_combo_hit(frame, (name,), scores, min_win_rate=0.0, config=cfg) for name in scores)
+        row for row in (
+            best_combo_hit(frame, (name,), scores, min_win_rate=0.0, min_trades=min_trades or cfg.min_trades, config=cfg)
+            for name in scores
+        )
         if row is not None
     ]
     hits.sort(key=lambda row: (row.win_rate, row.profit_factor, row.avg_return, row.trades), reverse=True)
@@ -176,13 +183,15 @@ def best_combo_hit(
     scores: dict[str, OrientedScore],
     *,
     min_win_rate: float = TARGET_WIN_RATE,
+    min_trades: int | None = None,
     config: GoalSearchConfig | None = None,
 ) -> ComboHit | None:
     cfg = validated_search_config(config)
     combo_score = sum(scores[name].score for name in members) / len(members)
     orientations = tuple(scores[name].orientation for name in members)
+    required_trades = int(min_trades if min_trades is not None else cfg.min_trades)
     candidates = [
-        combo_hit(frame, members, orientations, combo_score, threshold, min_win_rate=min_win_rate, min_trades=cfg.min_trades)
+        combo_hit(frame, members, orientations, combo_score, threshold, min_win_rate=min_win_rate, min_trades=required_trades)
         for threshold in cfg.signal_thresholds
     ]
     valid = [row for row in candidates if row is not None]
@@ -195,6 +204,7 @@ def best_combo_hit_with_diagnostics(
     scores: dict[str, OrientedScore],
     diagnostics: dict[str, Any],
     config: GoalSearchConfig | None = None,
+    min_trades: int | None = None,
 ) -> ComboHit | None:
     cfg = validated_search_config(config)
     diagnostics["testedCombinations"] += 1
@@ -202,7 +212,7 @@ def best_combo_hit_with_diagnostics(
     orientations = tuple(scores[name].orientation for name in members)
     candidates = []
     for threshold in cfg.signal_thresholds:
-        hit, rejected = combo_hit_result(frame, members, orientations, combo_score, threshold, cfg)
+        hit, rejected = combo_hit_result(frame, members, orientations, combo_score, threshold, cfg, min_trades=min_trades)
         diagnostics["testedThresholdEvaluations"] += 1
         diag.record_combo_gate_result(diagnostics, hit, rejected)
         if hit is not None:
@@ -217,14 +227,21 @@ def combo_hit_result(
     score: pd.Series,
     threshold: float,
     config: GoalSearchConfig | None = None,
+    min_trades: int | None = None,
+    min_win_rate: float = TARGET_WIN_RATE,
 ) -> tuple[ComboHit | None, dict[str, Any] | None]:
     cfg = validated_search_config(config)
-    signal = pd.Series(np.where(score >= threshold, 1.0, np.where(score <= -threshold, -1.0, np.nan)), index=frame.index)
-    returns = (signal * frame["fwd_ret"]).replace([np.inf, -np.inf], np.nan).dropna()
+    aligned_score = score.reindex(frame.index)
+    signal = pd.Series(
+        np.where(aligned_score >= threshold, 1.0, np.where(aligned_score <= -threshold, -1.0, np.nan)),
+        index=frame.index,
+    )
+    returns = (signal * frame["fwd_ret"] - roundtrip_cost_rate()).replace([np.inf, -np.inf], np.nan).dropna()
     metrics = combo_return_metrics(returns)
-    if metrics["trades"] < cfg.min_trades:
+    required_trades = int(min_trades if min_trades is not None else cfg.min_trades)
+    if metrics["trades"] < required_trades:
         return None, combo_rejection(members, threshold, "min_trades_below_min", metrics)
-    if metrics["winRate"] < TARGET_WIN_RATE:
+    if metrics["winRate"] < min_win_rate:
         return None, combo_rejection(members, threshold, "win_rate_below_min", metrics)
     if metrics["profitFactor"] < SUCCESS_PROFIT_FACTOR_MIN:
         return None, combo_rejection(members, threshold, "profit_factor_below_min", metrics)
@@ -251,8 +268,12 @@ def combo_hit(
     min_win_rate: float = TARGET_WIN_RATE,
     min_trades: int = TARGET_MIN_TRADES,
 ) -> ComboHit | None:
-    signal = pd.Series(np.where(score >= threshold, 1.0, np.where(score <= -threshold, -1.0, np.nan)), index=frame.index)
-    returns = (signal * frame["fwd_ret"]).replace([np.inf, -np.inf], np.nan).dropna()
+    aligned_score = score.reindex(frame.index)
+    signal = pd.Series(
+        np.where(aligned_score >= threshold, 1.0, np.where(aligned_score <= -threshold, -1.0, np.nan)),
+        index=frame.index,
+    )
+    returns = (signal * frame["fwd_ret"] - roundtrip_cost_rate()).replace([np.inf, -np.inf], np.nan).dropna()
     if len(returns) < int(min_trades):
         return None
     win_rate = float((returns > 0).mean())
@@ -262,35 +283,13 @@ def combo_hit(
     return ComboHit(members, orientations, threshold, win_rate, factor, len(returns), float(returns.mean()), score)
 
 
-def combo_return_metrics(returns: pd.Series) -> dict[str, Any]:
-    if returns.empty:
-        return {"trades": 0, "winRate": 0.0, "profitFactor": 0.0, "avgReturn": 0.0}
-    return {
-        "trades": len(returns),
-        "winRate": float((returns > 0).mean()),
-        "profitFactor": profit_factor(returns),
-        "avgReturn": float(returns.mean()),
-    }
-
-
-def combo_rejection(
-    members: tuple[str, ...],
-    threshold: float,
-    reason: str,
-    metrics: dict[str, Any],
-) -> dict[str, Any]:
-    return {"members": members, "threshold": threshold, "reason": reason, **metrics}
-
-
-def profit_factor(returns: pd.Series) -> float:
-    gains = float(returns[returns > 0].sum())
-    losses = abs(float(returns[returns < 0].sum()))
-    return gains / losses if losses > 0 else math.inf
-
-
 def validated_search_config(config: GoalSearchConfig | None = None) -> GoalSearchConfig:
     return _validated_search_config(config, TARGET_MIN_TRADES)
 
 
-def selected_hits(hits: list[ComboHit], target_count: int) -> list[ComboHit]:
-    return hits[:target_count]
+def _nested_frames(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    return nested_frames(frame, TRAIN_RATIO, VALIDATION_RATIO)
+
+
+def _nested_split_payload(frame: pd.DataFrame, split: dict[str, pd.DataFrame]) -> dict[str, Any]:
+    return nested_split_payload(frame, split, TRAIN_RATIO, VALIDATION_RATIO)
