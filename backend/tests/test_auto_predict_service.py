@@ -439,6 +439,41 @@ def test_lstm_strategy_prediction_saves_own_simulation_row(monkeypatch) -> None:
     assert saved == [(lstm_key, False)]
 
 
+def test_ready_model_family_shadow_creates_simulation_trade(monkeypatch) -> None:
+    saved = []
+    trades = []
+    lstm_key = lstm_shadow_strategy_key("10m")
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
+    monkeypatch.setattr(
+        service,
+        "predict_lstm_shadow_prediction",
+        lambda *_args, **_kwargs: _prediction(lstm_key, symbol="BTCUSDT", duration=DEFAULT_DURATION),
+    )
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(
+        service,
+        "create_batch_combo_simulation_trade",
+        lambda settings, result: trades.append((settings.strategy_key, result["strategy_key"])),
+    )
+
+    asyncio.run(
+        service._save_one_model_family_shadow_prediction(
+            "lstm",
+            _settings(FACTOR_COMBO_STRATEGY_KEY),
+            ENTRY_OPEN_TIME,
+            asyncio.Lock(),
+        )
+    )
+
+    assert saved == [(lstm_key, False)]
+    assert trades == [(FACTOR_COMBO_STRATEGY_KEY, lstm_key)]
+
+
 def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     mixed = [
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m"),
@@ -610,6 +645,41 @@ def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions
         ("prepare", 1),
         ("run_batch", [lstm_shadow_strategy_key(DEFAULT_DURATION)]),
         ("backfill", [lstm_shadow_strategy_key(DEFAULT_DURATION)]),
+    ]
+
+
+def test_backfill_shadow_predictions_logs_returned_exception_traceback(monkeypatch) -> None:
+    logged = []
+    failure = RuntimeError("backfill failed")
+
+    class Logger:
+        def error(self, message: str, *args, exc_info=None) -> None:
+            logged.append((message, args, exc_info))
+
+    def backfill(*_args) -> None:
+        raise failure
+
+    monkeypatch.setattr(
+        service,
+        "_ready_model_family_shadow_backfill_targets",
+        lambda _settings_list: [("gru", "BTCUSDT", DEFAULT_DURATION)],
+    )
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "backfill_model_family_shadow_predictions", backfill)
+    monkeypatch.setattr(service, "logger", Logger())
+
+    asyncio.run(service._backfill_lstm_shadow_predictions([_settings(FACTOR_COMBO_STRATEGY_KEY)]))
+
+    assert logged == [
+        (
+            "model family shadow backfill failed family=%s symbol=%s duration=%s",
+            ("gru", "BTCUSDT", DEFAULT_DURATION),
+            (RuntimeError, failure, failure.__traceback__),
+        )
     ]
 
 

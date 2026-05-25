@@ -92,7 +92,10 @@ async def proxy_agg_trade_stream(client_ws: WebSocket, symbol: str, *, limit: in
         max_retry_wait_seconds=15,
     )
     await client_ws.accept()
-    await _send_agg_trade_snapshot(client_ws, sym, limit=limit)
+    try:
+        await _send_agg_trade_snapshot(client_ws, sym, limit=limit)
+    except (WebSocketDisconnect, ConnectionClosed):
+        return
 
     while True:
         try:
@@ -148,7 +151,10 @@ async def _send_agg_trade_snapshot(client_ws: WebSocket, symbol: str, *, limit: 
     except Exception:
         logger.exception("agg trade REST snapshot failed for %s", symbol)
         return
-    await client_ws.send_json({"type": "snapshot", "data": rows})
+    try:
+        await client_ws.send_json({"type": "snapshot", "data": rows})
+    except (WebSocketDisconnect, ConnectionClosed):
+        raise
 
 
 async def _run_agg_trade_stream(client_ws: WebSocket, state: AggTradeStreamState) -> AggTradeStreamState:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.app_startup import bootstrap_application, shutdown_application
@@ -96,6 +96,8 @@ async def ws_agg_trades(websocket: WebSocket, symbol: str = "btcusdt", limit: in
     bounded_limit = max(1, min(int(limit), 200))
     try:
         await proxy_agg_trade_stream(websocket, symbol, limit=bounded_limit)
+    except WebSocketDisconnect:
+        pass
     except Exception:
         logger.exception("agg trade websocket failed: symbol=%s", symbol)
 

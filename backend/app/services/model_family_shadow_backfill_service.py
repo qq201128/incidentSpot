@@ -6,6 +6,8 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.lstm_artifacts import artifact_paths, read_json
 from app.services.lstm_config import duration_ms
+from app.services.lstm_feature_builder import duration_feature_frame
+from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.model_family_config import model_family_strategy_key, normalize_model_family
 from app.services.model_family_prediction_service import predict_model_family_shadow_predictions
 from app.services.prediction_cache_service import save_prediction
@@ -38,9 +40,26 @@ def missing_model_family_shadow_entry_times(
     start = _collection_start_entry_time(selected, sym, duration, int(current_entry_open_time))
     if start > int(current_entry_open_time):
         return ()
-    expected = set(range(start, int(current_entry_open_time) + 1, duration_ms(duration)))
+    expected = _predictable_entry_times(sym, duration, start, int(current_entry_open_time))
+    if not expected:
+        return ()
     existing = _existing_prediction_times(selected, sym, duration, min(expected), max(expected))
     return tuple(sorted(expected - existing))
+
+
+def _predictable_entry_times(symbol: str, duration: str, start_open_time: int, end_open_time: int) -> set[int]:
+    candidates = set(range(int(start_open_time), int(end_open_time) + 1, duration_ms(duration)))
+    available = _available_feature_entry_times(symbol, duration, int(end_open_time))
+    return candidates & available
+
+
+def _available_feature_entry_times(symbol: str, duration: str, current_entry_open_time: int) -> set[int]:
+    sampled = duration_feature_frame(load_lstm_market_frame(symbol, duration), duration)
+    return {
+        int(entry)
+        for entry in sampled["entry_open_time"].tolist()
+        if int(entry) <= int(current_entry_open_time)
+    }
 
 
 def _collection_start_entry_time(family: str, symbol: str, duration: str, current_entry_open_time: int) -> int:

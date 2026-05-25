@@ -59,8 +59,32 @@ def test_factor_learning_filter_blocks_remembered_loss_feature() -> None:
     assert result["factorLearning"]["state"] == "active"
     assert result["factorLearning"]["filterPassed"] is False
     assert result["factorLearning"]["lossPatternMatches"]
+    assert result["factorLearning"]["hardBlocked"] is True
+    assert result["factorLearning"]["hardBlockReason"] == "factor_learning_loss_pattern_blocked"
     assert result["qualityPassed"] is False
-    assert result["qualityGateReason"] == "factor_learning_filter_blocked"
+    assert result["qualityGateReason"] == "factor_learning_loss_pattern_blocked"
+
+
+def test_loss_pattern_blocks_even_when_quality_gate_is_not_enforced() -> None:
+    frame = _learning_frame()
+    memory = build_factor_learning_memory(
+        frame,
+        _ranking_report(),
+        _settled_predictions(),
+        symbol="BTCUSDT",
+        duration="10m",
+    )
+
+    result = apply_factor_learning_memory(
+        _live_payload(),
+        frame,
+        frame.index[-1],
+        memory,
+        enforce_quality_gate=False,
+    )
+
+    assert result["qualityPassed"] is False
+    assert result["qualityGateReason"] == "factor_learning_loss_pattern_blocked"
 
 
 def test_factor_learning_filter_ignores_mining_forbidden_region_member() -> None:

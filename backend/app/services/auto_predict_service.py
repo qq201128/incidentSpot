@@ -261,7 +261,9 @@ async def _save_model_family_shadow_predictions(
             *((settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)),
             entry_open_time=entry_open_time,
         )
-        await _save_prediction(result, write_lock)
+        saved = await _save_prediction(result, write_lock)
+        if saved:
+            await _save_model_family_shadow_trade(settings, result)
 
 
 async def _save_factor_candidate_signals(
@@ -300,7 +302,15 @@ async def _save_one_model_family_shadow_prediction(family, settings, entry_open_
         *((settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)),
         entry_open_time=entry_open_time,
     )
-    await _save_prediction(result, write_lock)
+    saved = await _save_prediction(result, write_lock)
+    if saved:
+        await _save_model_family_shadow_trade(settings, result)
+
+
+async def _save_model_family_shadow_trade(parent: AutoTradeSettings, result: dict) -> None:
+    if not result.get("trade_quality_passed"):
+        return
+    await asyncio.to_thread(create_batch_combo_simulation_trade, parent, result)
 
 
 async def _save_prediction(
@@ -534,9 +544,15 @@ async def _backfill_lstm_shadow_predictions(settings_list: list[AutoTradeSetting
         ),
         return_exceptions=True,
     )
-    for summary in summaries:
+    for (family, symbol, duration), summary in zip(targets, summaries):
         if isinstance(summary, Exception):
-            logger.exception("model family shadow backfill failed")
+            logger.error(
+                "model family shadow backfill failed family=%s symbol=%s duration=%s",
+                family,
+                symbol,
+                duration,
+                exc_info=(type(summary), summary, summary.__traceback__),
+            )
             continue
         if summary["savedCount"]:
             logger.info("predict: model family shadow backfill summary=%s", summary)

@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.services.factor_combo_scoring import oriented_zscore
 from app.services.factor_learning_controls import learning_risk_blocked_factor_names
+from app.services.factor_learning_loss_match import matched_loss_patterns
 from app.services.factor_learning_memory_store import load_factor_learning_memory
 
 SCORE_DECIMALS = 6
@@ -52,7 +53,7 @@ def apply_factor_learning_memory(
     blocked_members = _blocked_member_matches(members, memory)
     weighted = _weighted_member_score(frame, index, members, memory.get("weights") or {}, zscore_cache)
     enriched = _apply_weighted_score(dict(payload), weighted)
-    loss_matches = _matched_loss_patterns(frame, index, memory)
+    loss_matches = matched_loss_patterns(frame, index, memory)
     confirmations = _confirmation_count(frame, index, members, enriched["direction"], zscore_cache)
     filter_passed = _filter_passed(
         memory.get("filters") or {},
@@ -61,12 +62,10 @@ def apply_factor_learning_memory(
         loss_matches,
         blocked_members,
     )
-    if enforce_quality_gate:
-        enriched["qualityPassed"] = bool(payload["qualityPassed"] and filter_passed)
-        if payload["qualityPassed"] and not filter_passed:
-            enriched["qualityGateReason"] = "factor_learning_filter_blocked"
-    else:
-        enriched["qualityPassed"] = bool(payload["qualityPassed"])
+    block_reason = _block_reason(loss_matches, blocked_members, filter_passed)
+    enriched["qualityPassed"] = _quality_passed(payload, enforce_quality_gate, filter_passed, block_reason)
+    if payload["qualityPassed"] and not enriched["qualityPassed"] and block_reason is not None:
+        enriched["qualityGateReason"] = block_reason
     enriched["factorLearning"] = _learning_payload(
         memory,
         payload,
@@ -77,6 +76,33 @@ def apply_factor_learning_memory(
         filter_passed,
     )
     return enriched
+
+
+def _quality_passed(
+    payload: dict[str, Any],
+    enforce_quality_gate: bool,
+    filter_passed: bool,
+    block_reason: str | None,
+) -> bool:
+    if block_reason in {"factor_learning_loss_pattern_blocked", "factor_learning_member_blocked"}:
+        return False
+    if enforce_quality_gate:
+        return bool(payload["qualityPassed"] and filter_passed)
+    return bool(payload["qualityPassed"])
+
+
+def _block_reason(
+    loss_matches: list[dict[str, Any]],
+    blocked_members: list[dict[str, Any]],
+    filter_passed: bool,
+) -> str | None:
+    if loss_matches:
+        return "factor_learning_loss_pattern_blocked"
+    if blocked_members:
+        return "factor_learning_member_blocked"
+    if not filter_passed:
+        return "factor_learning_filter_blocked"
+    return None
 
 
 def _with_missing_memory(payload: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +164,8 @@ def _learning_payload(
         ),
         "lossPatternMatches": loss_matches,
         "blockedMembers": blocked_members,
+        "hardBlocked": bool(loss_matches or blocked_members),
+        "hardBlockReason": _block_reason(loss_matches, blocked_members, filter_passed),
     }
 
 
@@ -203,38 +231,6 @@ def _cached_oriented_zscore(
     if key not in zscore_cache:
         zscore_cache[key] = oriented_zscore(series, orientation)
     return zscore_cache[key]
-
-
-def _matched_loss_patterns(frame: pd.DataFrame, index: Any, memory: dict[str, Any]) -> list[dict[str, Any]]:
-    patterns = (memory.get("lossMemory") or {}).get("patterns") or []
-    matches = []
-    for pattern in patterns:
-        match = _loss_pattern_match(frame, index, pattern)
-        if match is not None:
-            matches.append(match)
-    return matches
-
-
-def _loss_pattern_match(frame: pd.DataFrame, index: Any, pattern: dict[str, Any]) -> dict[str, Any] | None:
-    feature = str(pattern.get("feature") or "")
-    if not feature or feature not in frame.columns:
-        return None
-    value = _finite_float(frame.at[index, feature])
-    threshold = _finite_float(pattern.get("threshold"))
-    if value is None or threshold is None:
-        return None
-    direction = str(pattern.get("direction"))
-    matched = value >= threshold if direction == "high" else value <= threshold
-    if not matched:
-        return None
-    return {
-        "feature": feature,
-        "direction": direction,
-        "threshold": threshold,
-        "value": round(value, SCORE_DECIMALS),
-        "lossRate": pattern.get("lossRate"),
-        "support": pattern.get("support"),
-    }
 
 
 def _filter_passed(

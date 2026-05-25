@@ -44,7 +44,10 @@ def evaluate_simulation_event_demotion(
             )
             for key in keys
         ]
-        watchlist = [item for item in evaluations if item["status"] == STATUS_DEMOTED]
+        evaluations = sort_simulation_rows_by_win_rate(evaluations)
+        watchlist = sort_simulation_rows_by_win_rate(
+            [item for item in evaluations if item["status"] == STATUS_DEMOTED]
+        )
         return {
             "source": source,
             "symbol": sym,
@@ -121,6 +124,26 @@ def _display_rule(rows: list[dict[str, Any]]) -> str | None:
 
 def _total_pnl(rows: list[dict[str, Any]]) -> float:
     return round(sum(float(row["event_pnl"]) for row in rows if row.get("event_pnl") is not None), 6)
+
+
+def sort_simulation_rows_by_win_rate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=_win_rate_sort_key, reverse=True)
+
+
+def _win_rate_sort_key(row: dict[str, Any]) -> tuple[int, float, int]:
+    win_rate = _finite_float(row.get("winRate"))
+    has_win_rate = 1 if win_rate is not None else 0
+    return (has_win_rate, win_rate or 0.0, int(row.get("sampleCount") or 0))
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
 
 
 def _utc_now() -> str:

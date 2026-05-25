@@ -390,6 +390,43 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
 
 
+def test_live_signal_hard_blocks_learned_loss_pattern_without_quality_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(
+        factor_learning_signal_filter,
+        "load_factor_learning_memory",
+        lambda *_args: {
+            "lossMemory": {"patterns": [{"feature": "factor_a", "direction": "high", "threshold": -999.0}]},
+            "filters": {},
+            "weights": {},
+        },
+    )
+    row = {
+        "factorName": "goal_combo__factor_a",
+        "factorDisplayName": "组合：factor_a",
+        "members": [{"name": "factor_a", "category": "return", "orientation": 1}],
+        "method": "test",
+        "threshold": 0.0,
+        "winRate": 0.70,
+        "profitFactor": 1.20,
+        "totalPeriods": ROWS,
+        "walkForwardPassed": True,
+    }
+
+    signal = build_live_signal_from_ranking(
+        synthetic_frame,
+        row,
+        symbol="BTCUSDT",
+        duration="10m",
+        apply_quality_gate=False,
+    )
+
+    assert signal["qualityPassed"] is False
+    assert signal["qualityGateReason"] == "factor_learning_loss_pattern_blocked"
+
+
 def test_live_signal_requires_walk_forward_for_regular_combo(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,

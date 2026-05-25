@@ -5,6 +5,12 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.factor_learning_common import round_metric, utc_now
 from app.services.factor_combo_simulation_keys import factor_combo_simulation_strategy_keys
+from app.services.high_winrate_strategy_metrics import (
+    ACTIVE_SAMPLE_COUNT,
+    ACTIVE_WIN_RATE_MIN,
+    LOSS_STREAK_LIMIT,
+    MIN_PROFIT_FACTOR,
+)
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 MONITOR_SAMPLE_LIMIT = 200
@@ -25,6 +31,7 @@ def factor_combo_monitor_report(symbol: str, duration: str) -> dict[str, Any]:
         "updatedAt": utc_now(),
         "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
         "thresholds": _threshold_payload(),
+        "paperLiveGate": _paper_live_gate(metrics),
         "metrics": metrics,
         "issues": issues,
         "solutions": _solutions(issues),
@@ -62,6 +69,9 @@ def _monitor_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "predictionSuccessRate": _success_rate(rows),
         "qualityPassedSuccessRate": _success_rate(passed),
         "qualityPassRate": _ratio(len(passed), len(rows)),
+        "profitFactor": _profit_factor(rows),
+        "avgReturn": _avg_return(rows),
+        "totalReturn": _total_return(rows),
         "latestConsecutiveLosses": _latest_consecutive_losses(rows),
     }
 
@@ -121,6 +131,58 @@ def _ratio(numerator: int, denominator: int) -> float | None:
     return round_metric(numerator / denominator, 4)
 
 
+def _paper_live_gate(metrics: dict[str, Any]) -> dict[str, Any]:
+    reason = _paper_live_gate_reason(metrics)
+    return {
+        "passed": reason == "passed",
+        "reason": reason,
+        "readyForSmallLive": reason == "passed",
+    }
+
+
+def _paper_live_gate_reason(metrics: dict[str, Any]) -> str:
+    if metrics["sampleCount"] < ACTIVE_SAMPLE_COUNT:
+        return "insufficient_settled_samples"
+    if metrics["latestConsecutiveLosses"] >= LOSS_STREAK_LIMIT:
+        return "consecutive_losses"
+    if _below(metrics["predictionSuccessRate"], ACTIVE_WIN_RATE_MIN):
+        return "live_win_rate_below_target"
+    if _below(metrics["profitFactor"], MIN_PROFIT_FACTOR):
+        return "profit_factor_below_one"
+    return "passed"
+
+
+def _profit_factor(rows: list[dict[str, Any]]) -> float | None:
+    values = _return_values(rows)
+    gains = sum(value for value in values if value > 0)
+    losses = -sum(value for value in values if value < 0)
+    if not values or losses == 0:
+        return None
+    return round_metric(gains / losses, 4)
+
+
+def _avg_return(rows: list[dict[str, Any]]) -> float | None:
+    values = _return_values(rows)
+    if not values:
+        return None
+    return round_metric(sum(values) / len(values), 6)
+
+
+def _total_return(rows: list[dict[str, Any]]) -> float | None:
+    values = _return_values(rows)
+    if not values:
+        return None
+    return round_metric(sum(values), 6)
+
+
+def _return_values(rows: list[dict[str, Any]]) -> list[float]:
+    return [float(row["actual_return"]) for row in rows if row.get("actual_return") is not None]
+
+
+def _below(value: float | None, threshold: float) -> bool:
+    return value is not None and value < threshold
+
+
 def _latest_consecutive_losses(rows: list[dict[str, Any]]) -> int:
     count = 0
     for row in rows:
@@ -143,6 +205,10 @@ def _threshold_payload() -> dict[str, float | int]:
         "lowSuccessRate": LOW_SUCCESS_RATE,
         "lowPassedSuccessRate": LOW_PASSED_SUCCESS_RATE,
         "consecutiveLossAlertCount": CONSECUTIVE_LOSS_ALERT_COUNT,
+        "paperLiveSampleCount": ACTIVE_SAMPLE_COUNT,
+        "paperLiveMinWinRate": ACTIVE_WIN_RATE_MIN,
+        "paperLiveMinProfitFactor": MIN_PROFIT_FACTOR,
+        "paperLiveLossStreakLimit": LOSS_STREAK_LIMIT,
     }
 
 

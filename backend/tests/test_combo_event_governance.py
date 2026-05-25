@@ -7,6 +7,7 @@ from app.services import high_winrate_strategy_demotion as demotion
 from app.services.batch_combo_event_demotion import evaluate_batch_combo_event_demotion
 from app.services.high_winrate_strategy_metrics import ACTIVE_SAMPLE_COUNT
 from app.services.high_winrate_strategy_rotation import ensure_high_winrate_status_table
+from app.services.model_family_config import model_family_strategy_key
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.shadow_event_deviation_service import shadow_event_deviation_report
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
@@ -129,7 +130,32 @@ def test_combo_event_monitoring_includes_single_and_batch_sections(monkeypatch, 
 
     assert "batchComboDemotion" in payload
     assert "factorCandidateDemotion" in payload
+    assert "modelShadowSimulation" in payload
     assert payload["simulationObservation"]["evaluatedCount"] == 0
+    assert payload["simulationObservation"]["modelShadowEventCount"] == 0
+
+
+def test_combo_event_monitoring_reports_model_shadow_simulation(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "model-shadow.db"
+    model_key = model_family_strategy_key("lstm", "10m")
+    _init_db(db_path)
+    _insert_model_prediction(db_path, strategy_key=model_key)
+    _insert_event(db_path, strategy_key=model_key, open_time=40_000, direction="up", result="YES", side="BUY")
+    monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr("app.services.model_shadow_simulation_monitor.get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(
+        "app.services.combo_event_governance.shadow_event_deviation_report",
+        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}, "issues": []},
+    )
+
+    from app.services.combo_event_governance import compute_combo_event_monitoring
+
+    payload = compute_combo_event_monitoring("BTCUSDT", "10m")
+    model = payload["modelShadowSimulation"]
+
+    assert model["summary"]["qualityPassedCount"] == 1
+    assert model["summary"]["simulationEventCount"] == 1
+    assert payload["simulationObservation"]["modelShadowEventCount"] == 1
 
 
 def _init_db(path: Path) -> None:
@@ -156,9 +182,11 @@ def _init_db(path: Path) -> None:
               duration TEXT NOT NULL,
               open_time INTEGER NOT NULL,
               direction TEXT NOT NULL,
+              trade_quality_passed INTEGER,
               prediction_correct INTEGER,
               actual_return REAL,
-              settled_at TEXT
+              settled_at TEXT,
+              created_at TEXT
             );
             CREATE TABLE events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,6 +234,24 @@ def _insert_prediction(path: Path, *, open_time: int, correct: bool, actual_retu
             VALUES(?, ?, 'BTCUSDT', '10m', ?, 'up', ?, ?, 'done')
             """,
             (BATCH_KEY, BATCH_KEY, open_time, int(correct), actual_return),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_model_prediction(path: Path, *, strategy_key: str) -> None:
+    conn = _connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO predictions(
+              signal_key, strategy_key, symbol, duration, open_time, direction,
+              trade_quality_passed, prediction_correct, actual_return, settled_at, created_at
+            )
+            VALUES(?, ?, 'BTCUSDT', '10m', 40000, 'up', 1, 1, 0.01, 'done', 'now')
+            """,
+            (strategy_key, strategy_key),
         )
         conn.commit()
     finally:
