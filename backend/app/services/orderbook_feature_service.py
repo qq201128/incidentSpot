@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.rule_config import BPS_DIVISOR
 
 
@@ -41,21 +41,24 @@ def build_orderbook_snapshot(request: OrderbookSnapshotRequest) -> dict[str, Any
 
 
 def persist_orderbook_tick(snapshot: dict[str, Any]) -> None:
-    conn = get_conn()
-    try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO orderbook_ticks(
-              symbol, quote_time, best_bid, best_ask, best_bid_qty, best_ask_qty,
-              bid_qty_sum, ask_qty_sum, imbalance, microprice, microprice_bps, ofi, ofi_ratio
+    def _persist() -> None:
+        conn = get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO orderbook_ticks(
+                  symbol, quote_time, best_bid, best_ask, best_bid_qty, best_ask_qty,
+                  bid_qty_sum, ask_qty_sum, imbalance, microprice, microprice_bps, ofi, ofi_ratio
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _tick_values(snapshot),
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            _tick_values(snapshot),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_persist)
 
 
 def _top_levels(symbol: str, request: OrderbookSnapshotRequest) -> OrderbookTop:

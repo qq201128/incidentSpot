@@ -42,14 +42,12 @@ TECHNICAL_LABEL_PREFIXES = (
 
 
 def signal_type(strategy_key: str, rows: list[dict[str, Any]] | None = None) -> str:
-    if strategy_key in high_winrate_factor_combo_simulation_strategy_keys():
-        return SIGNAL_HIGH_WINRATE_COMBO
-    if strategy_key.startswith(BATCH_HIGH_WINRATE_KEY_PREFIX):
-        return SIGNAL_HIGH_WINRATE_COMBO
     if strategy_key in factor_combo_simulation_strategy_keys():
         return SIGNAL_FACTOR_COMBO
-    if strategy_key.startswith(BATCH_COMBO_KEY_PREFIX):
+    if strategy_key.startswith(BATCH_COMBO_KEY_PREFIX) or strategy_key.startswith(BATCH_HIGH_WINRATE_KEY_PREFIX):
         return SIGNAL_FACTOR_COMBO
+    if strategy_key in high_winrate_factor_combo_simulation_strategy_keys():
+        return SIGNAL_HIGH_WINRATE_COMBO
     if is_factor_candidate_signal_key(strategy_key):
         return _candidate_signal_type(rows)
     if is_model_family_shadow_strategy(strategy_key):

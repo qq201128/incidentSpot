@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
-import { strategyLabel } from "../utils/strategyLabels";
+import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 
 const PAGE_SIZE = 6;
 const FILTER_ALL = "";
@@ -140,7 +140,9 @@ function EventHeader({ item }) {
     <div className="order-card-head">
       <div className="order-pair-row">
         <strong>{item.symbol.replace("USDT", "/USDT")}</strong>
-        <span className="strategy-tag">{strategyLabel(item.strategyKey)}</span>
+        <span className="strategy-tag">
+          {simulationTypeLabel(item.strategyKey, item.aiHighWinrateRule) || strategyLabel(item.strategyKey)}
+        </span>
         <span className={sideTagClass(item.orderSide)}>{sideLabel(item.orderSide)}</span>
         <span className={statusTagClass(item.status)}>{statusLabel(item.status)}</span>
       </div>

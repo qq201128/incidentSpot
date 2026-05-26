@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.db.session import get_conn
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
@@ -184,6 +184,32 @@ def get_klines(
     remote_rows = fetch_klines(symbol, interval, limit=limit)
     _upsert_klines(symbol, interval, remote_rows)
     return remote_rows
+
+@router.post("/market/backfill")
+def backfill_market_data(
+    background_tasks: BackgroundTasks,
+    symbol: str = Query(..., min_length=6),
+    duration: str | None = Query(None, description="omit to backfill all rule durations"),
+) -> dict:
+    """Queue kline / market-context backfill for factor research and combo ranking."""
+    from app.services.market_data_backfill_service import backfill_symbol_market_data
+
+    sym = symbol.upper()
+    durations = (duration,) if duration else None
+    if duration and duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+
+    def _run() -> None:
+        backfill_symbol_market_data(sym, durations=durations)
+
+    background_tasks.add_task(_run)
+    return {
+        "ok": True,
+        "symbol": sym,
+        "duration": duration,
+        "message": "已排队补全 K 线与因子依赖数据，完成后请刷新因子页。",
+    }
+
 
 @router.post("/predict")
 def predict(

@@ -116,7 +116,7 @@ def strategy_definition(strategy_key: str | None) -> StrategyDefinition:
     if key.startswith(f"{FACTOR_COMBO_STRATEGY_KEY}_combo_"):
         return _batch_combo_strategy_definition(key, "批量多因子组合模拟", "factor_combination_ranking")
     if key.startswith(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_combo_"):
-        return _batch_combo_strategy_definition(key, "批量高胜率组合模拟", "high_winrate_factor_combo_goal")
+        return _batch_combo_strategy_definition(key, "批量多因子组合模拟", "factor_combination_ranking")
     if key.startswith(f"{FACTOR_COMBO_STRATEGY_KEY}_top"):
         return _factor_combo_shadow_strategy_definition(key)
     if key.startswith(f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top"):

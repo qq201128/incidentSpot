@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
 
 logger = logging.getLogger("uvicorn.error")
@@ -40,24 +40,30 @@ def save_cached_high_winrate_combo_ranking(report: dict[str, Any]) -> None:
     persisted = {**report, "cacheMeta": ranking_cache_metadata(symbol, duration)}
     payload = json.dumps(persisted, ensure_ascii=False)
     config = json.dumps(persisted.get("target") or {}, ensure_ascii=False)
-    conn = get_conn()
-    try:
-        _ensure_table(conn)
-        conn.execute(
-            """
-            INSERT INTO high_winrate_combo_ranking_cache(symbol, duration, updated_at, total, search_config, payload)
-            VALUES(?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol, duration) DO UPDATE SET
-              updated_at = excluded.updated_at,
-              total = excluded.total,
-              search_config = excluded.search_config,
-              payload = excluded.payload
-            """,
-            (symbol, duration, _utc_now(), len(ranking), config, payload),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    updated_at = _utc_now()
+    ranking_total = len(ranking)
+
+    def _persist() -> None:
+        conn = get_conn()
+        try:
+            _ensure_table(conn)
+            conn.execute(
+                """
+                INSERT INTO high_winrate_combo_ranking_cache(symbol, duration, updated_at, total, search_config, payload)
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, duration) DO UPDATE SET
+                  updated_at = excluded.updated_at,
+                  total = excluded.total,
+                  search_config = excluded.search_config,
+                  payload = excluded.payload
+                """,
+                (symbol, duration, updated_at, ranking_total, config, payload),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_persist)
 
 
 def _cache_row(symbol: str, duration: str) -> Any | None:

@@ -3,7 +3,7 @@ import { fetchEventsPage } from "../api/client";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { factorLabel } from "../utils/factorLearningLabels";
-import { strategyLabel } from "../utils/strategyLabels";
+import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 import EnsembleRankingTable from "./EnsembleRankingTable";
 
 const PAGE_SIZE = 8;
@@ -391,10 +391,10 @@ function signed(value) {
 }
 
 function ruleName(event) {
-  if (event.aiHighWinrateRule) {
-    return factorLabel(event.aiHighWinrateRule);
-  }
+  const sim = simulationTypeLabel(event.strategyKey, event.aiHighWinrateRule);
+  if (sim) return sim;
   if (event.strategyKey) return strategyLabel(event.strategyKey);
+  if (event.aiHighWinrateRule) return factorLabel(event.aiHighWinrateRule);
   return event.title || "手动";
 }
 
@@ -412,7 +412,7 @@ const eventLabels = () => [
   "结果",
   "PnL",
   "置信",
-  "规则",
+  "类型",
 ];
 const orderLabels = () => ["事件ID", "交易对", "方向", "数量", "支付率", "下单", "订单", "模式", "外部ID"];
 const settlementLabels = () => ["事件ID", "方向", "入场价", "结算价", "结果", "PnL", "报价", "来源"];

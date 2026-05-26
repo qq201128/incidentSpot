@@ -81,8 +81,9 @@ def _event_title(settings: AutoTradeSettings, prediction: dict[str, Any], side: 
 def _event_strategy_label(settings: AutoTradeSettings, prediction: dict[str, Any]) -> str:
     combo_rule = str(prediction.get("high_winrate_rule") or "").strip()
     if is_batch_combo_simulation_strategy(settings.strategy_key) and combo_rule:
-        if combo_rule.startswith("goal_combo__"):
-            return f"GE70·{combo_rule.removeprefix('goal_combo__')[:48]}"
+        for prefix in ("goal_combo__", "combo__"):
+            if combo_rule.startswith(prefix):
+                return f"组合·{combo_rule.removeprefix(prefix)[:48]}"
         return f"组合·{combo_rule[:48]}"
     return strategy_definition(settings.strategy_key).name
 

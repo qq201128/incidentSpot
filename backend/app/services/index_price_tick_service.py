@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
-import time
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 
 
 def persist_index_price_tick(row: dict[str, Any]) -> None:
@@ -20,25 +18,16 @@ def persist_index_price_tick(row: dict[str, Any]) -> None:
             VALUES(?, ?, ?, ?)
             """
     params = (symbol, quote_time, index_price, mark_price)
-    backoff_s = (0.0, 0.04, 0.1, 0.25)
-    last: sqlite3.OperationalError | None = None
-    for delay in backoff_s:
-        if delay:
-            time.sleep(delay)
+
+    def _persist() -> None:
         conn = get_conn()
         try:
             conn.execute(sql, params)
             conn.commit()
-            return
-        except sqlite3.OperationalError as exc:
-            msg = str(exc).lower()
-            if "locked" not in msg and "busy" not in msg:
-                raise
-            last = exc
         finally:
             conn.close()
-    if last is not None:
-        raise last
+
+    run_db_write_with_retry(_persist)
 
 
 def nearest_index_price_tick(symbol: str, target_time_ms: int, max_drift_ms: int):

@@ -268,7 +268,7 @@ def db_write_lock():
     _DB_WRITE_LOCK.release()
 
 
-def run_db_write_with_retry(operation, *, attempts: int = 6, base_delay: float = 0.05):
+def run_db_write_with_retry(operation, *, attempts: int = 8, base_delay: float = 0.05):
   delay = base_delay
   for attempt in range(attempts):
     try:
@@ -276,10 +276,12 @@ def run_db_write_with_retry(operation, *, attempts: int = 6, base_delay: float =
         return operation()
     except sqlite3.OperationalError as exc:
       message = str(exc).lower()
-      if "locked" not in message or attempt == attempts - 1:
+      if "locked" not in message and "busy" not in message:
+        raise
+      if attempt == attempts - 1:
         raise
       time.sleep(delay)
-      delay = min(delay * 2, 1.0)
+      delay = min(delay * 2, 2.0)
 
 
 def init_db() -> None:

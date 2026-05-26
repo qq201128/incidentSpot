@@ -87,6 +87,26 @@ const BATCH_COMBO_PREFIX = "factor_combo_ranker_v1_combo_";
 const BATCH_HIGH_WINRATE_PREFIX = "high_winrate_factor_combo_v1_combo_";
 const FACTOR_CANDIDATE_PREFIX = "factor_candidate_signal_";
 
+/** 回测达标模拟单：事件记录里只区分单因子 / 多因子 */
+export function simulationKindLabel(key) {
+  const lowered = String(key || "").trim().toLowerCase();
+  if (!lowered) return "";
+  if (lowered.startsWith(FACTOR_CANDIDATE_PREFIX)) return "单因子";
+  if (lowered.startsWith(BATCH_COMBO_PREFIX) || lowered.startsWith(BATCH_HIGH_WINRATE_PREFIX)) {
+    return "多因子";
+  }
+  return "";
+}
+
+/** 单因子/多因子 + 具体因子名（用于事件列表） */
+export function simulationTypeLabel(strategyKey, factorName) {
+  const kind = simulationKindLabel(strategyKey);
+  if (!kind) return "";
+  const name = factorLabel(factorName);
+  if (!name || name === "—") return kind;
+  return `${kind} · ${name}`;
+}
+
 export function strategyLabel(key) {
   const raw = String(key || "").trim();
   if (!raw) return STRATEGY_LABELS.manual;
@@ -137,7 +157,7 @@ function batchComboLabel(key) {
   }
   if (lowered.startsWith(BATCH_HIGH_WINRATE_PREFIX)) {
     const suffix = key.slice(BATCH_HIGH_WINRATE_PREFIX.length);
-    return suffix ? `高胜率批量执行·${suffix.slice(-4)}` : "高胜率批量执行";
+    return suffix ? `多因子批量执行·${suffix.slice(-4)}` : "多因子批量执行";
   }
   return "";
 }

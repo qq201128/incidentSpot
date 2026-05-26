@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
 from app.services.auto_trade_service import list_auto_trade_settings
 
@@ -73,22 +73,26 @@ def save_cached_ranking(
     )
     total = len(ranking)
     ts = datetime.now(timezone.utc).isoformat()
-    conn = get_conn()
-    try:
-        conn.execute(
-            """
-            INSERT INTO factor_ranking_cache(symbol, duration, updated_at, total, payload)
-            VALUES(?, ?, ?, ?, ?)
-            ON CONFLICT(symbol, duration) DO UPDATE SET
-              updated_at = excluded.updated_at,
-              total = excluded.total,
-              payload = excluded.payload
-            """,
-            (sym, duration, ts, total, payload),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+
+    def _persist() -> None:
+        conn = get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO factor_ranking_cache(symbol, duration, updated_at, total, payload)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, duration) DO UPDATE SET
+                  updated_at = excluded.updated_at,
+                  total = excluded.total,
+                  payload = excluded.payload
+                """,
+                (sym, duration, ts, total, payload),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_persist)
 
 
 def factor_ranking_precomputed_symbols() -> list[str]:

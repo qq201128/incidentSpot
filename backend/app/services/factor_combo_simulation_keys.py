@@ -33,16 +33,14 @@ def high_winrate_factor_combo_simulation_strategy_key(rank: int) -> str:
 
 def simulation_strategy_key_for_combo(factor_name: str, rank: int) -> str:
     if rank in FACTOR_COMBO_TOP_SIMULATION_RANKS:
-        if is_high_winrate_combo_name(factor_name):
-            return high_winrate_factor_combo_simulation_strategy_key(rank)
         return factor_combo_simulation_strategy_key(rank)
     return simulation_strategy_key_for_factor_name(factor_name)
 
 
 def simulation_strategy_key_for_factor_name(factor_name: str) -> str:
-    prefix = BATCH_HIGH_WINRATE_KEY_PREFIX if is_high_winrate_combo_name(factor_name) else BATCH_COMBO_KEY_PREFIX
+    """One batch simulation key per combo factor name (combo__ and goal_combo__ share the same prefix)."""
     digest = hashlib.sha1(str(factor_name).encode("utf-8")).hexdigest()[:12]
-    return f"{prefix}{digest}"
+    return f"{BATCH_COMBO_KEY_PREFIX}{digest}"
 
 
 def is_batch_combo_simulation_strategy(strategy_key: str | None) -> bool:

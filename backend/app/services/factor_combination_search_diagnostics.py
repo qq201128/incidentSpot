@@ -5,6 +5,7 @@ from typing import Any
 
 from app.services.factor_combination_walk_forward import (
     RECENT_MIN_WIN_RATE,
+    TEST_MIN_WIN_RATE,
     VALIDATION_MIN_AVG_RETURN,
     VALIDATION_MIN_PROFIT_FACTOR,
     VALIDATION_MIN_SAMPLE_COUNT,
@@ -54,6 +55,7 @@ def _target_criteria() -> dict[str, Any]:
     return {
         "validationMinSampleCount": VALIDATION_MIN_SAMPLE_COUNT,
         "validationMinWinRate": VALIDATION_MIN_WIN_RATE,
+        "testMinWinRate": TEST_MIN_WIN_RATE,
         "validationMinProfitFactor": VALIDATION_MIN_PROFIT_FACTOR,
         "validationMinAvgReturn": VALIDATION_MIN_AVG_RETURN,
         "recentMinWinRate": RECENT_MIN_WIN_RATE,

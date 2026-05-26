@@ -18,3 +18,17 @@ def test_run_db_write_with_retry_recovers_from_locked(monkeypatch) -> None:
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     assert run_db_write_with_retry(flaky_write) == "ok"
     assert attempts["count"] == 2
+
+
+def test_run_db_write_with_retry_recovers_from_database_busy(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    def flaky_write() -> str:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise sqlite3.OperationalError("database is busy")
+        return "ok"
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    assert run_db_write_with_retry(flaky_write) == "ok"
+    assert attempts["count"] == 2

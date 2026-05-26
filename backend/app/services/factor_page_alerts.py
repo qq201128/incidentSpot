@@ -7,6 +7,15 @@ from app.services.factor_combination_cache_service import get_cached_combination
 
 ALERT_WARNING = "warning"
 ALERT_ERROR = "error"
+# Sparse or auxiliary tables: partial coverage is normal; only "missing" blocks research.
+SPARSE_COVERAGE_TABLES = frozenset({
+    "funding_features",
+    "futures_positioning_features",
+    "market_sentiment_features",
+    "onchain_features",
+    "klines_multi",
+})
+MIN_ORDERBOOK_COVERAGE_PCT = 80.0
 
 
 def build_alerts(symbol: str, duration: str, ranking_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -19,7 +28,7 @@ def build_alerts(symbol: str, duration: str, ranking_payload: dict[str, Any]) ->
 
 def coverage_alerts(symbol: str, duration: str) -> list[dict[str, Any]]:
     report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration))
-    gaps = coverage_gaps(report)
+    gaps = coverage_gaps(report, primary_interval=duration)
     if not gaps:
         return []
     sample = gaps[0]
@@ -39,23 +48,68 @@ def coverage_alerts(symbol: str, duration: str) -> list[dict[str, Any]]:
     }]
 
 
-def coverage_gaps(report: dict[str, Any]) -> list[dict[str, Any]]:
+def coverage_gaps(report: dict[str, Any], *, primary_interval: str | None = None) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
+    gaps.extend(_main_kline_gaps(report))
     for table in report.get("tables") or []:
         table_name = str(table.get("table") or "")
         for row_index, row in enumerate(table.get("rows") or []):
+            if _skip_coverage_gap(table_name, row, primary_interval=primary_interval):
+                continue
             status = row.get("status")
             if status in {"healthy", None}:
+                continue
+            if table_name in SPARSE_COVERAGE_TABLES and status != "missing":
+                continue
+            if table_name == "orderbook_features" and _orderbook_coverage_ok(row):
                 continue
             gaps.append({
                 "table": table_name,
                 "status": status,
                 "missingReason": str(row.get("missingReason") or status),
-                "group": str(row.get("group") or ""),
+                "group": _coverage_group_label(row),
                 "coveragePct": row.get("coveragePct"),
                 "rowIndex": row_index,
             })
     return gaps
+
+
+def _main_kline_gaps(report: dict[str, Any]) -> list[dict[str, Any]]:
+    main = report.get("mainRange") if isinstance(report.get("mainRange"), dict) else {}
+    row_count = int(main.get("rowCount") or 0)
+    status = str(main.get("status") or "")
+    if row_count > 0 and status in {"healthy", "partial"}:
+        return []
+    return [{
+        "table": "klines",
+        "status": status or "missing",
+        "missingReason": str(main.get("missingReason") or "no_rows"),
+        "group": str(report.get("interval") or ""),
+        "coveragePct": None,
+        "rowIndex": 0,
+    }]
+
+
+def _orderbook_coverage_ok(row: dict[str, Any]) -> bool:
+    pct = row.get("coveragePct")
+    if pct is None:
+        return False
+    return float(pct) >= MIN_ORDERBOOK_COVERAGE_PCT
+
+
+def _skip_coverage_gap(table_name: str, row: dict[str, Any], *, primary_interval: str | None) -> bool:
+    if table_name == "orderbook_ticks":
+        return True
+    if table_name == "klines" and primary_interval:
+        row_interval = row.get("interval")
+        if row_interval and str(row_interval) != str(primary_interval):
+            return True
+    return False
+
+
+def _coverage_group_label(row: dict[str, Any]) -> str:
+    parts = [str(row.get(key) or "") for key in ("symbol", "interval", "source") if row.get(key)]
+    return " · ".join(parts)
 
 
 def ranking_failure_alerts(ranking_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -107,7 +161,15 @@ def combination_failure_message(search: dict, diagnostics: dict, failure_counts:
         parts.append(f"组合回测样本不足（{entry_rows} < {min_sample}），最近一轮高胜率组合搜索未产出可用结果。")
     if failure_counts:
         top_reason = next(iter(failure_counts))
-        parts.append(f"失败原因统计：{top_reason} × {failure_counts[top_reason]}。")
+        top_count = failure_counts[top_reason]
+        parts.append(f"失败原因统计：{top_reason} × {top_count}。")
+        criteria = diagnostics.get("targetCriteria") if isinstance(diagnostics, dict) else {}
+        min_wr = criteria.get("validationMinWinRate") if isinstance(criteria, dict) else None
+        if top_reason == "validation_win_rate_below_min" and min_wr is not None:
+            parts.append(
+                f"验证集胜率未达门槛（≥ {float(min_wr):.1%}）。"
+                "请重新触发组合刷新；亦可查看「高胜率目标组合」结果。"
+            )
     if failures and not parts:
         parts.append(f"组合回测失败 {len(failures)} 条，请查看详情。")
     return " ".join(parts)

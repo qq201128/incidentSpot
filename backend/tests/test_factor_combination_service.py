@@ -227,7 +227,7 @@ def test_walk_forward_validation_fails_when_median_split_has_no_edge() -> None:
     result = walk_forward_validation(flat_edge_frame, factor, "10m")
 
     assert result.passed is False
-    assert result.failure_reason == "validation_win_rate_below_min"
+    assert result.failure_reason == "validation_profit_factor_below_min"
     assert result.payload["validation"]["winRate"] == pytest.approx(0.5, abs=0.05)
 
 
