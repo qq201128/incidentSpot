@@ -85,14 +85,24 @@ def test_models_route_is_family_scoped_and_lstm_alias_is_removed(monkeypatch) ->
     assert "/api/lstm/status" not in app_paths
 
 
-def test_validation_gate_requires_win_rate_above_70() -> None:
+def test_validation_gate_requires_win_rate_above_62() -> None:
     metrics = {
         "confidenceThresholds": [
-            {"minConfidence": 0.70, "sampleCount": 50, "winRate": 0.70, "profitFactor": 2.0, "avgReturn": 0.01},
+            {"minConfidence": 0.70, "sampleCount": 50, "winRate": 0.62, "profitFactor": 2.0, "avgReturn": 0.01},
         ]
     }
 
     assert validation_gate(metrics, metrics)["status"] == "failed"
+
+
+def test_validation_gate_passes_when_win_rate_is_above_62() -> None:
+    metrics = {
+        "confidenceThresholds": [
+            {"minConfidence": 0.70, "sampleCount": 50, "winRate": 0.6201, "profitFactor": 2.0, "avgReturn": 0.01},
+        ]
+    }
+
+    assert validation_gate(metrics, metrics)["status"] == "passed"
 
 
 def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
@@ -131,7 +141,7 @@ def test_each_model_family_has_successive_halving_training_rules() -> None:
 
     assert all(rule["searchMode"] == "successive_halving" for rule in rules)
     assert all([stage["stage"] for stage in rule["successiveHalving"]] == ["coarse", "full", "walk_forward"] for rule in rules)
-    assert all(rule["targetWinRateExclusive"] == 0.70 for rule in rules)
+    assert all(rule["targetWinRateExclusive"] == 0.62 for rule in rules)
     assert all(rule["searchSpaceTotal"] > 0 for rule in rules)
     assert model_family_training_rules("lstm")["searchSpaceTotal"] == 225
     assert "nEstimators" in model_family_training_rules("random_forest")["candidateSearchAxes"]

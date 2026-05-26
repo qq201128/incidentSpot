@@ -122,7 +122,7 @@ def test_train_lstm_model_records_failed_attempt_when_dataset_builder_crashes() 
     assert attempt["reason"] == "dataset builder crashed"
 
 
-def test_train_lstm_model_rejects_shadow_when_win_rate_not_above_70(monkeypatch) -> None:
+def test_train_lstm_model_rejects_shadow_when_win_rate_not_above_62(monkeypatch) -> None:
     artifact_root = _runtime_path("shadow-rejected")
     report = train_lstm_model(
         LstmTrainingConfig(symbol="BTCUSDT", duration="10m", feature_window=8, min_samples=30, epochs=1),

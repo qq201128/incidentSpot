@@ -80,7 +80,7 @@ def test_demotion_below_live_target_keeps_collecting_predictions(monkeypatch, tm
     db_path = tmp_path / "below-target.db"
     _init_db(db_path)
     _insert_slot(db_path, "30m", enabled=1, live=1)
-    _insert_predictions(db_path, "30m", ([True] * 2 + [False]) * 6 + [True, False])
+    _insert_predictions(db_path, "30m", ([True] * 3 + [False] * 2) * 6)
     monkeypatch.setattr(demotion, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(demotion, "high_winrate_candidate_rule", lambda *_args: None)
 
@@ -90,6 +90,25 @@ def test_demotion_below_live_target_keeps_collecting_predictions(monkeypatch, tm
     assert result["status"] == demotion.STATUS_DEMOTED
     assert result["reason"] == "live_win_rate_below_target"
     assert row["enabled"] == 1
+    assert row["live_trading_enabled"] == 0
+
+
+def test_demotion_rejects_recent_rolling_instability(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "unstable-recent.db"
+    _init_db(db_path)
+    _insert_slot(db_path, "10m", enabled=1, live=1)
+    stable_history = [True] * 20
+    unstable_recent = [True, False, False, True, False, False, True, False, True, False]
+    _insert_predictions(db_path, "10m", stable_history + unstable_recent)
+    monkeypatch.setattr(demotion, "get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(demotion, "high_winrate_candidate_rule", lambda *_args: None)
+
+    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m")
+
+    row = _slot(db_path, "10m")
+    assert result["status"] == demotion.STATUS_DEMOTED
+    assert result["reason"] == "rolling_window_win_rate_below_target"
+    assert result["paperStability"]["rollingWindows"][0]["winRate"] == 0.4
     assert row["live_trading_enabled"] == 0
 
 

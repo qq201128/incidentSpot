@@ -17,10 +17,15 @@ OOS_MIN_WIN_RATE = 0.70
 MIN_OOS_TRADES = 20
 WINDOW_COUNT = 3
 OOS_RATIO = 0.20
+RECENT_ROLLING_WINDOW_SIZE = 10
+RECENT_ROLLING_WINDOW_COUNT = 3
+RECENT_ROLLING_MIN_WIN_RATE = 0.62
+RECENT_ROLLING_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
 TRAIN_RATIO = 0.60
 VALIDATION_RATIO = 0.20
 METRIC_DECIMALS = 4
 AVG_RETURN_DECIMALS = 8
+STABILITY_SCORE_DECIMALS = 6
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,9 @@ class GoalComboValidation:
 
 def validate_goal_combo_hits(frame: pd.DataFrame, hits: list[ComboHit], duration: str) -> GoalComboValidation:
     records = [_validation_record(frame, hit, duration) for hit in hits]
-    passed = [hit for hit, record in zip(hits, records) if record["status"] == "passed"]
+    passed_pairs = [(hit, record) for hit, record in zip(hits, records) if record["status"] == "passed"]
+    passed_pairs.sort(key=lambda item: _stability_rank(item[1]), reverse=True)
+    passed = [hit for hit, _record in passed_pairs]
     return GoalComboValidation(passed, _gate_payload(records))
 
 
@@ -76,6 +83,7 @@ def _threshold_returns(frame: pd.DataFrame, hit: ComboHit) -> pd.Series:
 
 def _recomputed_payload(returns: pd.Series) -> dict[str, Any]:
     segments = _nested_segments(returns)
+    rolling = _recent_rolling_windows(returns)
     return {
         "full": _metrics(returns),
         "oos": _metrics(_oos_returns(returns)),
@@ -84,6 +92,11 @@ def _recomputed_payload(returns: pd.Series) -> dict[str, Any]:
             {**_metrics(window), "window": index}
             for index, window in enumerate(_window_returns(returns), start=1)
         ],
+        "recentRolling": [
+            {**_metrics(window), "window": index}
+            for index, window in enumerate(rolling, start=1)
+        ],
+        "stability": _stability_payload(returns, rolling),
     }
 
 
@@ -93,6 +106,7 @@ def _rejection_reasons(recomputed: dict[str, Any]) -> list[str]:
     reasons.extend(_nested_reasons(recomputed["nested"]))
     for row in recomputed["windows"]:
         reasons.extend(_scoped_reasons(f"window {row['window']}", row, require_trades=False))
+    reasons.extend(_recent_rolling_reasons(recomputed["recentRolling"]))
     return reasons
 
 
@@ -125,6 +139,19 @@ def _nested_reasons(nested: dict[str, dict[str, Any]]) -> list[str]:
     return reasons
 
 
+def _recent_rolling_reasons(rows: list[dict[str, Any]]) -> list[str]:
+    reasons = []
+    for row in rows:
+        scope = f"recent rolling {row['window']}"
+        if int(row["trades"]) < RECENT_ROLLING_WINDOW_SIZE:
+            reasons.append(f"{scope}: trades {row['trades']} < {RECENT_ROLLING_WINDOW_SIZE}")
+        if float(row["winRate"]) < RECENT_ROLLING_MIN_WIN_RATE:
+            reasons.append(f"{scope}: winRate {row['winRate']} < {RECENT_ROLLING_MIN_WIN_RATE}")
+        if float(row["profitFactor"]) < RECENT_ROLLING_MIN_PROFIT_FACTOR:
+            reasons.append(f"{scope}: profitFactor {row['profitFactor']} < {RECENT_ROLLING_MIN_PROFIT_FACTOR}")
+    return reasons
+
+
 def _metrics(returns: pd.Series) -> dict[str, Any]:
     if returns.empty:
         return {"trades": 0, "winRate": 0.0, "profitFactor": 0.0, "avgReturn": 0.0}
@@ -138,6 +165,33 @@ def _metrics(returns: pd.Series) -> dict[str, Any]:
 
 def _window_returns(returns: pd.Series) -> list[pd.Series]:
     return [pd.Series(chunk) for chunk in np.array_split(returns.to_numpy(), WINDOW_COUNT)]
+
+
+def _recent_rolling_windows(returns: pd.Series) -> list[pd.Series]:
+    values = returns.iloc[-RECENT_ROLLING_WINDOW_SIZE * RECENT_ROLLING_WINDOW_COUNT :]
+    return [
+        values.iloc[start : start + RECENT_ROLLING_WINDOW_SIZE]
+        for start in range(0, len(values), RECENT_ROLLING_WINDOW_SIZE)
+    ][-RECENT_ROLLING_WINDOW_COUNT:]
+
+
+def _stability_payload(returns: pd.Series, rolling: list[pd.Series]) -> dict[str, Any]:
+    rolling_metrics = [_metrics(window) for window in rolling]
+    rolling_win_rates = [float(row["winRate"]) for row in rolling_metrics if int(row["trades"]) > 0]
+    return {
+        "score": _stability_score(returns, rolling_metrics),
+        "recentRollingWindowSize": RECENT_ROLLING_WINDOW_SIZE,
+        "recentRollingWindowCount": RECENT_ROLLING_WINDOW_COUNT,
+        "worstRecentRollingWinRate": min(rolling_win_rates) if rolling_win_rates else None,
+    }
+
+
+def _stability_score(returns: pd.Series, rolling: list[dict[str, Any]]) -> float:
+    full = _metrics(returns)
+    oos = _metrics(_oos_returns(returns))
+    rolling_min = min((float(row["winRate"]) for row in rolling if int(row["trades"]) > 0), default=0.0)
+    raw = float(oos["winRate"]) + rolling_min + min(float(full["profitFactor"]), 5.0) * 0.05
+    return round(raw, STABILITY_SCORE_DECIMALS)
 
 
 def _oos_returns(returns: pd.Series) -> pd.Series:
@@ -196,6 +250,17 @@ def _summary_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _stability_rank(record: dict[str, Any]) -> tuple[float, float, float, float]:
+    recomputed = record["recomputed"]
+    stability = recomputed["stability"]
+    return (
+        float(stability["score"]),
+        float(recomputed["oos"]["winRate"]),
+        float(recomputed["nested"]["test"]["winRate"]),
+        float(record["reported"]["winRate"]),
+    )
+
+
 def _threshold_payload() -> dict[str, Any]:
     return {
         "reportedMinTrades": BACKTEST_MIN_PERIODS,
@@ -204,6 +269,10 @@ def _threshold_payload() -> dict[str, Any]:
         "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
         "minOosTrades": MIN_OOS_TRADES,
         "windowCount": WINDOW_COUNT,
+        "recentRollingWindowSize": RECENT_ROLLING_WINDOW_SIZE,
+        "recentRollingWindowCount": RECENT_ROLLING_WINDOW_COUNT,
+        "recentRollingMinWinRate": RECENT_ROLLING_MIN_WIN_RATE,
+        "recentRollingMinProfitFactor": RECENT_ROLLING_MIN_PROFIT_FACTOR,
         "nestedSplit": {
             "trainRatio": TRAIN_RATIO,
             "validationRatio": VALIDATION_RATIO,

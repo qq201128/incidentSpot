@@ -67,6 +67,21 @@ def test_run_goal_returns_empty_ranking_when_all_validation_rejected(
     assert cached == []
 
 
+def test_validation_rejects_recent_rolling_instability() -> None:
+    score = _score()
+    outcomes = [True] * (ROWS - 10) + [True, False] * 5
+    frame = _frame_from_outcomes(score, outcomes)
+    hit = _hit("factor_a", "factor_b", score)
+
+    result = goal.validate_goal_combo_hits(frame, [hit], "30m")
+
+    assert result.passed == []
+    rejection = result.payload["rejections"][0]
+    assert rejection["factorName"] == "goal_combo__factor_a__factor_b"
+    assert any("recent rolling 3: winRate 0.5 < 0.62" in reason for reason in rejection["reasons"])
+    assert rejection["recomputed"]["oos"]["winRate"] > 0.7
+
+
 def _patch_goal_runtime(
     monkeypatch: pytest.MonkeyPatch,
     frame: pd.DataFrame,
@@ -93,11 +108,17 @@ def _promote(report: dict, promoted: list[str]) -> dict:
 
 def _frame() -> pd.DataFrame:
     score = _score()
+    return _frame_from_outcomes(score, [True] * ROWS)
+
+
+def _frame_from_outcomes(score: pd.Series, outcomes: list[bool]) -> pd.DataFrame:
+    signal = np.where(score > 0, 1.0, -1.0)
+    returns = np.where(outcomes, signal * 0.02, -signal * 0.02)
     return pd.DataFrame(
         {
             "open_time": np.arange(ROWS) * THIRTY_MINUTES_MS,
             "close": np.linspace(100.0, 110.0, ROWS),
-            "fwd_ret": np.where(score > 0, 0.01, -0.01),
+            "fwd_ret": returns,
         }
     )
 

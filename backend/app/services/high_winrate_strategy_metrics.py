@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-ACTIVE_SAMPLE_COUNT = 20
+ACTIVE_SAMPLE_COUNT = 30
 ACTIVE_WIN_RATE_MIN = 0.62
 MIN_PROFIT_FACTOR = 1.05
 LOSS_STREAK_LIMIT = 5
+RECENT_SAMPLE_COUNT = 20
+RECENT_WIN_RATE_MIN = 0.58
+RECENT_PROFIT_FACTOR_MIN = 1.0
+ROLLING_WINDOW_SIZE = 10
+ROLLING_WINDOW_COUNT = 3
+ROLLING_WINDOW_WIN_RATE_MIN = 0.50
 
 
 def high_winrate_thresholds() -> dict[str, Any]:
@@ -15,6 +21,12 @@ def high_winrate_thresholds() -> dict[str, Any]:
         "activeWinRateMin": ACTIVE_WIN_RATE_MIN,
         "minProfitFactor": MIN_PROFIT_FACTOR,
         "lossStreakLimit": LOSS_STREAK_LIMIT,
+        "recentSampleCount": RECENT_SAMPLE_COUNT,
+        "recentWinRateMin": RECENT_WIN_RATE_MIN,
+        "recentProfitFactorMin": RECENT_PROFIT_FACTOR_MIN,
+        "rollingWindowSize": ROLLING_WINDOW_SIZE,
+        "rollingWindowCount": ROLLING_WINDOW_COUNT,
+        "rollingWindowWinRateMin": ROLLING_WINDOW_WIN_RATE_MIN,
     }
 
 
@@ -31,6 +43,7 @@ def empty_high_winrate_metrics() -> dict[str, Any]:
         "latestRule": None,
         "metricsSource": "predictions",
         "totalEventPnlU": None,
+        "paperStability": _empty_stability(),
     }
 
 
@@ -47,6 +60,7 @@ def high_winrate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "latestRule": str(rows[0].get("high_winrate_rule") or "") if rows else None,
         "metricsSource": _metrics_source(rows),
         "totalEventPnlU": _total_event_pnl(rows),
+        "paperStability": _paper_stability(rows),
     }
 
 
@@ -59,7 +73,49 @@ def high_winrate_decision(metrics: dict[str, Any]) -> dict[str, str]:
         return {"status": "demoted", "reason": "live_win_rate_below_target"}
     if _lt(metrics["profitFactor"], MIN_PROFIT_FACTOR):
         return {"status": "demoted", "reason": "profit_factor_below_one"}
+    stability_reason = _stability_failure_reason(metrics["paperStability"])
+    if stability_reason is not None:
+        return {"status": "demoted", "reason": stability_reason}
     return {"status": "paper_live_passed", "reason": "stable_live_target_met"}
+
+
+def _paper_stability(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    recent = rows[:RECENT_SAMPLE_COUNT]
+    windows = _rolling_windows(rows)
+    return {
+        "recent": _sample_metrics(recent),
+        "rollingWindows": [_sample_metrics(window) for window in windows],
+        "thresholds": {
+            "recentSampleCount": RECENT_SAMPLE_COUNT,
+            "recentWinRateMin": RECENT_WIN_RATE_MIN,
+            "recentProfitFactorMin": RECENT_PROFIT_FACTOR_MIN,
+            "rollingWindowSize": ROLLING_WINDOW_SIZE,
+            "rollingWindowCount": ROLLING_WINDOW_COUNT,
+            "rollingWindowWinRateMin": ROLLING_WINDOW_WIN_RATE_MIN,
+        },
+    }
+
+
+def _stability_failure_reason(stability: dict[str, Any]) -> str | None:
+    recent = stability["recent"]
+    if int(recent["sampleCount"]) < RECENT_SAMPLE_COUNT:
+        return "recent_samples_below_min"
+    if _lt(recent["winRate"], RECENT_WIN_RATE_MIN):
+        return "recent_win_rate_below_target"
+    if _lt(recent["profitFactor"], RECENT_PROFIT_FACTOR_MIN):
+        return "recent_profit_factor_below_target"
+    return _rolling_failure_reason(stability["rollingWindows"])
+
+
+def _rolling_failure_reason(windows: list[dict[str, Any]]) -> str | None:
+    if len(windows) < ROLLING_WINDOW_COUNT:
+        return "rolling_windows_below_min"
+    for row in windows:
+        if int(row["sampleCount"]) < ROLLING_WINDOW_SIZE:
+            return "rolling_window_samples_below_min"
+        if _lt(row["winRate"], ROLLING_WINDOW_WIN_RATE_MIN):
+            return "rolling_window_win_rate_below_target"
+    return None
 
 
 def _profit_factor(values: list[float]) -> float | None:
@@ -68,6 +124,31 @@ def _profit_factor(values: list[float]) -> float | None:
     if not values or losses == 0:
         return None
     return round(gains / losses, 4)
+
+
+def _rolling_windows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    limit = ROLLING_WINDOW_SIZE * ROLLING_WINDOW_COUNT
+    recent = rows[:limit]
+    windows = [recent[start : start + ROLLING_WINDOW_SIZE] for start in range(0, len(recent), ROLLING_WINDOW_SIZE)]
+    return windows[:ROLLING_WINDOW_COUNT]
+
+
+def _sample_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    returns = [_return_value(row) for row in rows if _return_value(row) is not None]
+    wins = sum(1 for row in rows if _is_win(row))
+    return {
+        "sampleCount": len(rows),
+        "winRate": _ratio(wins, len(rows)),
+        "profitFactor": _profit_factor(returns),
+    }
+
+
+def _empty_stability() -> dict[str, Any]:
+    return {
+        "recent": {"sampleCount": 0, "winRate": None, "profitFactor": None},
+        "rollingWindows": [],
+        "thresholds": high_winrate_thresholds(),
+    }
 
 
 def _streak_metrics(rows: list[dict[str, Any]]) -> dict[str, int]:

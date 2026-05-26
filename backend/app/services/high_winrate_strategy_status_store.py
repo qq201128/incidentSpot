@@ -34,6 +34,7 @@ def status_payload(
         "consecutiveLosses": metrics.get("consecutiveLosses"),
         "metricsSource": metrics.get("metricsSource"),
         "totalEventPnlU": metrics.get("totalEventPnlU"),
+        "paperStability": metrics.get("paperStability"),
         "requiredSampleCount": thresholds["requiredSampleCount"],
         "tradable": status == STATUS_TRADABLE,
         "evaluatedAt": utc_now(),

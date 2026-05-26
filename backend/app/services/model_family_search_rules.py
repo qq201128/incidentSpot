@@ -6,7 +6,7 @@ from typing import Any
 from app.services.model_family_config import normalize_model_family
 
 DEFAULT_PARALLEL_WORKERS = 10
-TARGET_WIN_RATE_EXCLUSIVE = 0.70
+TARGET_WIN_RATE_EXCLUSIVE = 0.62
 SUCCESSIVE_HALVING_SURVIVAL_RATE = 0.50
 COMMON_FEATURE_WINDOWS = (24, 32, 48, 64, 96)
 COMMON_MIN_MOVE_BPS = (8.0, 10.0, 12.0, 15.0, 20.0)
