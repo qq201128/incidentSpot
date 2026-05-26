@@ -23,6 +23,20 @@ from app.services.strategy_registry import (
 )
 
 
+def test_refresh_excludes_retired_strategies_from_candidates(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "retired.db"
+    _init_db(db_path)
+    _insert_predictions(db_path, FACTOR_COMBO_STRATEGY_KEY, 60, settled=True)
+    _insert_predictions(db_path, "orderbook_notional_15m", 120, settled=True)
+    _patch_db(monkeypatch, db_path)
+
+    ranking = ensemble_judge_service.refresh_ensemble_judge("btcusdt", "10m")["ranking"]
+    signal_keys = {row["signalKey"] for row in ranking}
+
+    assert FACTOR_COMBO_STRATEGY_KEY in signal_keys
+    assert "orderbook_notional_15m" not in signal_keys
+
+
 def test_refresh_reads_only_settled_predictions(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "settled.db"
     _init_db(db_path)

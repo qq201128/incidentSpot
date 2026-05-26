@@ -10,6 +10,7 @@ from app.services.ensemble_judge_constants import (
     MIN_ENSEMBLE_CANDIDATES,
     STAGE_ENSEMBLE_READY,
 )
+from app.services.retired_strategy_keys import is_retired_strategy_key, retired_strategy_sql_filter
 
 
 def predict_ensemble_ranker_prediction(symbol: str, duration: str, *, entry_open_time: int) -> dict[str, Any]:
@@ -39,20 +40,27 @@ def _assert_ensemble_ready(conn: Any, symbol: str, duration: str) -> None:
 
 
 def _weighted_candidates(conn: Any, symbol: str, duration: str, open_time: int) -> list[dict[str, Any]]:
+    retired_filter, retired_params = retired_strategy_sql_filter(table_prefix="p")
     rows = conn.execute(
-        """
+        f"""
         SELECT p.signal_key, p.strategy_key, p.direction, p.probability_up, p.expected_return,
                s.weight_suggestion
         FROM predictions p
         JOIN ensemble_signal_scores s
           ON s.symbol = p.symbol AND s.duration = p.duration AND s.signal_key = p.signal_key
         WHERE p.symbol = ? AND p.duration = ? AND p.open_time = ?
-          AND p.signal_key != ?
+          AND p.signal_key != ?{retired_filter}
         ORDER BY p.id
         """,
-        (symbol, duration, int(open_time), ENSEMBLE_RANKER_STRATEGY_KEY),
+        (symbol, duration, int(open_time), ENSEMBLE_RANKER_STRATEGY_KEY, *retired_params),
     ).fetchall()
-    return [dict(row) for row in rows if float(row["weight_suggestion"] or 0) > 0]
+    return [
+        dict(row)
+        for row in rows
+        if float(row["weight_suggestion"] or 0) > 0
+        and not is_retired_strategy_key(str(row["signal_key"]))
+        and not is_retired_strategy_key(str(row["strategy_key"]))
+    ]
 
 
 def _prediction_payload(symbol: str, duration: str, open_time: int, rows: list[dict[str, Any]]) -> dict[str, Any]:

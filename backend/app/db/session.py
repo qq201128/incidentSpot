@@ -376,28 +376,9 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
 
 
 def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:
-  retired_keys = [
-      "complete_day_10m_production",
-      "vegas_fib_resonance",
-      "high_winrate_rules",
-      "pure_rule_precision",
-      "win70_trade_max_rules",
-      "daily_trade_floor_tree",
-      "orderbook_notional_40m",
-      "orderbook_notional_40m_mg",
-      "orderbook_notional_10m_mg_5102045",
-      "orderbook_notional_10m",
-      "orderbook_notional_15m",
-      "orderbook_notional_15m_mg_51020",
-      "orderbook_trade_flow_1k",
-      "orderbook_trade_flow_1k_invert_mg",
-      "blind_reverse_martingale_v1",
-      "three_bar_10m_reverse_martingale_v1",
-      "four_bar_10m_reverse_martingale_v1",
-      "five_bar_10m_reverse_martingale_v1",
-      "high_winrate_factor_combo_v1",
-  ]
-  for key in retired_keys:
+  from app.services.retired_strategy_keys import RETIRED_AUTO_TRADE_STRATEGY_KEYS
+
+  for key in sorted(RETIRED_AUTO_TRADE_STRATEGY_KEYS):
     conn.execute(
         "DELETE FROM auto_trade_strategies WHERE strategy_key = ?",
         (key,),

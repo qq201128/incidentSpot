@@ -25,6 +25,7 @@ from app.services.ensemble_judge_metrics import (
     window_return,
 )
 from app.services.ensemble_ranking_rows import ensemble_candidate_rows, scored_rows
+from app.services.retired_strategy_keys import retired_strategy_sql_filter
 from app.services.rule_config import DURATION_TO_MINUTES
 
 
@@ -87,17 +88,18 @@ def confirm_ensemble_stage(symbol: str, duration: str, stage: str) -> dict[str, 
 
 
 def _settled_candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any]]:
+    retired_filter, retired_params = retired_strategy_sql_filter()
     rows = conn.execute(
-        """
+        f"""
         SELECT signal_key, strategy_key, symbol, duration, open_time, direction,
                probability_up, confidence, prediction_correct, actual_return,
                high_winrate_rule, model_version
         FROM predictions
         WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
-          AND signal_key != ?
+          AND signal_key != ?{retired_filter}
         ORDER BY open_time, id
         """,
-        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY),
+        (symbol, duration, ENSEMBLE_RANKER_STRATEGY_KEY, *retired_params),
     ).fetchall()
     return [dict(row) for row in rows]
 
