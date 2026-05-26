@@ -13,7 +13,10 @@ FACTOR_SCORE_CLIP = 4.0
 def combination_score(frame: pd.DataFrame, members: list[dict[str, Any]]) -> pd.Series:
     scores = [_member_score(frame, member) for member in members]
     stacked = pd.concat(scores, axis=1)
-    return stacked.mean(axis=1).replace([np.inf, -np.inf], np.nan)
+    weights = np.asarray([float(member.get("weight") or 0.0) for member in members], dtype=float)
+    if float(weights.sum()) <= 0:
+        return stacked.mean(axis=1).replace([np.inf, -np.inf], np.nan)
+    return stacked.dot(weights / weights.sum()).replace([np.inf, -np.inf], np.nan)
 
 
 def oriented_zscore(series: pd.Series, orientation: int) -> pd.Series:

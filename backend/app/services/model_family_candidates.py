@@ -14,16 +14,13 @@ from app.services.model_family_search_rules import (
 
 RECENT_LIMIT = 8
 
-
 def candidate_library_path(family: str, symbol: str, duration: str, *, artifact_root: Path | None = None) -> Path:
     selected = normalize_model_family(family)
     return artifact_paths(symbol, duration, artifact_root, family=selected).root / f"{selected}_candidate_library.json"
 
-
 def candidate_progress_path(family: str, symbol: str, duration: str, *, artifact_root: Path | None = None) -> Path:
     selected = normalize_model_family(family)
     return artifact_paths(symbol, duration, artifact_root, family=selected).root / f"{selected}_candidate_search_progress.json"
-
 
 def read_model_candidate_library(family: str, symbol: str, duration: str, *, artifact_root: Path | None = None) -> dict:
     path = candidate_library_path(family, symbol, duration, artifact_root=artifact_root)
@@ -34,7 +31,6 @@ def read_model_candidate_library(family: str, symbol: str, duration: str, *, art
         raise ValueError(f"{family} candidate library records must be a list: {path}")
     return payload
 
-
 def attempted_model_search_keys(family: str, symbol: str, duration: str, *, artifact_root: Path | None = None):
     library = read_model_candidate_library(family, symbol, duration, artifact_root=artifact_root)
     return frozenset(
@@ -42,7 +38,6 @@ def attempted_model_search_keys(family: str, symbol: str, duration: str, *, arti
         for row in library["records"]
         if row.get("searchKey") and row.get("status") != "failed"
     )
-
 
 def record_model_candidate(config: ModelFamilyTrainingConfig, profile: str, report: dict, *, artifact_root=None) -> dict:
     path = candidate_library_path(config.family, config.symbol, config.duration, artifact_root=artifact_root)
@@ -59,7 +54,6 @@ def record_model_candidate(config: ModelFamilyTrainingConfig, profile: str, repo
     update_json(path, _updater)
     return record
 
-
 def model_candidate_library_summary(family: str, symbol: str, duration: str, *, artifact_root=None) -> dict:
     records = list(read_model_candidate_library(family, symbol, duration, artifact_root=artifact_root)["records"])
     return {
@@ -69,11 +63,9 @@ def model_candidate_library_summary(family: str, symbol: str, duration: str, *, 
         "bestShadowCandidate": _best_record(records, "shadow_active"),
     }
 
-
 def read_model_candidate_progress(family: str, symbol: str, duration: str, *, artifact_root=None) -> dict:
     path = candidate_progress_path(family, symbol, duration, artifact_root=artifact_root)
     return read_json(path) or _empty_progress(family, symbol, duration)
-
 
 def queue_model_candidate_progress(
     family: str,
@@ -88,7 +80,6 @@ def queue_model_candidate_progress(
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
 
-
 def start_model_candidate_progress(
     family: str,
     *,
@@ -101,7 +92,6 @@ def start_model_candidate_progress(
     payload = _progress_payload(family, symbol, duration, profile, "running", total, parallel_workers)
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
-
 
 def complete_model_candidate_progress(config, profile: str, report: dict, completed: int, total: int) -> dict:
     latest = _candidate_payload(config, profile, report)
@@ -124,7 +114,6 @@ def complete_model_candidate_progress(config, profile: str, report: dict, comple
 
     return update_json(path, _updater)
 
-
 def finish_model_candidate_progress(family: str, *, symbol: str, duration: str, status: str) -> dict:
     path = candidate_progress_path(family, symbol, duration)
 
@@ -134,7 +123,6 @@ def finish_model_candidate_progress(family: str, *, symbol: str, duration: str, 
         return {**current, "status": status, "updatedAt": now, "finishedAt": now}
 
     return update_json(path, _updater)
-
 
 def finish_model_candidate_progress_from_library(family: str, *, symbol: str, duration: str, profile: str, parallel_workers: int, status: str) -> dict:
     selected = normalize_model_family(family)
@@ -163,10 +151,8 @@ def next_model_candidate_configs(config: ModelFamilyTrainingConfig, profile: str
     candidates = [_candidate_config(config, overrides) for overrides in model_family_search_grid(config.family)]
     return [item for item in candidates if model_search_key(item, profile) not in attempted]
 
-
 def model_search_space_size(family: str) -> int:
     return len(model_family_search_grid(normalize_model_family(family)))
-
 
 def model_search_key(config: ModelFamilyTrainingConfig, profile: str) -> str:
     params = ",".join(f"{key}={config.params[key]}" for key in sorted(config.params))
@@ -175,12 +161,10 @@ def model_search_key(config: ModelFamilyTrainingConfig, profile: str) -> str:
         f"m={config.min_move_bps:g}|e={config.epochs}|s={config.seed}|{params}"
     )
 
-
 def _candidate_config(config: ModelFamilyTrainingConfig, overrides: dict) -> ModelFamilyTrainingConfig:
     params = dict(overrides.get("params") or config.params)
     values = {key: value for key, value in overrides.items() if key != "params"}
     return replace(config, **values, params=params)
-
 
 def _candidate_record(config, profile: str, report: dict) -> dict:
     return {
@@ -199,10 +183,8 @@ def _candidate_record(config, profile: str, report: dict) -> dict:
         "test": _metric_summary(report.get("test") or {}),
     }
 
-
 def _candidate_payload(config, profile: str, report: dict) -> dict:
     return {**_candidate_record(config, profile, report), "completedAt": _utc_now()}
-
 
 def _config_payload(config) -> dict:
     return {
@@ -216,7 +198,6 @@ def _config_payload(config) -> dict:
         "params": config.params,
     }
 
-
 def _metric_summary(metrics: dict) -> dict:
     return {
         "winRate": metrics.get("winRate"),
@@ -224,11 +205,9 @@ def _metric_summary(metrics: dict) -> dict:
         "sampleCount": metrics.get("sampleCount"),
     }
 
-
 def _best_record(records: list[dict], status: str) -> dict | None:
     selected = [row for row in records if row.get("status") == status]
     return max(selected, key=_candidate_score) if selected else None
-
 
 def _candidate_score(record: dict) -> tuple[float, float, int]:
     validation = record.get("validation") or {}
@@ -238,7 +217,6 @@ def _candidate_score(record: dict) -> tuple[float, float, int]:
         min(float(validation.get("profitFactor") or 0.0), float(test.get("profitFactor") or 0.0)),
         int(test.get("sampleCount") or 0),
     )
-
 
 def _progress_payload(
     family: str,
@@ -261,7 +239,6 @@ def _progress_payload(
         "parallelWorkers": int(parallel_workers),
     }
 
-
 def _updated_counts(counts: dict, report: dict) -> dict[str, int]:
     selected = {**_empty_counts(), **{key: int(value or 0) for key, value in counts.items()}}
     selected[_count_key(report.get("status"))] += 1
@@ -282,15 +259,12 @@ def _count_key(status: Any) -> str:
 def _progress_record(record: dict) -> dict:
     return {**record, "completedAt": record.get("recordedAt")}
 
-
 def _empty_library(family: str, symbol: str, duration: str) -> dict:
     return {"modelFamily": family, "symbol": symbol.strip().upper(), "duration": duration, "updatedAt": None, "total": 0, "records": []}
-
 
 def _empty_progress(family: str, symbol: str, duration: str) -> dict:
     return {"status": "idle", "modelFamily": family, "symbol": symbol.strip().upper(), "duration": duration,
             "total": 0, "completed": 0, "percent": 0.0, "counts": _empty_counts(), "latestCompleted": None, "recent": []}
-
 
 def _empty_counts() -> dict[str, int]:
     return {
@@ -302,10 +276,8 @@ def _empty_counts() -> dict[str, int]:
         "failed": 0,
     }
 
-
 def _percent(completed: int, total: int) -> float:
     return 0.0 if total <= 0 else round(min(completed / total, 1.0), 4)
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()

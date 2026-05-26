@@ -6,25 +6,31 @@ from pathlib import Path
 from typing import Any
 
 from app.services.factor_combo_display import combo_display_name
-from app.services.factor_learning_common import (
-    SUCCESS_PROFIT_FACTOR_MIN,
-    SUCCESS_WIN_RATE_MIN,
-    edge_score,
-    finite,
-    round_metric,
-    utc_now,
-)
+from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN, finite, utc_now
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
 from app.services.json_atomic_io import load_json_object, save_json_object
-from app.services.factor_metric_enrichment import factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
+from app.services.factor_mined_library_helpers import (
+    display_score as _display_score,
+    empty_library as _empty_library,
+    is_regular_combination_name as _is_regular_combination_name,
+    library_combination_rank_key as _library_combination_rank_key,
+    library_score as _library_score,
+    mined_factor_parameters as _mined_factor_parameters,
+    promotion_report as _promotion_report,
+    row_key as _row_key,
+    row_score as _row_score,
+    row_symbol as _row_symbol,
+    standard_score as _standard_score,
+    threshold_payload as _threshold_payload,
+    validation_passed as _validation_passed,
+)
 
 MINED_FACTOR_LIBRARY_VERSION = "mined_factor_library_v1"
 MINED_FACTOR_LIBRARY_PATH = FACTOR_LEARNING_DIR / "mined_factor_library.json"
 MINED_FACTOR_SOURCE = "factor_combo_ranking"
 MINED_FACTOR_SOURCE_FILE = "mined_factor_library.json"
 SUMMARY_FACTOR_LIMIT = 12
-
 
 def load_mined_factor_library(path: Path | None = None) -> dict[str, Any]:
     target = path or MINED_FACTOR_LIBRARY_PATH
@@ -35,7 +41,6 @@ def load_mined_factor_library(path: Path | None = None) -> dict[str, Any]:
         raise ValueError(f"mined factor library is not an object: {target}")
     return payload
 
-
 def mined_factor_rows_for_duration(symbol: str, duration: str) -> list[dict[str, Any]]:
     rows = load_mined_factor_library().get("factors") or []
     return [
@@ -44,10 +49,8 @@ def mined_factor_rows_for_duration(symbol: str, duration: str) -> list[dict[str,
         if _row_symbol(row) == symbol.strip().upper() and str(row.get("duration")) == duration
     ]
 
-
 def mined_factor_rows() -> list[dict[str, Any]]:
     return deepcopy(load_mined_factor_library().get("factors") or [])
-
 
 def mined_factor_definition(row: dict[str, Any]) -> FactorDefinition:
     duration = str(row.get("duration") or "")
@@ -61,7 +64,6 @@ def mined_factor_definition(row: dict[str, Any]) -> FactorDefinition:
         direction=FactorDirection.HIGHER_BETTER,
         parameters=_mined_factor_parameters(row),
     )
-
 
 def mined_factor_payload(row: dict[str, Any]) -> dict[str, Any]:
     metrics = row.get("metrics") or {}
@@ -83,7 +85,6 @@ def mined_factor_payload(row: dict[str, Any]) -> dict[str, Any]:
         "metrics": dict(metrics) if isinstance(metrics, dict) else {},
     }
 
-
 def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
     rows = mined_factor_rows_for_duration(symbol, duration)
     rows.sort(key=_library_score, reverse=True)
@@ -98,7 +99,6 @@ def mined_factor_library_summary(symbol: str, duration: str) -> dict[str, Any]:
         }
     )
 
-
 def enrich_mined_factor_library_summary(library: dict[str, Any]) -> dict[str, Any]:
     if not library:
         return library
@@ -107,7 +107,6 @@ def enrich_mined_factor_library_summary(library: dict[str, Any]) -> dict[str, An
     if isinstance(factors, list):
         enriched["factors"] = [_enriched_summary_row(row) for row in factors]
     return enriched
-
 
 def regular_library_combination_rows_for_duration(
     symbol: str,
@@ -124,7 +123,6 @@ def regular_library_combination_rows_for_duration(
     selected.sort(key=_library_combination_rank_key, reverse=True)
     return selected[:limit]
 
-
 def upsert_good_combinations(report: dict[str, Any]) -> dict[str, Any]:
     candidates = [_library_row(report, row) for row in report.get("ranking") or [] if _is_good_combo(row)]
     candidates = [row for row in candidates if row is not None]
@@ -140,7 +138,6 @@ def upsert_good_combinations(report: dict[str, Any]) -> dict[str, Any]:
     }
     _save_library(payload)
     return _promotion_report(report, promoted=len(candidates), total=len(merged))
-
 
 def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None:
     factor_name = str(row.get("factorName") or "")
@@ -171,7 +168,6 @@ def _library_row(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] 
         "lastSeenAt": now,
         "promotionCount": 1,
     }
-
 
 def _library_combination_row(row: dict[str, Any]) -> dict[str, Any] | None:
     factor_name = str(row.get("factorName") or "")
@@ -205,7 +201,6 @@ def _library_combination_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "walkForwardPassed": _validation_passed(validation),
     }
 
-
 def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_key = {_row_key(row): deepcopy(row) for row in existing}
     for row in candidates:
@@ -219,7 +214,6 @@ def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]
     rows.sort(key=_library_score, reverse=True)
     return rows
 
-
 def _is_good_combo(row: dict[str, Any]) -> bool:
     win_rate = finite(row.get("winRate"))
     profit_factor = finite(row.get("profitFactor"))
@@ -230,13 +224,11 @@ def _is_good_combo(row: dict[str, Any]) -> bool:
         and profit_factor >= SUCCESS_PROFIT_FACTOR_MIN
     )
 
-
 def _combo_display_name_for_row(row: dict[str, Any]) -> str:
     members = row.get("members")
     if isinstance(members, list) and len(members) >= 2:
         return combo_display_name([_member_payload(member) for member in members])
     return str(row.get("factorDisplayName") or row.get("description") or row["factorName"])
-
 
 def _enriched_summary_row(row: dict[str, Any]) -> dict[str, Any]:
     enriched = deepcopy(row)
@@ -245,7 +237,6 @@ def _enriched_summary_row(row: dict[str, Any]) -> dict[str, Any]:
     enriched["description"] = display_name
     return enriched
 
-
 def _member_payload(member: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": str(member["name"]),
@@ -253,7 +244,6 @@ def _member_payload(member: dict[str, Any]) -> dict[str, Any]:
         "category": str(member.get("category") or "unknown"),
         "orientation": int(member.get("orientation") or 1),
     }
-
 
 def _metric_payload(row: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -265,101 +255,5 @@ def _metric_payload(row: dict[str, Any]) -> dict[str, Any]:
         "contribution": finite(row.get("contribution")),
     }
 
-
-def _promotion_report(report: dict[str, Any], *, promoted: int, total: int) -> dict[str, Any]:
-    return {
-        "symbol": str(report.get("symbol") or "").strip().upper(),
-        "duration": str(report.get("duration") or ""),
-        "promoted": promoted,
-        "libraryTotal": total,
-        "thresholds": _threshold_payload(),
-    }
-
-
-def _threshold_payload() -> dict[str, float]:
-    return {
-        "minWinRate": SUCCESS_WIN_RATE_MIN,
-        "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
-    }
-
-
-def _mined_factor_parameters(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "members": [
-            str(member["name"])
-            for member in row.get("members") or []
-            if isinstance(member, dict) and member.get("name")
-        ],
-        "symbol": _row_symbol(row),
-        "duration": str(row.get("duration") or ""),
-    }
-
-
-def _empty_library() -> dict[str, Any]:
-    return {
-        "version": MINED_FACTOR_LIBRARY_VERSION,
-        "thresholds": _threshold_payload(),
-        "factors": [],
-    }
-
-
 def _save_library(payload: dict[str, Any]) -> None:
     save_json_object(MINED_FACTOR_LIBRARY_PATH, payload)
-
-
-def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
-    return (_row_symbol(row), str(row.get("duration")), str(row.get("factorName")))
-
-
-def _is_regular_combination_name(name: str) -> bool:
-    return bool(name) and not name.startswith("goal_combo__")
-
-
-def _library_combination_rank_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
-    return (
-        _score_num(row.get("factorScore")),
-        _score_num(row.get("winRate")),
-        _score_num(row.get("profitFactor")),
-        _score_num(row.get("sharpe")),
-    )
-
-
-def _validation_passed(validation: Any) -> bool:
-    if not isinstance(validation, dict):
-        return True
-    return str(validation.get("status") or "") == "passed"
-
-
-def _row_symbol(row: dict[str, Any]) -> str:
-    return str(row.get("symbol") or "").strip().upper()
-
-
-def _library_score(row: dict[str, Any]) -> float:
-    metrics = row.get("metrics") or row
-    if _is_stability_rejected(row):
-        return 0.0
-    return _standard_score(metrics)
-
-
-def _row_score(row: dict[str, Any]) -> float:
-    return round_metric(edge_score(row), 6)
-
-
-def _standard_score(row: dict[str, Any]) -> float:
-    return factor_score(row)
-
-
-def _display_score(row: dict[str, Any]) -> float:
-    if _is_stability_rejected(row):
-        return 0.0
-    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else row
-    return _standard_score(metrics)
-
-
-def _is_stability_rejected(row: dict[str, Any]) -> bool:
-    return str(row.get("stabilityStatus") or "") == "rejected"
-
-
-def _score_num(value: Any) -> float:
-    number = finite(value)
-    return number if number is not None else float("-inf")

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
 from typing import Any
 
 import numpy as np
 
+from app.services.return_metric_policy import ReturnMetricPolicy
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 EPSILON = 1e-12
@@ -72,16 +72,18 @@ def binary_classification_metrics(
     fp = int(np.logical_and(pred_up, ~actual_up).sum())
     fn = int(np.logical_and(~pred_up, actual_up).sum())
     directional = _directional_returns(pred_up, future_returns)
+    return_metrics = ReturnMetricPolicy(cost_rate=ROUNDTRIP_COST_RATE).from_returns(directional)
     return {
         "sampleCount": int(len(y_true)),
         "accuracy": _ratio(tp + tn, len(y_true)),
-        "winRate": _ratio(int((directional > 0).sum()), len(directional)),
+        "winRate": return_metrics["winRate"],
         "precision": _ratio(tp, tp + fp),
         "recall": _ratio(tp, tp + fn),
-        "profitFactor": profit_factor(directional),
-        "maxDrawdown": max_drawdown(directional),
-        "sharpe": sharpe_ratio(directional),
-        "avgReturn": _mean_or_none(directional),
+        "profitFactor": return_metrics["profitFactor"],
+        "maxDrawdown": return_metrics["maxDrawdown"],
+        "sharpe": return_metrics["sharpe"],
+        "avgReturn": return_metrics["avgReturn"],
+        "totalCost": return_metrics["totalCost"],
         "confidenceThresholds": confidence_threshold_metrics(
             probability_up,
             future_returns,
@@ -169,29 +171,16 @@ def _bucket_payload(confidence: np.ndarray, returns: np.ndarray, left: float, ri
 
 
 def profit_factor(returns: np.ndarray) -> float | None:
-    wins = returns[returns > 0].sum()
-    losses = returns[returns <= 0].sum()
-    if wins <= 0:
-        return 0.0
-    if losses == 0:
-        return float("inf")
-    return float(wins / abs(losses))
+    return ReturnMetricPolicy().from_returns(returns)["profitFactor"]
 
 
 def max_drawdown(returns: np.ndarray) -> float:
-    equity = np.cumsum(returns)
-    peak = np.maximum.accumulate(equity)
-    drawdown = peak - equity
-    return float(drawdown.max()) if len(drawdown) else 0.0
+    value = ReturnMetricPolicy().from_returns(returns)["maxDrawdown"]
+    return 0.0 if value is None else float(value)
 
 
 def sharpe_ratio(returns: np.ndarray) -> float | None:
-    if len(returns) < 2:
-        return None
-    std = float(np.std(returns, ddof=1))
-    if std < EPSILON:
-        return None
-    return float(np.mean(returns) / std * sqrt(len(returns)))
+    return ReturnMetricPolicy().from_returns(returns)["sharpe"]
 
 
 def _directional_returns(pred_up: np.ndarray, future_returns: np.ndarray) -> np.ndarray:

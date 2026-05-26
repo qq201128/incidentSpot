@@ -39,7 +39,8 @@ class SiliconFlowChatClient:
                 json=request_payload,
                 timeout=self.config.timeout_seconds,
             )
-            if response.status_code >= 400:
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None and status_code >= 400:
                 raise RuntimeError(_http_error_message(response)) from None
             response.raise_for_status()
         except RequestException as exc:

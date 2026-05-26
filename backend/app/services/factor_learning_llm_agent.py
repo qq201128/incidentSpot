@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from app.services.agent_formula_dedup import filter_agent_review_duplicates, limited_do_not_suggest_formulas
 from app.services.factor_operator_library import AGENT_FORMULA_RULES, factor_operator_prompt_payload
 from app.services.factor_learning_common import utc_now
-from app.services.factor_learning_retrieval import build_factor_learning_retrieval
+from app.services.factor_learning_llm_memory import compact_memory
 from app.services.siliconflow_chat_client import SiliconFlowChatClient, siliconflow_config_from_env
 
 AGENT_NAME = "siliconflow_factor_agent_v1"
@@ -33,14 +33,12 @@ AGENT_PROMPT_TEXT_LIMIT = 96
 AGENT_PROMPT_SHORT_TEXT_LIMIT = 72
 AGENT_RUNNING_STALE_SECONDS = 600
 
-
 def _factor_agent_chat_client() -> SiliconFlowChatClient:
     base = siliconflow_config_from_env()
     timeout_seconds = _agent_timeout_seconds(base.timeout_seconds)
     if timeout_seconds == base.timeout_seconds:
         return SiliconFlowChatClient(base)
     return SiliconFlowChatClient(replace(base, timeout_seconds=timeout_seconds))
-
 
 def _agent_timeout_seconds(fallback: int) -> int:
     raw = os.getenv(AGENT_TIMEOUT_ENV, "").strip()
@@ -53,7 +51,6 @@ def _agent_timeout_seconds(fallback: int) -> int:
             return value
     return max(fallback, AGENT_TIMEOUT_SECONDS_DEFAULT)
 
-
 def _agent_max_tokens() -> int:
     raw = os.getenv("FACTOR_LEARNING_AGENT_MAX_TOKENS", "").strip()
     if raw:
@@ -65,13 +62,11 @@ def _agent_max_tokens() -> int:
             return value
     return AGENT_MAX_TOKENS_DEFAULT
 
-
 class ChatCompletionClient(Protocol):
     @property
     def model(self) -> str: ...
 
     def create_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
 
 def attach_llm_agent_review(
     memory: dict[str, Any],
@@ -97,7 +92,6 @@ def attach_llm_agent_review(
     }
     return updated
 
-
 def _agent_payload(memory: dict[str, Any]) -> dict[str, Any]:
     return {
         "messages": [
@@ -108,7 +102,6 @@ def _agent_payload(memory: dict[str, Any]) -> dict[str, Any]:
         "max_tokens": _agent_max_tokens(),
         "response_format": {"type": "json_object"},
     }
-
 
 def _system_prompt() -> str:
     return (
@@ -124,7 +117,6 @@ def _system_prompt() -> str:
         "所有给交易员看的因子名称、理由、风控建议必须使用中文。"
     )
 
-
 def _user_prompt(memory: dict[str, Any]) -> str:
     return json.dumps(
         {
@@ -136,7 +128,6 @@ def _user_prompt(memory: dict[str, Any]) -> str:
         },
         ensure_ascii=False,
     )
-
 
 def _required_schema() -> dict[str, Any]:
     return {
@@ -170,30 +161,11 @@ def _required_schema() -> dict[str, Any]:
         "notes": ["string"],
     }
 
-
 def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
     symbol = str(memory.get("symbol") or "")
     duration = str(memory.get("duration") or "")
     blocklist = limited_do_not_suggest_formulas(symbol, duration)
-    agent_factor_names = _factor_names(memory.get("agentMinedFactorLibrary") or {})
-    return {
-        "symbol": memory.get("symbol"),
-        "duration": memory.get("duration"),
-        "source": _slim_source(memory.get("source") or {}),
-        "retrieval": _slim_retrieval(build_factor_learning_retrieval(memory)),
-        "factorMining": _slim_factor_mining(memory.get("factorMining") or {}),
-        "lossMemory": _slim_loss_memory(memory.get("lossMemory") or {}),
-        "filters": _slim_filters(memory.get("filters") or {}),
-        "weights": _top_weights(memory.get("weights") or {}),
-        "minedFactorLibrary": _slim_mined_library(memory.get("minedFactorLibrary") or {}),
-        "agentMinedFactorLibrary": _slim_agent_library(memory.get("agentMinedFactorLibrary") or {}),
-        "doNotSuggestFactorNames": _limited_strings(agent_factor_names, AGENT_PROMPT_NAME_BLOCK_LIMIT),
-        "doNotSuggestFactorNameTotal": len(agent_factor_names),
-        "doNotSuggestFormulas": _limited_strings(blocklist, AGENT_PROMPT_FORMULA_BLOCK_LIMIT),
-        "doNotSuggestFormulaTotal": len(blocklist),
-        "monitoring": _slim_monitoring(memory.get("monitoring") or {}),
-    }
-
+    return compact_memory(memory, blocklist)
 
 def is_llm_agent_run_stale(agent: dict[str, Any], *, now: datetime | None = None) -> bool:
     if str(agent.get("status") or "") != "running":
@@ -210,7 +182,6 @@ def is_llm_agent_run_stale(agent: dict[str, Any], *, now: datetime | None = None
     current = now or datetime.now(timezone.utc)
     return (current - started).total_seconds() >= AGENT_RUNNING_STALE_SECONDS
 
-
 def stale_llm_agent_error(agent: dict[str, Any]) -> str:
     stamp = str(agent.get("agentStartedAt") or agent.get("updatedAt") or "")
     return (
@@ -219,204 +190,6 @@ def stale_llm_agent_error(agent: dict[str, Any]) -> str:
         " 请重新点击联网挖掘；若反复失败，请检查 SILICONFLOW_API_KEY / 网络，"
         " 或在 backend/.env 设置 FACTOR_LEARNING_SILICONFLOW_TIMEOUT_SECONDS=420。"
     )
-
-
-def _slim_source(source: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "status": source.get("status"),
-        "rankingRefreshSource": source.get("rankingRefreshSource"),
-        "minedFrameFailureCount": source.get("minedFrameFailureCount"),
-        "learningRefreshSource": source.get("learningRefreshSource"),
-    }
-
-
-def _slim_retrieval(retrieval: dict[str, Any]) -> dict[str, Any]:
-    blocked = _limited_strings(retrieval.get("blockedFactorNames") or [], AGENT_PROMPT_RETRIEVAL_NAME_LIMIT)
-    excluded = _limited_strings(retrieval.get("miningExcludedFactorNames") or [], AGENT_PROMPT_RETRIEVAL_NAME_LIMIT)
-    return {
-        "blockedFactorNames": blocked,
-        "blockedFactorNameTotal": len(retrieval.get("blockedFactorNames") or []),
-        "miningExcludedFactorNames": excluded,
-        "miningExcludedFactorNameTotal": len(retrieval.get("miningExcludedFactorNames") or []),
-        "successPatterns": _slim_pattern_rows(retrieval.get("successPatterns") or [], "pattern"),
-        "forbiddenRegions": _slim_pattern_rows(retrieval.get("forbiddenRegions") or [], "region"),
-        "lossPatterns": _slim_pattern_rows(retrieval.get("lossPatterns") or [], "pattern"),
-        "topWeights": _slim_weight_rows(retrieval.get("topWeights") or []),
-        "summary": retrieval.get("summary") or {},
-    }
-
-
-def _slim_factor_mining(factor_mining: dict[str, Any]) -> dict[str, Any]:
-    success = factor_mining.get("successPatterns") or []
-    forbidden = factor_mining.get("forbiddenRegions") or []
-    return {
-        "successPatternTotal": len(success),
-        "forbiddenRegionTotal": len(forbidden),
-    }
-
-
-def _slim_pattern_rows(rows: list[Any], label_key: str) -> list[dict[str, Any]]:
-    slim = []
-    for row in rows[:AGENT_PROMPT_PATTERN_ROW_LIMIT]:
-        if not isinstance(row, dict):
-            continue
-        members = row.get("members") or []
-        item = {
-            label_key: _truncate_text(
-                row.get(label_key) or row.get("pattern") or row.get("region"),
-                AGENT_PROMPT_SHORT_TEXT_LIMIT,
-            ),
-            "support": row.get("support"),
-            "members": _limited_strings(members, AGENT_PROMPT_PATTERN_MEMBER_LIMIT),
-        }
-        feature = _truncate_text(row.get("feature"), AGENT_PROMPT_SHORT_TEXT_LIMIT)
-        if feature:
-            item["feature"] = feature
-        slim.append(item)
-    return slim
-
-
-def _slim_filters(filters: dict[str, Any]) -> dict[str, Any]:
-    slim: dict[str, Any] = {}
-    for key, value in filters.items():
-        name = _truncate_text(key, AGENT_PROMPT_SHORT_TEXT_LIMIT)
-        if isinstance(value, list):
-            slim[name] = _limited_strings(value, AGENT_PROMPT_RETRIEVAL_NAME_LIMIT)
-            slim[f"{name}Total"] = len(value)
-            continue
-        slim[name] = value if not isinstance(value, str) else _truncate_text(value)
-    return slim
-
-
-def _slim_loss_memory(loss_memory: dict[str, Any]) -> dict[str, Any]:
-    patterns = loss_memory.get("patterns") or []
-    return {
-        "status": loss_memory.get("status"),
-        "sampleCount": loss_memory.get("sampleCount"),
-        "lossCount": loss_memory.get("lossCount"),
-        "patterns": _slim_pattern_rows(patterns, "pattern"),
-        "patternTotal": len(patterns),
-    }
-
-
-def _slim_monitoring(monitoring: dict[str, Any]) -> dict[str, Any]:
-    issues = monitoring.get("issues") or []
-    return {
-        "status": monitoring.get("status"),
-        "issues": [
-            _slim_monitoring_issue(item)
-            for item in issues[:AGENT_PROMPT_PATTERN_ROW_LIMIT]
-            if isinstance(item, dict)
-        ],
-        "issueTotal": len(issues),
-    }
-
-
-def _slim_monitoring_issue(issue: dict[str, Any]) -> dict[str, Any]:
-    return {str(key): _truncate_text(value) if isinstance(value, str) else value for key, value in issue.items()}
-
-
-def _slim_mined_library(library: dict[str, Any]) -> dict[str, Any]:
-    rows = []
-    for row in library.get("factors") or []:
-        if not isinstance(row, dict):
-            continue
-        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
-        members = row.get("members") or []
-        rows.append(
-            {
-                "factorName": _truncate_text(row.get("factorName"), 96),
-                "factorDisplayName": _truncate_text(row.get("factorDisplayName")),
-                "formula": _truncate_text(row.get("formula")),
-                "method": row.get("method"),
-                "memberNames": _limited_strings(
-                    [item.get("name") or item for item in members if item],
-                    AGENT_PROMPT_PATTERN_MEMBER_LIMIT,
-                ),
-                "winRate": metrics.get("winRate"),
-                "profitFactor": metrics.get("profitFactor"),
-                "ir": metrics.get("ir"),
-                "score": row.get("score") or row.get("factorScore"),
-            }
-        )
-        if len(rows) >= AGENT_PROMPT_COMBO_ROW_LIMIT:
-            break
-    return {
-        "total": library.get("total"),
-        "duration": library.get("duration"),
-        "symbol": library.get("symbol"),
-        "factors": rows,
-    }
-
-
-def _slim_agent_library(library: dict[str, Any]) -> dict[str, Any]:
-    rows = []
-    for row in library.get("factors") or []:
-        if not isinstance(row, dict):
-            continue
-        metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
-        rows.append(
-            {
-                "factorName": _truncate_text(row.get("factorName"), AGENT_PROMPT_SHORT_TEXT_LIMIT),
-                "factorDisplayName": _truncate_text(row.get("factorDisplayName")),
-                "formula": _truncate_text(row.get("formula")),
-                "winRate": metrics.get("winRate"),
-                "profitFactor": metrics.get("profitFactor"),
-                "qualityPassed": row.get("qualityPassed"),
-            }
-        )
-        if len(rows) >= AGENT_PROMPT_LIBRARY_ROW_LIMIT:
-            break
-    return {
-        "total": library.get("total"),
-        "candidateTotal": library.get("candidateTotal"),
-        "rejectedTotal": library.get("rejectedTotal"),
-        "duration": library.get("duration"),
-        "symbol": library.get("symbol"),
-        "factors": rows,
-    }
-
-
-def _truncate_text(value: Any, limit: int = AGENT_PROMPT_TEXT_LIMIT) -> str:
-    text = " ".join(str(value or "").split())
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 3]}..."
-
-
-def _limited_strings(values: list[Any], limit: int) -> list[str]:
-    items = []
-    for value in values:
-        text = _truncate_text(value, AGENT_PROMPT_SHORT_TEXT_LIMIT)
-        if text:
-            items.append(text)
-        if len(items) >= limit:
-            break
-    return items
-
-
-def _slim_weight_rows(rows: list[Any]) -> list[dict[str, Any]]:
-    slim = []
-    for row in rows[:AGENT_PROMPT_RETRIEVAL_ROW_LIMIT]:
-        if not isinstance(row, dict):
-            continue
-        slim.append(
-            {
-                "name": _truncate_text(row.get("name"), AGENT_PROMPT_SHORT_TEXT_LIMIT),
-                "weight": row.get("weight"),
-            }
-        )
-    return slim
-
-
-def _top_weights(weights: dict[str, Any]) -> dict[str, Any]:
-    pairs = sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)
-    return dict(pairs[:20])
-
-
-def _factor_names(library: dict[str, Any]) -> list[str]:
-    return [str(row.get("factorName")) for row in library.get("factors") or [] if row.get("factorName")]
-
 
 def _review_from_completion(completion: dict[str, Any]) -> dict[str, Any]:
     content, finish_reason = _assistant_message(completion)
@@ -434,7 +207,6 @@ def _review_from_completion(completion: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("SiliconFlow factor agent JSON must be an object")
     return parsed
 
-
 def _strip_markdown_json_fence(text: str) -> str:
     stripped = text.strip()
     if not stripped.startswith("```"):
@@ -443,7 +215,6 @@ def _strip_markdown_json_fence(text: str) -> str:
     stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n?", "", stripped, count=1)
     stripped = re.sub(r"\n?```\s*$", "", stripped, count=1)
     return stripped.strip()
-
 
 def _extract_outer_json_object(text: str) -> str:
     """Return substring from first '{' through matching '}' (handles leading prose)."""
@@ -474,7 +245,6 @@ def _extract_outer_json_object(text: str) -> str:
                 return text[start : i + 1]
     raise ValueError("unterminated JSON object in assistant content")
 
-
 def _parse_factor_agent_json(content: str) -> Any:
     trimmed = _strip_markdown_json_fence(content)
     try:
@@ -482,7 +252,6 @@ def _parse_factor_agent_json(content: str) -> Any:
     except json.JSONDecodeError:
         candidate = _extract_outer_json_object(trimmed)
         return json.loads(candidate)
-
 
 def _assistant_message(completion: dict[str, Any]) -> tuple[str, str | None]:
     choices = completion.get("choices")

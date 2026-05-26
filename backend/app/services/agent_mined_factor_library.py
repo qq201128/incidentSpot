@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from copy import deepcopy
 from dataclasses import dataclass
@@ -28,6 +27,22 @@ from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
 from app.services.json_atomic_io import load_json_object, save_json_object
 from app.services.factor_metric_enrichment import enrich_factor_results, factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
+from app.services.agent_mined_factor_library_helpers import (
+    duplicate_formula as _duplicate_formula,
+    empty_library as _empty_library,
+    failure as _failure,
+    ingested_agent_rows as _ingested_agent_rows,
+    library_with_rows as _library_with_rows,
+    merge_agent_review as _merge_agent_review,
+    merged_rows as _merged_rows,
+    num as _num,
+    orientation as _orientation,
+    row_key as _row_key,
+    row_symbol as _row_symbol,
+    simulation_eligible as _simulation_eligible,
+    threshold_payload as _threshold_payload,
+    usable_metrics as _usable_metrics,
+)
 
 AGENT_FACTOR_LIBRARY_VERSION = "agent_mined_factor_library_v1"
 AGENT_FACTOR_SOURCE_FILE = "agent_mined_factor_library.json"
@@ -250,89 +265,12 @@ def _factor_definition(row: dict[str, Any], duration: str) -> FactorDefinition:
         direction=FactorDirection.NEUTRAL,
     )
 
-def _merged_rows(existing: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_key = {_row_key(row): deepcopy(row) for row in existing}
-    for row in candidates:
-        previous = by_key.get(_row_key(row))
-        if previous:
-            row["firstSeenAt"] = previous.get("firstSeenAt") or row["firstSeenAt"]
-            row["promotionCount"] = int(previous.get("promotionCount") or 0) + (
-                1 if row.get("qualityPassed") else 0
-            )
-        by_key[_row_key(row)] = row
-    return sorted(by_key.values(), key=lambda row: float(row.get("score") or 0.0), reverse=True)
-
 def _save_library(payload: dict[str, Any]) -> None:
     _save_json(AGENT_FACTOR_LIBRARY_PATH, payload)
 
 def _save_json(path: Path, payload: dict[str, Any]) -> None:
     save_json_object(path, payload)
 
-def _library_with_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"version": AGENT_FACTOR_LIBRARY_VERSION, "updatedAt": utc_now(), "thresholds": _threshold_payload(), "factors": rows}
-
 def _candidate_ideas(memory: dict[str, Any]) -> list[dict[str, Any]]:
     plan = (((memory.get("llmAgent") or {}).get("review") or {}).get("factorMiningPlan") or {})
     return [dict(item) for item in plan.get("candidateFactorIdeas") or []]
-
-def _simulation_eligible(metrics: dict[str, Any]) -> bool:
-    return _num(metrics.get("winRate")) >= SUCCESS_WIN_RATE_MIN and _num(metrics.get("profitFactor")) >= SUCCESS_PROFIT_FACTOR_MIN
-
-
-def _usable_metrics(metrics: dict[str, Any]) -> bool:
-    return int(metrics.get("totalPeriods") or 0) >= BACKTEST_MIN_PERIODS and metrics.get("winRate") is not None
-
-
-def _orientation(metrics: dict[str, Any]) -> int:
-    return 1 if _num(metrics.get("ir")) >= 0 else -1
-
-
-def _ingested_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [row for row in rows if _row_ingested(row)]
-
-
-def _row_ingested(row: dict[str, Any]) -> bool:
-    if str(row.get("candidateStatus") or "") == "promoted":
-        return True
-    return isinstance(row.get("metrics"), dict) and str(row.get("candidateStatus") or "") not in {
-        "failed",
-        "duplicate_existing",
-    }
-
-
-def _merge_agent_review(llm_agent: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
-    updated = deepcopy(llm_agent)
-    review = updated.get("review") if isinstance(updated.get("review"), dict) else {}
-    review = deepcopy(review)
-    review["evaluation"] = evaluation
-    updated["review"] = review
-    return updated
-
-
-def _duplicate_formula(formula: str, existing: list[dict[str, Any]]) -> bool:
-    normalized = normalize_agent_formula(formula)
-    return any(normalize_agent_formula(str(row.get("formula") or "")) == normalized for row in existing)
-
-
-def _empty_library() -> dict[str, Any]:
-    return {"version": AGENT_FACTOR_LIBRARY_VERSION, "thresholds": _threshold_payload(), "factors": []}
-
-
-def _threshold_payload() -> dict[str, float]:
-    return {"minWinRate": SUCCESS_WIN_RATE_MIN, "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN}
-
-
-def _failure(row: dict[str, Any], stage: str, exc: Exception) -> dict[str, Any]:
-    return {"factorName": row.get("factorName"), "stage": stage, "error": str(exc)}
-
-
-def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
-    return (_row_symbol(row), str(row.get("duration")), str(row.get("factorName")))
-
-
-def _row_symbol(row: dict[str, Any]) -> str:
-    return str(row.get("symbol") or "").strip().upper()
-
-
-def _num(value: Any) -> float:
-    return float(value) if value is not None else 0.0

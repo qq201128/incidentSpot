@@ -3,9 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-MIN_PAIRED_SAMPLES = 5
-SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE = 0.15
-SYSTEMIC_MIN_SHADOW_WIN_EVENT_LOSS = 3
+from app.services.shadow_event_deviation_metrics import (
+    MIN_PAIRED_SAMPLES,
+    SYSTEMIC_MIN_SHADOW_WIN_EVENT_LOSS,
+    SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE,
+    by_strategy as _by_strategy,
+    issues as _issues,
+    summary as _summary,
+    utc_now as _utc_now,
+)
+
 FUZZY_WINDOW_MS = 900_000
 
 ORDER_JOIN = """
@@ -262,106 +269,3 @@ def _divergence_type(shadow_correct: bool, event_profitable: bool) -> str:
         return "shadow_loss_event_win"
     return "aligned_loss"
 
-
-def _summary(pairs: list[dict[str, Any]]) -> dict[str, Any]:
-    total = len(pairs)
-    counts = {
-        "alignedWin": 0,
-        "shadowWinEventLoss": 0,
-        "shadowLossEventWin": 0,
-        "alignedLoss": 0,
-    }
-    shadow_pnl_estimate = 0.0
-    for pair in pairs:
-        counts[_camel(pair["divergenceType"])] += 1
-        shadow_return = pair.get("shadowReturn")
-        if shadow_return is not None:
-            shadow_pnl_estimate += float(shadow_return)
-    return {
-        "pairedCount": total,
-        "alignedWinCount": counts["alignedWin"],
-        "shadowWinEventLossCount": counts["shadowWinEventLoss"],
-        "shadowLossEventWinCount": counts["shadowLossEventWin"],
-        "alignedLossCount": counts["alignedLoss"],
-        "shadowWinEventLossRate": _ratio(counts["shadowWinEventLoss"], total),
-        "alignmentRate": _ratio(counts["alignedWin"] + counts["alignedLoss"], total),
-        "totalEventPnlU": round(sum(float(p["eventPnlU"]) for p in pairs if p.get("eventPnlU") is not None), 6),
-        "estimatedShadowReturnSum": round(shadow_pnl_estimate, 6),
-    }
-
-
-def _by_strategy(pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for pair in pairs:
-        grouped.setdefault(str(pair["strategyKey"]), []).append(pair)
-    rows = []
-    for strategy_key, items in grouped.items():
-        summary = _summary(items)
-        rows.append(
-            {
-                "strategyKey": strategy_key,
-                "pairedCount": summary["pairedCount"],
-                "shadowWinEventLossCount": summary["shadowWinEventLossCount"],
-                "shadowWinEventLossRate": summary["shadowWinEventLossRate"],
-                "totalEventPnlU": summary["totalEventPnlU"],
-            }
-        )
-    rows.sort(key=lambda item: (item["shadowWinEventLossRate"] or 0, item["pairedCount"]), reverse=True)
-    return rows
-
-
-def _issues(summary: dict[str, Any], by_strategy: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if summary["pairedCount"] < MIN_PAIRED_SAMPLES:
-        return []
-    issues: list[dict[str, Any]] = []
-    rate = summary.get("shadowWinEventLossRate")
-    count = int(summary.get("shadowWinEventLossCount") or 0)
-    if (
-        count >= SYSTEMIC_MIN_SHADOW_WIN_EVENT_LOSS
-        and rate is not None
-        and rate >= SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE
-    ):
-        issues.append(
-            {
-                "code": "systemic_shadow_win_event_loss",
-                "severity": "warning",
-                "message": "shadow 预测正确但事件合约模拟亏损的比例偏高，可能存在方向/结算口径偏差",
-                "shadowWinEventLossCount": count,
-                "shadowWinEventLossRate": rate,
-            }
-        )
-    for row in by_strategy:
-        if row["pairedCount"] < MIN_PAIRED_SAMPLES:
-            continue
-        strategy_rate = row.get("shadowWinEventLossRate")
-        strategy_count = int(row.get("shadowWinEventLossCount") or 0)
-        if (
-            strategy_count >= 2
-            and strategy_rate is not None
-            and strategy_rate >= SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE
-        ):
-            issues.append(
-                {
-                    "code": "strategy_shadow_win_event_loss",
-                    "severity": "warning",
-                    "message": "该策略 shadow 与 event 盈亏口径偏差偏高",
-                    "strategyKey": row["strategyKey"],
-                    "shadowWinEventLossCount": strategy_count,
-                    "shadowWinEventLossRate": strategy_rate,
-                    "totalEventPnlU": row.get("totalEventPnlU"),
-                }
-            )
-    return issues
-
-
-def _camel(value: str) -> str:
-    parts = value.split("_")
-    return parts[0] + "".join(part[:1].upper() + part[1:] for part in parts[1:])
-
-
-def _ratio(numerator: int, denominator: int) -> float | None:
-    return None if denominator <= 0 else round(numerator / denominator, 4)
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

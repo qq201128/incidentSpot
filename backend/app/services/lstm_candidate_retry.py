@@ -3,7 +3,6 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.services.experiment_profiles import (
@@ -34,6 +33,17 @@ from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_prediction_service import lstm_model_status
 from app.services.lstm_training_service import publish_lstm_staged_model, train_lstm_model
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
+from app.services.lstm_candidate_retry_payloads import (
+    duration_ms as _duration_ms,
+    failed_training_report as _failed_training_report,
+    normalized_symbols as _normalized_symbols,
+    search_exhausted_result as _search_exhausted_result,
+    skipped_result as _skipped_result,
+    summary_status as _summary_status,
+    trained_result as _trained_result,
+    utc_now as _utc_now,
+    validated_durations as _validated_durations,
+)
 
 DEFAULT_RETRY_DURATIONS = ("10m", "60m")
 RETRY_TRAIN_STATUSES = {"untrained", "validation_failed", "failed", "insufficient_samples"}
@@ -283,124 +293,3 @@ def _refresh_inputs(
     deps.refresh_klines(symbol, "1m", entry_open_time - MS_PER_MINUTE)
     deps.refresh_klines(symbol, duration, entry_open_time - _duration_ms(duration))
 
-
-def _skipped_result(
-    symbol: str,
-    duration: str,
-    status: dict[str, Any],
-    decision: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "symbol": symbol,
-        "duration": duration,
-        "status": "skipped",
-        "reason": decision["reason"],
-        "activeModelStatus": status.get("activeModelStatus") or status.get("status"),
-        "lastAttemptStatus": status.get("lastAttemptStatus"),
-    }
-
-
-def _search_exhausted_result(
-    symbol: str,
-    duration: str,
-    status: dict[str, Any],
-    decision: dict[str, Any],
-    config: LstmCandidateRetryConfig,
-) -> dict[str, Any]:
-    return {
-        **_skipped_result(symbol, duration, status, decision),
-        "reason": "candidate_search_exhausted",
-        "searchSpaceTotal": search_space_size(config.search),
-    }
-
-
-def _trained_result(
-    symbol: str,
-    duration: str,
-    status: dict[str, Any],
-    decision: dict[str, Any],
-    ranking: dict[str, Any],
-    promotion: dict[str, Any],
-    trainings: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return {
-        "symbol": symbol,
-        "duration": duration,
-        "status": _training_batch_status(trainings),
-        "reason": decision["reason"],
-        "previousActiveModelStatus": status.get("activeModelStatus") or status.get("status"),
-        "rankingTotal": len(ranking.get("ranking") or []),
-        "promotion": promotion,
-        "training": _training_summary(trainings[-1]),
-        "candidates": [_candidate_result_summary(training) for training in trainings],
-    }
-
-
-def _training_batch_status(trainings: list[dict[str, Any]]) -> str:
-    if any(str(item.get("status") or "") in {"trade_active", "trained"} for item in trainings):
-        return "trade_active"
-    if any(str(item.get("status") or "") == "shadow_active" for item in trainings):
-        return "shadow_active"
-    if trainings:
-        return str(trainings[-1].get("status") or "failed")
-    return "skipped"
-
-
-def _training_summary(report: dict[str, Any]) -> dict[str, Any]:
-    keys = (
-        "status", "modelVersion", "trainedAt", "sampleCounts",
-        "candidateStatus", "promotionReason", "validationFailureReason",
-    )
-    return {key: report.get(key) for key in keys if key in report}
-
-
-def _candidate_result_summary(report: dict[str, Any]) -> dict[str, Any]:
-    summary = _training_summary(report)
-    summary["searchKey"] = report.get("searchKey")
-    return {key: value for key, value in summary.items() if value is not None}
-
-
-def _failed_training_report(config: LstmTrainingConfig, profile: str, exc: Exception) -> dict[str, Any]:
-    return {
-        "status": "failed",
-        "candidateStatus": "failed",
-        "symbol": config.symbol,
-        "duration": config.duration,
-        "modelVersion": None,
-        "searchKey": search_key_for_config(config, profile),
-        "trainedAt": _utc_now(),
-        "validationFailureReason": str(exc),
-    }
-
-
-def _summary_status(results: list[dict[str, Any]]) -> str:
-    if any(result.get("status") not in {"skipped", *TRAINED_STATUSES} for result in results):
-        return "completed_with_rejections"
-    if any(result.get("status") in TRAINED_STATUSES for result in results):
-        return "trained"
-    return "skipped"
-
-
-def _normalized_symbols(symbols: tuple[str, ...]) -> tuple[str, ...]:
-    normalized = tuple(symbol.strip().upper() for symbol in symbols if symbol.strip())
-    if not normalized:
-        raise ValueError("at least one LSTM retry symbol is required")
-    return normalized
-
-
-def _validated_durations(durations: tuple[str, ...]) -> tuple[str, ...]:
-    selected = tuple(duration.strip() for duration in durations if duration.strip())
-    unsupported = [duration for duration in selected if duration not in SUPPORTED_RULE_DURATIONS]
-    if not selected:
-        raise ValueError("at least one LSTM retry duration is required")
-    if unsupported:
-        raise ValueError(f"unsupported LSTM retry durations: {', '.join(unsupported)}")
-    return selected
-
-
-def _duration_ms(duration: str) -> int:
-    return int(DURATION_TO_MINUTES[duration]) * MS_PER_MINUTE
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

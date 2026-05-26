@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 
 from app.services.factor_backtest_service import IC_ROLLING_WINDOW, _compute_rolling_ic
+from app.services.factor_backtest_service import run_factor_backtest_on_frame
+from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
 
 def test_rolling_ic_ranks_inside_each_window() -> None:
@@ -38,6 +40,33 @@ def test_rolling_ic_skips_constant_windows() -> None:
     fwd_ret = pd.Series(np.arange(IC_ROLLING_WINDOW + 1, dtype=float))
 
     assert _compute_rolling_ic(factor, fwd_ret).empty
+
+
+def test_factor_backtest_exposes_out_of_sample_selection_gate() -> None:
+    rows = 700
+    close = 100.0 * np.cumprod(1.0 + 0.002 * np.sin(np.arange(rows) / 5.0))
+    future = pd.Series(close).pct_change().shift(-1).fillna(0.0)
+    frame = pd.DataFrame({
+        "open_time": np.arange(rows) * 60_000,
+        "close": close,
+        "alpha": future,
+    })
+    factor = FactorDefinition(
+        name="alpha",
+        category=FactorCategory.RETURN,
+        description="alpha",
+        formula="alpha",
+        direction=FactorDirection.HIGHER_BETTER,
+    )
+
+    result = run_factor_backtest_on_frame(factor, frame, symbol="btcusdt", duration="10m")
+    oos = result["outOfSample"]
+
+    assert oos["selectionMetricSource"] == "validation_and_test_only"
+    assert set(("train", "validation", "test")) <= set(oos)
+    assert oos["validation"]["returnMetrics"]["sampleCount"] > 0
+    assert oos["validation"]["researchMetrics"]["quintileReturns"]
+    assert oos["selectionGate"]["status"] in {"passed", "failed"}
 
 
 def _window_spearman(factor: pd.Series, fwd_ret: pd.Series) -> float:

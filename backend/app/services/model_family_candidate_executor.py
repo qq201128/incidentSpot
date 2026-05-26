@@ -73,6 +73,7 @@ def train_candidate(
             publish_trade_active=False,
             write_attempt=False,
             persist_artifacts=False,
+            evaluate_test=False,
         )
     except Exception as exc:
         report = _failed_report(record_config, profile, exc)

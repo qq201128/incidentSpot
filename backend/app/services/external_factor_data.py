@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.external_factor_columns import (
     ONCHAIN_COLUMNS,
     ONCHAIN_RAW_COLUMNS,
@@ -70,53 +70,69 @@ def load_onchain_features(symbol: str) -> pd.DataFrame:
 def upsert_positioning_rows(symbol: str, rows: list[dict]) -> None:
     if not rows:
         return
-    conn = get_conn()
-    try:
-        for row in rows:
-            conn.execute(UPSERT_POSITIONING_SQL, _positioning_values(symbol, row))
-        refresh_positioning_derivatives(conn, symbol)
-        conn.commit()
-    finally:
-        conn.close()
+
+    def _upsert() -> None:
+        conn = get_conn()
+        try:
+            for row in rows:
+                conn.execute(UPSERT_POSITIONING_SQL, _positioning_values(symbol, row))
+            refresh_positioning_derivatives(conn, symbol)
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_upsert)
 
 
 def upsert_sentiment_rows(rows: list[dict], source: str = "alternative_me_fng") -> None:
     if not rows:
         return
-    conn = get_conn()
-    try:
-        for row in rows:
-            conn.execute(UPSERT_SENTIMENT_SQL, _sentiment_values(source, row))
-        refresh_sentiment_derivatives(conn, source)
-        conn.commit()
-    finally:
-        conn.close()
+
+    def _upsert() -> None:
+        conn = get_conn()
+        try:
+            for row in rows:
+                conn.execute(UPSERT_SENTIMENT_SQL, _sentiment_values(source, row))
+            refresh_sentiment_derivatives(conn, source)
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_upsert)
 
 
 def upsert_onchain_rows(symbol: str, rows: list[dict]) -> None:
     if not rows:
         return
-    conn = get_conn()
-    try:
-        for row in rows:
-            conn.execute(UPSERT_ONCHAIN_SQL, _onchain_values(symbol, row))
-        refresh_onchain_derivatives(conn, symbol)
-        conn.commit()
-    finally:
-        conn.close()
+
+    def _upsert() -> None:
+        conn = get_conn()
+        try:
+            for row in rows:
+                conn.execute(UPSERT_ONCHAIN_SQL, _onchain_values(symbol, row))
+            refresh_onchain_derivatives(conn, symbol)
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_upsert)
 
 
 def upsert_funding_rows(symbol: str, rows: list[dict]) -> None:
     if not rows:
         return
-    conn = get_conn()
-    try:
-        for row in rows:
-            values = (symbol.upper(), int(row["open_time"]), float_or_none(row.get("funding_rate")))
-            conn.execute(UPSERT_FUNDING_SQL, values)
-        conn.commit()
-    finally:
-        conn.close()
+
+    def _upsert() -> None:
+        conn = get_conn()
+        try:
+            for row in rows:
+                values = (symbol.upper(), int(row["open_time"]), float_or_none(row.get("funding_rate")))
+                conn.execute(UPSERT_FUNDING_SQL, values)
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_upsert)
 
 
 def _load_table(sql: str, params: tuple, columns: tuple[str, ...]) -> pd.DataFrame:

@@ -1,37 +1,32 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
 import pandas as pd
-
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_combo_scoring import combination_score
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_combination_service import COMBINATION_METHOD
+from app.services.factor_combination_quality_gate import (
+    LIVE_MIN_PROFIT_FACTOR,
+    LIVE_MIN_TOTAL_PERIODS,
+    LIVE_MIN_WIN_RATE,
+    EntryWindow,
+    backtest_aligned_quality,
+    min_total_periods,
+    quality_gate,
+    resolve_apply_quality_gate,
+    signal_threshold,
+)
 from app.services.factor_duration_alignment import live_duration_entry_index
-from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN
 from app.services.factor_learning_signal_filter import MEMORY_NOT_PROVIDED, enrich_signal_with_factor_learning
 from app.services.factor_signal_timing import FactorSignalTiming, combination_kline_close_timing
-from app.services.kline_timing import is_within_entry_grace
 
-LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
-LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
-LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
-DEFAULT_SIGNAL_THRESHOLD = 0.0
 COMBO_MEDIAN_DECIMALS = 6
-
-
-@dataclass(frozen=True)
-class _EntryWindow:
-    open_time: int | None
-    grace_ms: int | None
-
-
 @dataclass(frozen=True)
 class _SignalContext:
     row: dict[str, Any]
@@ -72,18 +67,18 @@ def build_live_signal_from_ranking(
         zscore_cache=None if context is None else context.zscore_cache,
     )
     confidence = _live_confidence(row)
-    window = _EntryWindow(entry_open_time, entry_grace_ms)
+    window = EntryWindow(entry_open_time, entry_grace_ms)
     timing = combination_kline_close_timing(
         row,
         symbol=symbol,
         duration=duration,
         mined_by_name=None if context is None else context.mined_by_name,
     )
-    use_quality_gate = _resolve_apply_quality_gate(apply_quality_gate)
+    use_quality_gate = resolve_apply_quality_gate(apply_quality_gate)
     quality = (
-        _quality_gate(row, confidence, window, timing=timing, score=signal.score)
+        quality_gate(row, confidence, window, timing=timing, score=signal.score)
         if use_quality_gate
-        else _backtest_aligned_quality()
+        else backtest_aligned_quality()
     )
     payload = _live_signal_payload(
         _SignalContext(
@@ -169,7 +164,7 @@ def _combo_direction_from_row_rule(
 
 
 def _live_direction(row: dict[str, Any], score: float, historical_median: float) -> str:
-    threshold = _signal_threshold(row)
+    threshold = signal_threshold(row)
     if is_high_winrate_combo_name(str(row.get("factorName") or "")) and threshold > 0:
         if score >= threshold:
             return "up"
@@ -244,7 +239,7 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityPassed": ctx.quality["passed"],
         "qualityMetricsPassed": ctx.quality["metricsPassed"],
         "qualityThresholdPassed": ctx.quality["thresholdPassed"],
-        "signalThreshold": _signal_threshold(ctx.row),
+        "signalThreshold": signal_threshold(ctx.row),
         "qualityEntryWindowPassed": ctx.quality["entryWindowPassed"],
         "factorTimingMode": ctx.timing.mode,
         "factorTimingPassed": ctx.quality["factorTimingPassed"],
@@ -254,133 +249,9 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityGateReason": ctx.quality["reason"],
         "qualityMinWinRate": LIVE_MIN_WIN_RATE,
         "qualityMinProfitFactor": LIVE_MIN_PROFIT_FACTOR,
-        "qualityMinPeriods": _min_total_periods(ctx.row),
+        "qualityMinPeriods": min_total_periods(ctx.row),
         "frameIndex": str(ctx.index),
     }
-
-
-def _resolve_apply_quality_gate(requested: bool) -> bool:
-    env = os.getenv("FACTOR_COMBO_LIVE_QUALITY_GATE", "").strip().lower()
-    if env in {"1", "true", "yes"}:
-        return True
-    if env in {"0", "false", "no"}:
-        return False
-    return requested
-
-
-def _backtest_aligned_quality() -> dict[str, Any]:
-    """Combo backtests do not apply live trade-quality gates; keep SIM aligned with that path."""
-    return {
-        "passed": True,
-        "metricsPassed": True,
-        "thresholdPassed": True,
-        "entryWindowPassed": True,
-        "factorTimingPassed": True,
-        "reason": "backtest_aligned",
-    }
-
-
-def _quality_gate(
-    row: dict[str, Any],
-    confidence: float,
-    window: _EntryWindow,
-    *,
-    timing: FactorSignalTiming,
-    score: float,
-) -> dict[str, Any]:
-    metric_reason = _quality_metric_reason(row, confidence)
-    threshold_reason = _threshold_reason(row, score)
-    entry_passed = _entry_window_passed(window)
-    metrics_passed = metric_reason == "passed"
-    threshold_passed = threshold_reason == "passed"
-    passed = metrics_passed and threshold_passed and entry_passed is not False and timing.passed
-    return {
-        "passed": passed,
-        "metricsPassed": metrics_passed,
-        "thresholdPassed": threshold_passed,
-        "entryWindowPassed": entry_passed,
-        "factorTimingPassed": timing.passed,
-        "reason": _quality_reason(metric_reason, threshold_reason, entry_passed, timing),
-    }
-
-
-def _quality_metric_reason(row: dict[str, Any], confidence: float) -> str:
-    if confidence < LIVE_MIN_WIN_RATE:
-        return "win_rate_below_min"
-    profit_factor = _finite_float(row.get("profitFactor"))
-    if profit_factor is None:
-        return "profit_factor_missing"
-    if profit_factor < LIVE_MIN_PROFIT_FACTOR:
-        return "profit_factor_below_min"
-    min_periods = _min_total_periods(row)
-    total_periods = _finite_float(row.get("totalPeriods"))
-    if total_periods is None:
-        return "total_periods_missing"
-    if total_periods < min_periods:
-        return "total_periods_below_min"
-    walk_forward_reason = _walk_forward_reason(row)
-    if walk_forward_reason is not None:
-        return walk_forward_reason
-    return "passed"
-
-
-def _walk_forward_reason(row: dict[str, Any]) -> str | None:
-    if is_high_winrate_combo_name(str(row.get("factorName") or "")):
-        return None
-    passed = row.get("walkForwardPassed")
-    if passed is True or passed == 1:
-        return None
-    if passed is False or passed == 0:
-        return str(row.get("walkForwardFailureReason") or "walk_forward_failed")
-    return "walk_forward_missing"
-
-
-def _min_total_periods(row: dict[str, Any]) -> float:
-    value = _finite_float(row.get("minTrades"))
-    if value is None:
-        return float(LIVE_MIN_TOTAL_PERIODS)
-    if value <= 0:
-        raise ValueError(f"combination row has invalid minTrades: {row.get('factorName')}")
-    return value
-
-
-def _threshold_reason(row: dict[str, Any], score: float) -> str:
-    threshold = _signal_threshold(row)
-    if abs(score) < threshold:
-        return "signal_threshold_not_met"
-    return "passed"
-
-
-def _signal_threshold(row: dict[str, Any]) -> float:
-    threshold = _finite_float(row.get("threshold"))
-    if threshold is None:
-        return DEFAULT_SIGNAL_THRESHOLD
-    if threshold < 0:
-        raise ValueError(f"combination row has negative threshold: {row.get('factorName')}")
-    return threshold
-
-
-def _entry_window_passed(window: _EntryWindow) -> bool | None:
-    if window.open_time is None or window.grace_ms is None:
-        return None
-    return is_within_entry_grace(int(window.open_time), grace_ms=int(window.grace_ms))
-
-
-def _quality_reason(
-    metric_reason: str,
-    threshold_reason: str,
-    entry_passed: bool | None,
-    timing: FactorSignalTiming,
-) -> str:
-    if metric_reason != "passed":
-        return metric_reason
-    if threshold_reason != "passed":
-        return threshold_reason
-    if not timing.passed:
-        return timing.reason
-    if entry_passed is False:
-        return "entry_window_closed"
-    return "passed"
 
 
 def _row_members(row: dict[str, Any]) -> list[dict[str, Any]]:

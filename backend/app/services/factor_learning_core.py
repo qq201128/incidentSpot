@@ -8,6 +8,7 @@ from app.services.factor_adaptive_learning import adaptive_learning_summary
 from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_loss import loss_memory
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_VERSION
+from app.services.factor_learning_mining_merge import factor_mining_payload
 from app.services.factor_learning_patterns import (
     candidate_loss_columns,
     factor_rows,
@@ -17,10 +18,6 @@ from app.services.factor_learning_patterns import (
     success_patterns,
 )
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
-from app.services.factor_operator_library import factor_operator_summary
-
-COMBO_FACTOR_PREFIXES = ("combo__", "goal_combo__")
-
 
 def build_factor_learning_memory(
     frame: pd.DataFrame,
@@ -69,7 +66,6 @@ def build_factor_learning_memory(
     payload["retrieval"] = build_factor_learning_retrieval(payload)
     return payload
 
-
 def _memory_payload(
     *,
     symbol: str,
@@ -101,7 +97,7 @@ def _memory_payload(
             settlement_sweep=settlement_sweep,
             mined_frame_failures=mined_frame_failures,
         ),
-        "factorMining": _factor_mining_payload(
+        "factorMining": factor_mining_payload(
             previous_memory=previous_memory,
             current_success=success_patterns(rows),
             current_forbidden=forbidden_regions(frame, rows),
@@ -117,196 +113,6 @@ def _memory_payload(
         "monitoring": monitoring_report or {},
     }
     return payload
-
-
-def _factor_mining_payload(
-    *,
-    previous_memory: dict[str, Any] | None,
-    current_success: list[dict[str, Any]],
-    current_forbidden: list[dict[str, Any]],
-    now: str,
-) -> dict[str, Any]:
-    return {
-        "operatorLibrary": factor_operator_summary(),
-        "successPatterns": _merge_success_patterns(previous_memory, current_success, now),
-        "forbiddenRegions": _merge_forbidden_regions(previous_memory, current_forbidden, now),
-    }
-
-
-def _merge_success_patterns(
-    previous_memory: dict[str, Any] | None,
-    current: list[dict[str, Any]],
-    now: str,
-) -> list[dict[str, Any]]:
-    previous = _previous_factor_mining_items(previous_memory, "successPatterns")
-    by_key = {_success_pattern_key(item): dict(item) for item in previous if _success_pattern_key(item)}
-    for item in current:
-        key = _success_pattern_key(item)
-        if not key:
-            continue
-        merged = _merge_success_pattern(by_key.get(key), item, now)
-        by_key[key] = merged
-    rows = list(by_key.values())
-    rows.sort(key=lambda item: (float(item.get("score") or 0.0), int(item.get("support") or 0)), reverse=True)
-    return rows
-
-
-def _merge_success_pattern(
-    previous: dict[str, Any] | None,
-    current: dict[str, Any],
-    now: str,
-) -> dict[str, Any]:
-    if previous is None:
-        return {**current, "firstSeenAt": now, "lastSeenAt": now}
-    previous_support = int(previous.get("support") or 0)
-    current_support = int(current.get("support") or 0)
-    support = previous_support + current_support
-    return {
-        **previous,
-        **current,
-        "support": support,
-        "score": _weighted_average(
-            previous_value=previous.get("score"),
-            previous_weight=previous_support,
-            current_value=current.get("score"),
-            current_weight=current_support,
-        ),
-        "factors": _merged_list(previous.get("factors"), current.get("factors")),
-        "firstSeenAt": previous.get("firstSeenAt") or now,
-        "lastSeenAt": now,
-    }
-
-
-def _merge_forbidden_regions(
-    previous_memory: dict[str, Any] | None,
-    current: list[dict[str, Any]],
-    now: str,
-) -> list[dict[str, Any]]:
-    previous = _clean_forbidden_regions(_previous_factor_mining_items(previous_memory, "forbiddenRegions"))
-    current = _clean_forbidden_regions(current)
-    by_key = {_forbidden_region_key(item): dict(item) for item in previous if _forbidden_region_key(item)}
-    for item in current:
-        key = _forbidden_region_key(item)
-        if not key:
-            continue
-        by_key[key] = _merge_forbidden_region(by_key.get(key), item, now)
-    rows = list(by_key.values())
-    rows.sort(
-        key=lambda item: (float(item.get("avgAbsCorrelation") or 0.0), int(item.get("support") or 0)),
-        reverse=True,
-    )
-    return rows
-
-
-def _merge_forbidden_region(
-    previous: dict[str, Any] | None,
-    current: dict[str, Any],
-    now: str,
-) -> dict[str, Any]:
-    if previous is None:
-        return {**current, "firstSeenAt": now, "lastSeenAt": now}
-    previous_support = int(previous.get("support") or 0)
-    current_support = int(current.get("support") or 0)
-    support = previous_support + current_support
-    return {
-        **previous,
-        **current,
-        "support": support,
-        "avgAbsCorrelation": _weighted_average(
-            previous_value=previous.get("avgAbsCorrelation"),
-            previous_weight=previous_support,
-            current_value=current.get("avgAbsCorrelation"),
-            current_weight=current_support,
-        ),
-        "members": _merged_list(previous.get("members"), current.get("members")),
-        "firstSeenAt": previous.get("firstSeenAt") or now,
-        "lastSeenAt": now,
-    }
-
-
-def _previous_factor_mining_items(previous_memory: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
-    if not isinstance(previous_memory, dict):
-        return []
-    factor_mining = previous_memory.get("factorMining")
-    if not isinstance(factor_mining, dict):
-        return []
-    items = factor_mining.get(key)
-    return [dict(item) for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-
-
-def _success_pattern_key(item: dict[str, Any]) -> str:
-    return str(item.get("pattern") or "")
-
-
-def _forbidden_region_key(item: dict[str, Any]) -> str:
-    return str(item.get("region") or "")
-
-
-def _clean_forbidden_regions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    cleaned = []
-    for item in items:
-        row = _clean_forbidden_region(item)
-        if row is not None:
-            cleaned.append(row)
-    return cleaned
-
-
-def _clean_forbidden_region(item: dict[str, Any]) -> dict[str, Any] | None:
-    key = _forbidden_region_key(item)
-    if not key or _is_combo_factor_name(_forbidden_region_seed(key)):
-        return None
-    members = item.get("members")
-    if not isinstance(members, list):
-        return dict(item)
-    filtered = [name for name in _member_names(members) if not _is_combo_factor_name(name)]
-    if not filtered:
-        return None
-    if len(filtered) != len(members) and len(filtered) < 2:
-        return None
-    return {**item, "members": filtered, "support": _cleaned_support(item, filtered)}
-
-
-def _forbidden_region_seed(key: str) -> str:
-    prefix = "correlation_cluster:"
-    return key[len(prefix):] if key.startswith(prefix) else key
-
-
-def _member_names(members: list[Any]) -> list[str]:
-    return [str(member or "").strip() for member in members if str(member or "").strip()]
-
-
-def _is_combo_factor_name(name: str) -> bool:
-    return name.startswith(COMBO_FACTOR_PREFIXES)
-
-
-def _cleaned_support(item: dict[str, Any], members: list[str]) -> int:
-    support = int(item.get("support") or 0)
-    return min(support, len(members)) if support > 0 else len(members)
-
-
-def _weighted_average(
-    *,
-    previous_value: Any,
-    previous_weight: int,
-    current_value: Any,
-    current_weight: int,
-) -> float:
-    total = previous_weight + current_weight
-    if total <= 0:
-        return 0.0
-    return round(
-        (float(previous_value or 0.0) * previous_weight + float(current_value or 0.0) * current_weight) / total,
-        4,
-    )
-
-
-def _merged_list(previous: Any, current: Any) -> list[Any]:
-    values = []
-    for item in [*(previous or []), *(current or [])]:
-        if item not in values:
-            values.append(item)
-    return values
-
 
 def _source_payload(
     *,

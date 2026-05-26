@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, FastAPI
 
 from app.db.session import init_db
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_asyncio_thread_pool() -> None:
+    workers = int(os.getenv("ASYNCIO_THREAD_POOL_WORKERS", "48"))
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=max(8, workers)))
 
 BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 STOP_EVENT_ATTRS = (
@@ -36,6 +44,7 @@ BACKGROUND_TASK_ATTRS = (
 
 async def bootstrap_application(app: FastAPI) -> None:
     """Fast path: migrate DB, register core APIs off-thread, then load the rest."""
+    _configure_asyncio_thread_pool()
     await asyncio.to_thread(init_db)
     await asyncio.to_thread(_register_core_routers, app)
     app.state.bootstrap_task = asyncio.create_task(_deferred_bootstrap(app))

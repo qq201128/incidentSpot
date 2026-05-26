@@ -33,10 +33,8 @@ BASE_EXCLUDED_COLUMNS = {
     "label_up", "y",
 }
 
-
 class LstmDataError(ValueError):
     pass
-
 
 @dataclass(frozen=True)
 class LstmDataset:
@@ -48,7 +46,6 @@ class LstmDataset:
     feature_frame: pd.DataFrame
     combo_snapshot: list[dict[str, Any]]
     learning_context: dict[str, Any] | None = None
-
 
 def build_lstm_training_dataset(
     config: LstmTrainingConfig,
@@ -73,14 +70,12 @@ def build_lstm_training_dataset(
         learning_context=lstm_learning_context(memory),
     )
 
-
 def sanitize_feature_window(window: np.ndarray) -> np.ndarray:
     """Replace NaN/inf in a live feature window; pct_change and sparse inputs can leave edge infs."""
     cleaned = np.asarray(window, dtype=np.float32)
     if np.isfinite(cleaned).all():
         return cleaned
     return np.nan_to_num(cleaned, nan=0.0, posinf=0.0, neginf=0.0)
-
 
 def build_live_feature_window(
     symbol: str,
@@ -105,7 +100,6 @@ def build_live_feature_window(
     meta = {"entryOpenTime": int(last["entry_open_time"]), "entryPrice": float(last["close"])}
     return window.reshape(1, feature_window, len(feature_columns)), meta
 
-
 def duration_labeled_frame(
     frame: pd.DataFrame,
     duration: str,
@@ -120,7 +114,6 @@ def duration_labeled_frame(
     sampled["label_threshold_bps"] = _label_threshold_bps(sampled, min_move_bps)
     sampled["label_up"] = _label_series(sampled["future_return"], sampled["label_threshold_bps"] / 10_000.0)
     return sampled.dropna(subset=["future_return", "label_up"]).reset_index(drop=True)
-
 
 def duration_feature_frame(
     frame: pd.DataFrame,
@@ -138,13 +131,11 @@ def duration_feature_frame(
         _assert_live_entry_row(sampled, int(entry_open_time), duration)
     return sampled
 
-
 def candidate_feature_columns(
     frame: pd.DataFrame,
     learning_memory: dict[str, Any] | None = None,
 ) -> list[str]:
     return candidate_feature_columns_for_memory(frame, learning_memory)
-
 
 def candidate_feature_columns_for_memory(
     frame: pd.DataFrame,
@@ -163,7 +154,6 @@ def candidate_feature_columns_for_memory(
     if not columns:
         raise LstmDataError("no numeric LSTM feature columns")
     return columns
-
 
 def windowed_lstm_dataset(
     frame: pd.DataFrame,
@@ -192,7 +182,6 @@ def windowed_lstm_dataset(
         learning_context,
     )
 
-
 def _training_feature_frame(
     config: LstmTrainingConfig,
     frame_loader: Callable[[str, str], pd.DataFrame] | None,
@@ -208,7 +197,6 @@ def _training_feature_frame(
         learning_memory=learning_memory,
     )
 
-
 def _legacy_combo_snapshot(
     symbol: str,
     duration: str,
@@ -218,7 +206,6 @@ def _legacy_combo_snapshot(
     if not _has_ranking(ranking):
         ranking = resolve_lstm_combo_ranking(symbol, duration)
     return combo_snapshot_from_ranking(ranking) if _has_ranking(ranking) else []
-
 
 def _loaded_ranking(
     symbol: str,
@@ -230,25 +217,20 @@ def _loaded_ranking(
     ranking = ranking_loader(symbol.strip().upper(), duration)
     return dict(ranking) if isinstance(ranking, dict) else None
 
-
 def _has_ranking(ranking: dict[str, Any] | None) -> bool:
     rows = None if ranking is None else ranking.get("ranking")
     return isinstance(rows, list) and bool(rows)
-
 
 def _assert_live_entry_row(frame: pd.DataFrame, entry_open_time: int, duration: str) -> None:
     source_open_time = duration_entry_source_open_time(entry_open_time, duration)
     if frame.empty or int(frame.iloc[-1]["open_time"]) != source_open_time:
         raise LstmDataError(f"missing completed LSTM source row at open_time={source_open_time}")
 
-
 def _duration_ms(duration: str) -> int:
     return horizon_minutes_for_duration(duration) * MS_PER_MINUTE
 
-
 def _horizon_minutes(config: LstmTrainingConfig) -> int:
     return int(config.horizon_minutes or horizon_minutes_for_duration(config.duration))
-
 
 def _horizon_bar_count(duration: str, horizon_minutes: int) -> int:
     duration_minutes = horizon_minutes_for_duration(duration)
@@ -261,14 +243,12 @@ def _horizon_bar_count(duration: str, horizon_minutes: int) -> int:
         )
     return max(1, horizon // duration_minutes)
 
-
 def _label_series(future_return: pd.Series, threshold: float | pd.Series) -> pd.Series:
     threshold = threshold if isinstance(threshold, pd.Series) else float(threshold)
     labels = pd.Series(np.nan, index=future_return.index)
     labels = labels.mask(future_return > threshold, 1.0)
     labels = labels.mask(future_return <= -threshold, 0.0)
     return labels
-
 
 def _window_arrays(
     frame: pd.DataFrame,
@@ -292,25 +272,20 @@ def _window_arrays(
         np.asarray(entry_times, dtype=np.int64),
     )
 
-
 def _column_is_finite_enough(values: pd.Series) -> bool:
     finite = np.isfinite(values.to_numpy(dtype=np.float32)).mean()
     return float(finite) >= MIN_FEATURE_FINITE_RATIO
 
-
 def _label_threshold_bps(frame: pd.DataFrame, min_move_bps: float) -> pd.Series:
     return pd.Series(float(min_move_bps), index=frame.index, dtype=np.float32)
 
-
 def _valid_sample(window: np.ndarray, label: float, future_return: float) -> bool:
     return bool(np.isfinite(window).all() and isfinite(float(label)) and isfinite(float(future_return)))
-
 
 def _assert_columns(frame: pd.DataFrame, columns: list[str]) -> None:
     missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise LstmDataError(f"LSTM feature columns missing: {', '.join(missing[:12])}")
-
 
 def _is_candidate_feature_column(column: str) -> bool:
     if column in BASE_EXCLUDED_COLUMNS:

@@ -15,8 +15,8 @@ class BacktestCostConfig:
 
 
 DEFAULT_BACKTEST_COST_CONFIG = BacktestCostConfig(
-    fee_rate_per_side=0.0004,
-    slippage_rate_per_side=0.0001,
+    fee_rate_per_side=0.0,
+    slippage_rate_per_side=0.0,
     min_trade_gap_minutes=0,
 )
 ROUNDTRIP_COST_RATE = DEFAULT_BACKTEST_COST_CONFIG.roundtrip_cost_rate

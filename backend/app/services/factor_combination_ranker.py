@@ -12,6 +12,7 @@ from app.services.factor_combination_payloads import combo_display_name, member_
 from app.services.factor_combination_search_diagnostics import combination_search_diagnostics
 from app.services.factor_combination_walk_forward import walk_forward_validation
 from app.services.factor_combo_scoring import combination_score
+from app.services.factor_combo_weighting import learned_member_payloads
 from app.services.factor_metric_enrichment import enrich_factor_results, factor_score
 from app.services.factor_registry import FactorCategory, FactorDefinition, FactorDirection
 
@@ -55,7 +56,7 @@ def combination_result(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     factor_def = combination_definition(members, context.duration)
     try:
-        combo_frame = combo_backtest_frame(context.frame, members, factor_def.name)
+        combo_frame = combo_backtest_frame(context.frame, members, factor_def.name, context.duration)
         result = run_factor_backtest_on_frame(
             factor_def,
             combo_frame,
@@ -73,15 +74,16 @@ def combination_definition(
     duration: str,
 ) -> FactorDefinition:
     names = [member.factor.name for member in members]
+    payloads = member_payloads(members)
     return FactorDefinition(
         name="combo__" + "__".join(names),
         category=FactorCategory.PERFORMANCE,
-        description=combo_display_name(member_payloads(members)),
+        description=combo_display_name(payloads),
         formula=f"{COMBINATION_METHOD}(" + ", ".join(names) + ")",
         source_file=COMBO_SOURCE_FILE,
         timeframes=(duration,),
         direction=FactorDirection.HIGHER_BETTER,
-        parameters={"members": names, "method": COMBINATION_METHOD},
+        parameters={"members": payloads, "method": COMBINATION_METHOD},
     )
 
 
@@ -89,11 +91,12 @@ def combo_backtest_frame(
     frame: pd.DataFrame,
     members: tuple[Any, ...],
     combo_name: str,
+    duration: str = "10m",
 ) -> pd.DataFrame:
     out = frame[["close"]].copy()
     if "open_time" in frame.columns:
         out["open_time"] = frame["open_time"]
-    out[combo_name] = combination_score(frame, member_payloads(members))
+    out[combo_name] = combination_score(frame, _learned_payloads(frame, members, duration))
     return out
 
 
@@ -103,8 +106,8 @@ def enriched_combo_result(
     source_frame: pd.DataFrame,
     factor_def: FactorDefinition,
 ) -> dict[str, Any]:
-    member_rows = member_payloads(members)
-    combo_frame = combo_backtest_frame(source_frame, members, factor_def.name)
+    member_rows = _learned_payloads(source_frame, members, factor_def.timeframes[0])
+    combo_frame = combo_backtest_frame(source_frame, members, factor_def.name, factor_def.timeframes[0])
     walk_forward = walk_forward_validation(combo_frame, factor_def, factor_def.timeframes[0])
     payload = _combo_payload(result, members, member_rows, walk_forward)
     pairwise = pairwise_diversity_payload(source_frame, members)
@@ -128,6 +131,19 @@ def _combo_payload(result: dict[str, Any], members: tuple[Any, ...], member_rows
         "walkForwardPassed": walk_forward.passed,
         "walkForwardFailureReason": walk_forward.failure_reason,
     }
+
+
+def _learned_payloads(frame: pd.DataFrame, members: tuple[Any, ...], duration: str) -> list[dict[str, Any]]:
+    del duration
+    rows = member_payloads(members)
+    if "close" not in frame.columns or len(rows) < 2:
+        return rows
+    train_end = int(len(frame) * 0.60)
+    training_frame = frame.copy()
+    training_frame["fwd_ret"] = training_frame["close"].shift(-1) / training_frame["close"] - 1.0
+    return learned_member_payloads(training_frame, rows, train_end)
+
+
 def _walk_forward_failures(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {

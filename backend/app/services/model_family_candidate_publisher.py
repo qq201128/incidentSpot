@@ -51,9 +51,8 @@ def _needs_seed_model(config: ModelFamilyTrainingConfig) -> bool:
 
 def _candidate_score(report: dict[str, Any]) -> tuple[float, float, int]:
     validation = report.get("validation") or {}
-    test = report.get("test") or {}
     return (
-        min(float(validation.get("winRate") or 0.0), float(test.get("winRate") or 0.0)),
-        min(float(validation.get("profitFactor") or 0.0), float(test.get("profitFactor") or 0.0)),
-        int((report.get("sampleCounts") or {}).get("test") or 0),
+        float(validation.get("winRate") or 0.0),
+        float(validation.get("profitFactor") or 0.0),
+        int((report.get("sampleCounts") or {}).get("validation") or validation.get("sampleCount") or 0),
     )

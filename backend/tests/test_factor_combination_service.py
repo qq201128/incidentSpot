@@ -231,6 +231,47 @@ def test_walk_forward_validation_fails_when_median_split_has_no_edge() -> None:
     assert result.payload["validation"]["winRate"] == pytest.approx(0.5, abs=0.05)
 
 
+def test_walk_forward_validation_reports_purge_embargo_diagnostics() -> None:
+    factor = FactorDefinition(
+        name="factor_a",
+        category=FactorCategory.RETURN,
+        description="带窗口因子",
+        formula="factor_a",
+        direction=FactorDirection.HIGHER_BETTER,
+        parameters={"featureWindow": 7},
+    )
+    frame = pd.DataFrame({"factor_a": np.arange(600, dtype=float), "fwd_ret": np.full(600, 0.002)})
+
+    result = walk_forward_validation(frame, factor, "10m")
+    diagnostics = result.payload["splitDiagnostics"]
+
+    assert diagnostics["policy"] == "chronological_train_validation_test_with_purge_embargo"
+    assert diagnostics["purgeGapBars"] == 7
+    assert diagnostics["embargoBars"] == 7
+    assert diagnostics["purgedSampleCount"] == 14
+    assert diagnostics["windows"][1]["name"] == "validation"
+    assert diagnostics["windows"][1]["start"] > diagnostics["windows"][0]["end"]
+
+
+def test_combination_ranking_learns_non_negative_member_weights(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
+    )
+    weights = [member["weight"] for member in report["ranking"][0]["members"]]
+
+    assert all(weight >= 0 for weight in weights)
+    assert sum(weights) == pytest.approx(1.0)
+
+
 def test_neutral_base_candidate_flips_low_winrate_orientation() -> None:
     factor = _factor("inverse_alpha", "反向信号", FactorDirection.NEUTRAL)
     metrics = {"winRate": 0.18, "ir": 0.2, "totalPeriods": ROWS}
@@ -335,7 +376,7 @@ def test_combination_search_reports_prefilter_diagnostics(
     assert diagnostics["searchStages"][0]["generated"] == 6
 
 
-def test_combination_search_expands_only_surviving_previous_stage(
+def test_combination_search_retains_diverse_failed_pairs_for_expansion(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
 ) -> None:
@@ -365,8 +406,10 @@ def test_combination_search_expands_only_surviving_previous_stage(
     size_three = [names for names in seen if len(names) == 3]
 
     assert size_three
-    assert all({"factor_a", "factor_b"} <= set(names) for names in size_three)
+    assert any({"factor_a", "factor_b"} <= set(names) for names in size_three)
+    assert any({"factor_a", "factor_b"} - set(names) for names in size_three)
     assert result.diagnostics["searchStages"][0]["survivors"] == 1
+    assert result.diagnostics["searchStages"][0]["retainedForExpansion"] > 0
     assert result.diagnostics["searchStages"][1]["evaluated"] == len(size_three)
 
 
@@ -825,6 +868,7 @@ def _fake_live_signal(
     symbol: str,
     duration: str,
     context=None,
+    **_kwargs,
 ) -> dict:
     return {
         "symbol": symbol,

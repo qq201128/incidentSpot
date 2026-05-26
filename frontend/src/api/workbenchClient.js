@@ -1,7 +1,7 @@
 import axios from "axios";
 import { API_BASE_URL } from "./client";
 
-const SUMMARY_TIMEOUT_MS = 15_000;
+const SUMMARY_TIMEOUT_MS = 30_000;
 
 export async function fetchWorkbenchSummary(symbol, duration) {
   const startedAt = performance.now();

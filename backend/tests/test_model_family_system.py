@@ -22,7 +22,9 @@ from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
 from app.services import model_family_candidate_search_service as search_service
+from app.services import model_family_candidate_executor as candidate_executor
 from app.services import model_family_candidate_publisher as candidate_publisher
+from app.services import model_family_walk_forward
 from app.services.model_family_joblib_backend import JoblibModelOptions, XGBOOST_TREE_METHOD, _xgboost
 from app.services.lstm_training_gate import validation_gate
 
@@ -75,11 +77,12 @@ def test_models_route_is_family_scoped_and_lstm_alias_is_removed(monkeypatch) ->
         },
     )
     response = models_api.model_status("gru", symbol="BTCUSDT", duration="10m")
-    paths = {getattr(route, "path", "") for route in app.routes}
+    app_paths = {getattr(route, "path", "") for route in app.routes}
+    model_paths = {getattr(route, "path", "") for route in models_api.router.routes}
 
     assert response["strategyKey"] == "factor_gru_shadow_10m"
-    assert "/api/models/{family}/status" in paths
-    assert "/api/lstm/status" not in paths
+    assert "/api/models/{family}/status" in model_paths
+    assert "/api/lstm/status" not in app_paths
 
 
 def test_validation_gate_requires_win_rate_above_70() -> None:
@@ -121,12 +124,13 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
     assert status["tradePredictionReady"] is False
 
 
-def test_each_model_family_has_full_parallel_training_rules() -> None:
+def test_each_model_family_has_successive_halving_training_rules() -> None:
     families = ("lstm", "gru", "cnn", "transformer", "random_forest", "xgboost", "svm", "rl_strategy", "bayesian", "knn")
 
     rules = [model_family_training_rules(family) for family in families]
 
-    assert all(rule["searchMode"] == "full_parallel" for rule in rules)
+    assert all(rule["searchMode"] == "successive_halving" for rule in rules)
+    assert all([stage["stage"] for stage in rule["successiveHalving"]] == ["coarse", "full", "walk_forward"] for rule in rules)
     assert all(rule["targetWinRateExclusive"] == 0.70 for rule in rules)
     assert all(rule["searchSpaceTotal"] > 0 for rule in rules)
     assert model_family_training_rules("lstm")["searchSpaceTotal"] == 225
@@ -143,7 +147,6 @@ def test_candidate_search_publishes_best_trade_candidate(monkeypatch) -> None:
         _report("trade_active", 0.72, 1),
         _report("trade_active", 0.81, 2),
     ]
-    published = []
     training_calls = []
 
     def fake_train_model_family(config, **_kwargs):
@@ -156,7 +159,8 @@ def test_candidate_search_publishes_best_trade_candidate(monkeypatch) -> None:
     monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(search_service, "train_model_family", fake_train_model_family)
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
     monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
 
     result = search_service.run_model_candidate_search(
@@ -166,7 +170,7 @@ def test_candidate_search_publishes_best_trade_candidate(monkeypatch) -> None:
     assert result["status"] == "trade_active"
     assert training_calls[-1][0] == configs[1]
     assert training_calls[-1][1] == {}
-    assert len(published) == 0
+    assert [stage["stage"] for stage in result["successiveHalvingStages"]] == ["coarse", "full", "walk_forward"]
 
 
 def test_candidate_search_publishes_initial_baseline_when_untrained(monkeypatch) -> None:
@@ -190,7 +194,8 @@ def test_candidate_search_publishes_initial_baseline_when_untrained(monkeypatch)
     monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(search_service, "train_model_family", fake_train_model_family)
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
     monkeypatch.setattr(candidate_publisher, "model_family_status", lambda *_args: {"activeModelStatus": "untrained"})
     monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
 
@@ -215,7 +220,13 @@ def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> N
     monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(search_service, "train_model_family", lambda *_args, **_kwargs: _report("validation_failed", 0.52, 1))
+    monkeypatch.setattr(
+        search_service,
+        "train_candidate_reports",
+        _candidate_report_iterator([base], [_report("validation_failed", 0.52, 1)]),
+    )
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", lambda *_args: {"activeModelStatus": "trade_active"})
 
     result = search_service.run_model_candidate_search(config)
 
@@ -235,7 +246,13 @@ def test_model_candidate_search_finishes_progress(monkeypatch) -> None:
     monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_complete", args[3])) or {})
     monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_finish", kwargs["status"])) or {})
     monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(search_service, "train_model_family", lambda *_args, **_kwargs: _report("validation_failed", 0.52, 1))
+    monkeypatch.setattr(
+        search_service,
+        "train_candidate_reports",
+        _candidate_report_iterator([base], [_report("validation_failed", 0.52, 1)]),
+    )
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", lambda *_args: {"activeModelStatus": "trade_active"})
 
     result = search_service.run_model_candidate_search(config)
 
@@ -264,16 +281,16 @@ def test_exhausted_candidate_search_uses_library_status(monkeypatch) -> None:
 
 
 def test_xgboost_process_worker_override_is_explicit(monkeypatch) -> None:
-    monkeypatch.setenv(search_service.XGBOOST_PROCESS_WORKERS_ENV, "3")
+    monkeypatch.setenv(candidate_executor.XGBOOST_PROCESS_WORKERS_ENV, "3")
 
-    assert search_service._process_worker_count(10) == 3
+    assert candidate_executor._process_worker_count(10) == 3
 
 
 def test_xgboost_process_worker_override_rejects_invalid_value(monkeypatch) -> None:
-    monkeypatch.setenv(search_service.XGBOOST_PROCESS_WORKERS_ENV, "0")
+    monkeypatch.setenv(candidate_executor.XGBOOST_PROCESS_WORKERS_ENV, "0")
 
     with pytest.raises(ValueError):
-        search_service._process_worker_count(10)
+        candidate_executor._process_worker_count(10)
 
 
 def test_xgboost_uses_hist_tree_method() -> None:
@@ -282,13 +299,95 @@ def test_xgboost_uses_hist_tree_method() -> None:
     assert model.get_params()["tree_method"] == XGBOOST_TREE_METHOD
 
 
+def test_candidate_training_withholds_test_set_during_search(monkeypatch) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m")
+    captured = {}
+
+    def fake_train_model_family(_config, **kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "validation_failed",
+            "validation": {"winRate": 0.55, "profitFactor": 1.2, "sampleCount": 60},
+            "test": {"status": "withheld"},
+        }
+
+    monkeypatch.setattr(candidate_executor, "train_model_family", fake_train_model_family)
+    report = candidate_executor.train_candidate(config, "fast", lambda _cfg: _fake_dataset(_cfg), stage="coarse", record_config=config)
+
+    assert captured["evaluate_test"] is False
+    assert report["test"]["status"] == "withheld"
+    assert report["searchStage"] == "coarse"
+
+
+def test_candidate_score_uses_validation_not_test() -> None:
+    strong_validation_bad_test = _report("trade_active", 0.80, 1)
+    weak_validation_good_test = _report("trade_active", 0.60, 2)
+    strong_validation_bad_test["test"] = {"winRate": 0.10, "profitFactor": 0.1}
+    weak_validation_good_test["test"] = {"winRate": 0.99, "profitFactor": 9.0}
+
+    selected = max(
+        [strong_validation_bad_test, weak_validation_good_test],
+        key=candidate_publisher._candidate_score,
+    )
+
+    assert selected is strong_validation_bad_test
+
+
+def test_model_family_walk_forward_outputs_fold_boundaries(monkeypatch) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", feature_window=8)
+    finalist = candidate_executor.CandidateTrainingResult(config, _report("trade_active", 0.80, 1))
+
+    def fake_train_model_family(_config, **kwargs):
+        dataset = kwargs["dataset_builder"](_config)
+        return {
+            "validationGate": {"status": "passed"},
+            "validation": {"sampleCount": len(dataset.y) // 5, "winRate": 0.8},
+            "test": {"sampleCount": len(dataset.y) // 5, "winRate": 0.78},
+            "sampleCounts": {"train": 120, "validation": 60, "test": 60},
+            "validationFailureReason": None,
+        }
+
+    monkeypatch.setattr(model_family_walk_forward, "train_model_family", fake_train_model_family)
+
+    survivors, payload = model_family_walk_forward.run_walk_forward_stage([finalist], _fake_dataset)
+
+    assert len(survivors) == 1
+    assert payload["stage"] == "walk_forward"
+    assert payload["evaluated"] == 1
+    assert payload["advanced"] == 1
+    assert payload["candidates"][0]["foldCount"] == 3
+    assert payload["candidates"][0]["folds"][0]["trainEnd"] > payload["candidates"][0]["folds"][0]["start"]
+
+
 def _report(status: str, win_rate: float, version: int) -> dict:
     return {
         "status": status,
         "modelVersion": f"v{version}",
-        "validation": {"winRate": win_rate, "profitFactor": 2.0},
+        "validation": {"winRate": win_rate, "profitFactor": 2.0, "sampleCount": 60},
         "test": {"winRate": win_rate, "profitFactor": 2.0},
-        "sampleCounts": {"test": 60},
+        "sampleCounts": {"validation": 60, "test": 60},
+    }
+
+
+def _candidate_report_iterator(configs: list[ModelFamilyTrainingConfig], reports: list[dict]):
+    def _iter(train_configs, profile, workers, dataset_builder, *, stage, record_configs=None):
+        del profile, workers, dataset_builder
+        records = record_configs or train_configs
+        for record_config in records:
+            report = {**reports[configs.index(record_config)], "searchStage": stage}
+            yield candidate_executor.CandidateTrainingResult(record_config, report)
+
+    return _iter
+
+
+def _walk_forward_passthrough(finalists, _dataset_builder):
+    return finalists, {
+        "stage": "walk_forward",
+        "evaluated": len(finalists),
+        "advanced": len(finalists),
+        "candidateKeys": [item.report.get("searchKey") for item in finalists],
+        "advancedKeys": [item.report.get("searchKey") for item in finalists],
+        "candidates": [],
     }
 
 

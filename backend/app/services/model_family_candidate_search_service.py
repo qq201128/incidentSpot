@@ -12,7 +12,6 @@ from app.services.model_family_candidate_executor import (
 from app.services.model_family_candidate_halving import (
     close_halving_stage,
     coarse_candidate_config,
-    walk_forward_stage_payload,
 )
 from app.services.model_family_candidates import (
     attempted_model_search_keys,
@@ -32,6 +31,7 @@ from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_training_rules,
 )
+from app.services.model_family_walk_forward import run_walk_forward_stage
 
 
 @dataclass(frozen=True)
@@ -148,8 +148,11 @@ def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset
     _record_stage_reports(full_closed.reports, cfg.profile)
     reports.extend(full_closed.reports)
     stages.append(full_closed.payload)
-    stages.append(walk_forward_stage_payload(full_closed.survivors))
-    return {"reports": reports, "finalists": full_closed.survivors, "stages": stages}
+    walk_forward_survivors, walk_forward_payload = run_walk_forward_stage(full_closed.survivors, dataset_builder)
+    _record_stage_reports(walk_forward_survivors, cfg.profile)
+    reports.extend(walk_forward_survivors)
+    stages.append(walk_forward_payload)
+    return {"reports": reports, "finalists": walk_forward_survivors, "stages": stages}
 
 
 def _collect_stage(train_configs, record_configs, cfg, dataset_builder, stage: str, completed: int, total: int):

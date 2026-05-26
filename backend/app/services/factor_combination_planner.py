@@ -18,6 +18,7 @@ PREFILTER_DIVERSITY_WEIGHT = 7.0
 PAIRWISE_DIVERSITY_WEIGHT = 9.0
 PROFIT_FACTOR_TARGET_SPAN = 0.25
 SHARPE_TARGET_SPAN = 2.0
+DIVERSITY_RETENTION_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -62,12 +63,13 @@ def staged_evaluation(
         selected = layer[: config.prefilter_limit]
         evaluated = _evaluate_plan_items(context, selected, config, result_func)
         survivors = _surviving_plans(evaluated)
+        retained = _retained_diverse_plans(evaluated, survivors)
         rows.extend(_requested_rows(evaluated, size in requested_sizes))
         failures.extend(_evaluated_failures(evaluated))
         evaluated_plan.extend(selected)
         generated_count += generated
-        stages.append(_evaluated_stage_payload(size, generated, layer, selected, survivors, config.beam_width))
-        previous = survivors
+        stages.append(_evaluated_stage_payload(size, generated, layer, selected, survivors, retained, config.beam_width))
+        previous = [*survivors, *retained]
         if size < max_size and not previous:
             break
     return StagedEvaluation(rows, failures, evaluated_plan, generated_count, stages)
@@ -106,11 +108,12 @@ def _planned_combination(frame: pd.DataFrame, members: tuple[Any, ...]) -> Plann
     return PlannedCombination(members, prefilter_score(members, pairwise), pairwise)
 
 
-def _evaluated_stage_payload(size, generated, layer, selected, survivors, beam_width) -> dict[str, Any]:
+def _evaluated_stage_payload(size, generated, layer, selected, survivors, retained, beam_width) -> dict[str, Any]:
     return {
         **_stage_payload(size, generated, layer, beam_width),
         "evaluated": len(selected),
         "survivors": len(survivors),
+        "retainedForExpansion": len(retained),
         "filter": "walk_forward_passed",
     }
 
@@ -157,8 +160,24 @@ def _surviving_plans(evaluated: list[EvaluatedPlan]) -> list[PlannedCombination]
     return [item.plan for item in evaluated if _stage_passed(item.result)]
 
 
+def _retained_diverse_plans(evaluated: list[EvaluatedPlan], survivors: list[PlannedCombination]) -> list[PlannedCombination]:
+    survivor_keys = {_member_key(item.members) for item in survivors}
+    failed = [item.plan for item in evaluated if not _stage_passed(item.result)]
+    diverse = sorted(failed, key=lambda item: _retention_key(item, survivor_keys), reverse=True)
+    return diverse[:DIVERSITY_RETENTION_LIMIT]
+
+
 def _stage_passed(row: dict[str, Any] | None) -> bool:
     return bool(row is not None and row.get("walkForwardPassed") is True)
+
+
+def _retention_key(plan: PlannedCombination, survivor_keys: set[tuple[str, ...]]) -> tuple[float, float]:
+    novelty = 1.0 if _member_key(plan.members) not in survivor_keys else 0.0
+    return (_pairwise_diversity_score(plan.pairwise), novelty)
+
+
+def _member_key(members: tuple[Any, ...]) -> tuple[str, ...]:
+    return tuple(sorted(member.factor.name for member in members))
 
 
 def _requested_rows(evaluated: list[EvaluatedPlan], include: bool) -> list[dict[str, Any]]:

@@ -16,21 +16,29 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from app.services.factor_duration_alignment import backtest_duration_frame
 from app.services.factor_frame_service import load_factor_frame
 from app.services.factor_metric_enrichment import backtest_validity, enrich_factor_results
 from app.services.factor_catalog import factor_definition_for_backtest
+from app.services.factor_out_of_sample import factor_out_of_sample_report
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
+from app.services.factor_research_metrics import (
+    IC_ROLLING_WINDOW,
+    QUINTILE_COUNT,
+    compute_ic_ttest,
+    compute_quintile_returns,
+    compute_rolling_ic,
+    compute_turnover,
+    ic_metrics,
+    window_spearman_ic,
+)
 from app.services.factor_registry import (
+    FactorCategory,
     FactorDefinition,
     factor_payload,
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
-
-QUINTILE_COUNT = 5
-IC_ROLLING_WINDOW = 20
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,7 @@ class FactorBacktestResult:
     win_rate: float | None
     max_drawdown: float | None
     profit_factor: float | None
+    out_of_sample: dict[str, Any]
 
 
 def run_factor_backtest(
@@ -125,32 +134,30 @@ def _compute_factor_metrics(
     if len(df) < BACKTEST_MIN_PERIODS:
         return _empty_factor_result(factor_name, symbol, duration, len(df))
 
-    ic_series = _compute_rolling_ic(df[factor_name], df["fwd_ret"])
-    t_stat, p_value = _compute_ic_ttest(ic_series)
-    quintile_returns = _compute_quintile_returns(df, factor_name)
+    research = _research_metrics(df, factor_def)
+    quintile_returns = research["quintile_returns"]
     long_short = quintile_returns[-1] - quintile_returns[0] if len(quintile_returns) == QUINTILE_COUNT else None
-    turnover = _compute_turnover(df, factor_name)
     sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor_def, horizon)
-    ic_metrics = _ic_metrics(ic_series)
 
     return FactorBacktestResult(
         factor_name=factor_name,
         symbol=symbol.upper(),
         duration=duration,
         total_periods=len(df),
-        ic_mean=ic_metrics["mean"],
-        ic_std=ic_metrics["std"],
-        ir=ic_metrics["ir"],
-        ic_positive_rate=ic_metrics["positive_rate"],
+        ic_mean=research["ic"]["mean"],
+        ic_std=research["ic"]["std"],
+        ir=research["ic"]["ir"],
+        ic_positive_rate=research["ic"]["positive_rate"],
         quintile_returns=quintile_returns,
         long_short_return=long_short,
-        turnover=turnover,
-        t_stat=t_stat,
-        p_value=p_value,
+        turnover=research["turnover"],
+        t_stat=research["t_stat"],
+        p_value=research["p_value"],
         sharpe=sharpe,
         win_rate=win_rate,
         max_drawdown=max_drawdown,
         profit_factor=profit_factor,
+        out_of_sample=_out_of_sample_report(df, factor_def),
     )
 
 
@@ -178,66 +185,42 @@ def _empty_factor_result(
         win_rate=None,
         max_drawdown=None,
         profit_factor=None,
+        out_of_sample={},
     )
 
 
-def _ic_metrics(ic_series: pd.Series) -> dict[str, float | None]:
-    ic_mean = float(ic_series.mean()) if not ic_series.empty else None
-    ic_std = float(ic_series.std()) if not ic_series.empty else None
-    ir = ic_mean / ic_std if ic_mean is not None and ic_std and ic_std > 0 else None
-    positive_rate = float((ic_series > 0).mean()) if not ic_series.empty else None
-    return {"mean": ic_mean, "std": ic_std, "ir": ir, "positive_rate": positive_rate}
+def _out_of_sample_report(df: pd.DataFrame, factor_def: FactorDefinition) -> dict[str, Any]:
+    if factor_def.category == FactorCategory.PERFORMANCE:
+        return {}
+    return factor_out_of_sample_report(df, factor_def)
 
 
-def _compute_rolling_ic(factor: pd.Series, fwd_ret: pd.Series) -> pd.Series:
-    values = pd.DataFrame({"factor": factor, "fwd_ret": fwd_ret}).replace([np.inf, -np.inf], np.nan)
-    correlations: list[float] = []
-    indices = []
-    for end in range(IC_ROLLING_WINDOW - 1, len(values)):
-        window = values.iloc[end - IC_ROLLING_WINDOW + 1:end + 1].dropna()
-        corr = _window_spearman_ic(window)
-        if corr is None:
-            continue
-        correlations.append(corr)
-        indices.append(values.index[end])
-    return pd.Series(correlations, index=indices, dtype=float)
+def _research_metrics(df: pd.DataFrame, factor_def: FactorDefinition) -> dict[str, Any]:
+    if factor_def.category == FactorCategory.PERFORMANCE:
+        return _empty_research_metrics()
+    ic_series = compute_rolling_ic(df[factor_def.name], df["fwd_ret"])
+    t_stat, p_value = compute_ic_ttest(ic_series)
+    return {
+        "ic": ic_metrics(ic_series),
+        "t_stat": t_stat,
+        "p_value": p_value,
+        "quintile_returns": compute_quintile_returns(df, factor_def.name),
+        "turnover": compute_turnover(df, factor_def.name),
+    }
 
 
-def _window_spearman_ic(window: pd.DataFrame) -> float | None:
-    if len(window) < IC_ROLLING_WINDOW:
-        return None
-    if window["factor"].nunique(dropna=True) < 2 or window["fwd_ret"].nunique(dropna=True) < 2:
-        return None
-    corr = window["factor"].rank(method="average").corr(window["fwd_ret"].rank(method="average"))
-    return float(corr) if corr is not None and math.isfinite(float(corr)) else None
+def _empty_research_metrics() -> dict[str, Any]:
+    return {
+        "ic": {"mean": None, "std": None, "ir": None, "positive_rate": None},
+        "t_stat": None,
+        "p_value": None,
+        "quintile_returns": [],
+        "turnover": None,
+    }
 
 
-def _compute_ic_ttest(ic_series: pd.Series) -> tuple[float | None, float | None]:
-    clean = ic_series.replace([np.inf, -np.inf], np.nan).dropna()
-    if len(clean) < 2:
-        return None, None
-    t_stat, p_value = stats.ttest_1samp(clean, 0)
-    return float(t_stat), float(p_value)
-
-
-def _compute_quintile_returns(df: pd.DataFrame, factor_name: str) -> list[float]:
-    try:
-        df = df.copy()
-        df["quintile"] = pd.qcut(df[factor_name], QUINTILE_COUNT, labels=False, duplicates="drop")
-        returns = df.groupby("quintile")["fwd_ret"].mean()
-        return [float(returns.get(i, 0)) for i in range(QUINTILE_COUNT)]
-    except Exception:
-        return []
-
-
-def _compute_turnover(df: pd.DataFrame, factor_name: str) -> float | None:
-    try:
-        df = df.copy()
-        df["quintile"] = pd.qcut(df[factor_name], QUINTILE_COUNT, labels=False, duplicates="drop")
-        changes = (df["quintile"] != df["quintile"].shift(1)).sum()
-        return float(changes / len(df)) if len(df) > 0 else None
-    except Exception:
-        return None
+_compute_rolling_ic = compute_rolling_ic
+_window_spearman_ic = window_spearman_ic
 
 
 def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) -> dict[str, Any]:
@@ -270,6 +253,7 @@ def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) 
         "winRate": _round_or_none(result.win_rate, 4),
         "maxDrawdown": _round_or_none(result.max_drawdown, 6),
         "profitFactor": _round_or_none(result.profit_factor, 4),
+        "outOfSample": result.out_of_sample,
         "backtestValid": validity["valid"],
         "backtestInvalidReason": None if validity["valid"] else validity["reason"],
         "backtestMinPeriods": validity["minPeriods"],

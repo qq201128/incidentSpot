@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
@@ -29,8 +28,18 @@ from app.services.high_winrate_strategy_rotation import (
     refresh_high_winrate_goal,
 )
 from app.services.event_pnl_rows import settled_event_rows_for_high_winrate_rule
-from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
+from app.services.high_winrate_strategy_status_store import (
+    current_status as _current_status,
+    has_rankings as _has_rankings,
+    public_status as _public_status,
+    refresh_failed_payload as _refresh_failed_payload,
+    set_strategy_slot as _set_strategy_slot,
+    status_payload as _status_payload,
+    sync_strategy_slot_for_status as _sync_strategy_slot_for_status,
+    utc_now as _utc_now,
+    write_status as _write_status,
+)
 
 STATUS_BACKTEST_CANDIDATE = "backtest_candidate"
 STATUS_PAPER_LIVE_COLLECTING = "paper_live_collecting"
@@ -44,7 +53,6 @@ REASON_OFFLINE_PROMOTION = "offline_promotion"
 RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
 RANKING_REFRESH_PENDING_REASON = "ranking_refresh_pending"
 RECENT_SAMPLE_LIMIT = 30
-DEFAULT_QTY = 5.0
 
 
 def promote_high_winrate_strategy(symbol: str, duration: str) -> dict[str, Any]:
@@ -218,177 +226,3 @@ def _evaluation_payload(
     payload = _status_payload(STATUS_PAPER_LIVE_COLLECTING, ROTATED_REASON, empty_high_winrate_metrics(), rotation)
     return payload, False
 
-
-def _status_payload(
-    status: str,
-    reason: str,
-    metrics: dict[str, Any],
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = {
-        "status": status,
-        "reason": reason,
-        "metrics": metrics,
-        "thresholds": high_winrate_thresholds(),
-        "sampleCount": metrics.get("sampleCount"),
-        "settledSampleCount": metrics.get("sampleCount"),
-        "winRate": metrics.get("winRate"),
-        "profitFactor": metrics.get("profitFactor"),
-        "consecutiveLosses": metrics.get("consecutiveLosses"),
-        "metricsSource": metrics.get("metricsSource"),
-        "totalEventPnlU": metrics.get("totalEventPnlU"),
-        "requiredSampleCount": high_winrate_thresholds()["requiredSampleCount"],
-        "tradable": status == STATUS_TRADABLE,
-        "evaluatedAt": _utc_now(),
-    }
-    if extra:
-        payload.update(extra)
-    return payload
-
-
-def _refresh_failed_payload(payload: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **payload,
-        "status": STATUS_DEMOTED,
-        "reason": RANKING_REFRESH_FAILED_REASON,
-        "evaluatedAt": _utc_now(),
-        "refreshReport": _refresh_report_summary(report),
-    }
-
-
-def _refresh_report_summary(report: dict[str, Any]) -> dict[str, Any]:
-    ranking = report.get("ranking") if isinstance(report.get("ranking"), list) else []
-    summary = {
-        "updatedAt": report.get("updatedAt"),
-        "rankingTotal": len(ranking),
-        "rankingFailure": report.get("rankingFailure"),
-        "validationGate": report.get("validationGate"),
-        "candidateDiagnostics": report.get("candidateDiagnostics"),
-        "rankingDiagnostics": report.get("rankingDiagnostics"),
-        "promotion": report.get("promotion"),
-        "target": report.get("target"),
-    }
-    return {key: value for key, value in summary.items() if value is not None}
-
-
-def _has_rankings(report: dict[str, Any]) -> bool:
-    ranking = report.get("ranking")
-    return isinstance(ranking, list) and bool(ranking)
-
-
-def _write_status(conn: Any, symbol: str, duration: str, payload: dict[str, Any]) -> None:
-    metrics = payload["metrics"]
-    conn.execute(
-        """
-        INSERT INTO high_winrate_strategy_status(
-          strategy_key, symbol, duration, status, reason, details_json,
-          sample_count, win_rate, profit_factor, consecutive_losses, evaluated_at, updated_at
-        )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(strategy_key, symbol, duration) DO UPDATE SET
-          status = excluded.status, reason = excluded.reason, details_json = excluded.details_json,
-          sample_count = excluded.sample_count, win_rate = excluded.win_rate,
-          profit_factor = excluded.profit_factor, consecutive_losses = excluded.consecutive_losses,
-          evaluated_at = excluded.evaluated_at, updated_at = excluded.updated_at
-        """,
-        (
-            HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-            symbol,
-            duration,
-            payload["status"],
-            payload["reason"],
-            json.dumps(payload, ensure_ascii=False),
-            int(metrics["sampleCount"]),
-            metrics["winRate"],
-            metrics["profitFactor"],
-            int(metrics["consecutiveLosses"]),
-            payload["evaluatedAt"],
-            _utc_now(),
-        ),
-    )
-
-
-def _current_status(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
-    row = conn.execute(
-        """
-        SELECT status, reason, details_json, evaluated_at
-        FROM high_winrate_strategy_status
-        WHERE strategy_key = ? AND symbol = ? AND duration = ?
-        """,
-        (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, symbol, duration),
-    ).fetchone()
-    if row is None:
-        return {}
-    return dict(row)
-
-
-def _public_status(row: dict[str, Any], symbol: str, duration: str) -> dict[str, Any]:
-    if not row:
-        return {"symbol": symbol, "duration": duration, "status": "unknown", "reason": "not_evaluated"}
-    details = json.loads(row["details_json"]) if row.get("details_json") else {}
-    return {
-        "symbol": symbol,
-        "duration": duration,
-        "status": details.get("status") or row.get("status"),
-        "reason": details.get("reason") or row.get("reason"),
-        **details,
-    }
-
-
-def _set_strategy_slot(
-    conn: Any,
-    symbol: str,
-    duration: str,
-    *,
-    enabled: bool,
-    live_trading_enabled: bool | None,
-) -> None:
-    row = _strategy_slot(conn, duration)
-    live_enabled = _live_trading_enabled(row, live_trading_enabled)
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO auto_trade_strategies(
-          strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
-        )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
-            duration,
-            int(enabled),
-            int(live_enabled),
-            symbol,
-            int(DURATION_TO_MINUTES[duration]),
-            float(row["qty"]) if row else DEFAULT_QTY,
-            _utc_now(),
-        ),
-    )
-
-
-def _sync_strategy_slot_for_status(conn: Any, symbol: str, duration: str, status: str) -> None:
-    if status == STATUS_PAUSED:
-        _set_strategy_slot(conn, symbol, duration, enabled=False, live_trading_enabled=False)
-        return
-    live_override = None if status == STATUS_TRADABLE else False
-    _set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=live_override)
-
-
-def _strategy_slot(conn: Any, duration: str) -> Any | None:
-    return conn.execute(
-        """
-        SELECT qty, live_trading_enabled
-        FROM auto_trade_strategies
-        WHERE strategy_key = ? AND duration = ?
-        """,
-        (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, duration),
-    ).fetchone()
-
-
-def _live_trading_enabled(row: Any | None, override: bool | None) -> bool:
-    if override is not None:
-        return bool(override)
-    return bool(row["live_trading_enabled"]) if row else False
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

@@ -9,22 +9,39 @@ MIN_VALIDATION_AVG_RETURN = 0.0
 MIN_THRESHOLD_SAMPLE_COUNT = 50
 
 
-def validation_gate(validation: dict[str, Any], test: dict[str, Any]) -> dict[str, Any]:
+def validation_gate(validation: dict[str, Any], test: dict[str, Any], *, require_test: bool = True) -> dict[str, Any]:
     criteria = validation_gate_criteria()
     candidates = _threshold_candidates(validation, test)
     for row in candidates:
-        if _threshold_passes(row["validation"]) and _threshold_passes(row["test"]):
+        if _threshold_passes(row["validation"]):
+            if require_test and not _threshold_passes(row["test"]):
+                return _test_failed_gate(criteria, row, candidates)
             return {
                 "status": "passed",
                 "criteria": criteria,
                 "minConfidence": row["minConfidence"],
                 "validation": row["validation"],
-                "test": row["test"],
+                "testAtSelectedThreshold": row["test"],
+                "selectionMetricSource": "validation_only",
+                "requiresFinalTest": require_test,
             }
     return {
         "status": "failed",
         "reason": "no_validation_confidence_threshold_met",
         "criteria": criteria,
+        "candidates": candidates,
+    }
+
+
+def _test_failed_gate(criteria: dict[str, Any], row: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "reason": "selected_test_threshold_failed",
+        "criteria": criteria,
+        "minConfidence": row["minConfidence"],
+        "validation": row["validation"],
+        "testAtSelectedThreshold": row["test"],
+        "selectionMetricSource": "validation_only",
         "candidates": candidates,
     }
 
@@ -42,7 +59,8 @@ def validation_gate_criteria() -> dict[str, Any]:
         "minProfitFactorExclusive": MIN_VALIDATION_PROFIT_FACTOR,
         "minAvgReturnExclusive": MIN_VALIDATION_AVG_RETURN,
         "minThresholdSampleCount": MIN_THRESHOLD_SAMPLE_COUNT,
-        "requiresValidationAndTest": True,
+        "requiresValidationAndTest": False,
+        "testPolicy": "reported_once_for_final_candidate_not_used_for_threshold_selection",
     }
 
 

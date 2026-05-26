@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from app.db.session import get_conn
+from app.db.session import get_conn, run_db_write_with_retry
 from app.services.rule_config import (
     BPS_DIVISOR,
     MAX_SIGNAL_SCORE,
@@ -77,12 +77,15 @@ def orderbook_rule_score(orderbook: dict[str, Any]) -> dict[str, Any]:
 
 
 def persist_orderbook_features(symbol: str, open_time: int, orderbook: dict[str, Any]) -> None:
-    conn = get_conn()
-    try:
-        conn.execute(_UPSERT_ORDERBOOK_FEATURE_SQL, _feature_values(symbol, open_time, orderbook))
-        conn.commit()
-    finally:
-        conn.close()
+    def _persist() -> None:
+        conn = get_conn()
+        try:
+            conn.execute(_UPSERT_ORDERBOOK_FEATURE_SQL, _feature_values(symbol, open_time, orderbook))
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_persist)
 
 
 def _score_payload(data: OrderbookScoreInput) -> dict[str, Any]:

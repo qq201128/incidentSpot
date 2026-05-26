@@ -50,7 +50,6 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 COMBO_FACTOR_PREFIXES = ("combo__", "goal_combo__")
 LEARNING_METRIC_KEYS = ("winRate", "profitFactor", "sharpe", "ir")
 
-
 def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | None:
     _validate_duration(duration)
     memory = load_factor_learning_memory(symbol, duration)
@@ -58,7 +57,6 @@ def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | N
         return None
     memory = recover_stale_llm_agent_memory(memory)
     return _enrich_learning_memory(memory)
-
 
 def recover_stale_llm_agent_memory(memory: dict[str, Any]) -> dict[str, Any]:
     agent = memory.get("llmAgent")
@@ -69,7 +67,6 @@ def recover_stale_llm_agent_memory(memory: dict[str, Any]) -> dict[str, Any]:
     if sym and dur:
         return mark_factor_learning_agent_failed(sym, dur, stale_llm_agent_error(agent))
     return _save_factor_learning_agent_status(memory, "failed", stale_llm_agent_error(agent))
-
 
 def refresh_factor_learning_memory(
     symbol: str,
@@ -104,21 +101,17 @@ def refresh_factor_learning_memory(
         return _attach_agent_review_and_save(memory)
     return _save_memory_payload(memory)
 
-
 def mark_factor_learning_agent_pending(memory: dict[str, Any]) -> dict[str, Any]:
     return _save_factor_learning_agent_status(memory, "pending")
 
-
 def mark_factor_learning_agent_running(memory: dict[str, Any]) -> dict[str, Any]:
     return _save_factor_learning_agent_status(memory, "running")
-
 
 def mark_factor_learning_agent_failed(symbol: str, duration: str, error: str) -> dict[str, Any]:
     _validate_duration(duration)
     sym = symbol.strip().upper()
     memory = load_factor_learning_memory(sym, duration) or _queued_memory(sym, duration)
     return _save_factor_learning_agent_status(memory, "failed", error)
-
 
 def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
     _validate_duration(duration)
@@ -127,14 +120,12 @@ def run_factor_learning_llm_agent(symbol: str, duration: str) -> dict[str, Any]:
         raise ValueError(f"factor learning memory not found for {symbol.upper()} {duration}")
     return _attach_agent_review_and_save(memory)
 
-
 def _enrich_learning_memory(memory: dict[str, Any]) -> dict[str, Any]:
     enriched = deepcopy(memory)
     library = enriched.get("minedFactorLibrary")
     if isinstance(library, dict):
         enriched["minedFactorLibrary"] = enrich_mined_factor_library_summary(library)
     return enriched
-
 
 def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:
     try:
@@ -146,7 +137,6 @@ def _attach_agent_review_and_save(memory: dict[str, Any]) -> dict[str, Any]:
         _save_factor_learning_agent_status(memory, "failed", str(exc))
         raise
 
-
 def _save_factor_learning_agent_status(
     memory: dict[str, Any],
     status: str,
@@ -155,7 +145,6 @@ def _save_factor_learning_agent_status(
     updated = deepcopy(memory)
     updated["llmAgent"] = _agent_status_payload(status, error, previous=updated.get("llmAgent"))
     return _save_memory_payload(updated)
-
 
 def _agent_status_payload(
     status: str,
@@ -179,7 +168,6 @@ def _agent_status_payload(
         payload["error"] = error
     return payload
 
-
 def _resolved_agent_model(previous: dict[str, Any] | None) -> str:
     if isinstance(previous, dict):
         model = str(previous.get("model") or "").strip()
@@ -190,7 +178,6 @@ def _resolved_agent_model(previous: dict[str, Any] | None) -> str:
     except RuntimeError:
         return ""
 
-
 def _queued_memory(symbol: str, duration: str) -> dict[str, Any]:
     return {
         "version": FACTOR_LEARNING_VERSION,
@@ -200,13 +187,11 @@ def _queued_memory(symbol: str, duration: str) -> dict[str, Any]:
         "source": {"status": "queued"},
     }
 
-
 def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(memory)
     payload.pop("memoryPath", None)
     path = save_factor_learning_memory(payload)
     return {**payload, "memoryPath": _path_payload(path)}
-
 
 def _current_ranking_report(symbol: str, duration: str, frame: pd.DataFrame) -> dict[str, Any]:
     cached = _usable_cached_ranking(symbol, duration)
@@ -221,7 +206,6 @@ def _current_ranking_report(symbol: str, duration: str, frame: pd.DataFrame) -> 
     save_cached_combination_ranking(report)
     return {**report, "learningRefreshSource": "rebuilt_cache"}
 
-
 def _usable_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
     cached = get_cached_combination_ranking(symbol, duration)
     if cached is None:
@@ -232,7 +216,6 @@ def _usable_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
         return None
     return cached
 
-
 def _has_learning_metric_rows(report: dict[str, Any]) -> bool:
     for row in factor_rows(report):
         name = str(row.get("name") or "")
@@ -241,7 +224,6 @@ def _has_learning_metric_rows(report: dict[str, Any]) -> bool:
         if any(finite(row.get(key)) is not None for key in LEARNING_METRIC_KEYS):
             return True
     return False
-
 
 def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[str, Any]]:
     conn = get_conn()
@@ -273,7 +255,6 @@ def _settled_factor_combo_predictions(symbol: str, duration: str) -> list[dict[s
         conn.close()
     return [dict(row) for row in rows]
 
-
 def _fixed_simulation_strategy_keys(duration: str) -> tuple[str, ...]:
     return (
         *factor_combo_simulation_strategy_keys(),
@@ -281,10 +262,8 @@ def _fixed_simulation_strategy_keys(duration: str) -> tuple[str, ...]:
         lstm_shadow_strategy_key(duration),
     )
 
-
 def _strategy_placeholders() -> str:
     return ",".join("?" for _key in _fixed_simulation_strategy_keys_for_placeholders())
-
 
 def _fixed_simulation_strategy_keys_for_placeholders() -> tuple[str, ...]:
     return (
@@ -293,11 +272,9 @@ def _fixed_simulation_strategy_keys_for_placeholders() -> tuple[str, ...]:
         "factor_lstm_shadow_placeholder",
     )
 
-
 def _validate_duration(duration: str) -> None:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-
 
 def _path_payload(path: Path) -> str:
     return str(path)

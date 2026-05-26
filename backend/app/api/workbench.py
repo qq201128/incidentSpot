@@ -29,7 +29,8 @@ async def workbench_summary(
 ) -> dict:
     safe_symbol = symbol.upper()
     safe_duration = _validate_duration(duration)
-    return await asyncio.to_thread(get_workbench_summary, safe_symbol, safe_duration)
+    # Fast cached reads; stale-while-revalidate avoids asyncio thread-pool queueing.
+    return get_workbench_summary(safe_symbol, safe_duration)
 
 
 def workbench_summary_sync(symbol: str = "BTCUSDT", duration: str = "10m") -> dict:

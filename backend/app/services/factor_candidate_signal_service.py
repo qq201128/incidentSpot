@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from math import isfinite
 from typing import Any
 
 import pandas as pd
@@ -16,6 +14,16 @@ from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_catalog import factor_definition_for_backtest
+from app.services.factor_candidate_signal_utils import (
+    candidate_failure,
+    candidate_failure_message,
+    directional_win_rate,
+    factor_orientation,
+    finite_float,
+    series_value_at,
+    usable_factor_row,
+    utc_now,
+)
 from app.services.factor_combo_scoring import oriented_zscore
 from app.services.factor_duration_alignment import (
     duration_entry_source_open_time,
@@ -25,13 +33,11 @@ from app.services.factor_frame_service import FACTOR_FRAME_MIN_HISTORY, load_fac
 from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.factor_ranking_cache_service import get_cached_ranking
-from app.services.factor_registry import FactorDirection
 from app.services.rule_config import MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
 
 SIGNAL_RULE_NAME = "factor_candidate_signal_v1"
 PROBABILITY_DECIMALS = 4
 SCORE_DECIMALS = 6
-NEUTRAL_WIN_RATE = 0.5
 MIN_DURATION_KLINE_ROWS = 540
 DURATION_BACKFILL_LIMIT = 1000
 MAX_DURATION_BACKFILL_ROUNDS = 10
@@ -42,7 +48,6 @@ CANDIDATE_SCORE_LOOKBACK_BARS = max(
 )
 logger = logging.getLogger("uvicorn.error")
 
-
 @dataclass(frozen=True)
 class _FactorSignal:
     score: float
@@ -52,15 +57,12 @@ class _FactorSignal:
     index: Any
     orientation: int
 
-
 def factor_candidate_signal_keys(symbol: str, duration: str) -> tuple[str, ...]:
     rows = _ranking_rows(symbol, duration, require_usable=False)
     return tuple(factor_candidate_signal_key(str(row["factorName"])) for row in rows)
 
-
 def factor_candidate_signal_strategy_keys(symbol: str, duration: str) -> tuple[str, ...]:
     return factor_candidate_signal_keys(symbol, duration)
-
 
 def predict_factor_candidate_signals(
     symbol: str,
@@ -80,13 +82,12 @@ def predict_factor_candidate_signals(
             working, prediction = _prediction_for_row(working, row, symbol, duration, entry_open_time)
             predictions.append(prediction)
         except Exception as exc:
-            failures.append(_candidate_failure(row, exc))
+            failures.append(candidate_failure(row, exc))
     if failures:
         _log_candidate_failures(symbol, duration, failures)
     if not predictions and failures:
-        raise ValueError(_candidate_failure_message(symbol, duration, failures))
+        raise ValueError(candidate_failure_message(symbol, duration, failures))
     return predictions
-
 
 def _refresh_candidate_source_klines(symbol: str, duration: str, entry_open_time: int) -> None:
     source_open_time = duration_entry_source_open_time(entry_open_time, duration)
@@ -99,10 +100,8 @@ def _refresh_candidate_source_klines(symbol: str, duration: str, entry_open_time
     refresh_prediction_klines(symbol, "1m", one_m_lookback_start)
     refresh_prediction_klines(symbol, "1m", int(entry_open_time) - MS_PER_MINUTE)
 
-
 def _candidate_frame_min_history() -> int:
     return CANDIDATE_SCORE_LOOKBACK_BARS
-
 
 def _backfill_duration_klines_if_needed(symbol: str, duration: str) -> None:
     sym = symbol.strip().upper()
@@ -118,11 +117,9 @@ def _backfill_duration_klines_if_needed(symbol: str, duration: str) -> None:
         upsert_klines_rows(sym, duration, rows)
         end_time = _next_duration_backfill_end_time(rows, end_time, sym, duration)
 
-
 def _duration_backfill_end_time(symbol: str, duration: str) -> int | None:
     oldest = oldest_open_time(symbol, duration)
     return int(oldest) - 1 if oldest is not None else None
-
 
 def _next_duration_backfill_end_time(
     rows: list[dict],
@@ -135,7 +132,6 @@ def _next_duration_backfill_end_time(
         raise ValueError(f"historical {duration} kline backfill did not move earlier for {symbol}")
     return new_oldest - 1
 
-
 def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[dict[str, Any]]:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
@@ -145,7 +141,7 @@ def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[d
         assert_cache_usable_for_live_signal(cache, f"factor ranking {sym} {duration}")
     rows: list[dict[str, Any]] = []
     if cache is not None:
-        rows.extend(dict(row) for row in cache.get("ranking") or [] if _usable_factor_row(row))
+        rows.extend(dict(row) for row in cache.get("ranking") or [] if usable_factor_row(row))
     for row in agent_factor_rows_for_duration(sym, duration):
         metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
         candidate = {
@@ -155,12 +151,11 @@ def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[d
             "totalPeriods": metrics.get("totalPeriods"),
             "backtestValid": True,
         }
-        if _usable_factor_row(candidate):
+        if usable_factor_row(candidate):
             rows.append(candidate)
     if require_usable and not rows and cache is None:
         raise ValueError(f"factor ranking cache missing for {sym} {duration}")
     return [row for row in rows if meets_backtest_gate(row)]
-
 
 def _prediction_for_row(
     frame: pd.DataFrame,
@@ -176,7 +171,6 @@ def _prediction_for_row(
     signal = _live_factor_signal(working, row, factor.name, duration, entry_open_time)
     return working, _prediction_payload(row, signal, symbol, duration, entry_open_time)
 
-
 def _live_factor_signal(
     frame: pd.DataFrame,
     row: dict[str, Any],
@@ -184,18 +178,17 @@ def _live_factor_signal(
     duration: str,
     entry_open_time: int,
 ) -> _FactorSignal:
-    orientation = _factor_orientation(row)
+    orientation = factor_orientation(row)
     index = _strict_duration_entry_index(frame, duration, entry_open_time)
     score_series = oriented_zscore(frame[factor_name], orientation)
-    score = _finite_float(_series_value_at(score_series, index))
-    median = _finite_float(
-        _series_value_at(score_series.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1), index)
+    score = finite_float(series_value_at(score_series, index))
+    median = finite_float(
+        series_value_at(score_series.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1), index)
     )
     if score is None or median is None:
         raise ValueError(f"factor candidate signal has insufficient score history: {factor_name}")
     direction = "up" if score >= median else "down"
-    return _FactorSignal(score, median, direction, _directional_win_rate(row, orientation), index, orientation)
-
+    return _FactorSignal(score, median, direction, directional_win_rate(row, orientation), index, orientation)
 
 def _prediction_payload(
     row: dict[str, Any],
@@ -228,12 +221,11 @@ def _prediction_payload(
         "expected_return": None,
         "model_version": str(row["factorName"]),
         "model_duration": duration,
-        "model_trained_at": _utc_now(),
+        "model_trained_at": utc_now(),
         "rule_score": round(signal.score, SCORE_DECIMALS),
         "rule_reasons": _rule_reasons(row, signal),
         "signal_source": "factor_candidate_signal",
     }
-
 
 def _rule_reasons(row: dict[str, Any], signal: _FactorSignal) -> list[str]:
     return [
@@ -248,7 +240,6 @@ def _rule_reasons(row: dict[str, Any], signal: _FactorSignal) -> list[str]:
         f"historical_win_rate={row.get('winRate')}",
         f"historical_profit_factor={row.get('profitFactor')}",
     ]
-
 
 def _strict_duration_entry_index(
     frame: pd.DataFrame,
@@ -265,23 +256,6 @@ def _strict_duration_entry_index(
         )
     return index
 
-
-def _usable_factor_row(row: Any) -> bool:
-    if not isinstance(row, dict) or not row.get("factorName"):
-        return False
-    if row.get("backtestValid") is False:
-        return False
-    return _finite_float(row.get("winRate")) is not None
-
-
-def _candidate_failure(row: dict[str, Any], exc: Exception) -> dict[str, str]:
-    return {
-        "factorName": str(row.get("factorName") or "unknown"),
-        "errorType": type(exc).__name__,
-        "error": str(exc),
-    }
-
-
 def _log_candidate_failures(symbol: str, duration: str, failures: list[dict[str, str]]) -> None:
     logger.warning(
         "factor candidate signal failures symbol=%s duration=%s failures=%s",
@@ -289,52 +263,3 @@ def _log_candidate_failures(symbol: str, duration: str, failures: list[dict[str,
         duration,
         failures,
     )
-
-
-def _candidate_failure_message(symbol: str, duration: str, failures: list[dict[str, str]]) -> str:
-    names = ", ".join(item["factorName"] for item in failures[:5])
-    return f"all factor candidate signals failed for {symbol.strip().upper()} {duration}: {names}"
-
-
-def _factor_orientation(row: dict[str, Any]) -> int:
-    direction = str(row.get("direction") or FactorDirection.NEUTRAL)
-    if direction == FactorDirection.LOWER_BETTER.value:
-        return -1
-    if direction == FactorDirection.HIGHER_BETTER.value:
-        return 1
-    win_rate = _finite_float(row.get("winRate"))
-    if win_rate is not None and win_rate < NEUTRAL_WIN_RATE:
-        return -1
-    return 1 if _metric_sign(row) >= 0 else -1
-
-
-def _directional_win_rate(row: dict[str, Any], orientation: int) -> float:
-    win_rate = _finite_float(row.get("winRate"))
-    if win_rate is None:
-        raise ValueError(f"factor candidate row missing winRate: {row.get('factorName')}")
-    value = win_rate if orientation == 1 else 1.0 - win_rate
-    return max(0.0, min(value, 0.99))
-
-
-def _metric_sign(row: dict[str, Any]) -> float:
-    for key in ("icMean", "longShortReturn", "ir"):
-        value = _finite_float(row.get(key))
-        if value is not None and value != 0:
-            return value
-    return 1.0
-
-
-def _series_value_at(series: pd.Series, index: Any) -> Any:
-    value = series.loc[index]
-    return value.iloc[-1] if isinstance(value, pd.Series) else value
-
-
-def _finite_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    number = float(value)
-    return number if isfinite(number) else None
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
