@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 import pytest
@@ -88,6 +89,27 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
     assert [item[2] for item in calls if item[0] == "learn"] == run_durations
     assert [item for item in calls if item[0] == "signals"] == [("signals", "BTCUSDT", None, None)]
     assert run_durations == ["10m", "30m", "60m", "1d"]
+
+
+def test_daily_refresh_loop_runs_paper_live_closed_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    stop_event = asyncio.Event()
+
+    async def sleep_once(_stop_event: asyncio.Event, _seconds: float) -> None:
+        calls.append(("sleep", None))
+
+    async def run_once(func):
+        calls.append(("run", func.__name__))
+        stop_event.set()
+        return {"status": "passed"}
+
+    monkeypatch.setattr(combo_background, "_sleep_for", sleep_once)
+    monkeypatch.setattr(combo_background, "seconds_until_next_daily_refresh", lambda: 0.0)
+    monkeypatch.setattr(combo_background, "run_blocking_daemon", run_once)
+
+    asyncio.run(combo_background.factor_combination_daily_refresh_loop(stop_event))
+
+    assert calls == [("sleep", None), ("run", "run_paper_live_daily_closed_loop")]
 
 
 def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatch) -> None:

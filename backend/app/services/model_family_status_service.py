@@ -19,6 +19,7 @@ from app.services.model_family_config import (
     model_family_strategy_key,
     normalize_model_family,
 )
+from app.services.model_family_paper_live_policy import model_status_policy_payload
 from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_family_candidates import (
     model_candidate_library_summary,
@@ -46,6 +47,7 @@ def model_family_status(
     snapshot = _combo_snapshot_status(sym, duration, paths.features)
     ready_reason = _shadow_ready_reason(status, version, report, artifacts_ready, dependency["available"])
     trade_reason = _trade_ready_reason(status, version, report, artifacts_ready, dependency["available"])
+    gate = validation_gate_payload(version, report)
     return {
         **status,
         "modelFamily": selected,
@@ -56,7 +58,7 @@ def model_family_status(
         "testAccuracy": (report.get("test") or {}).get("accuracy"),
         "testWinRate": (report.get("test") or {}).get("winRate"),
         "validationWinRate": (report.get("validation") or {}).get("winRate"),
-        "validationGate": version.get("validationGate") or report.get("validationGate"),
+        "validationGate": gate,
         "selectedConfidenceThreshold": version.get("selectedConfidenceThreshold") or report.get("selectedConfidenceThreshold"),
         "activeModelStatus": status.get("status"),
         "lastAttemptStatus": attempt.get("status"),
@@ -80,6 +82,7 @@ def model_family_status(
         "shadowPredictionBlockedReason": ready_reason,
         "tradePredictionReady": trade_reason == "passed",
         "tradePredictionBlockedReason": trade_reason,
+        **model_status_policy_payload(status.get("status"), gate),
     }
 
 

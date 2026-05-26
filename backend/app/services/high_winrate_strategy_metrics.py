@@ -5,6 +5,7 @@ from typing import Any
 ACTIVE_SAMPLE_COUNT = 30
 ACTIVE_WIN_RATE_MIN = 0.62
 MIN_PROFIT_FACTOR = 1.05
+MIN_AVG_RETURN = 0.0
 LOSS_STREAK_LIMIT = 5
 RECENT_SAMPLE_COUNT = 20
 RECENT_WIN_RATE_MIN = 0.58
@@ -20,6 +21,7 @@ def high_winrate_thresholds() -> dict[str, Any]:
         "requiredSampleCount": ACTIVE_SAMPLE_COUNT,
         "activeWinRateMin": ACTIVE_WIN_RATE_MIN,
         "minProfitFactor": MIN_PROFIT_FACTOR,
+        "minAvgReturn": MIN_AVG_RETURN,
         "lossStreakLimit": LOSS_STREAK_LIMIT,
         "recentSampleCount": RECENT_SAMPLE_COUNT,
         "recentWinRateMin": RECENT_WIN_RATE_MIN,
@@ -35,6 +37,7 @@ def empty_high_winrate_metrics() -> dict[str, Any]:
         "sampleCount": 0,
         "winRate": None,
         "profitFactor": None,
+        "avgReturn": None,
         "consecutiveLosses": 0,
         "currentConsecutiveWins": 0,
         "currentConsecutiveLosses": 0,
@@ -44,6 +47,7 @@ def empty_high_winrate_metrics() -> dict[str, Any]:
         "metricsSource": "predictions",
         "totalEventPnlU": None,
         "paperStability": _empty_stability(),
+        "paperLiveWindows": _empty_windows(),
     }
 
 
@@ -55,28 +59,32 @@ def high_winrate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "sampleCount": len(rows),
         "winRate": _ratio(wins, len(rows)),
         "profitFactor": _profit_factor(returns),
+        "avgReturn": _avg_return(returns),
         "consecutiveLosses": streaks["currentConsecutiveLosses"],
         **streaks,
         "latestRule": str(rows[0].get("high_winrate_rule") or "") if rows else None,
         "metricsSource": _metrics_source(rows),
         "totalEventPnlU": _total_event_pnl(rows),
         "paperStability": _paper_stability(rows),
+        "paperLiveWindows": _paper_live_windows(rows),
     }
 
 
 def high_winrate_decision(metrics: dict[str, Any]) -> dict[str, str]:
     if metrics["consecutiveLosses"] >= LOSS_STREAK_LIMIT:
-        return {"status": "demoted", "reason": "consecutive_losses"}
+        return {"status": "paper_failed", "reason": "consecutive_losses"}
     if metrics["sampleCount"] < ACTIVE_SAMPLE_COUNT:
-        return {"status": "paper_live_collecting", "reason": "insufficient_settled_samples"}
+        return {"status": "paper_collecting", "reason": "insufficient_settled_samples"}
     if _lt(metrics["winRate"], ACTIVE_WIN_RATE_MIN):
-        return {"status": "demoted", "reason": "live_win_rate_below_target"}
+        return {"status": "paper_failed", "reason": "paper_live_win_rate_below_target"}
     if _lt(metrics["profitFactor"], MIN_PROFIT_FACTOR):
-        return {"status": "demoted", "reason": "profit_factor_below_one"}
+        return {"status": "paper_failed", "reason": "paper_live_profit_factor_below_target"}
+    if _lt_or_equal(metrics["avgReturn"], MIN_AVG_RETURN):
+        return {"status": "paper_failed", "reason": "paper_live_avg_return_below_target"}
     stability_reason = _stability_failure_reason(metrics["paperStability"])
     if stability_reason is not None:
-        return {"status": "demoted", "reason": stability_reason}
-    return {"status": "paper_live_passed", "reason": "stable_live_target_met"}
+        return {"status": "paper_failed", "reason": stability_reason}
+    return {"status": "paper_stable", "reason": "stable_paper_live_target_met"}
 
 
 def _paper_stability(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -126,6 +134,12 @@ def _profit_factor(values: list[float]) -> float | None:
     return round(gains / losses, 4)
 
 
+def _avg_return(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 8)
+
+
 def _rolling_windows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     limit = ROLLING_WINDOW_SIZE * ROLLING_WINDOW_COUNT
     recent = rows[:limit]
@@ -140,15 +154,29 @@ def _sample_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "sampleCount": len(rows),
         "winRate": _ratio(wins, len(rows)),
         "profitFactor": _profit_factor(returns),
+        "avgReturn": _avg_return(returns),
     }
 
 
 def _empty_stability() -> dict[str, Any]:
     return {
-        "recent": {"sampleCount": 0, "winRate": None, "profitFactor": None},
+        "recent": {"sampleCount": 0, "winRate": None, "profitFactor": None, "avgReturn": None},
         "rollingWindows": [],
         "thresholds": high_winrate_thresholds(),
     }
+
+
+def _paper_live_windows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "recent30": _sample_metrics(rows[:30]),
+        "recent60": _sample_metrics(rows[:60]),
+        "recent100": _sample_metrics(rows[:100]),
+    }
+
+
+def _empty_windows() -> dict[str, Any]:
+    empty = {"sampleCount": 0, "winRate": None, "profitFactor": None, "avgReturn": None}
+    return {"recent30": dict(empty), "recent60": dict(empty), "recent100": dict(empty)}
 
 
 def _streak_metrics(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -234,3 +262,7 @@ def _ratio(numerator: int, denominator: int) -> float | None:
 
 def _lt(value: float | None, threshold: float) -> bool:
     return value is not None and value < threshold
+
+
+def _lt_or_equal(value: float | None, threshold: float) -> bool:
+    return value is not None and value <= threshold

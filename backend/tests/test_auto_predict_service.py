@@ -27,6 +27,7 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
     refresh_1m_calls = []
     refresh_duration_calls = []
     settlement_calls = []
+    paper_live_calls = []
     strategy_settings = [
         _settings(FACTOR_COMBO_STRATEGY_KEY),
         _settings(HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY),
@@ -40,6 +41,7 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
         lambda *args: refresh_duration_calls.append(args),
     )
     monkeypatch.setattr(service, "settle_due_predictions", lambda *args: settlement_calls.append(args))
+    monkeypatch.setattr(service, "refresh_paper_live_candidate_states", lambda *args: paper_live_calls.append(args))
     monkeypatch.setattr(
         service,
         "current_rule_entry_open_time_for_duration",
@@ -57,6 +59,7 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
         ("ETHUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME),
     ]
     assert sorted(settlement_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
+    assert sorted(paper_live_calls) == [("BTCUSDT", DEFAULT_DURATION), ("ETHUSDT", DEFAULT_DURATION)]
 
 
 def test_refresh_prediction_inputs_request_required_completed_klines(monkeypatch) -> None:
@@ -210,6 +213,7 @@ def test_factor_combo_existing_primary_does_not_save_candidates_inline(monkeypat
 
 def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> None:
     saved = []
+    trades = []
     candidate_key = factor_candidate_signal_key("rsi_14")
 
     async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
@@ -239,6 +243,11 @@ def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> Non
     )
     monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(
+        service,
+        "create_batch_combo_simulation_trade",
+        lambda _settings, result: trades.append(result["strategy_key"]),
+    )
     monkeypatch.setattr(service, "prediction_response", lambda result: result)
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
 
@@ -250,6 +259,7 @@ def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> Non
     )
 
     assert saved == [(candidate_key, False)]
+    assert trades == [candidate_key]
 
 
 def test_factor_candidate_collection_failure_is_exposed(monkeypatch) -> None:

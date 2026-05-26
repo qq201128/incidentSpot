@@ -42,24 +42,27 @@ from app.services.high_winrate_strategy_status_store import (
 )
 
 STATUS_BACKTEST_CANDIDATE = "backtest_candidate"
-STATUS_PAPER_LIVE_COLLECTING = "paper_live_collecting"
-STATUS_PAPER_LIVE_PASSED = "paper_live_passed"
-STATUS_TRADABLE = "tradable"
-STATUS_DEMOTED = "demoted"
+STATUS_PAPER_COLLECTING = "paper_collecting"
+STATUS_PAPER_STABLE = "paper_stable"
+STATUS_PAPER_FAILED = "paper_failed"
+STATUS_PAPER_LIVE_COLLECTING = STATUS_PAPER_COLLECTING
+STATUS_PAPER_LIVE_PASSED = STATUS_PAPER_STABLE
+STATUS_TRADABLE = STATUS_PAPER_STABLE
+STATUS_DEMOTED = STATUS_PAPER_FAILED
 STATUS_PAUSED = "paused"
 STATUS_ACTIVE = STATUS_TRADABLE
-STATUS_COLLECTING = STATUS_PAPER_LIVE_COLLECTING
+STATUS_COLLECTING = STATUS_PAPER_COLLECTING
 REASON_OFFLINE_PROMOTION = "offline_promotion"
 RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
 RANKING_REFRESH_PENDING_REASON = "ranking_refresh_pending"
-RECENT_SAMPLE_LIMIT = 30
+RECENT_SAMPLE_LIMIT = 100
 
 
 def promote_high_winrate_strategy(symbol: str, duration: str) -> dict[str, Any]:
     sym = symbol.strip().upper()
     metrics = empty_high_winrate_metrics()
     rotation = high_winrate_rotation_payload(sym, duration, DEFAULT_ACTIVE_RANK)
-    payload = _status_payload(STATUS_BACKTEST_CANDIDATE, REASON_OFFLINE_PROMOTION, metrics, rotation)
+    payload = _status_payload(STATUS_PAPER_COLLECTING, REASON_OFFLINE_PROMOTION, metrics, rotation)
     conn = get_conn()
     try:
         ensure_high_winrate_status_table(conn)
@@ -109,12 +112,7 @@ def _evaluate_high_winrate_demotion(
         decision = high_winrate_decision(metrics)
         payload, refresh_required = _evaluation_payload(decision, current, metrics, sym, duration, rank, rule)
         if refresh_required and not allow_goal_refresh:
-            payload = {
-                **payload,
-                "status": STATUS_DEMOTED,
-                "reason": RANKING_REFRESH_PENDING_REASON,
-                "pendingGoalRefresh": True,
-            }
+            payload = _pending_refresh_payload(payload)
             refresh_required = False
         _sync_strategy_slot_for_status(conn, sym, duration, payload["status"])
         _write_status(conn, sym, duration, payload)
@@ -212,7 +210,7 @@ def _evaluation_payload(
     if current.get("status") == STATUS_PAUSED:
         payload = _status_payload(STATUS_PAUSED, str(current.get("reason") or "paused"), metrics)
         return payload, False
-    if decision["status"] != STATUS_DEMOTED or rule is None:
+    if decision["status"] != STATUS_PAPER_FAILED or rule is None:
         rotation = high_winrate_rotation_payload(symbol, duration, rank, high_winrate_failed_ranks_from_status(current))
         return _status_payload(decision["status"], decision["reason"], metrics, rotation), False
     failed = (*high_winrate_failed_ranks_from_status(current), rank)
@@ -223,6 +221,14 @@ def _evaluation_payload(
         return _status_payload(STATUS_DEMOTED, RANKING_REFRESH_REASON, metrics, rotation), True
     next_rule = high_winrate_candidate_rule(symbol, duration, next_rank)
     rotation = high_winrate_rotation_payload(symbol, duration, next_rank, failed, previous, active_rule=next_rule)
-    payload = _status_payload(STATUS_PAPER_LIVE_COLLECTING, ROTATED_REASON, empty_high_winrate_metrics(), rotation)
+    payload = _status_payload(STATUS_PAPER_COLLECTING, ROTATED_REASON, empty_high_winrate_metrics(), rotation)
     return payload, False
 
+
+def _pending_refresh_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "status": STATUS_PAPER_FAILED,
+        "reason": RANKING_REFRESH_PENDING_REASON,
+        "pendingGoalRefresh": True,
+    }

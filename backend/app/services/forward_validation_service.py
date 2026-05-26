@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.paper_live_stage_log import log_settlement_pending, log_settlement_success
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 DAY_MS = 86_400_000
@@ -56,7 +57,7 @@ def _due_prediction_rows(conn, symbol: str, duration: str) -> list[dict[str, Any
     max_open_time = int(latest["value"]) - _duration_ms(duration)
     rows = conn.execute(
         """
-        SELECT id, symbol, duration, open_time, direction, entry_price
+        SELECT id, signal_key, strategy_key, symbol, duration, open_time, direction, entry_price
         FROM predictions
         WHERE symbol = ? AND duration = ? AND settled_at IS NULL AND open_time <= ?
         ORDER BY open_time
@@ -71,6 +72,13 @@ def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
     exit_open_time = int(row["open_time"]) + _duration_ms(duration)
     exit_price = _kline_close(conn, row["symbol"], exit_open_time)
     if entry_price is None or exit_price is None:
+        log_settlement_pending(
+            conn,
+            row,
+            entry_price=entry_price,
+            exit_open_time=exit_open_time,
+            exit_price=exit_price,
+        )
         return False
     actual_return = _directional_return(float(entry_price), float(exit_price), row["direction"])
     prediction_correct = _direction_correct(float(entry_price), float(exit_price), row["direction"])
@@ -82,6 +90,15 @@ def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
         WHERE id = ?
         """,
         (entry_price, exit_price, actual_return, int(prediction_correct), _utc_now(), row["id"]),
+    )
+    log_settlement_success(
+        conn,
+        row,
+        entry_price=float(entry_price),
+        exit_open_time=exit_open_time,
+        exit_price=float(exit_price),
+        actual_return=actual_return,
+        prediction_correct=prediction_correct,
     )
     return True
 

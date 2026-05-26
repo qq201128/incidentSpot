@@ -5,7 +5,7 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.factor_backtest_gate import meets_backtest_gate
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
-from app.services.factor_combo_batch_predictions import eligible_factor_combo_rows
+from app.services.factor_combo_batch_predictions import backtest_qualified_factor_combo_rows
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_learning_common import utc_now
 from app.services.factor_ranking_cache_service import get_cached_ranking
@@ -70,7 +70,7 @@ def _single_factor_candidate_rows(symbol: str, duration: str) -> list[dict[str, 
 def _qualified_combo_strategy_keys(symbol: str, duration: str) -> list[str]:
     keys: list[str] = []
     seen: set[str] = set()
-    for row in eligible_factor_combo_rows(symbol, duration):
+    for row in backtest_qualified_factor_combo_rows(symbol, duration):
         strategy_key = simulation_strategy_key_for_factor_name(str(row["factorName"]))
         if strategy_key in seen:
             continue

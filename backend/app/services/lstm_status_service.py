@@ -15,6 +15,7 @@ from app.services.lstm_lifecycle import (
     shadow_predictable_status,
     trade_active_status,
 )
+from app.services.model_family_paper_live_policy import model_status_policy_payload
 from app.services.lstm_torch_backend import torch_availability
 
 
@@ -38,6 +39,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         torch_available,
     )
     trade_reason = _trade_prediction_ready_reason(status, version, report, artifacts_ready, torch_available)
+    gate = validation_gate_payload(version, report)
     return {
         **status,
         "strategyKey": lstm_shadow_strategy_key(duration),
@@ -46,7 +48,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "sampleCounts": report.get("sampleCounts") or {},
         "testAccuracy": (report.get("test") or {}).get("accuracy"),
         "testWinRate": (report.get("test") or {}).get("winRate"),
-        "validationGate": version.get("validationGate") or report.get("validationGate"),
+        "validationGate": gate,
         "selectedConfidenceThreshold": (
             version.get("selectedConfidenceThreshold")
             or report.get("selectedConfidenceThreshold")
@@ -70,6 +72,7 @@ def lstm_model_status(symbol: str, duration: str, *, artifact_root: Path | None 
         "shadowPredictionBlockedReason": ready_reason,
         "tradePredictionReady": trade_reason == "passed",
         "tradePredictionBlockedReason": trade_reason,
+        **model_status_policy_payload(status.get("status"), gate),
     }
 
 

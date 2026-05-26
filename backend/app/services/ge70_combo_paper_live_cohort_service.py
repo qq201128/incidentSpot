@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -12,7 +11,12 @@ from app.services.factor_combo_batch_simulation_service import create_batch_comb
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_combination_live_service import rebuild_combination_signal_watchlist
 from app.services.factor_learning_common import utc_now
-from app.services.factor_mined_library import MINED_FACTOR_LIBRARY_PATH, load_mined_factor_library
+from app.services.ge70_combo_screening import (
+    GE70_MIN_WIN_RATE,
+    ge70_mined_combo_screening_report,
+    load_ge70_mined_combo_rows,
+    rejection_reason_counts,
+)
 from app.services.high_winrate_combo_cache_service import (
     get_cached_high_winrate_combo_ranking,
     save_cached_high_winrate_combo_ranking,
@@ -24,30 +28,9 @@ from app.services.prediction_cache_service import save_prediction
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms
 
-GE70_MIN_WIN_RATE = 0.62
 COHORT_VERSION = "ge70_mined_library_paper_live_v1"
 # Batch shadow path only runs comboRank > 1; start at 2 so every cohort combo is simulated.
 COHORT_COMBO_RANK_START = 2
-
-
-def load_ge70_mined_combo_rows(*, min_win_rate: float = GE70_MIN_WIN_RATE) -> list[dict[str, Any]]:
-    library = load_mined_factor_library(MINED_FACTOR_LIBRARY_PATH)
-    rows: list[dict[str, Any]] = []
-    for row in library.get("factors") or []:
-        metrics = row.get("metrics") or {}
-        win_rate = metrics.get("winRate")
-        if win_rate is None or float(win_rate) < min_win_rate:
-            continue
-        if not row.get("members"):
-            continue
-        rows.append(row)
-    rows.sort(
-        key=lambda item: (
-            str(item.get("duration") or ""),
-            -float((item.get("metrics") or {}).get("winRate") or 0.0),
-        ),
-    )
-    return rows
 
 
 def bootstrap_ge70_paper_live_cohort(
@@ -106,6 +89,7 @@ def bootstrap_ge70_paper_live_cohort(
         "symbol": sym,
         "duration": duration,
         "totalCombos": len(selected),
+        "offlineScreening": _offline_screening_summary(duration, len(selected)),
         "durations": cache_reports,
         "batchStrategySlots": slot_reports,
         "watchlist": {
@@ -117,7 +101,8 @@ def bootstrap_ge70_paper_live_cohort(
         "predictions": prediction_report,
         "message": (
             f"已将 {len(selected)} 条 ≥62% 组合写入高胜率模拟缓存并启用批量模拟策略；"
-            "信号触发后会在「事件合约记录」生成 SIM 模拟事件（规则列显示组合名）。"
+            "该胜率仅代表离线初筛，不是真实胜率；信号触发后会在「事件合约记录」生成 SIM 模拟事件（规则列显示组合名），"
+            "并等待真实 K 线结算 paper-live 样本。当前不会启用真实交易。"
             "请保持后端自动预测运行。"
         ),
         "eventRecordHint": "事件合约记录 · 模式 SIM · 规则列=组合因子名",
@@ -135,6 +120,7 @@ def _group_rows_by_duration(rows: list[dict[str, Any]]) -> dict[str, list[dict[s
 
 def _ranking_row_from_mined(row: dict[str, Any], rank: int) -> dict[str, Any]:
     metrics = row.get("metrics") or {}
+    backtest_win_rate = float(metrics["winRate"])
     return {
         "rank": rank,
         "comboRank": rank,
@@ -145,13 +131,33 @@ def _ranking_row_from_mined(row: dict[str, Any], rank: int) -> dict[str, Any]:
         "method": str(row.get("method") or ""),
         "members": list(row.get("members") or []),
         "threshold": row.get("threshold"),
-        "winRate": float(metrics["winRate"]),
+        "winRate": backtest_win_rate,
+        "backtestWinRate": backtest_win_rate,
+        "oosWinRate": None,
+        "walkForwardResult": row.get("walkForward"),
+        "recentRollingResult": None,
+        "paperLiveWinRate": None,
+        "paperLiveStatus": "paper_collecting",
         "profitFactor": metrics.get("profitFactor"),
         "trades": int(metrics.get("totalPeriods") or 0),
         "totalPeriods": int(metrics.get("totalPeriods") or 0),
         "minTrades": int(metrics.get("totalPeriods") or 0),
         "avgReturn": metrics.get("longShortReturn"),
         "source": "mined_factor_library_ge70_cohort",
+    }
+
+
+def _offline_screening_summary(duration: str | None, selected_count: int) -> dict[str, Any]:
+    report = ge70_mined_combo_screening_report()
+    rejected = report["rejectedReasons"]
+    if duration is not None:
+        rejected = [row for row in rejected if row.get("duration") == duration]
+    return {
+        "policy": report["policy"],
+        "selectedCount": selected_count,
+        "rejectedCount": len(rejected),
+        "rejectedReasons": rejected,
+        "reasonCounts": rejection_reason_counts(rejected),
     }
 
 
@@ -283,13 +289,10 @@ def _empty_bootstrap_report(
         "symbol": symbol,
         "duration": duration,
         "totalCombos": 0,
+        "offlineScreening": _offline_screening_summary(duration, 0),
         "durations": [],
         "batchStrategySlots": [],
         "watchlist": {"eligibleTotal": 0, "total": 0, "signalFailures": 0, "cacheIssues": []},
         "predictions": {"skipped": True, "reason": "no_ge70_combos"},
         "message": "未在 mined_factor_library 中找到 ≥70% 组合。",
     }
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

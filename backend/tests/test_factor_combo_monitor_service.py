@@ -59,9 +59,10 @@ def test_monitor_marks_small_live_ready_after_paper_live_thresholds(monkeypatch)
     assert captured[0][1][:3] == factor_combo_simulation_strategy_keys()
     assert report["metrics"]["predictionSuccessRate"] == 0.65
     assert report["metrics"]["profitFactor"] == 1.8571
-    assert report["paperLiveGate"]["passed"] is True
-    assert report["paperLiveGate"]["readyForSmallLive"] is True
-    assert report["paperLiveGate"]["reason"] == "passed"
+    assert report["paperLiveGate"]["passed"] is False
+    assert report["paperLiveGate"]["readyForSmallLive"] is False
+    assert report["paperLiveGate"]["realTradingEnabled"] is False
+    assert report["paperLiveGate"]["reason"] == "insufficient_settled_samples"
 
 
 def _loss_row(index: int) -> dict:

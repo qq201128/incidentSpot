@@ -9,15 +9,10 @@ from fastapi import HTTPException
 
 from app.db.session import get_conn
 from app.services.binance_event_contract import (
-    BinanceEventConfigError,
-    BinanceEventOrderError,
     build_event_contract_order_payload,
-    place_event_contract_order,
 )
-from app.services.live_order_failure_log import log_live_order_failure
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 from app.services.position_guard import has_open_position
-from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
 from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
 
 
@@ -75,25 +70,7 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
 def _place_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
     if not ctx.live_trading_enabled:
         return _simulated_external_order(ctx)
-    if ctx.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
-        raise HTTPException(status_code=400, detail="ensemble_ranker_v1 supports simulation only")
-    try:
-        return place_event_contract_order(
-            symbol=ctx.symbol,
-            event_interval=ctx.event_interval,
-            side=ctx.side,
-            amount=ctx.payload.order.qty,
-            payout_ratio=FIXED_PAYOUT_RATIO,
-        )
-    except BinanceEventConfigError as exc:
-        log_live_order_failure(ctx, exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except BinanceEventOrderError as exc:
-        log_live_order_failure(ctx, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except Exception as exc:
-        log_live_order_failure(ctx, exc)
-        raise
+    raise HTTPException(status_code=400, detail="real trading is disabled in the current paper-live preparation phase")
 
 
 def _simulated_external_order(ctx: QuickTradeContext) -> dict[str, Any]:

@@ -13,6 +13,7 @@ from app.services.factor_backtest_materialization import materialized_frame_for_
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
+from app.services.paper_live_candidate_service import log_prediction_failure
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_candidate_signal_utils import (
     candidate_failure,
@@ -220,8 +221,11 @@ def _prediction_payload(
         "high_winrate_gate_min": None,
         "expected_return": None,
         "model_version": str(row["factorName"]),
+        "model_family": "factor",
         "model_duration": duration,
         "model_trained_at": utc_now(),
+        "data_freshness_status": "fresh",
+        "missing_feature_status": "complete",
         "rule_score": round(signal.score, SCORE_DECIMALS),
         "rule_reasons": _rule_reasons(row, signal),
         "signal_source": "factor_candidate_signal",
@@ -263,3 +267,14 @@ def _log_candidate_failures(symbol: str, duration: str, failures: list[dict[str,
         duration,
         failures,
     )
+    for failure in failures:
+        factor_name = str(failure.get("factorName") or "unknown_factor")
+        log_prediction_failure(
+            candidate_key=factor_candidate_signal_key(factor_name),
+            strategy_key=factor_candidate_signal_key(factor_name),
+            symbol=symbol,
+            duration=duration,
+            stage=str(failure.get("stage") or "factor_candidate_signal"),
+            reason=str(failure.get("error") or "unknown_factor_candidate_failure"),
+            details={"factorName": factor_name},
+        )

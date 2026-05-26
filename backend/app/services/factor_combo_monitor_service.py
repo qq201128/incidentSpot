@@ -136,7 +136,8 @@ def _paper_live_gate(metrics: dict[str, Any]) -> dict[str, Any]:
     return {
         "passed": reason == "passed",
         "reason": reason,
-        "readyForSmallLive": reason == "passed",
+        "readyForSmallLive": False,
+        "realTradingEnabled": False,
     }
 
 

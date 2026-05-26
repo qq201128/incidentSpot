@@ -35,6 +35,7 @@ from app.services.model_family_config import (
     validated_model_family_config,
 )
 from app.services.model_family_joblib_backend import JoblibModelBackend
+from app.services.model_family_paper_live_policy import paper_live_admission_payload
 from app.services.model_family_training_payloads import (
     attempt_payload,
     attempt_payload_from_report,
@@ -190,6 +191,8 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version, 
         },
         "outOfSample": {"validation": val_metrics, "test": test_metrics},
         "validationGate": gate,
+        "paperLiveAdmission": paper_live_admission_payload(status, gate),
+        "realTradingEnabled": False,
         "selectedConfidenceThreshold": gate.get("minConfidence"),
         "validationFailureReason": validation_failure_reason(gate),
         "candidateStatus": candidate_status(status),

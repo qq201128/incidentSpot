@@ -195,9 +195,13 @@ CREATE TABLE IF NOT EXISTS predictions (
   entry_price REAL,
   expected_return REAL,
   model_version TEXT,
+  model_family TEXT,
+  validation_win_rate REAL,
   feature_window INTEGER,
   model_duration TEXT,
   model_trained_at TEXT,
+  data_freshness_status TEXT,
+  missing_feature_status TEXT,
   exit_price REAL,
   actual_return REAL,
   prediction_correct INTEGER,
@@ -292,6 +296,55 @@ CREATE TABLE IF NOT EXISTS high_winrate_strategy_status (
   PRIMARY KEY (strategy_key, symbol, duration)
 );
 
+CREATE TABLE IF NOT EXISTS paper_live_candidate_status (
+  candidate_key TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(candidate_key, symbol, duration)
+);
+
+CREATE TABLE IF NOT EXISTS paper_live_candidate_status_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_key TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  old_status TEXT,
+  new_status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  changed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_live_prediction_failures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_key TEXT NOT NULL,
+  strategy_key TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_live_prediction_stage_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  signal_key TEXT NOT NULL,
+  strategy_key TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  open_time INTEGER,
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ensemble_stage_status (
   symbol TEXT NOT NULL,
   duration TEXT NOT NULL,
@@ -323,6 +376,7 @@ CREATE TABLE IF NOT EXISTS ensemble_signal_scores (
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time);
 CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at);
+CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_lookup ON paper_live_prediction_stage_log(symbol, duration, signal_key, open_time, stage);
 CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time);
 CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status);
 CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id);

@@ -234,7 +234,9 @@ async def factor_combination_daily_refresh_loop(stop_event: asyncio.Event) -> No
         if stop_event.is_set():
             return
         try:
-            await run_blocking_daemon(refresh_all_configured_combination_rankings)
+            from app.services.paper_live_daily_loop_service import run_paper_live_daily_closed_loop
+
+            await run_blocking_daemon(run_paper_live_daily_closed_loop)
         except Exception:
             logger.exception("factor combo daily refresh batch failed")
 

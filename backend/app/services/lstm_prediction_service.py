@@ -183,6 +183,7 @@ def _signal_payload(
         "confidence": round(confidence, 6),
         "selectedConfidenceThreshold": min_confidence,
         "validationGatePassed": gate_passed,
+        "validationWinRate": _validation_win_rate(version),
         "expectedReturn": _expected_return(prob, version),
         "modelVersion": version["modelVersion"],
         "featureWindow": int(features["featureWindow"]),
@@ -217,9 +218,13 @@ def _prediction_payload(signal: dict[str, Any]) -> dict[str, Any]:
         "high_winrate_gate_min": signal["selectedConfidenceThreshold"],
         "expected_return": signal["expectedReturn"],
         "model_version": signal["modelVersion"],
+        "model_family": "lstm",
+        "validation_win_rate": signal["validationWinRate"],
         "feature_window": signal["featureWindow"],
         "model_duration": signal["duration"],
         "model_trained_at": signal["trainedAt"],
+        "data_freshness_status": "fresh",
+        "missing_feature_status": "complete",
     }
 
 
@@ -238,6 +243,16 @@ def _selected_confidence_threshold(version: dict[str, Any]) -> float | None:
     if threshold is None:
         return None
     return float(threshold)
+
+
+def _validation_win_rate(version: dict[str, Any]) -> float | None:
+    gate = version.get("validationGate") or {}
+    validation = gate.get("validation") if isinstance(gate, dict) else None
+    if isinstance(validation, dict) and validation.get("winRate") is not None:
+        return float(validation["winRate"])
+    metrics = version.get("validation") if isinstance(version.get("validation"), dict) else {}
+    value = metrics.get("winRate")
+    return None if value is None else float(value)
 
 
 def _trade_gate_passed(

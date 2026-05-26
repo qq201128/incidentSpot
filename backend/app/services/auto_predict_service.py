@@ -5,7 +5,11 @@ import os
 from app.services.auto_trade_service import get_auto_trade_settings, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
-from app.services.factor_combo_batch_predictions import eligible_factor_combo_rows, predict_eligible_factor_combo_rows
+from app.services.factor_combo_batch_predictions import (
+    backtest_qualified_factor_combo_rows,
+    eligible_factor_combo_rows,
+    predict_eligible_factor_combo_rows,
+)
 from app.services.factor_combo_batch_simulation_service import create_batch_combo_simulation_trade
 from app.services.factor_candidate_signal_service import factor_candidate_signal_keys, predict_factor_candidate_signals
 from app.services.forward_validation_service import settle_due_predictions
@@ -17,6 +21,7 @@ from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.model_family_config import MODEL_FAMILIES, is_model_family_shadow_strategy, parse_model_family_strategy
 from app.services.model_family_shadow_backfill_service import backfill_model_family_shadow_predictions, missing_model_family_shadow_entry_times
 from app.services.prediction_cache_service import prediction_exists, prediction_response, save_prediction
+from app.services.paper_live_candidate_service import refresh_paper_live_candidate_states
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
@@ -173,7 +178,13 @@ def _candidate_collection_due(settings: AutoTradeSettings, bucket: int) -> bool:
 def _should_predict_entry(settings: AutoTradeSettings) -> bool:
     return target_helpers.should_predict_entry(settings, current_bucket=current_rule_entry_open_time_for_duration, prediction_exists=prediction_exists, ready_any_shadow_due=_ready_any_model_family_shadow_due, ready_family_strategy_due=_ready_model_family_strategy_due)
 def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
-    return target_helpers.factor_combo_shadow_due(settings, bucket, eligible_rows=eligible_factor_combo_rows, prediction_exists=prediction_exists, simulation_key=simulation_strategy_key_for_factor_name)
+    return target_helpers.factor_combo_shadow_due(
+        settings,
+        bucket,
+        eligible_rows=backtest_qualified_factor_combo_rows,
+        prediction_exists=prediction_exists,
+        simulation_key=simulation_strategy_key_for_factor_name,
+    )
 def _factor_candidate_signal_due(settings: AutoTradeSettings, bucket: int) -> bool:
     return target_helpers.factor_candidate_signal_due(settings, bucket, signal_keys=factor_candidate_signal_keys, prediction_exists=prediction_exists)
 def _ready_any_model_family_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
@@ -224,6 +235,7 @@ def missing_lstm_shadow_entry_times(symbol: str, duration: str, current_entry_op
 def _run_prediction_db_side_effects(settings_list: list[AutoTradeSettings]) -> None:
     for symbol, duration in _unique_symbol_durations(settings_list):
         settle_due_predictions(symbol, duration)
+        refresh_paper_live_candidate_states(symbol, duration)
         refresh_ensemble_judge(symbol, duration)
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
     return sorted({(settings.symbol.upper(), settings.duration) for settings in settings_list})

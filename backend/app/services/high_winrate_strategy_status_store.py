@@ -8,9 +8,9 @@ from app.services.high_winrate_strategy_metrics import high_winrate_thresholds
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
-STATUS_TRADABLE = "tradable"
+STATUS_TRADABLE = "paper_stable"
 STATUS_PAUSED = "paused"
-STATUS_DEMOTED = "demoted"
+STATUS_DEMOTED = "paper_failed"
 DEFAULT_QTY = 5.0
 RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
 
@@ -31,12 +31,15 @@ def status_payload(
         "settledSampleCount": metrics.get("sampleCount"),
         "winRate": metrics.get("winRate"),
         "profitFactor": metrics.get("profitFactor"),
+        "avgReturn": metrics.get("avgReturn"),
         "consecutiveLosses": metrics.get("consecutiveLosses"),
         "metricsSource": metrics.get("metricsSource"),
         "totalEventPnlU": metrics.get("totalEventPnlU"),
         "paperStability": metrics.get("paperStability"),
+        "paperLiveWindows": metrics.get("paperLiveWindows"),
         "requiredSampleCount": thresholds["requiredSampleCount"],
-        "tradable": status == STATUS_TRADABLE,
+        "tradable": False,
+        "realTradingEnabled": False,
         "evaluatedAt": utc_now(),
     }
     if extra:
@@ -162,8 +165,7 @@ def sync_strategy_slot_for_status(conn: Any, symbol: str, duration: str, status:
     if status == STATUS_PAUSED:
         set_strategy_slot(conn, symbol, duration, enabled=False, live_trading_enabled=False)
         return
-    live_override = None if status == STATUS_TRADABLE else False
-    set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=live_override)
+    set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=False)
 
 
 def strategy_slot(conn: Any, duration: str) -> Any | None:

@@ -214,6 +214,10 @@ def test_train_lstm_model_publishes_active_artifact_when_validation_passes(monke
     assert status["candidateStatus"] == "promoted_trade_active"
     assert status["selectedConfidenceThreshold"] is not None
     assert status["tradePredictionReady"] is True
+    assert status["paperLiveAdmission"]["allowed"] is True
+    assert status["paperLiveStatus"] == "paper_collecting"
+    assert status["modelCredibilitySource"] == "settled_paper_live_predictions"
+    assert status["realTradingEnabled"] is False
 
 
 def test_search_candidate_can_stage_trade_model_before_serial_publish(monkeypatch) -> None:
@@ -240,6 +244,8 @@ def test_search_candidate_can_stage_trade_model_before_serial_publish(monkeypatc
     assert _read_json(paths.status)["status"] == "trade_active"
     assert _read_json(paths.attempt)["status"] == "trade_active"
     assert status["tradePredictionReady"] is True
+    assert status["validationRole"] == "validation_gate_allows_paper_live_only"
+    assert status["paperLiveSampleCount"] == 0
 
 
 def _staging_status(root: Path, model_version: str) -> dict:

@@ -124,6 +124,7 @@ def ranking_row(
     name = f"goal_combo__{member_names}"
     members = [member_payload(member, orientation) for member, orientation in zip(hit.members, hit.orientations)]
     display_name = combo_display_name(members)
+    reported_win_rate = round(hit.win_rate, 4)
     return {
         "rank": rank,
         "factorName": name,
@@ -134,7 +135,13 @@ def ranking_row(
         "members": members,
         "comboSize": len(hit.members),
         "threshold": hit.threshold,
-        "winRate": round(hit.win_rate, 4),
+        "winRate": reported_win_rate,
+        "backtestWinRate": reported_win_rate,
+        "oosWinRate": None,
+        "walkForwardResult": None,
+        "recentRollingResult": None,
+        "paperLiveWinRate": None,
+        "paperLiveStatus": "backtest_candidate",
         "profitFactor": round(hit.profit_factor, 4),
         "trades": hit.trades,
         "totalPeriods": hit.trades,

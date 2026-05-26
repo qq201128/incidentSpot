@@ -17,7 +17,7 @@ def test_promotion_enables_simulation_slot(monkeypatch, tmp_path: Path) -> None:
     result = demotion.promote_high_winrate_strategy("btcusdt", "10m")
 
     row = _slot(db_path, "10m")
-    assert result["status"] == demotion.STATUS_BACKTEST_CANDIDATE
+    assert result["status"] == demotion.STATUS_PAPER_LIVE_COLLECTING
     assert result["tradable"] is False
     assert row["enabled"] == 1
     assert row["live_trading_enabled"] == 0
@@ -35,7 +35,7 @@ def test_paper_live_passed_after_live_samples_hit_target(monkeypatch, tmp_path: 
 
     row = _slot(db_path, "10m")
     assert result["status"] == demotion.STATUS_PAPER_LIVE_PASSED
-    assert result["reason"] == "stable_live_target_met"
+    assert result["reason"] == "stable_paper_live_target_met"
     assert result["sampleCount"] == demotion.ACTIVE_SAMPLE_COUNT
     assert result["requiredSampleCount"] == demotion.ACTIVE_SAMPLE_COUNT
     assert result["tradable"] is False
@@ -88,7 +88,7 @@ def test_demotion_below_live_target_keeps_collecting_predictions(monkeypatch, tm
 
     row = _slot(db_path, "30m")
     assert result["status"] == demotion.STATUS_DEMOTED
-    assert result["reason"] == "live_win_rate_below_target"
+    assert result["reason"] == "paper_live_win_rate_below_target"
     assert row["enabled"] == 1
     assert row["live_trading_enabled"] == 0
 
@@ -172,7 +172,7 @@ def test_failed_top3_refreshes_goal_ranking(monkeypatch, tmp_path: Path) -> None
     result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m", allow_goal_refresh=True)
 
     assert refreshed == [("BTCUSDT", "10m")]
-    assert result["status"] == demotion.STATUS_BACKTEST_CANDIDATE
+    assert result["status"] == demotion.STATUS_PAPER_LIVE_COLLECTING
     assert result["reason"] == demotion.REASON_OFFLINE_PROMOTION
     assert result["activeRank"] == 1
 

@@ -132,6 +132,9 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
     assert status["activeModelStatus"] == "initial_baseline"
     assert status["shadowPredictionReady"] is True
     assert status["tradePredictionReady"] is False
+    assert status["paperLiveAdmission"]["allowed"] is False
+    assert status["validationRole"] == "validation_gate_allows_paper_live_only"
+    assert status["realTradingEnabled"] is False
 
 
 def test_each_model_family_has_successive_halving_training_rules() -> None:

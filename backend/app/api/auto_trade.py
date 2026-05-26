@@ -61,6 +61,8 @@ def update_strategy(strategy_key: str, payload: AutoTradeSettingsPayload) -> dic
 
 
 def _settings_from_payload(payload: AutoTradeSettingsPayload, strategy_key: str) -> AutoTradeSettings:
+    if payload.liveTradingEnabled:
+        raise ValueError("real trading is disabled in the current paper-live preparation phase")
     return AutoTradeSettings(
         strategy_key=payload.strategyKey or strategy_key,
         enabled=payload.enabled,
@@ -68,7 +70,7 @@ def _settings_from_payload(payload: AutoTradeSettingsPayload, strategy_key: str)
         duration=payload.duration,
         duration_minutes=payload.durationMinutes,
         qty=payload.qty,
-        live_trading_enabled=payload.liveTradingEnabled,
+        live_trading_enabled=False,
     )
 
 
@@ -87,6 +89,6 @@ def _disable_invalid_auto_trade(
             duration=payload.duration,
             duration_minutes=payload.durationMinutes,
             qty=payload.qty,
-            live_trading_enabled=payload.liveTradingEnabled,
+            live_trading_enabled=False,
         )
     )

@@ -37,9 +37,13 @@ SCHEMA_MIGRATIONS = (
   "ALTER TABLE predictions ADD COLUMN entry_price REAL",
   "ALTER TABLE predictions ADD COLUMN expected_return REAL",
   "ALTER TABLE predictions ADD COLUMN model_version TEXT",
+  "ALTER TABLE predictions ADD COLUMN model_family TEXT",
+  "ALTER TABLE predictions ADD COLUMN validation_win_rate REAL",
   "ALTER TABLE predictions ADD COLUMN feature_window INTEGER",
   "ALTER TABLE predictions ADD COLUMN model_duration TEXT",
   "ALTER TABLE predictions ADD COLUMN model_trained_at TEXT",
+  "ALTER TABLE predictions ADD COLUMN data_freshness_status TEXT",
+  "ALTER TABLE predictions ADD COLUMN missing_feature_status TEXT",
   "ALTER TABLE predictions ADD COLUMN exit_price REAL",
   "ALTER TABLE predictions ADD COLUMN actual_return REAL",
   "ALTER TABLE predictions ADD COLUMN prediction_correct INTEGER",
@@ -172,6 +176,31 @@ SCHEMA_MIGRATIONS = (
     evaluated_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (strategy_key, symbol, duration)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS paper_live_candidate_status (
+    candidate_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(candidate_key, symbol, duration)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS paper_live_prediction_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_key TEXT NOT NULL,
+    strategy_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
   )
   """,
   """

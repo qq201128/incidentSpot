@@ -14,6 +14,8 @@ from app.services.ge70_combo_paper_live_cohort_service import bootstrap_ge70_pap
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
+from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_daily_loop_service import run_paper_live_daily_closed_loop
 from app.services.factor_combination_service import MIN_COMBO_SIZE, CombinationSearchConfig
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
@@ -64,6 +66,26 @@ def factor_combination_signals(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/paper-live/candidates")
+def paper_live_candidates(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+) -> dict:
+    _validate_duration(duration)
+    return paper_live_candidate_report(symbol.upper(), duration)
+
+
+@router.post("/paper-live/daily-loop")
+def paper_live_daily_loop(
+    symbol: str | None = Query(None, min_length=6),
+    duration: str | None = Query(None),
+) -> dict:
+    _validate_optional_duration(duration)
+    symbols = [symbol.upper()] if symbol else None
+    durations = [duration] if duration else None
+    return run_paper_live_daily_closed_loop(symbols=symbols, durations=durations)
 
 
 @router.post("/ge70-paper-live/bootstrap")
