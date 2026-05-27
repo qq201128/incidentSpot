@@ -90,6 +90,7 @@ def _normalize_predicted_direction(predicted: str | None) -> str | None:
 @router.get("")
 def list_events(
     symbol: str | None = Query(None, min_length=6),
+    strategyKey: str | None = Query(None, min_length=1),
     page: int = Query(1, ge=1),
     pageSize: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     view: str = Query("events"),
@@ -103,6 +104,7 @@ def list_events(
                 page=page,
                 page_size=pageSize,
                 view=view,
+                strategy_key=strategyKey,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

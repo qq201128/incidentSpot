@@ -10,6 +10,7 @@ import AppNavigation from "./components/AppNavigation";
 import EventGovernancePage from "./pages/EventGovernancePage";
 import FactorLearningPage from "./pages/FactorLearningPage";
 import FactorsPage from "./pages/FactorsPage";
+import RuleHitRatePage from "./pages/RuleHitRatePage";
 import TradingWorkbench from "./components/TradingWorkbench";
 import "./components/EventContractPanel.css";
 import { strategyLabel } from "./utils/strategyLabels";
@@ -85,6 +86,9 @@ export default function App() {
     [reloadWorkbench],
   );
 
+  if (appView === "hit-rate") {
+    return pageFrame(appView, setAppView, <RuleHitRatePage />);
+  }
   if (appView === "factors") {
     return pageFrame(appView, setAppView, <FactorsPage />);
   }

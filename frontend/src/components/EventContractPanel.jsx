@@ -5,11 +5,6 @@ import TradeControls from "./TradeControls";
 const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
-const EMPTY_AI_HISTORY = Object.freeze({
-  overall: { total: 0, hits: 0, rate: null, pnlU: 0 },
-  byStrategy: [],
-});
-
 const PANEL_TABS = /** @type {const} */ (["execution", "judge", "trade"]);
 
 export default function EventContractPanel({
@@ -17,7 +12,6 @@ export default function EventContractPanel({
   chartInterval = "10m",
   currentPrice,
   hasOpenPosition: dbHasOpenPosition = false,
-  aiHistorySuccess = EMPTY_AI_HISTORY,
   onQuickTrade,
   onPredict,
   latestPrediction,
@@ -223,7 +217,6 @@ export default function EventContractPanel({
             predictLoading={predictLoading}
             predictInfo={predictInfo}
             predictError={predictError}
-            aiHistorySuccess={aiHistorySuccess}
             liveTradingEnabled={liveTradingEnabled}
             onLiveTradingChange={setLiveTradingEnabled}
             onAmountChange={setAmount}

@@ -5,6 +5,24 @@ import sqlite3
 from app.services.event_list_query import paginated_events
 
 
+def test_paginated_events_filters_by_strategy_key() -> None:
+    conn = _memory_conn()
+    _insert_event(conn, "BTCUSDT", "manual")
+    _insert_event(conn, "BTCUSDT", "factor_combo_ranker_v1_combo_abc")
+
+    payload = paginated_events(
+        conn,
+        symbol="BTCUSDT",
+        page=1,
+        page_size=10,
+        view="events",
+        strategy_key="factor_combo_ranker_v1_combo_abc",
+    )
+
+    assert payload["total"] == 1
+    assert payload["items"][0]["strategy_key"] == "factor_combo_ranker_v1_combo_abc"
+
+
 def test_paginated_events_clamps_page_to_last_page() -> None:
     conn = _memory_conn()
     for _ in range(3):
@@ -39,15 +57,15 @@ def _memory_conn() -> sqlite3.Connection:
     return conn
 
 
-def _insert_event(conn: sqlite3.Connection, symbol: str) -> None:
+def _insert_event(conn: sqlite3.Connection, symbol: str, strategy_key: str = "manual") -> None:
     conn.execute(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value,
           start_time, end_time, status
         )
-        VALUES('manual', ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', '2026-05-21T14:20:00Z', 'OPEN')
+        VALUES(?, ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', '2026-05-21T14:20:00Z', 'OPEN')
         """,
-        (symbol,),
+        (strategy_key, symbol),
     )
     conn.commit()

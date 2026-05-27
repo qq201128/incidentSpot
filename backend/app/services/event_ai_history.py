@@ -21,6 +21,7 @@ def ai_history_success(conn, symbol: str) -> dict:
         """
         SELECT
           e.strategy_key,
+          e.ai_high_winrate_rule,
           e.start_time,
           e.end_time,
           e.ai_prediction_correct,
@@ -69,16 +70,20 @@ def ai_history_success(conn, symbol: str) -> dict:
         strategy_key = row["strategy_key"] or "manual"
         duration_minutes = _duration_minutes(row["start_time"], row["end_time"])
         bucket_key = (strategy_key, duration_minutes)
-        bucket = buckets.setdefault(bucket_key, {"total": 0, "hits": 0, "pnlU": 0.0})
+        bucket = buckets.setdefault(bucket_key, {"total": 0, "hits": 0, "pnlU": 0.0, "factorName": None})
         bucket["total"] += 1
         if int(row["ai_prediction_correct"] or 0) == 1:
             bucket["hits"] += 1
         if pnl is not None:
             bucket["pnlU"] += pnl
+        rule = row["ai_high_winrate_rule"]
+        if rule and not bucket["factorName"]:
+            bucket["factorName"] = str(rule)
 
     by_strategy = [
         {
             "strategyKey": strategy_key,
+            "factorName": bucket["factorName"],
             "durationMinutes": duration_minutes,
             "total": bucket["total"],
             "hits": bucket["hits"],

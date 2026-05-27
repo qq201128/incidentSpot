@@ -67,7 +67,6 @@ export default function TradingWorkbench(props) {
             chartInterval={props.interval}
             currentPrice={props.currentPrice}
             hasOpenPosition={Boolean(props.summary?.hasOpenPosition)}
-            aiHistorySuccess={props.summary?.aiHistorySuccess}
             onQuickTrade={props.onQuickTrade}
             onPredict={props.onPredict}
             latestPrediction={props.latestPrediction}
@@ -336,7 +335,6 @@ function panelProps(props) {
     chartInterval: props.interval,
     currentPrice: props.currentPrice,
     hasOpenPosition: Boolean(props.summary?.hasOpenPosition),
-    aiHistorySuccess: props.summary?.aiHistorySuccess,
     latestPrediction: props.latestPrediction,
     onClearAllEvents: props.onClearAllEvents,
     onPredict: props.onPredict,

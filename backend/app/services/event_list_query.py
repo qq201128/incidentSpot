@@ -21,11 +21,19 @@ def normalize_view(view: str) -> str:
     return normalized
 
 
-def paginated_events(conn, *, symbol: str | None, page: int, page_size: int, view: str) -> dict:
+def paginated_events(
+    conn,
+    *,
+    symbol: str | None,
+    page: int,
+    page_size: int,
+    view: str,
+    strategy_key: str | None = None,
+) -> dict:
     safe_view = normalize_view(view)
     safe_page = max(1, int(page))
     safe_page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
-    where_sql, params = _view_where_clause(safe_view, symbol)
+    where_sql, params = _view_where_clause(safe_view, symbol, strategy_key)
     total = int(
         conn.execute(
             f"SELECT COUNT(*) AS total FROM events {_LATEST_ORDER_JOIN} WHERE {where_sql}",
@@ -56,12 +64,16 @@ def paginated_events(conn, *, symbol: str | None, page: int, page_size: int, vie
     }
 
 
-def _view_where_clause(view: str, symbol: str | None) -> tuple[str, list]:
+def _view_where_clause(view: str, symbol: str | None, strategy_key: str | None = None) -> tuple[str, list]:
     clauses = ["1 = 1"]
     params: list = []
     if symbol:
         clauses.append("events.symbol = ?")
         params.append(symbol.upper())
+    safe_strategy_key = strategy_key.strip() if isinstance(strategy_key, str) and strategy_key.strip() else None
+    if safe_strategy_key:
+        clauses.append("events.strategy_key = ?")
+        params.append(safe_strategy_key)
     if view == "orders":
         clauses.append("latest_order.id IS NOT NULL")
     elif view == "settlements":
