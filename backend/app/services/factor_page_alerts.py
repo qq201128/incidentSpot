@@ -4,6 +4,7 @@ from typing import Any
 
 from app.services.data_coverage_report import CoverageOptions, build_data_coverage_report
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
+from app.services.factor_combination_walk_forward import VALIDATION_MIN_WIN_RATE
 
 ALERT_WARNING = "warning"
 ALERT_ERROR = "error"
@@ -164,12 +165,16 @@ def combination_failure_message(search: dict, diagnostics: dict, failure_counts:
         top_count = failure_counts[top_reason]
         parts.append(f"失败原因统计：{top_reason} × {top_count}。")
         criteria = diagnostics.get("targetCriteria") if isinstance(diagnostics, dict) else {}
-        min_wr = criteria.get("validationMinWinRate") if isinstance(criteria, dict) else None
-        if top_reason == "validation_win_rate_below_min" and min_wr is not None:
-            parts.append(
-                f"验证集胜率未达门槛（≥ {float(min_wr):.1%}）。"
-                "请重新触发组合刷新；亦可查看「高胜率目标组合」结果。"
-            )
+        cached_min_wr = criteria.get("validationMinWinRate") if isinstance(criteria, dict) else None
+        if top_reason == "validation_win_rate_below_min":
+            parts.append(f"验证集胜率未达门槛（当前标准 ≥ {VALIDATION_MIN_WIN_RATE:.1%}）。")
+            if cached_min_wr is not None and abs(float(cached_min_wr) - VALIDATION_MIN_WIN_RATE) > 0.001:
+                parts.append(
+                    f"页面统计来自上一轮组合搜索（当时门槛 {float(cached_min_wr):.1%}），"
+                    "请重新触发组合刷新以按新标准重算。"
+                )
+            else:
+                parts.append("请重新触发组合刷新；亦可查看「高胜率目标组合」结果。")
     if failures and not parts:
         parts.append(f"组合回测失败 {len(failures)} 条，请查看详情。")
     return " ".join(parts)

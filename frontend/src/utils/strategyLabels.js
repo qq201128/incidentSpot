@@ -137,6 +137,25 @@ export function strategyLabel(key) {
   return humanizeStrategyKey(raw);
 }
 
+/** 模型族影子执行项，如 factor_gru_shadow_10m */
+export function isModelShadowStrategyKey(key) {
+  return Boolean(modelShadowLabel(String(key || "").trim()));
+}
+
+/** 训练工件版本号，如 gru_BTCUSDT_10m_w24_m8_e16_s... */
+export function modelVersionLabel(version) {
+  const raw = String(version || "").trim();
+  const match = raw.match(
+    /^(lstm|gru|cnn|transformer|random_forest|xgboost|svm|bayesian|knn|rl_strategy)_([A-Z0-9]+)_(\d+m|60m|1d)(?:_|$)/i,
+  );
+  if (!match) return "";
+  const family = match[1].toLowerCase();
+  const symbol = match[2].toUpperCase();
+  const duration = match[3].toLowerCase();
+  const familyName = MODEL_FAMILY_LABELS[family] || family.toUpperCase();
+  return `${familyName} · ${symbol} · ${durationLabel(duration)}`;
+}
+
 function modelShadowLabel(key) {
   const lowered = key.toLowerCase();
   for (const [family, label] of Object.entries(MODEL_FAMILY_LABELS)) {

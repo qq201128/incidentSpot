@@ -513,6 +513,47 @@ def test_ready_model_family_shadow_creates_simulation_trade(monkeypatch) -> None
     assert trades == [(FACTOR_COMBO_STRATEGY_KEY, lstm_key)]
 
 
+def test_candidate_collection_saves_ready_model_family_shadow_sim(monkeypatch) -> None:
+    saved = []
+    trades = []
+    lstm_key = lstm_shadow_strategy_key(DEFAULT_DURATION)
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append(result["strategy_key"])
+        return True
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "predict_eligible_factor_combo_rows", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(service, "predict_factor_candidate_signals", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(service, "lstm_model_status", lambda *_args: {"shadowPredictionReady": True})
+    monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
+    monkeypatch.setattr(
+        service,
+        "predict_lstm_shadow_prediction",
+        lambda *_args, **_kwargs: _prediction(lstm_key, symbol="BTCUSDT", duration=DEFAULT_DURATION),
+    )
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(
+        service,
+        "create_batch_combo_simulation_trade",
+        lambda _settings, result: trades.append(result["strategy_key"]),
+    )
+
+    asyncio.run(
+        service._save_candidate_collection_predictions(
+            _settings(FACTOR_COMBO_STRATEGY_KEY),
+            write_lock=asyncio.Lock(),
+        )
+    )
+
+    assert lstm_key in saved
+    assert lstm_key in trades
+
+
 def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     mixed = [
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m"),

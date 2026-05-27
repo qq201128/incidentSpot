@@ -39,6 +39,21 @@
   color: var(--text);
 }
 
+.strategy-recent-events-code {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #9fc6ff;
+  background: rgba(47, 140, 255, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .strategy-recent-events-close {
   flex: 0 0 auto;
   width: 32px;

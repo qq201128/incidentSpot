@@ -3,6 +3,7 @@ import { fetchEventsPage } from "../api/client";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { factorLabel } from "../utils/factorLearningLabels";
+import { eventBacktestWinRatePercent } from "../utils/eventAiMetrics";
 import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 import EnsembleRankingTable from "./EnsembleRankingTable";
 
@@ -243,7 +244,7 @@ function eventRow(event) {
     modeCell(event.externalStatus),
     resultCell(event),
     pnlCell(event),
-    confidenceCell(event),
+    backtestWinRateCell(event),
     text("rule", ruleName(event)),
   ]);
 }
@@ -335,10 +336,10 @@ function pnlCell(event) {
   return text("pnl", signed(pnl), pnl >= 0 ? "value-up" : "value-down");
 }
 
-function confidenceCell(event) {
-  const p = Number(event.aiProbabilityUp);
-  if (!Number.isFinite(p)) return text("confidence", "—");
-  return text("confidence", `${Math.round(Math.max(p, 1 - p) * 1000) / 10}%`);
+function backtestWinRateCell(event) {
+  const pct = eventBacktestWinRatePercent(event);
+  if (pct == null) return text("backtestWinRate", "—");
+  return text("backtestWinRate", `${pct}%`);
 }
 
 function failureReason(event) {
@@ -411,7 +412,7 @@ const eventLabels = () => [
   "模式",
   "结果",
   "PnL",
-  "置信",
+  "回测胜率",
   "类型",
 ];
 const orderLabels = () => ["事件ID", "交易对", "方向", "数量", "支付率", "下单", "订单", "模式", "外部ID"];

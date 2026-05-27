@@ -6,7 +6,7 @@ import "./StrategyRecentEventsPanel.css";
 
 const PAGE_SIZE = 12;
 
-export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, onClose }) {
+export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, englishName, onClose }) {
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -56,6 +56,11 @@ export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, 
         <div>
           <span className="strategy-recent-events-kicker">最近合约记录</span>
           <h3>{title}</h3>
+          {englishName ? (
+            <code className="strategy-recent-events-code" title="英文/字段名">
+              {englishName}
+            </code>
+          ) : null}
         </div>
         <button type="button" className="strategy-recent-events-close" onClick={onClose} aria-label="关闭">
           ×

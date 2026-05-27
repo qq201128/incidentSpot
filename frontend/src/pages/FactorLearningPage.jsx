@@ -19,15 +19,8 @@ export default function FactorLearningPage() {
   const [duration, setDuration] = useState("10m");
   const mining = useMiningPageData(symbol, duration);
 
-  if (mining.loading) {
-    return (
-      <main className="mining-page layout">
-        <div className="mining-loading">正在加载自动挖掘数据…</div>
-      </main>
-    );
-  }
-
   const overview = mining.overview;
+  const initialLoading = mining.loading && !overview;
 
   return (
     <main className="mining-page layout">
@@ -40,8 +33,14 @@ export default function FactorLearningPage() {
         header={overview?.header}
         updatedAt={overview?.updatedAt}
         onReload={() => void mining.reload()}
-        reloading={mining.busy !== ""}
+        reloading={mining.busy !== "" || mining.loading}
       />
+
+      {initialLoading ? (
+        <div className="mining-loading" role="status">
+          正在加载自动挖掘数据…（汇总 10 个模型族状态，首次可能需数秒）
+        </div>
+      ) : null}
 
       {mining.status ? <div className="mining-banner">{mining.status}</div> : null}
 
@@ -70,6 +69,8 @@ export default function FactorLearningPage() {
             <MiningAgentTable rows={overview.agentCandidates} />
           </section>
         </div>
+      ) : !initialLoading && !mining.status ? (
+        <div className="mining-loading">暂无数据</div>
       ) : null}
     </main>
   );

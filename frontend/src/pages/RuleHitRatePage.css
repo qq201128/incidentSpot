@@ -350,6 +350,16 @@
   overflow-wrap: anywhere;
 }
 
+.rhr-factor-code {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #9fc6ff;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
 .rhr-factor-meta {
   font-size: 11px;
   color: var(--muted);

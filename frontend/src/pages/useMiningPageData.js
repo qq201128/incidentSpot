@@ -27,7 +27,7 @@ export function useMiningPageData(symbol, duration) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
-    async (signal) => {
+    async (signal, { fresh = false } = {}) => {
       if (!isValidSymbol(normalizedSymbol)) {
         setOverview(null);
         setLoading(false);
@@ -35,7 +35,7 @@ export function useMiningPageData(symbol, duration) {
         return;
       }
       try {
-        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal });
+        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal, fresh });
         if (!signal?.aborted) {
           setOverview(data);
           setStatus("");
@@ -64,7 +64,7 @@ export function useMiningPageData(symbol, duration) {
       try {
         await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
         await sleep(400);
-        await load();
+        await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`刷新失败：${errorMessage(error)}`);
       } finally {
@@ -89,7 +89,10 @@ export function useMiningPageData(symbol, duration) {
     let timer;
     const poll = async () => {
       try {
-        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal: ac.signal });
+        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, {
+          signal: ac.signal,
+          fresh: true,
+        });
         if (!ac.signal.aborted) setOverview(data);
         if (!ac.signal.aborted && hasActiveTasks(data)) timer = window.setTimeout(poll, POLL_MS);
       } catch (error) {
@@ -113,7 +116,7 @@ export function useMiningPageData(symbol, duration) {
       await Promise.all(
         MODEL_FAMILIES.map((family) => requestModelCandidateSearch(family, normalizedSymbol, duration)),
       );
-      await load();
+      await load(undefined, { fresh: true });
     } catch (error) {
       setStatus(`全量搜索失败：${errorMessage(error)}`);
     } finally {
@@ -127,7 +130,7 @@ export function useMiningPageData(symbol, duration) {
       setBusy(`search-${family}`);
       try {
         await requestModelCandidateSearch(family, normalizedSymbol, duration);
-        await load();
+        await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`${family} 搜索失败：${errorMessage(error)}`);
       } finally {
@@ -136,6 +139,13 @@ export function useMiningPageData(symbol, duration) {
     },
     [duration, load, normalizedSymbol],
   );
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    const ac = new AbortController();
+    void load(ac.signal, { fresh: true });
+    return () => ac.abort();
+  }, [load]);
 
   return {
     overview,
@@ -146,7 +156,7 @@ export function useMiningPageData(symbol, duration) {
     refreshAgent,
     searchAllModels,
     searchModel,
-    reload: load,
+    reload,
   };
 }
 
@@ -172,7 +182,7 @@ function errorMessage(error) {
 }
 
 async function fetchMiningOverviewWithRetry(symbol, duration, options = {}) {
-  const retries = 5;
+  const retries = 3;
   let lastError;
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
@@ -185,7 +195,7 @@ async function fetchMiningOverviewWithRetry(symbol, duration, options = {}) {
         String(errorMessage(error)).includes("delimiter") ||
         String(errorMessage(error)).includes("JSON");
       if (!retryable || attempt + 1 >= retries) throw error;
-      await sleep(300 * (attempt + 1));
+      await sleep(200 * (attempt + 1));
     }
   }
   throw lastError;

@@ -285,6 +285,7 @@ def _series_value_at(series: pd.Series, index: Any) -> Any:
 
 
 def _live_confidence(row: dict[str, Any]) -> float:
+    """Historical backtest win rate used as the live gate score (not model directional confidence)."""
     value = _finite_float(row.get("winRate"))
     if value is None:
         raise ValueError(f"combination row missing winRate: {row.get('factorName')}")

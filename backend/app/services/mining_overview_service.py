@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.services.factor_learning_service import get_factor_learning_memory
+from app.services.lstm_combo_snapshot import current_combo_snapshot
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.model_family_status_service import model_family_status
 from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model, siliconflow_config_from_env
@@ -54,7 +56,7 @@ def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
         raise ValueError(f"factor learning memory not found for {sym} {duration}")
 
     operators = factor_operator_payload()
-    models = [_model_card(model_family_status(family, sym, duration)) for family in MODEL_FAMILIES]
+    models = _model_cards(sym, duration)
     agent_rows = _agent_candidate_rows(memory)
     promotion = memory.get("agentCandidatePromotion") or {}
     ideas = _candidate_ideas(memory)
@@ -73,6 +75,22 @@ def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
         "operators": _operators_sidebar(operators),
         "memory": memory,
     }
+
+def _model_cards(symbol: str, duration: str) -> list[dict[str, Any]]:
+    shared_combo = current_combo_snapshot(symbol, duration)
+
+    def load_card(family: str) -> dict[str, Any]:
+        status = model_family_status(
+            family,
+            symbol,
+            duration,
+            current_combo_snapshot=shared_combo,
+        )
+        return _model_card(status)
+
+    with ThreadPoolExecutor(max_workers=min(6, len(MODEL_FAMILIES))) as pool:
+        return list(pool.map(load_card, MODEL_FAMILIES))
+
 
 def _header_payload(memory: dict, ideas: list, promotion: dict, agent_rows: list) -> dict[str, Any]:
     refresh = memory.get("refreshTask") or {}

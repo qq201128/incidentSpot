@@ -4,6 +4,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.services.mining_overview_cache import get_cached_mining_overview
 from app.services.mining_overview_service import mining_overview
 
 router = APIRouter(prefix="/api/mining", tags=["mining"])
@@ -13,9 +14,13 @@ router = APIRouter(prefix="/api/mining", tags=["mining"])
 def get_mining_overview(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
+    fresh: bool = Query(False, description="Skip overview cache (use while tasks are running)"),
 ) -> dict:
     try:
-        return mining_overview(symbol.upper(), duration)
+        sym = symbol.upper()
+        if fresh:
+            return mining_overview(sym, duration)
+        return get_cached_mining_overview(sym, duration, build=mining_overview)
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status_code=503,

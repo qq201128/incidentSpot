@@ -3,7 +3,7 @@ import { fetchWorkbenchSummary } from "../api/workbenchClient";
 import StrategyRecentEventsPanel from "../components/StrategyRecentEventsPanel";
 import { contractDurationLabel } from "../utils/eventDuration";
 import { formatPnlU } from "../utils/eventSettlement";
-import { aiHistoryRowLabel } from "../utils/aiHistoryLabels";
+import { aiHistoryRowEnglishName, aiHistoryRowLabel } from "../utils/aiHistoryLabels";
 import "./RuleHitRatePage.css";
 
 const SYMBOLS = [
@@ -64,6 +64,7 @@ export default function RuleHitRatePage() {
   );
   const { overall } = aiHistorySuccess;
   const selectedTitle = selectedRow ? aiHistoryRowLabel(selectedRow) : "";
+  const selectedEnglishName = selectedRow ? aiHistoryRowEnglishName(selectedRow) : "";
   const factorCount = aiHistorySuccess.byStrategy?.length ?? 0;
 
   return (
@@ -135,6 +136,7 @@ export default function RuleHitRatePage() {
                 <ul className="rhr-factor-list">
                   {group.rows.map((row) => {
                     const label = aiHistoryRowLabel(row);
+                    const englishName = aiHistoryRowEnglishName(row);
                     const active =
                       selectedRow?.strategyKey === row.strategyKey &&
                       selectedRow?.durationMinutes === row.durationMinutes;
@@ -150,6 +152,9 @@ export default function RuleHitRatePage() {
                           <HitRateRing percent={ratePct} />
                           <div className="rhr-factor-main">
                             <span className="rhr-factor-name">{label}</span>
+                            {englishName ? (
+                              <code className="rhr-factor-code">{englishName}</code>
+                            ) : null}
                             <span className="rhr-factor-meta">
                               {row.total === 0 ? "暂无样本" : `${row.hits} 命中 · ${row.total} 笔`}
                             </span>
@@ -178,6 +183,7 @@ export default function RuleHitRatePage() {
             symbol={symbol}
             strategyKey={selectedRow.strategyKey}
             title={selectedTitle}
+            englishName={selectedEnglishName}
             onClose={() => setSelectedRow(null)}
           />
         ) : (

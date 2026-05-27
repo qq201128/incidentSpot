@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { eventBacktestWinRatePercent, eventDirectionalConfidencePercent, eventUsesBacktestWinRate } from "../utils/eventAiMetrics";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 
@@ -155,12 +156,17 @@ function EventHeader({ item }) {
 }
 
 function AiEventMeta({ item }) {
-  const aiPct = aiConfidencePercent(item);
+  const backtestPct = eventBacktestWinRatePercent(item);
+  const confPct = eventDirectionalConfidencePercent(item);
   if (!item.aiPredictedDirection) return null;
+  const rateLabel = eventUsesBacktestWinRate(item) ? "回测胜率" : "置信度";
+  const ratePct = eventUsesBacktestWinRate(item) ? backtestPct : confPct;
   return (
     <div className="ai-event-meta">
       <span>规则方向：{item.aiPredictedDirection === "up" ? "涨" : "跌"}</span>
-      <span>置信度：{aiPct != null ? `${aiPct.toFixed(1).replace(/\.0$/, "")}%` : "--"}</span>
+      <span>
+        {rateLabel}：{ratePct != null ? `${ratePct.toFixed(1).replace(/\.0$/, "")}%` : "--"}
+      </span>
       {item.status === "SETTLED" && item.aiPredictionCorrect != null && (
         <span className={Number(item.aiPredictionCorrect) === 1 ? "value-up" : "value-down"}>
           规则{Number(item.aiPredictionCorrect) === 1 ? "命中" : "未中"}
@@ -225,14 +231,6 @@ function settlementView(item) {
 
 function _isCorrectSettlement(side, result) {
   return (side === "BUY" && result === "YES") || (side === "SELL" && result === "NO");
-}
-
-function aiConfidencePercent(item) {
-  const p = Number(item?.aiProbabilityUp);
-  if (!Number.isFinite(p)) return null;
-  if (item?.orderSide === "BUY") return Math.round(p * 1000) / 10;
-  if (item?.orderSide === "SELL") return Math.round((1 - p) * 1000) / 10;
-  return Math.round(Math.max(p, 1 - p) * 1000) / 10;
 }
 
 function eventDurationLabel(item) {

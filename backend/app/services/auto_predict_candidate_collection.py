@@ -12,6 +12,19 @@ from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_e
 async def save_candidate_collection_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock, deps: dict[str, Any]) -> None:
     await save_factor_candidate_signals(settings, entry_open_time, write_lock, deps)
     await save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock, deps)
+    await save_model_family_shadow_predictions(settings, entry_open_time, write_lock, deps)
+
+
+async def save_model_family_shadow_predictions(
+    settings: AutoTradeSettings,
+    entry_open_time: int,
+    write_lock: asyncio.Lock,
+    deps: dict[str, Any],
+) -> None:
+    if settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
+        return
+    for family in MODEL_FAMILIES:
+        await save_one_model_family_shadow_prediction(family, settings, entry_open_time, write_lock, deps)
 
 
 async def save_factor_combo_shadow_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock, deps: dict[str, Any]) -> None:
@@ -80,7 +93,13 @@ async def save_one_model_family_shadow_prediction(
     result = await asyncio.to_thread(predictor, *args, entry_open_time=entry_open_time)
     saved = await deps["save_prediction"](result, write_lock)
     if saved:
-        await save_model_family_shadow_trade(settings, result, deps["create_batch_combo_simulation_trade"])
+        # Shadow sidecar is observe-only: any shadow-ready prediction gets a SIM event,
+        # not only models promoted to trade_active with validation gate passed.
+        await save_model_family_shadow_trade(
+            settings,
+            {**result, "trade_quality_passed": True},
+            deps["create_batch_combo_simulation_trade"],
+        )
 
 
 async def save_model_family_shadow_trade(

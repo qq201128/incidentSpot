@@ -26,6 +26,8 @@ from app.services.model_family_candidates import (
     read_model_candidate_progress,
 )
 
+_DEPENDENCY_STATUS_CACHE: dict[str, dict[str, Any]] = {}
+
 
 def model_family_status(
     family: str,
@@ -33,6 +35,7 @@ def model_family_status(
     duration: str,
     *,
     artifact_root: Path | None = None,
+    current_combo_snapshot: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     selected = normalize_model_family(family)
     sym = symbol.strip().upper()
@@ -44,7 +47,7 @@ def model_family_status(
     artifacts_ready = required_artifacts_exist(paths)
     status = _active_status(selected, sym, duration, raw_status, version, report, artifacts_ready)
     dependency = _dependency_status(selected)
-    snapshot = _combo_snapshot_status(sym, duration, paths.features)
+    snapshot = _combo_snapshot_status(sym, duration, paths.features, current=current_combo_snapshot)
     ready_reason = _shadow_ready_reason(status, version, report, artifacts_ready, dependency["available"])
     trade_reason = _trade_ready_reason(status, version, report, artifacts_ready, dependency["available"])
     gate = validation_gate_payload(version, report)
@@ -142,18 +145,24 @@ def _active_artifacts_pass_validation(status, version, report, artifacts_ready: 
     )
 
 
-def _combo_snapshot_status(symbol: str, duration: str, features_path: Path) -> dict[str, Any]:
-    current = current_combo_snapshot(symbol, duration)
+def _combo_snapshot_status(
+    symbol: str,
+    duration: str,
+    features_path: Path,
+    *,
+    current: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    current_list = current if current is not None else current_combo_snapshot(symbol, duration)
     features = read_json(features_path) or {}
     trained = features.get("comboSnapshot")
     trained = list(trained) if isinstance(trained, list) else []
-    if not current:
-        return _snapshot(False, current, trained, "current_combo_snapshot_missing")
+    if not current_list:
+        return _snapshot(False, current_list, trained, "current_combo_snapshot_missing")
     if not trained:
-        return _snapshot(False, current, trained, "trained_combo_snapshot_missing")
-    if current != trained:
-        return _snapshot(False, current, trained, "combo_snapshot_mismatch")
-    return _snapshot(True, current, trained, "passed")
+        return _snapshot(False, current_list, trained, "trained_combo_snapshot_missing")
+    if current_list != trained:
+        return _snapshot(False, current_list, trained, "combo_snapshot_mismatch")
+    return _snapshot(True, current_list, trained, "passed")
 
 
 def _shadow_ready_reason(status, version, report, artifacts_ready: bool, dependency_ready: bool) -> str:
@@ -177,15 +186,22 @@ def _trade_ready_reason(status, version, report, artifacts_ready: bool, dependen
 
 
 def _dependency_status(family: str) -> dict[str, Any]:
+    cached = _DEPENDENCY_STATUS_CACHE.get(family)
+    if cached is not None:
+        return cached
     if family in TORCH_MODEL_FAMILIES:
-        return torch_availability()
-    if family == "xgboost":
+        payload = torch_availability()
+    elif family == "xgboost":
         try:
             import xgboost
         except ImportError as exc:
-            return {"available": False, "error": str(exc)}
-        return {"available": True, "version": getattr(xgboost, "__version__", None)}
-    return {"available": family in JOBLIB_MODEL_FAMILIES}
+            payload = {"available": False, "error": str(exc)}
+        else:
+            payload = {"available": True, "version": getattr(xgboost, "__version__", None)}
+    else:
+        payload = {"available": family in JOBLIB_MODEL_FAMILIES}
+    _DEPENDENCY_STATUS_CACHE[family] = payload
+    return payload
 
 
 def _validation_failure_reason(status, attempt, report) -> str | None:

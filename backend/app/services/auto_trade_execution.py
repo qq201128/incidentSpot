@@ -75,7 +75,8 @@ def _event_title(settings: AutoTradeSettings, prediction: dict[str, Any], side: 
     confidence = round(probability * PERCENT_SCALE) / PERCENT_DECIMALS
     direction = "看涨" if side == "BUY" else "看跌"
     strategy_name = _event_strategy_label(settings, prediction)
-    return f"{settings.symbol} {strategy_name}{_duration_label(settings.duration_minutes)} {direction} 置信{confidence:.1f}%"
+    metric = "回测胜率" if is_batch_combo_simulation_strategy(settings.strategy_key) else "置信"
+    return f"{settings.symbol} {strategy_name}{_duration_label(settings.duration_minutes)} {direction} {metric}{confidence:.1f}%"
 
 
 def _event_strategy_label(settings: AutoTradeSettings, prediction: dict[str, Any]) -> str:
