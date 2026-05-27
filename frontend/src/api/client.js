@@ -173,9 +173,13 @@ export async function updateAutoTradeStrategy(strategyKey, payload) {
   return data;
 }
 
+const ENSEMBLE_STATUS_TIMEOUT_MS = 30_000;
+const ENSEMBLE_WRITE_TIMEOUT_MS = 120_000;
+
 export async function fetchEnsembleStatus(symbol, duration = "10m") {
   const { data } = await axios.get(`${BASE_URL}/api/ensemble/status`, {
     params: { symbol, duration },
+    timeout: ENSEMBLE_STATUS_TIMEOUT_MS,
   });
   return data;
 }
@@ -183,6 +187,7 @@ export async function fetchEnsembleStatus(symbol, duration = "10m") {
 export async function fetchEnsembleRanking(symbol, duration = "10m") {
   const { data } = await axios.get(`${BASE_URL}/api/ensemble/ranking`, {
     params: { symbol, duration },
+    timeout: ENSEMBLE_STATUS_TIMEOUT_MS,
   });
   return data;
 }
@@ -190,6 +195,7 @@ export async function fetchEnsembleRanking(symbol, duration = "10m") {
 export async function refreshEnsemble(symbol, duration = "10m") {
   const { data } = await axios.post(`${BASE_URL}/api/ensemble/refresh`, null, {
     params: { symbol, duration },
+    timeout: ENSEMBLE_WRITE_TIMEOUT_MS,
   });
   return data;
 }
@@ -199,6 +205,7 @@ export async function confirmEnsembleStage(symbol, duration, stage) {
     symbol,
     duration,
     stage,
+    timeout: ENSEMBLE_WRITE_TIMEOUT_MS,
   });
   return data;
 }

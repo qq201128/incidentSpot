@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -36,6 +37,9 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     assert candidate["paperLiveStatus"] == "paper_collecting"
     assert failed["candidateKey"] == "factor_alpha"
     assert failed["backtestWinRate"] == pytest.approx(0.82)
+    assert failed["oosWinRate"] == pytest.approx(0.61)
+    assert failed["walkForwardResult"]["stabilityScore"] == pytest.approx(0.72)
+    assert failed["recentRollingResult"]["winRate"] == pytest.approx(0.64)
     assert failed["paperLiveWinRate"] == pytest.approx(0.6)
     assert failed["paperLiveSampleCount"] == 30
     assert failed["paperLiveStatus"] == "paper_failed"
@@ -43,6 +47,7 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     assert failed["metrics"]["paperLiveWindows"]["recent30"]["winRate"] == pytest.approx(0.6)
     assert failed["metrics"]["maxConsecutiveLosses"] == 2
     assert failed["performanceComparison"]["winRateGap"] == pytest.approx(0.22)
+    assert failed["performanceComparison"]["oosWinRate"] == pytest.approx(0.61)
     assert failed["performanceComparison"]["policy"] == "backtest_oos_walk_forward_recent_rolling_are_prefilter_only"
     assert report["avoidNextSearch"][0]["candidateKey"] == "factor_alpha"
     assert report["predictionFailures"][0]["candidateKey"] == "factor_beta"
@@ -107,6 +112,19 @@ def test_candidate_with_future_data_leakage_is_marked_invalid(monkeypatch: pytes
     assert invalid["dataFreshnessStatus"] == "invalid_data_leakage"
 
 
+def test_collecting_candidates_rank_by_oos_after_paper_live_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-oos-rank") / "candidates.db"
+    _create_db(db_path)
+    _insert_unsettled_candidate(db_path, "low_oos", 0.55)
+    _insert_unsettled_candidate(db_path, "high_oos", 0.68)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
+
+    assert [row["candidateKey"] for row in report["candidates"][:2]] == ["high_oos", "low_oos"]
+    assert report["candidates"][0]["oosWinRate"] == pytest.approx(0.68)
+
+
 def _create_db(path: Path) -> None:
     conn = _connect(path)
     conn.executescript(
@@ -128,6 +146,9 @@ def _create_db(path: Path) -> None:
           feature_window INTEGER,
           model_duration TEXT,
           model_trained_at TEXT,
+          oos_win_rate REAL,
+          walk_forward_result TEXT,
+          recent_rolling_result TEXT,
           data_freshness_status TEXT,
           missing_feature_status TEXT,
           entry_price REAL,
@@ -142,6 +163,32 @@ def _create_db(path: Path) -> None:
     conn.close()
 
 
+def _insert_unsettled_candidate(path: Path, factor_name: str, oos_win_rate: float) -> None:
+    conn = _connect(path)
+    conn.execute(
+        """
+        INSERT INTO predictions(
+          signal_key, strategy_key, symbol, duration, open_time, direction,
+          high_winrate_rule, high_winrate_gate_value, oos_win_rate,
+          walk_forward_result, recent_rolling_result, data_freshness_status,
+          missing_feature_status, created_at
+        )
+        VALUES(?, ?, 'BTCUSDT', '10m', 1, 'up', ?, 0.7, ?, ?, ?, 'fresh', 'complete', ?)
+        """,
+        (
+            factor_name,
+            factor_name,
+            factor_name,
+            oos_win_rate,
+            json.dumps({"stabilityScore": 0.5, "oosWinRate": oos_win_rate}),
+            json.dumps({"winRate": 0.6}),
+            "2026-05-26T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _insert_predictions(path: Path) -> None:
     conn = _connect(path)
     rows = [_prediction_row("factor_alpha", "alpha", 0.82, idx, idx % 5 < 3) for idx in range(30)]
@@ -150,10 +197,11 @@ def _insert_predictions(path: Path) -> None:
         """
         INSERT INTO predictions(
           signal_key, strategy_key, symbol, duration, open_time, direction,
-          high_winrate_rule, high_winrate_gate_value, data_freshness_status,
+          high_winrate_rule, high_winrate_gate_value, oos_win_rate,
+          walk_forward_result, recent_rolling_result, data_freshness_status,
           missing_feature_status, actual_return, prediction_correct, settled_at, created_at
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -188,10 +236,11 @@ def _insert_gamma_failures(path: Path) -> None:
         """
         INSERT INTO predictions(
           signal_key, strategy_key, symbol, duration, open_time, direction,
-          high_winrate_rule, high_winrate_gate_value, data_freshness_status,
+          high_winrate_rule, high_winrate_gate_value, oos_win_rate,
+          walk_forward_result, recent_rolling_result, data_freshness_status,
           missing_feature_status, actual_return, prediction_correct, settled_at, created_at
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -230,6 +279,9 @@ def _prediction_row(signal_key: str, factor_name: str, backtest_win_rate: float,
         "up",
         factor_name,
         backtest_win_rate,
+        0.61,
+        json.dumps({"stabilityScore": 0.72, "oosWinRate": 0.61}),
+        json.dumps({"winRate": 0.64}),
         "fresh",
         "complete",
         actual_return,

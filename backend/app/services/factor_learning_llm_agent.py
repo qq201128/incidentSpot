@@ -168,7 +168,7 @@ def _compact_memory(memory: dict[str, Any]) -> dict[str, Any]:
     return compact_memory(memory, blocklist)
 
 def is_llm_agent_run_stale(agent: dict[str, Any], *, now: datetime | None = None) -> bool:
-    if str(agent.get("status") or "") != "running":
+    if str(agent.get("status") or "") not in {"pending", "running"}:
         return False
     stamp = str(agent.get("agentStartedAt") or agent.get("updatedAt") or "")
     if not stamp:
@@ -185,7 +185,7 @@ def is_llm_agent_run_stale(agent: dict[str, Any], *, now: datetime | None = None
 def stale_llm_agent_error(agent: dict[str, Any]) -> str:
     stamp = str(agent.get("agentStartedAt") or agent.get("updatedAt") or "")
     return (
-        "Agent 联网挖掘超时或中断（状态停留在 running）。"
+        "Agent 联网挖掘超时或中断（状态停留在 pending/running）。"
         f" 开始于 {stamp or '未知'}，超过 {AGENT_RUNNING_STALE_SECONDS} 秒未写回 review。"
         " 请重新点击联网挖掘；若反复失败，请检查 SILICONFLOW_API_KEY / 网络，"
         " 或在 backend/.env 设置 FACTOR_LEARNING_SILICONFLOW_TIMEOUT_SECONDS=420。"

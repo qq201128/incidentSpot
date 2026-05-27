@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -108,6 +109,35 @@ def test_factor_learning_filter_ignores_mining_forbidden_region_member() -> None
     assert result["qualityPassed"] is True
 
 
+def test_refresh_reuses_stale_cache_with_learning_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    saved = []
+    frame = _learning_frame()
+    cached = {
+        **_ranking_report(),
+        "cacheStatus": {
+            "usable": False,
+            "reason": "market_data_changed",
+            "cachedMarketData": {"rowCount": 100, "maxOpenTime": 1},
+            "currentMarketData": {"rowCount": 150, "maxOpenTime": 2},
+        },
+    }
+
+    _patch_refresh_dependencies(
+        monkeypatch,
+        frame=frame,
+        calls=calls,
+        saved=saved,
+        cached=cached,
+    )
+
+    payload = factor_learning_service.refresh_factor_learning_memory("btcusdt", "10m")
+
+    assert payload["source"]["rankingRefreshSource"] == "stale_cache"
+    assert calls == []
+    assert saved[0]["source"]["rankingRefreshSource"] == "stale_cache"
+
+
 def test_refresh_rebuilds_stale_combination_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     saved = []
@@ -214,6 +244,80 @@ def test_factor_learning_agent_failure_is_written_to_memory(monkeypatch: pytest.
     assert saved[0]["llmAgent"]["status"] == "failed"
     assert saved[0]["llmAgent"]["error"] == "Kimi request failed"
     assert "llmAgent" not in memory
+
+
+def test_running_agent_not_orphaned_while_llm_in_flight() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    started = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+    memory = {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "refreshTask": {"status": "completed", "runAgent": True, "updatedAt": started},
+        "llmAgent": {
+            "status": "running",
+            "agentStartedAt": started,
+            "updatedAt": started,
+        },
+    }
+
+    recovered = factor_learning_service.recover_stale_learning_task_memory(memory)
+
+    assert recovered["llmAgent"]["status"] == "running"
+    assert "error" not in recovered["llmAgent"]
+
+
+def test_recover_orphaned_pending_agent_after_refresh_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = []
+    memory = {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "refreshTask": {"status": "failed", "runAgent": True, "error": "rank rebuild failed"},
+        "llmAgent": {"status": "pending", "updatedAt": "2026-05-26T00:00:00+00:00"},
+    }
+    monkeypatch.setattr(factor_learning_service, "load_factor_learning_memory", lambda *_args: deepcopy(memory))
+    monkeypatch.setattr(
+        factor_learning_service,
+        "save_factor_learning_memory",
+        lambda payload: saved.append(payload) or Path("memory.json"),
+    )
+
+    recovered = factor_learning_service.recover_stale_learning_task_memory(memory)
+
+    assert recovered["llmAgent"]["status"] == "failed"
+    assert "复盘任务已失败" in recovered["llmAgent"]["error"]
+    assert saved
+
+
+def test_recover_stale_refresh_task_marks_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.factor_learning_refresh_stale import REFRESH_TASK_STALE_SECONDS
+
+    saved = []
+    stamp = (datetime.now(timezone.utc) - timedelta(seconds=REFRESH_TASK_STALE_SECONDS + 5)).isoformat()
+    memory = {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "refreshTask": {"status": "running", "runAgent": True, "updatedAt": stamp},
+        "llmAgent": {"status": "pending", "updatedAt": stamp},
+    }
+    monkeypatch.setattr(
+        "app.services.factor_learning_refresh_tasks.load_factor_learning_memory",
+        lambda *_args: deepcopy(memory),
+    )
+    monkeypatch.setattr(
+        factor_learning_service,
+        "save_factor_learning_memory",
+        lambda payload: saved.append(payload) or Path("memory.json"),
+    )
+
+    recovered = factor_learning_service.recover_stale_learning_task_memory(memory)
+
+    assert recovered["refreshTask"]["status"] == "failed"
+    assert "超时或中断" in recovered["refreshTask"]["error"]
+    assert recovered["llmAgent"]["status"] == "failed"
+    assert saved
 
 
 def test_pending_agent_status_does_not_persist_response_path(monkeypatch: pytest.MonkeyPatch) -> None:

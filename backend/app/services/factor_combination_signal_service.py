@@ -234,6 +234,9 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "historicalSharpe": ctx.row.get("sharpe"),
         "historicalIr": ctx.row.get("ir"),
         "historicalTotalPeriods": ctx.row.get("totalPeriods"),
+        "oosWinRate": _oos_win_rate(ctx.row),
+        "walkForwardResult": ctx.row.get("walkForward"),
+        "recentRollingResult": ctx.row.get("recentRollingResult"),
         "walkForwardPassed": ctx.row.get("walkForwardPassed"),
         "walkForwardFailureReason": ctx.row.get("walkForwardFailureReason"),
         "qualityPassed": ctx.quality["passed"],
@@ -252,6 +255,13 @@ def _live_signal_payload(ctx: _SignalContext) -> dict[str, Any]:
         "qualityMinPeriods": min_total_periods(ctx.row),
         "frameIndex": str(ctx.index),
     }
+
+
+def _oos_win_rate(row: dict[str, Any]) -> Any:
+    walk_forward = row.get("walkForward")
+    if isinstance(walk_forward, dict):
+        return walk_forward.get("oosWinRate")
+    return row.get("oosWinRate")
 
 
 def _row_members(row: dict[str, Any]) -> list[dict[str, Any]]:

@@ -128,6 +128,28 @@ def test_should_predict_entry_backfills_ready_lstm_shadow(monkeypatch) -> None:
     assert missing_calls == [("BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME)]
 
 
+def test_factor_combo_shadow_due_uses_offline_focused_candidates(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "eligible_factor_combo_rows",
+        lambda *_args: [{"factorName": "focused_combo"}],
+    )
+    monkeypatch.setattr(
+        service,
+        "prediction_exists",
+        lambda **kwargs: calls.append(kwargs["strategy_key"]) or False,
+    )
+
+    due = service._factor_combo_shadow_due(
+        _settings(FACTOR_COMBO_STRATEGY_KEY),
+        ENTRY_OPEN_TIME,
+    )
+
+    assert due is True
+    assert calls == [simulation_strategy_key_for_factor_name("focused_combo")]
+
+
 def test_candidate_collection_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
     saved = []
     trades = []
@@ -383,6 +405,7 @@ def test_predict_due_entries_collects_candidates_when_primary_batch_fails(monkey
 
 def test_candidate_collection_uses_factor_combo_source_for_non_combo_strategy(monkeypatch) -> None:
     saved = []
+    trades = []
     candidate_key = factor_candidate_signal_key("rsi_14")
 
     async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
@@ -412,6 +435,11 @@ def test_candidate_collection_uses_factor_combo_source_for_non_combo_strategy(mo
     )
     monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
     monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(
+        service,
+        "create_batch_combo_simulation_trade",
+        lambda _settings, result: trades.append(result["strategy_key"]),
+    )
     monkeypatch.setattr(service, "prediction_response", lambda result: result)
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
 
@@ -420,6 +448,7 @@ def test_candidate_collection_uses_factor_combo_source_for_non_combo_strategy(mo
 
     assert target.strategy_key == FACTOR_COMBO_STRATEGY_KEY
     assert saved == [(candidate_key, False)]
+    assert trades == [candidate_key]
 
 
 def test_lstm_strategy_prediction_saves_own_simulation_row(monkeypatch) -> None:

@@ -80,7 +80,7 @@ def predict_eligible_factor_combo_rows(
             entry_open_time=entry_open_time,
             entry_grace_ms=entry_grace_ms,
         )
-        for row in backtest_qualified_factor_combo_rows(symbol, duration)
+        for row in eligible_factor_combo_rows(symbol, duration)
     ]
 
 

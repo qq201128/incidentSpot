@@ -39,6 +39,9 @@ def test_prediction_uses_usable_combo_cache(monkeypatch) -> None:
     assert result["high_winrate_gate"] == FACTOR_COMBO_RULE_NAME
     assert result["high_winrate_gate_passed"] is True
     assert result["open_time"] == 123
+    assert result["oos_win_rate"] == 0.62
+    assert result["walk_forward_result"]["stabilityScore"] == 0.81
+    assert result["recent_rolling_result"]["winRate"] == 0.64
 
 
 def test_prediction_rejects_stale_combo_cache(monkeypatch) -> None:
@@ -163,6 +166,8 @@ def _ranking_row(name: str) -> dict[str, Any]:
         "members": [{"name": "factor_a"}],
         "winRate": 0.7,
         "profitFactor": 1.3,
+        "walkForward": {"oosWinRate": 0.62, "stabilityScore": 0.81},
+        "recentRollingResult": {"winRate": 0.64},
     }
 
 
@@ -184,6 +189,9 @@ def _signal_from_row(_frame: object, row: dict[str, Any], **kwargs) -> dict[str,
         "method": row["method"],
         "historicalWinRate": row["winRate"],
         "historicalProfitFactor": row["profitFactor"],
+        "oosWinRate": row["walkForward"]["oosWinRate"],
+        "walkForwardResult": row["walkForward"],
+        "recentRollingResult": row["recentRollingResult"],
         "qualityMinWinRate": 0.55,
         "qualityMinProfitFactor": 1.05,
         "qualityGateReason": "passed",

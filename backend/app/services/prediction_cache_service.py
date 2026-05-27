@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from app.db.session import get_conn
@@ -14,9 +15,10 @@ INSERT_PREDICTION_SQL = """INSERT INTO predictions(
   high_winrate_gate, high_winrate_rule, high_winrate_gate_passed,
   high_winrate_gate_value, high_winrate_gate_min, entry_price, expected_return,
   model_version, model_family, validation_win_rate, feature_window, model_duration, model_trained_at,
+  oos_win_rate, walk_forward_result, recent_rolling_result,
   data_freshness_status, missing_feature_status, created_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
 
 def save_prediction(result: dict, *, allow_existing: bool = False) -> bool:
@@ -89,6 +91,7 @@ def get_latest_prediction(
           high_winrate_gate_value, high_winrate_gate_min, entry_price, exit_price,
           actual_return, prediction_correct, settled_at, expected_return,
           model_version, model_family, validation_win_rate, feature_window, model_duration, model_trained_at,
+          oos_win_rate, walk_forward_result, recent_rolling_result,
           data_freshness_status, missing_feature_status, created_at
         FROM predictions
         WHERE signal_key = ? AND symbol = ? AND duration = ?
@@ -139,6 +142,9 @@ def prediction_response(result: dict) -> dict:
         "featureWindow": result.get("feature_window"),
         "modelDuration": result.get("model_duration"),
         "modelTrainedAt": result.get("model_trained_at"),
+        "oosWinRate": result.get("oos_win_rate"),
+        "walkForwardResult": _json_value(result.get("walk_forward_result")),
+        "recentRollingResult": _json_value(result.get("recent_rolling_result")),
         "dataFreshnessStatus": result.get("data_freshness_status"),
         "missingFeatureStatus": result.get("missing_feature_status"),
         "settledAt": result.get("settled_at"),
@@ -165,6 +171,8 @@ def _prediction_values(result: dict) -> tuple:
         result.get("high_winrate_gate_min"), result.get("entry_price"), result.get("expected_return"),
         result.get("model_version"), result.get("model_family"), result.get("validation_win_rate"),
         result.get("feature_window"), result.get("model_duration"), result.get("model_trained_at"),
+        result.get("oos_win_rate"), _json_text(result.get("walk_forward_result")),
+        _json_text(result.get("recent_rolling_result")),
         result.get("data_freshness_status"), result.get("missing_feature_status"), _utc_now_iso(),
     )
 
@@ -202,6 +210,21 @@ def _as_bool(value) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _json_text(value) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
+def _json_value(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _parse_iso_ms(value: str) -> int:

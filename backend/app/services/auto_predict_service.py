@@ -6,7 +6,6 @@ from app.services.auto_trade_service import get_auto_trade_settings, list_auto_t
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_combo_batch_predictions import (
-    backtest_qualified_factor_combo_rows,
     eligible_factor_combo_rows,
     predict_eligible_factor_combo_rows,
 )
@@ -181,7 +180,7 @@ def _factor_combo_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
     return target_helpers.factor_combo_shadow_due(
         settings,
         bucket,
-        eligible_rows=backtest_qualified_factor_combo_rows,
+        eligible_rows=eligible_factor_combo_rows,
         prediction_exists=prediction_exists,
         simulation_key=simulation_strategy_key_for_factor_name,
     )

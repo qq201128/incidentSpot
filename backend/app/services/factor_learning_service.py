@@ -12,6 +12,11 @@ from app.services.agent_mined_factor_library import (
     process_agent_factor_candidates,
 )
 from app.services.factor_cache_metadata import cache_is_usable
+from app.services.factor_learning_refresh_stale import (
+    is_refresh_task_stale,
+    stale_refresh_task_error,
+)
+from app.services.factor_learning_refresh_tasks import mark_factor_learning_refresh_failed
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_cache_service import save_cached_combination_ranking
 from app.services.factor_combination_service import CombinationSearchConfig
@@ -55,18 +60,80 @@ def get_factor_learning_memory(symbol: str, duration: str) -> dict[str, Any] | N
     memory = load_factor_learning_memory(symbol, duration)
     if memory is None:
         return None
-    memory = recover_stale_llm_agent_memory(memory)
+    memory = recover_stale_learning_task_memory(memory)
     return _enrich_learning_memory(memory)
 
-def recover_stale_llm_agent_memory(memory: dict[str, Any]) -> dict[str, Any]:
-    agent = memory.get("llmAgent")
-    if not isinstance(agent, dict) or not is_llm_agent_run_stale(agent):
+
+def recover_stale_learning_task_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    memory = recover_stale_refresh_task_memory(memory)
+    return recover_stale_llm_agent_memory(memory)
+
+
+def recover_stale_refresh_task_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    task = memory.get("refreshTask")
+    if not isinstance(task, dict) or not is_refresh_task_stale(task):
         return memory
     sym = str(memory.get("symbol") or "").strip().upper()
     dur = str(memory.get("duration") or "")
+    error = stale_refresh_task_error(task)
+    run_agent = bool(task.get("runAgent"))
     if sym and dur:
-        return mark_factor_learning_agent_failed(sym, dur, stale_llm_agent_error(agent))
-    return _save_factor_learning_agent_status(memory, "failed", stale_llm_agent_error(agent))
+        updated = mark_factor_learning_refresh_failed(sym, dur, error, run_agent=run_agent)
+        agent = updated.get("llmAgent") or {}
+        if run_agent and str(agent.get("status") or "") in {"pending", "running"}:
+            return mark_factor_learning_agent_failed(sym, dur, error)
+        return updated
+    updated = deepcopy(memory)
+    updated["refreshTask"] = {
+        **task,
+        "status": "failed",
+        "error": error,
+        "updatedAt": utc_now(),
+    }
+    return _save_memory_payload(updated)
+
+
+def recover_stale_llm_agent_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    agent = memory.get("llmAgent")
+    if not isinstance(agent, dict):
+        return memory
+    if not is_llm_agent_run_stale(agent) and not _orphaned_llm_agent_after_refresh(memory, agent):
+        return memory
+    sym = str(memory.get("symbol") or "").strip().upper()
+    dur = str(memory.get("duration") or "")
+    error = _orphaned_llm_agent_error(memory, agent) or stale_llm_agent_error(agent)
+    if sym and dur:
+        return mark_factor_learning_agent_failed(sym, dur, error)
+    return _save_factor_learning_agent_status(memory, "failed", error)
+
+
+def _orphaned_llm_agent_after_refresh(memory: dict[str, Any], agent: dict[str, Any]) -> bool:
+    task = memory.get("refreshTask")
+    if not isinstance(task, dict):
+        return False
+    if str(task.get("status") or "") not in {"failed", "completed"}:
+        return False
+    status = str(agent.get("status") or "")
+    if status not in {"pending", "running"}:
+        return False
+    if agent.get("review"):
+        return False
+    # Refresh can finish before the LLM returns; running is normal until stale timeout.
+    if status == "running":
+        return is_llm_agent_run_stale(agent)
+    return True
+
+
+def _orphaned_llm_agent_error(memory: dict[str, Any], agent: dict[str, Any]) -> str | None:
+    if not _orphaned_llm_agent_after_refresh(memory, agent):
+        return None
+    task = memory.get("refreshTask") or {}
+    if str(task.get("status") or "") == "failed":
+        detail = str(task.get("error") or "").strip()
+        if detail:
+            return f"联网挖掘未执行：复盘任务已失败（{detail}）"
+        return "联网挖掘未执行：复盘任务已失败，请重新点击联网挖掘。"
+    return "联网挖掘未执行：复盘已完成但未写回 Agent review，请重新点击联网挖掘。"
 
 def refresh_factor_learning_memory(
     symbol: str,
@@ -194,9 +261,13 @@ def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "memoryPath": _path_payload(path)}
 
 def _current_ranking_report(symbol: str, duration: str, frame: pd.DataFrame) -> dict[str, Any]:
-    cached = _usable_cached_ranking(symbol, duration)
-    if cached is not None:
-        return {**cached, "learningRefreshSource": "cache"}
+    cached = get_cached_combination_ranking(symbol, duration)
+    fresh = _fresh_cached_ranking(cached)
+    if fresh is not None:
+        return {**fresh, "learningRefreshSource": "cache"}
+    stale = _stale_cached_ranking_for_learning(cached)
+    if stale is not None:
+        return {**stale, "learningRefreshSource": "stale_cache"}
     report = run_factor_combination_ranking_on_frame(
         frame,
         symbol=symbol,
@@ -206,11 +277,22 @@ def _current_ranking_report(symbol: str, duration: str, frame: pd.DataFrame) -> 
     save_cached_combination_ranking(report)
     return {**report, "learningRefreshSource": "rebuilt_cache"}
 
-def _usable_cached_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
-    cached = get_cached_combination_ranking(symbol, duration)
+
+def _fresh_cached_ranking(cached: dict[str, Any] | None) -> dict[str, Any] | None:
     if cached is None:
         return None
     if not cache_is_usable(cached):
+        return None
+    if not _has_learning_metric_rows(cached):
+        return None
+    return cached
+
+
+def _stale_cached_ranking_for_learning(cached: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Reuse combination cache for learning/agent refresh without a full combo search rebuild."""
+    if cached is None:
+        return None
+    if cache_is_usable(cached):
         return None
     if not _has_learning_metric_rows(cached):
         return None

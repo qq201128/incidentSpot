@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -55,6 +56,9 @@ def _ensure_prediction_metadata_columns(conn: Any) -> None:
     for sql in (
         "ALTER TABLE predictions ADD COLUMN model_family TEXT",
         "ALTER TABLE predictions ADD COLUMN validation_win_rate REAL",
+        "ALTER TABLE predictions ADD COLUMN oos_win_rate REAL",
+        "ALTER TABLE predictions ADD COLUMN walk_forward_result TEXT",
+        "ALTER TABLE predictions ADD COLUMN recent_rolling_result TEXT",
         "ALTER TABLE predictions ADD COLUMN data_freshness_status TEXT",
         "ALTER TABLE predictions ADD COLUMN missing_feature_status TEXT",
     ):
@@ -96,7 +100,8 @@ def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any
         SELECT signal_key, strategy_key, high_winrate_rule, high_winrate_gate_value,
                high_winrate_gate_min, model_family, model_version, validation_win_rate, feature_window,
                model_duration, model_trained_at, data_freshness_status,
-               missing_feature_status, MIN(created_at) AS first_created_at,
+               missing_feature_status, oos_win_rate, walk_forward_result,
+               recent_rolling_result, MIN(created_at) AS first_created_at,
                MAX(created_at) AS latest_created_at, COUNT(*) AS prediction_count
         FROM predictions
         WHERE symbol = ? AND duration = ?
@@ -139,9 +144,9 @@ def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) ->
         "minConfidence": candidate.get("high_winrate_gate_min"),
         "validationWinRate": candidate.get("validation_win_rate"),
         "backtestWinRate": candidate.get("high_winrate_gate_value"),
-        "oosWinRate": None,
-        "walkForwardResult": None,
-        "recentRollingResult": metrics.get("paperStability"),
+        "oosWinRate": candidate.get("oos_win_rate"),
+        "walkForwardResult": _json_value(candidate.get("walk_forward_result")),
+        "recentRollingResult": _json_value(candidate.get("recent_rolling_result")),
         "paperLiveWinRate": metrics.get("winRate"),
         "paperLiveSampleCount": metrics.get("sampleCount"),
         "paperLiveStatus": decision["status"],
@@ -265,6 +270,15 @@ def _avoid_next_search(
     avoid = [{"candidateKey": row["candidateKey"], "reason": row["reason"]} for row in failed[:20]]
     avoid.extend({"candidateKey": row["candidateKey"], "reason": row["reason"]} for row in failures[:20])
     return avoid[:20]
+
+
+def _json_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _utc_now() -> str:

@@ -55,6 +55,7 @@ class _FactorSignal:
     median: float
     direction: str
     confidence: float
+    entry_price: float
     index: Any
     orientation: int
 
@@ -186,10 +187,11 @@ def _live_factor_signal(
     median = finite_float(
         series_value_at(score_series.expanding(min_periods=BACKTEST_MIN_PERIODS).median().shift(1), index)
     )
-    if score is None or median is None:
+    entry_price = finite_float(series_value_at(frame["close"], index))
+    if score is None or median is None or entry_price is None:
         raise ValueError(f"factor candidate signal has insufficient score history: {factor_name}")
     direction = "up" if score >= median else "down"
-    return _FactorSignal(score, median, direction, directional_win_rate(row, orientation), index, orientation)
+    return _FactorSignal(score, median, direction, directional_win_rate(row, orientation), entry_price, index, orientation)
 
 def _prediction_payload(
     row: dict[str, Any],
@@ -206,7 +208,7 @@ def _prediction_payload(
         "strategy_key": signal_key,
         "duration": duration,
         "open_time": int(entry_open_time),
-        "entry_price": None,
+        "entry_price": signal.entry_price,
         "direction": signal.direction,
         "probability_up": round(probability_up, PROBABILITY_DECIMALS),
         "confidence": round(signal.confidence, PROBABILITY_DECIMALS),
@@ -224,6 +226,9 @@ def _prediction_payload(
         "model_family": "factor",
         "model_duration": duration,
         "model_trained_at": utc_now(),
+        "oos_win_rate": _oos_win_rate(row),
+        "walk_forward_result": row.get("walkForward"),
+        "recent_rolling_result": row.get("recentRollingResult"),
         "data_freshness_status": "fresh",
         "missing_feature_status": "complete",
         "rule_score": round(signal.score, SCORE_DECIMALS),
@@ -244,6 +249,13 @@ def _rule_reasons(row: dict[str, Any], signal: _FactorSignal) -> list[str]:
         f"historical_win_rate={row.get('winRate')}",
         f"historical_profit_factor={row.get('profitFactor')}",
     ]
+
+
+def _oos_win_rate(row: dict[str, Any]) -> Any:
+    walk_forward = row.get("walkForward")
+    if isinstance(walk_forward, dict):
+        return walk_forward.get("oosWinRate")
+    return row.get("oosWinRate")
 
 def _strict_duration_entry_index(
     frame: pd.DataFrame,

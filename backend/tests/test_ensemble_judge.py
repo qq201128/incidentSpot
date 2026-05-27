@@ -23,6 +23,28 @@ from app.services.strategy_registry import (
 )
 
 
+def test_coverage_distinct_days_batch_query(monkeypatch, tmp_path: Path) -> None:
+    from app.services.ensemble_judge_metrics import _distinct_days_by_signal_keys
+
+    db_path = tmp_path / "coverage.db"
+    _init_db(db_path)
+    _insert_predictions(db_path, FACTOR_COMBO_STRATEGY_KEY, 30, settled=True)
+    _insert_predictions(db_path, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, 20, settled=True)
+    conn = _connect(db_path)
+    try:
+        counts = _distinct_days_by_signal_keys(
+            conn,
+            "BTCUSDT",
+            "10m",
+            [FACTOR_COMBO_STRATEGY_KEY, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY],
+        )
+    finally:
+        conn.close()
+
+    assert counts[FACTOR_COMBO_STRATEGY_KEY] >= 1
+    assert counts[HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY] >= 1
+
+
 def test_refresh_excludes_retired_strategies_from_candidates(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "retired.db"
     _init_db(db_path)

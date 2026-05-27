@@ -18,6 +18,9 @@ def test_save_prediction_records_generation_stages(monkeypatch, tmp_path: Path) 
     assert [row["stage"] for row in logs] == ["feature_construction", "prediction_generation"]
     assert {row["status"] for row in logs} == {"passed"}
     assert logs[0]["reason"] == "features_available_before_entry"
+    row = _prediction_row(db_path)
+    assert row["oos_win_rate"] == 0.61
+    assert '"stabilityScore": 0.7' in row["walk_forward_result"]
 
 
 def test_save_prediction_records_missing_feature_failure(monkeypatch, tmp_path: Path) -> None:
@@ -103,6 +106,7 @@ def _init_prediction_db(path: Path) -> None:
               high_winrate_gate_min REAL, entry_price REAL, expected_return REAL,
               model_version TEXT, model_family TEXT, validation_win_rate REAL,
               feature_window INTEGER, model_duration TEXT, model_trained_at TEXT,
+              oos_win_rate REAL, walk_forward_result TEXT, recent_rolling_result TEXT,
               data_freshness_status TEXT, missing_feature_status TEXT,
               exit_price REAL, actual_return REAL, prediction_correct INTEGER,
               settled_at TEXT, created_at TEXT
@@ -149,6 +153,9 @@ def _prediction_result() -> dict:
         "trade_quality_passed": True,
         "model_version": "alpha_v1",
         "model_family": "factor",
+        "oos_win_rate": 0.61,
+        "walk_forward_result": {"stabilityScore": 0.7},
+        "recent_rolling_result": {"window": "recent"},
         "data_freshness_status": "fresh",
         "missing_feature_status": "complete",
     }

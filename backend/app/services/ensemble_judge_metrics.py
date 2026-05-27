@@ -61,11 +61,17 @@ def ranking_payload(rows: list[Any]) -> list[dict[str, Any]]:
 
 
 def coverage_from_scores(conn: Any, symbol: str, duration: str, scores: list[Any]) -> dict[str, Any]:
+    distinct_days = _distinct_days_by_signal_keys(
+        conn,
+        symbol,
+        duration,
+        [str(row["signal_key"]) for row in scores],
+    )
     by_type = {kind: _empty_coverage() for kind in MAJOR_SIGNAL_TYPES}
     major_by_type = {kind: _empty_coverage() for kind in MAJOR_SIGNAL_TYPES}
     total = _empty_coverage()
     for row in scores:
-        item = _row_coverage(conn, symbol, duration, row)
+        item = _row_coverage(row, distinct_days)
         _merge_coverage(total, item)
         _merge_coverage(by_type.setdefault(row["signal_type"], _empty_coverage()), item)
         _merge_coverage(major_by_type.setdefault(_major_signal_type(row["signal_type"]), _empty_coverage()), item)
@@ -164,10 +170,11 @@ def _empty_coverage() -> dict[str, Any]:
     }
 
 
-def _row_coverage(conn: Any, symbol: str, duration: str, row: Any) -> dict[str, Any]:
+def _row_coverage(row: Any, distinct_days_by_key: dict[str, int]) -> dict[str, Any]:
+    signal_key = str(row["signal_key"])
     return {
         "sampleCount": int(row["sample_count"]),
-        "distinctTradingDays": _distinct_days(conn, symbol, duration, row),
+        "distinctTradingDays": int(distinct_days_by_key.get(signal_key, 0)),
         "maxConsecutiveLosses": int(row["consecutive_losses"]),
         "recentProfitFactorBelowOne": float(row["profit_factor"]) < 1,
     }
@@ -197,16 +204,34 @@ def _major_signal_type(signal_type: str) -> str:
     return SIGNAL_FACTOR_CANDIDATE if signal_type == "indicator" else signal_type
 
 
-def _distinct_days(conn: Any, symbol: str, duration: str, row: Any) -> int:
-    rows = conn.execute(
-        """
-        SELECT DISTINCT CAST(open_time / ? AS INTEGER) AS day
-        FROM predictions
-        WHERE symbol = ? AND duration = ? AND signal_key = ? AND settled_at IS NOT NULL
-        """,
-        (MS_PER_DAY, symbol, duration, row["signal_key"]),
-    ).fetchall()
-    return len(rows)
+def _distinct_days_by_signal_keys(
+    conn: Any,
+    symbol: str,
+    duration: str,
+    signal_keys: list[str],
+) -> dict[str, int]:
+    keys = list(dict.fromkeys(key for key in signal_keys if key))
+    if not keys:
+        return {}
+    counts: dict[str, int] = {}
+    chunk_size = 400
+    for start in range(0, len(keys), chunk_size):
+        chunk = keys[start : start + chunk_size]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"""
+            SELECT signal_key,
+                   COUNT(DISTINCT CAST(open_time / ? AS INTEGER)) AS day_count
+            FROM predictions
+            WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+              AND signal_key IN ({placeholders})
+            GROUP BY signal_key
+            """,
+            (MS_PER_DAY, symbol, duration, *chunk),
+        ).fetchall()
+        for row in rows:
+            counts[str(row["signal_key"])] = int(row["day_count"] or 0)
+    return counts
 
 
 def _win_rate(rows: tuple[dict[str, Any], ...]) -> float:

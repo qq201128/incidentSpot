@@ -50,6 +50,7 @@ def test_predict_factor_candidate_signals_from_ranking_cache(monkeypatch) -> Non
     assert predictions[0]["symbol"] == "BTCUSDT"
     assert predictions[0]["high_winrate_rule"] == "rsi_14"
     assert predictions[0]["signal_source"] == "factor_candidate_signal"
+    assert predictions[0]["entry_price"] == pytest.approx(619.0)
 
 
 def test_predict_factor_candidate_signals_refreshes_required_source_kline(monkeypatch) -> None:
