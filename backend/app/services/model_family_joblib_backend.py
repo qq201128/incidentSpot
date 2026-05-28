@@ -235,6 +235,10 @@ class QTableDirectionClassifier:
         return state
 
 
+# Backward compatibility: older artifacts pickled this name before the rename.
+QLearningDirectionClassifier = QTableDirectionClassifier
+
+
 def _flat(x: np.ndarray) -> np.ndarray:
     return x.reshape(x.shape[0], -1).astype(np.float32)
 
