@@ -66,6 +66,7 @@ async def _deferred_bootstrap(app: FastAPI) -> None:
         for router in routers:
             app.include_router(router)
         await asyncio.to_thread(_warm_background_imports)
+        await asyncio.to_thread(_warm_ai_history_cache)
         _spawn_background_tasks(app)
         logger.info("deferred application bootstrap complete")
     except Exception:
@@ -166,6 +167,19 @@ def _spawn_background_tasks(app: FastAPI) -> None:
     app.state.combo_event_governance_task = asyncio.create_task(
         combo_event_governance_refresh_loop(governance_stop)
     )
+
+
+def _warm_ai_history_cache() -> None:
+    from app.db.session import get_conn
+    from app.services.ai_history_cache import warm_ai_history_cache
+
+    conn = get_conn()
+    try:
+        warm_ai_history_cache(conn)
+    except Exception:
+        logger.exception("ai history cache warm-up failed")
+    finally:
+        conn.close()
 
 
 async def shutdown_application(app: FastAPI) -> None:

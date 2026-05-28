@@ -243,6 +243,8 @@ SCHEMA_MIGRATIONS = (
   "CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time)",
   "CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status)",
   "CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id)",
+  "CREATE INDEX IF NOT EXISTS idx_settlements_event_id ON settlements(event_id)",
+  "CREATE INDEX IF NOT EXISTS idx_events_settled_ai_history ON events(symbol, event_interval, strategy_key) WHERE status = 'SETTLED' AND ai_predicted_direction IS NOT NULL AND ai_prediction_correct IS NOT NULL",
 )
 
 

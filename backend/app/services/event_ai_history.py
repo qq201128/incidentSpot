@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 
+from app.services.rule_config import DURATION_TO_MINUTES
+
 UNKNOWN_DURATION = -1
+DEFAULT_PAGE_SIZE = 10
+MAX_PAGE_SIZE = 100
+
+MINUTES_TO_INTERVAL: dict[int, str] = {minutes: interval for interval, minutes in DURATION_TO_MINUTES.items()}
+KNOWN_INTERVAL_SQL = ", ".join(f"'{key}'" for key in DURATION_TO_MINUTES)
+
+_SETTLEMENT_PNL_JOIN = """
+LEFT JOIN (
+  SELECT event_id, SUM(pnl) AS pnl_u
+  FROM settlements
+  GROUP BY event_id
+) s ON s.event_id = e.id
+"""
+
+_PNL_SQL = "COALESCE(s.pnl_u, 0)"
+
+_SETTLED_AI_WHERE = """
+  e.symbol = ?
+  AND e.status = 'SETTLED'
+  AND e.ai_predicted_direction IS NOT NULL
+  AND e.ai_prediction_correct IS NOT NULL
+"""
 
 
 def settled_expected_profit_usdt(*, status: str, order_side: str | None, order_qty, order_price, result) -> float | None:
@@ -17,97 +42,206 @@ def settled_expected_profit_usdt(*, status: str, order_side: str | None, order_q
 
 
 def ai_history_success(conn, symbol: str) -> dict:
-    rows = conn.execute(
-        """
-        SELECT
-          e.strategy_key,
-          e.ai_high_winrate_rule,
-          e.start_time,
-          e.end_time,
-          e.ai_prediction_correct,
-          e.status,
-          e.result,
-          o.side AS order_side,
-          o.qty AS order_qty,
-          o.price AS order_price
-        FROM events e
-        LEFT JOIN (
-          SELECT o.event_id, o.side, o.qty, o.price
-          FROM orders o
-          INNER JOIN (
-            SELECT event_id, MAX(id) AS id
-            FROM orders
-            GROUP BY event_id
-          ) latest ON latest.id = o.id
-        ) o ON o.event_id = e.id
-        WHERE e.symbol = ?
-          AND e.status = 'SETTLED'
-          AND e.ai_predicted_direction IS NOT NULL
-          AND e.ai_prediction_correct IS NOT NULL
-        """,
-        (symbol.upper(),),
-    ).fetchall()
+    """Symbol-wide settled AI stats for workbench summary (no factor list)."""
+    return {"overall": _fetch_overall_stats(conn, symbol.upper())}
 
-    overall_total = 0
-    overall_hits = 0
-    overall_pnl = 0.0
-    buckets: dict[tuple[str, int], dict] = {}
 
-    for row in rows:
-        overall_total += 1
-        if int(row["ai_prediction_correct"] or 0) == 1:
-            overall_hits += 1
-        pnl = settled_expected_profit_usdt(
-            status=row["status"],
-            order_side=row["order_side"],
-            order_qty=row["order_qty"],
-            order_price=row["order_price"],
-            result=row["result"],
-        )
-        if pnl is not None:
-            overall_pnl += pnl
+def query_ai_history_meta(conn, symbol: str) -> dict:
+    from app.services.ai_history_cache import get_cached_ai_history_meta
 
-        strategy_key = row["strategy_key"] or "manual"
-        duration_minutes = _duration_minutes(row["start_time"], row["end_time"])
-        bucket_key = (strategy_key, duration_minutes)
-        bucket = buckets.setdefault(bucket_key, {"total": 0, "hits": 0, "pnlU": 0.0, "factorName": None})
-        bucket["total"] += 1
-        if int(row["ai_prediction_correct"] or 0) == 1:
-            bucket["hits"] += 1
-        if pnl is not None:
-            bucket["pnlU"] += pnl
-        rule = row["ai_high_winrate_rule"]
-        if rule and not bucket["factorName"]:
-            bucket["factorName"] = str(rule)
+    safe_symbol = symbol.upper()
 
-    by_strategy = [
-        {
-            "strategyKey": strategy_key,
-            "factorName": bucket["factorName"],
-            "durationMinutes": duration_minutes,
-            "total": bucket["total"],
-            "hits": bucket["hits"],
-            "pnlU": bucket["pnlU"],
-            "rate": bucket["hits"] / bucket["total"] if bucket["total"] else None,
+    def _build() -> dict:
+        return {
+            "symbol": safe_symbol,
+            "durationSummaries": _fetch_duration_summaries(conn, safe_symbol),
         }
-        for (strategy_key, duration_minutes), bucket in buckets.items()
-    ]
-    by_strategy.sort(
-        key=lambda item: (
-            item["durationMinutes"] if item["durationMinutes"] != UNKNOWN_DURATION else 1_000_000_000,
-            -item["pnlU"],
-            item["strategyKey"],
-        )
-    )
 
+    return get_cached_ai_history_meta(safe_symbol, build=_build)
+
+
+def query_ai_history_success(
+    conn,
+    symbol: str,
+    *,
+    duration_minutes: int,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    include_summaries: bool = False,
+) -> dict:
+    from app.services.ai_history_cache import get_cached_ai_history
+
+    safe_symbol = symbol.upper()
+    page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
+    page = max(1, int(page))
+
+    def _build() -> dict:
+        period = _fetch_period_stats(conn, safe_symbol, duration_minutes)
+        total = period["factorCount"]
+        page_count = max(1, math.ceil(total / page_size)) if total else 1
+        safe_page = min(page, page_count)
+        by_strategy = _fetch_strategy_page(
+            conn,
+            safe_symbol,
+            duration_minutes,
+            page=safe_page,
+            page_size=page_size,
+        )
+        payload = {
+            "symbol": safe_symbol,
+            "durationMinutes": duration_minutes,
+            "period": period,
+            "byStrategy": by_strategy,
+            "pagination": {
+                "page": safe_page,
+                "pageSize": page_size,
+                "total": total,
+                "pageCount": page_count,
+            },
+        }
+        if include_summaries:
+            payload["durationSummaries"] = _fetch_duration_summaries(conn, safe_symbol)
+        return payload
+
+    return get_cached_ai_history(safe_symbol, duration_minutes, page, page_size, build=_build)
+
+
+def _interval_filter_sql(duration_minutes: int) -> tuple[str, tuple]:
+    if duration_minutes == UNKNOWN_DURATION:
+        return f" AND e.event_interval NOT IN ({KNOWN_INTERVAL_SQL})", ()
+    interval = MINUTES_TO_INTERVAL.get(duration_minutes)
+    if interval is None:
+        return " AND 1 = 0", ()
+    return " AND e.event_interval = ?", (interval,)
+
+
+def _duration_minutes_from_interval(event_interval: str | None) -> int:
+    if event_interval in DURATION_TO_MINUTES:
+        return DURATION_TO_MINUTES[event_interval]
+    return UNKNOWN_DURATION
+
+
+def _fetch_overall_stats(conn, symbol: str) -> dict:
+    row = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS total,
+          COALESCE(SUM(e.ai_prediction_correct), 0) AS hits,
+          COALESCE(SUM({_PNL_SQL}), 0.0) AS pnl_u
+        FROM events e
+        {_SETTLEMENT_PNL_JOIN}
+        WHERE {_SETTLED_AI_WHERE}
+        """,
+        (symbol,),
+    ).fetchone()
+    total = int(row["total"] or 0)
+    hits = int(row["hits"] or 0)
     return {
-        "overall": {
-            "total": overall_total,
-            "hits": overall_hits,
-            "rate": overall_hits / overall_total if overall_total else None,
-            "pnlU": overall_pnl,
-        },
-        "byStrategy": by_strategy,
+        "total": total,
+        "hits": hits,
+        "rate": hits / total if total else None,
+        "pnlU": float(row["pnl_u"] or 0),
+    }
+
+
+def _fetch_duration_summaries(conn, symbol: str) -> list[dict]:
+    rows = conn.execute(
+        f"""
+        SELECT
+          e.event_interval AS event_interval,
+          COUNT(DISTINCT e.strategy_key) AS factor_count
+        FROM events e
+        WHERE {_SETTLED_AI_WHERE}
+        GROUP BY e.event_interval
+        ORDER BY
+          CASE e.event_interval
+            WHEN '10m' THEN 10
+            WHEN '30m' THEN 30
+            WHEN '60m' THEN 60
+            WHEN '1d' THEN 1440
+            ELSE 999999
+          END
+        """,
+        (symbol,),
+    ).fetchall()
+    return [
+        {
+            "durationMinutes": _duration_minutes_from_interval(row["event_interval"]),
+            "factorCount": int(row["factor_count"] or 0),
+        }
+        for row in rows
+    ]
+
+
+def _fetch_period_stats(conn, symbol: str, duration_minutes: int) -> dict:
+    interval_sql, interval_params = _interval_filter_sql(duration_minutes)
+    row = conn.execute(
+        f"""
+        SELECT
+          COUNT(DISTINCT e.strategy_key) AS factor_count,
+          COUNT(*) AS total,
+          COALESCE(SUM(e.ai_prediction_correct), 0) AS hits,
+          COALESCE(SUM({_PNL_SQL}), 0.0) AS pnl_u
+        FROM events e
+        {_SETTLEMENT_PNL_JOIN}
+        WHERE {_SETTLED_AI_WHERE}
+        {interval_sql}
+        """,
+        (symbol, *interval_params),
+    ).fetchone()
+    total = int(row["total"] or 0)
+    hits = int(row["hits"] or 0)
+    return {
+        "total": total,
+        "hits": hits,
+        "pnlU": float(row["pnl_u"] or 0),
+        "rate": hits / total if total else None,
+        "factorCount": int(row["factor_count"] or 0),
+    }
+
+
+def _fetch_strategy_page(
+    conn,
+    symbol: str,
+    duration_minutes: int,
+    *,
+    page: int,
+    page_size: int,
+) -> list[dict]:
+    interval_sql, interval_params = _interval_filter_sql(duration_minutes)
+    offset = (page - 1) * page_size
+    rows = conn.execute(
+        f"""
+        SELECT
+          e.strategy_key AS strategy_key,
+          MAX(e.ai_high_winrate_rule) AS factor_name,
+          COUNT(*) AS total,
+          COALESCE(SUM(e.ai_prediction_correct), 0) AS hits,
+          COALESCE(SUM({_PNL_SQL}), 0.0) AS pnl_u
+        FROM events e
+        {_SETTLEMENT_PNL_JOIN}
+        WHERE {_SETTLED_AI_WHERE}
+        {interval_sql}
+        GROUP BY e.strategy_key
+        ORDER BY pnl_u DESC, e.strategy_key ASC
+        LIMIT ? OFFSET ?
+        """,
+        (symbol, *interval_params, page_size, offset),
+    ).fetchall()
+    return [_row_to_strategy_item(row, duration_minutes) for row in rows]
+
+
+def _row_to_strategy_item(row, duration_minutes: int) -> dict:
+    total = int(row["total"] or 0)
+    hits = int(row["hits"] or 0)
+    return {
+        "strategyKey": row["strategy_key"] or "manual",
+        "factorName": row["factor_name"],
+        "durationMinutes": duration_minutes,
+        "total": total,
+        "hits": hits,
+        "pnlU": float(row["pnl_u"] or 0),
+        "rate": hits / total if total else None,
     }
 
 

@@ -103,6 +103,156 @@
   border: 1px solid rgba(238, 95, 84, 0.32);
 }
 
+/* —— Duration tabs —— */
+.rhr-duration-tabs-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(69, 88, 96, 0.5);
+  background: rgba(13, 18, 23, 0.88);
+}
+
+.rhr-duration-tabs-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.rhr-duration-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rhr-duration-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px 0 14px;
+  border: 1px solid rgba(69, 88, 96, 0.45);
+  border-radius: 8px;
+  background: rgba(8, 12, 16, 0.65);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.rhr-duration-tab.is-active {
+  color: #c8e4ff;
+  border-color: rgba(47, 140, 255, 0.5);
+  background: linear-gradient(180deg, rgba(47, 140, 255, 0.22), rgba(47, 140, 255, 0.08));
+  box-shadow: 0 4px 14px rgba(47, 140, 255, 0.14);
+}
+
+.rhr-duration-tab-count {
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(200, 228, 255, 0.85);
+  background: rgba(47, 140, 255, 0.18);
+}
+
+.rhr-duration-tab:not(.is-active) .rhr-duration-tab-count {
+  color: var(--muted);
+  background: rgba(69, 88, 96, 0.35);
+}
+
+.rhr-empty-inline {
+  padding: 24px 12px;
+  min-height: auto;
+}
+
+.rhr-empty-inline p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* —— Skeleton loading —— */
+@keyframes rhr-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.rhr-skeleton-block,
+.rhr-skeleton-line,
+.rhr-skeleton-ring {
+  background: linear-gradient(
+    90deg,
+    rgba(69, 88, 96, 0.35) 0%,
+    rgba(120, 140, 152, 0.5) 50%,
+    rgba(69, 88, 96, 0.35) 100%
+  );
+  background-size: 200% 100%;
+  animation: rhr-shimmer 1.2s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.rhr-kpi.is-skeleton strong.rhr-skeleton-block {
+  display: block;
+  width: 56%;
+  min-height: 24px;
+  margin: 2px 0;
+}
+
+.rhr-factor-list-skeleton {
+  pointer-events: none;
+}
+
+.rhr-skeleton-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(69, 88, 96, 0.35);
+  border-radius: 10px;
+  background: rgba(11, 17, 22, 0.75);
+  cursor: default;
+}
+
+.rhr-skeleton-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+
+.rhr-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rhr-skeleton-line {
+  display: block;
+  height: 12px;
+  width: 42%;
+}
+
+.rhr-skeleton-line.wide {
+  height: 14px;
+  width: 72%;
+}
+
 /* —— KPIs —— */
 .rhr-kpis {
   display: grid;
@@ -189,6 +339,12 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  transition: opacity 0.15s ease;
+}
+
+.rhr-list.is-refreshing {
+  opacity: 0.72;
+  pointer-events: none;
 }
 
 /* —— Duration blocks —— */
@@ -243,6 +399,54 @@
   list-style: none;
   display: grid;
   gap: 8px;
+}
+
+.rhr-pagination {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(69, 88, 96, 0.4);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rhr-page-total {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rhr-page-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.rhr-page-indicator {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.rhr-page-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid rgba(69, 88, 96, 0.55);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.rhr-page-actions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* —— Factor cards —— */
