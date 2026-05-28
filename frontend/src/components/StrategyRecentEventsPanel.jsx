@@ -6,7 +6,15 @@ import "./StrategyRecentEventsPanel.css";
 
 const PAGE_SIZE = 12;
 
-export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, englishName, onClose }) {
+export default function StrategyRecentEventsPanel({
+  symbol,
+  strategyKey,
+  title,
+  englishName,
+  durationMinutes,
+  durationHeading,
+  onClose,
+}) {
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -22,6 +30,7 @@ export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, 
       const data = await fetchEventsPage({
         symbol,
         strategyKey,
+        durationMinutes,
         page,
         pageSize: PAGE_SIZE,
         view: "events",
@@ -38,11 +47,11 @@ export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, 
     } finally {
       setLoading(false);
     }
-  }, [page, strategyKey, symbol]);
+  }, [durationMinutes, page, strategyKey, symbol]);
 
   useEffect(() => {
     setPage(1);
-  }, [strategyKey, symbol]);
+  }, [durationMinutes, strategyKey, symbol]);
 
   useEffect(() => {
     void loadRecords();
@@ -50,11 +59,15 @@ export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, 
 
   if (!strategyKey) return null;
 
+  const periodLabel = durationHeading || "—";
+  const countLabel = loading ? "同步中…" : `共 ${total} 条`;
+  const scopeKicker = `${periodLabel} · ${countLabel}`;
+
   return (
     <aside className="strategy-recent-events" role="dialog" aria-label={`${title} 最近合约记录`}>
       <header className="strategy-recent-events-head">
         <div>
-          <span className="strategy-recent-events-kicker">最近合约记录</span>
+          <span className="strategy-recent-events-kicker">{scopeKicker}</span>
           <h3>{title}</h3>
           {englishName ? (
             <code className="strategy-recent-events-code" title="英文/字段名">
@@ -79,7 +92,7 @@ export default function StrategyRecentEventsPanel({ symbol, strategyKey, title, 
         ) : null}
       </div>
       <footer className="strategy-recent-events-foot">
-        <span>{loading ? "同步中…" : `共 ${total} 条`}</span>
+        <span className="strategy-recent-events-foot-scope">{scopeKicker}</span>
         <div className="strategy-recent-events-pager">
           <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
             上一页

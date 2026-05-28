@@ -106,13 +106,21 @@ def query_ai_history_success(
     return get_cached_ai_history(safe_symbol, duration_minutes, page, page_size, build=_build)
 
 
-def _interval_filter_sql(duration_minutes: int) -> tuple[str, tuple]:
+def event_interval_where(duration_minutes: int | None, *, alias: str = "e") -> tuple[str, tuple]:
+    """SQL fragment filtering events by settlement duration (minutes). None = no filter."""
+    if duration_minutes is None:
+        return "", ()
+    column = f"{alias}.event_interval"
     if duration_minutes == UNKNOWN_DURATION:
-        return f" AND e.event_interval NOT IN ({KNOWN_INTERVAL_SQL})", ()
+        return f" AND {column} NOT IN ({KNOWN_INTERVAL_SQL})", ()
     interval = MINUTES_TO_INTERVAL.get(duration_minutes)
     if interval is None:
         return " AND 1 = 0", ()
-    return " AND e.event_interval = ?", (interval,)
+    return f" AND {column} = ?", (interval,)
+
+
+def _interval_filter_sql(duration_minutes: int) -> tuple[str, tuple]:
+    return event_interval_where(duration_minutes, alias="e")
 
 
 def _duration_minutes_from_interval(event_interval: str | None) -> int:

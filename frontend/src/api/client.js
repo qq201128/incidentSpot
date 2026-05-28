@@ -134,9 +134,19 @@ export async function settleEvent(eventId) {
   return data;
 }
 
-export async function fetchEventsPage({ symbol, strategyKey, page = 1, pageSize = 8, view = "events" } = {}) {
+export async function fetchEventsPage({
+  symbol,
+  strategyKey,
+  durationMinutes,
+  page = 1,
+  pageSize = 8,
+  view = "events",
+} = {}) {
   const params = { symbol, page, pageSize, view };
   if (strategyKey) params.strategyKey = strategyKey;
+  if (durationMinutes != null && Number.isFinite(Number(durationMinutes))) {
+    params.durationMinutes = durationMinutes;
+  }
   const { data } = await axios.get(`${BASE_URL}/api/events`, {
     params,
     timeout: LOCAL_REQUEST_TIMEOUT_MS,

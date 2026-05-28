@@ -370,6 +370,8 @@ export default function RuleHitRatePage() {
             strategyKey={selectedRow.strategyKey}
             title={selectedTitle}
             englishName={selectedEnglishName}
+            durationMinutes={queryDurationMinutes}
+            durationHeading={periodHeading}
             onClose={() => setSelectedRow(null)}
           />
         ) : (

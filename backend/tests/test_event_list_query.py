@@ -23,6 +23,26 @@ def test_paginated_events_filters_by_strategy_key() -> None:
     assert payload["items"][0]["strategy_key"] == "factor_combo_ranker_v1_combo_abc"
 
 
+def test_paginated_events_filters_by_duration_minutes() -> None:
+    conn = _memory_conn()
+    _insert_event(conn, "BTCUSDT", "combo_a", event_interval="10m")
+    _insert_event(conn, "BTCUSDT", "combo_a", event_interval="30m")
+    _insert_event(conn, "BTCUSDT", "combo_a", event_interval="60m")
+
+    payload = paginated_events(
+        conn,
+        symbol="BTCUSDT",
+        page=1,
+        page_size=10,
+        view="events",
+        strategy_key="combo_a",
+        duration_minutes=30,
+    )
+
+    assert payload["total"] == 1
+    assert payload["items"][0]["event_interval"] == "30m"
+
+
 def test_paginated_events_clamps_page_to_last_page() -> None:
     conn = _memory_conn()
     for _ in range(3):
@@ -57,15 +77,21 @@ def _memory_conn() -> sqlite3.Connection:
     return conn
 
 
-def _insert_event(conn: sqlite3.Connection, symbol: str, strategy_key: str = "manual") -> None:
+def _insert_event(
+    conn: sqlite3.Connection,
+    symbol: str,
+    strategy_key: str = "manual",
+    *,
+    event_interval: str = "10m",
+) -> None:
     conn.execute(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value,
           start_time, end_time, status
         )
-        VALUES(?, ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', '2026-05-21T14:20:00Z', 'OPEN')
+        VALUES(?, ?, 'test', ?, 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', '2026-05-21T14:20:00Z', 'OPEN')
         """,
-        (strategy_key, symbol),
+        (strategy_key, symbol, event_interval),
     )
     conn.commit()

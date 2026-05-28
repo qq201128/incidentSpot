@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+from app.services.event_ai_history import event_interval_where
+
 ALLOWED_VIEWS = frozenset({"events", "orders", "settlements", "failures"})
 DEFAULT_PAGE_SIZE = 8
 MAX_PAGE_SIZE = 100
@@ -29,11 +31,17 @@ def paginated_events(
     page_size: int,
     view: str,
     strategy_key: str | None = None,
+    duration_minutes: int | None = None,
 ) -> dict:
     safe_view = normalize_view(view)
     safe_page = max(1, int(page))
     safe_page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
-    where_sql, params = _view_where_clause(safe_view, symbol, strategy_key)
+    where_sql, params = _view_where_clause(
+        safe_view,
+        symbol,
+        strategy_key,
+        duration_minutes=duration_minutes,
+    )
     total = int(
         conn.execute(
             f"SELECT COUNT(*) AS total FROM events {_LATEST_ORDER_JOIN} WHERE {where_sql}",
@@ -64,7 +72,13 @@ def paginated_events(
     }
 
 
-def _view_where_clause(view: str, symbol: str | None, strategy_key: str | None = None) -> tuple[str, list]:
+def _view_where_clause(
+    view: str,
+    symbol: str | None,
+    strategy_key: str | None = None,
+    *,
+    duration_minutes: int | None = None,
+) -> tuple[str, list]:
     clauses = ["1 = 1"]
     params: list = []
     if symbol:
@@ -74,6 +88,10 @@ def _view_where_clause(view: str, symbol: str | None, strategy_key: str | None =
     if safe_strategy_key:
         clauses.append("events.strategy_key = ?")
         params.append(safe_strategy_key)
+    interval_sql, interval_params = event_interval_where(duration_minutes, alias="events")
+    if interval_sql:
+        clauses.append(interval_sql.removeprefix(" AND "))
+        params.extend(interval_params)
     if view == "orders":
         clauses.append("latest_order.id IS NOT NULL")
     elif view == "settlements":
