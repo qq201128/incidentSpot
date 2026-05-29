@@ -1,1 +1,12 @@
-cd /d D:\Desktop\incidentSpot\backend && set "PYTHONPATH=D:\Desktop\incidentSpot\backend" && python .\scripts\run_model_family_full_search.py --symbols BTCUSDT,ETHUSDT --durations 10m 30m 60m 1d --profile full --parallel-workers 5 --target-workers 2 --reset-history --progress-interval 15
+cd /d D:\Desktop\incidentSpot
+set "PYTHONPATH=D:\Desktop\incidentSpot\backend"
+
+REM 1. 先入队：只创建 BTCUSDT/ETHUSDT 多周期多模型族搜索任务，不直接训练。
+D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\enqueue_model_search.py --symbols BTCUSDT,ETHUSDT --durations 10m 30m 60m 1d --families lstm gru cnn transformer random_forest xgboost svm bayesian knn --profile full
+
+REM 2. 再启动 worker：前台慢慢跑完整个队列；每次只 claim 并训练一个 job，完成后继续 claim 下一个 pending job，队列空了自动退出。
+REM    关闭窗口会中断当前 worker，后续可重新启动继续 pending job；训练异常会直接暴露并让命令退出。
+D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\run_model_search_worker.py --run-until-empty --max-running-jobs 1 --internal-threads 4 --parallel-workers 1 --xgboost-process-workers 1 --torch-jobs 1 --resource-profile local_safe --log-dir runtime\model-search-jobs --stale-after-seconds 3600
+
+REM 3. 查看状态时单独运行这一行：
+REM D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\model_search_status.py --symbols BTCUSDT,ETHUSDT --compact --json

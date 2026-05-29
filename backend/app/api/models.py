@@ -1,27 +1,20 @@
 from __future__ import annotations
 
-import logging
-
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.model_family_candidate_search_service import (
-    ModelCandidateSearchConfig,
     model_training_config_for_profile,
-    queue_total_for_family,
-    run_model_candidate_search,
-)
-from app.services.model_family_candidates import (
-    finish_model_candidate_progress,
-    queue_model_candidate_progress,
 )
 from app.services.model_family_config import normalize_model_family
 from app.services.model_family_prediction_service import predict_model_family_signal
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
+from app.services.model_search_job_store import enqueue_model_search_jobs
+from app.services.model_search_status_service import model_search_status_with_lifecycle
+from app.services.runtime_symbols import parse_symbol_csv
 
 router = APIRouter(prefix="/api/models", tags=["models"])
-logger = logging.getLogger("uvicorn.error")
 
 
 @router.get("/{family}/status")
@@ -71,41 +64,29 @@ def model_train(
 
 @router.post("/{family}/candidate-search")
 def model_candidate_search(
-    background_tasks: BackgroundTasks,
     family: str,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     profile: str = Query("full"),
-    parallel_workers: int = Query(10, alias="parallelWorkers", ge=1),
     reset_history: bool = Query(False, alias="resetHistory"),
 ) -> dict:
     try:
         selected = normalize_model_family(family)
         sym = symbol.upper()
         selected_profile = normalize_experiment_profile(profile)
-        total = queue_total_for_family(selected)
-        queued = queue_model_candidate_progress(
-            selected,
-            symbol=sym,
-            duration=duration,
+        queued_job = enqueue_model_search_jobs(
+            symbols=(sym,),
+            durations=(duration,),
+            families=(selected,),
             profile=selected_profile,
-            total=total,
-            parallel_workers=parallel_workers,
-        )
-        background_tasks.add_task(
-            _background_model_candidate_search,
-            selected,
-            sym,
-            duration,
-            selected_profile,
-            parallel_workers,
-            reset_history,
+            reset_existing=reset_history,
         )
         status = model_family_status(selected, sym, duration)
         return {
             **status,
-            "candidateSearchProgress": status["candidateSearchProgress"] or queued,
-            "message": f"{selected}候选搜索已排队。",
+            "modelSearchJob": queued_job["jobs"][0],
+            "modelSearchQueue": queued_job,
+            "message": f"{selected}候选搜索已入队，等待 model search worker 执行。",
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -126,21 +107,18 @@ def model_predict(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _background_model_candidate_search(
-    family: str,
-    symbol: str,
-    duration: str,
-    profile: str,
-    parallel_workers: int,
-    reset_history: bool,
-) -> None:
-    try:
-        report = run_model_candidate_search(
-            ModelCandidateSearchConfig(family, symbol, duration, profile, parallel_workers, reset_history)
-        )
-        if str(report.get("status") or "") == "skipped":
-            finish_model_candidate_progress(family, symbol=symbol, duration=duration, status="skipped")
-    except Exception:
-        finish_model_candidate_progress(family, symbol=symbol, duration=duration, status="failed")
-        logger.exception("model candidate search failed: family=%s symbol=%s duration=%s", family, symbol, duration)
-        raise
+@router.get("/search/jobs/status")
+def model_search_jobs_status(
+    symbols: str | None = Query(None),
+    duration: str | None = Query(None),
+    family: str | None = Query(None),
+    status: str | None = Query(None),
+) -> dict:
+    filters = {
+        "symbols": parse_symbol_csv(symbols) if symbols else (),
+        "durations": (duration,) if duration else (),
+        "families": (normalize_model_family(family),) if family else (),
+        "statuses": (status,) if status else (),
+    }
+    return model_search_status_with_lifecycle(filters)
+

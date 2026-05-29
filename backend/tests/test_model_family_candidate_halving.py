@@ -24,6 +24,7 @@ def test_candidate_search_runs_successive_halving(monkeypatch) -> None:
     monkeypatch.setattr(service, "record_model_candidate", lambda config, profile, report: recorded.append(report))
     monkeypatch.setattr(executor, "record_model_candidate", lambda config, profile, report: recorded.append(report))
     monkeypatch.setattr(executor, "train_model_family", _training_stub(calls))
+    monkeypatch.setattr(service, "run_walk_forward_stage", _walk_forward_stub)
     monkeypatch.setattr(service, "publish_best_model_candidate", _publisher_stub(calls))
 
     result = service.run_model_candidate_search(
@@ -79,3 +80,15 @@ def _publisher_stub(calls):
         return {"status": "trade_active"}
 
     return _publish
+
+
+def _walk_forward_stub(finalists, _dataset_builder):
+    payload = {
+        "stage": "walk_forward",
+        "evaluated": len(finalists),
+        "advanced": len(finalists),
+        "candidateKeys": [item.report.get("searchKey") for item in finalists],
+        "advancedKeys": [item.report.get("searchKey") for item in finalists],
+        "candidates": [],
+    }
+    return finalists, payload
