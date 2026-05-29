@@ -225,14 +225,14 @@ CREATE TABLE IF NOT EXISTS auto_trade_settings (
 
 CREATE TABLE IF NOT EXISTS auto_trade_strategies (
   strategy_key TEXT NOT NULL,
+  symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
   duration TEXT NOT NULL DEFAULT '10m',
   enabled INTEGER NOT NULL DEFAULT 0,
   live_trading_enabled INTEGER NOT NULL DEFAULT 0,
-  symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
   duration_minutes INTEGER NOT NULL DEFAULT 10,
   qty REAL NOT NULL DEFAULT 5,
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (strategy_key, duration)
+  PRIMARY KEY (strategy_key, symbol, duration)
 );
 
 -- Background-precomputed factor IR rankings (see factor_ranking_background)
@@ -281,6 +281,14 @@ CREATE TABLE IF NOT EXISTS high_winrate_combo_ranking_cache (
   search_config TEXT NOT NULL,
   payload TEXT NOT NULL,
   PRIMARY KEY (symbol, duration)
+);
+
+CREATE TABLE IF NOT EXISTS factor_combo_feature_snapshots (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  entry_open_time INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY(symbol, duration, entry_open_time)
 );
 
 CREATE TABLE IF NOT EXISTS high_winrate_strategy_status (

@@ -10,7 +10,7 @@ import pytest
 from app.services import forward_validation_service
 from app.services.lstm_validation import binary_classification_metrics
 
-def test_lstm_accuracy_tracks_direction_and_win_rate_uses_gross_returns() -> None:
+def test_lstm_accuracy_tracks_direction_and_win_rate_use_cost_adjusted_returns() -> None:
     metrics = binary_classification_metrics(
         np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
         np.asarray([0.6, 0.4, 0.7], dtype=np.float32),
@@ -19,7 +19,7 @@ def test_lstm_accuracy_tracks_direction_and_win_rate_uses_gross_returns() -> Non
 
     assert metrics["accuracy"] == pytest.approx(2 / 3)
     assert metrics["winRate"] == pytest.approx(2 / 3)
-    assert metrics["avgReturn"] == pytest.approx(0.0005 / 3)
+    assert metrics["expectedReturn"] == pytest.approx(0.0005 / 3)
 
 
 def test_lstm_metrics_include_confidence_threshold_samples() -> None:

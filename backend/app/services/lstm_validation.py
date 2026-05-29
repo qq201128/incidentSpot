@@ -83,6 +83,7 @@ def binary_classification_metrics(
         "maxDrawdown": return_metrics["maxDrawdown"],
         "sharpe": return_metrics["sharpe"],
         "avgReturn": return_metrics["avgReturn"],
+        "expectedReturn": return_metrics["avgReturn"],
         "totalCost": return_metrics["totalCost"],
         "confidenceThresholds": confidence_threshold_metrics(
             probability_up,
@@ -167,6 +168,7 @@ def _bucket_payload(confidence: np.ndarray, returns: np.ndarray, left: float, ri
         "winRate": _ratio(int((selected > 0).sum()), len(selected)),
         "profitFactor": None if len(selected) == 0 else profit_factor(selected),
         "avgReturn": _mean_or_none(selected),
+        "expectedReturn": _mean_or_none(selected),
     }
 
 
@@ -193,6 +195,7 @@ def _confidence_threshold_payload(threshold: float, returns: np.ndarray) -> dict
         "sampleCount": int(len(returns)),
         "winRate": _ratio(int((returns > 0).sum()), len(returns)),
         "avgReturn": _mean_or_none(returns),
+        "expectedReturn": _mean_or_none(returns),
         "profitFactor": None if len(returns) == 0 else profit_factor(returns),
     }
 

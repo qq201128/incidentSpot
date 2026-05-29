@@ -31,6 +31,9 @@ def feature_payload(cfg, dataset: LstmDataset) -> dict[str, Any]:
         "columns": dataset.feature_columns,
         "comboSnapshot": dataset.combo_snapshot,
         "learningContext": dataset.learning_context or {},
+        "dataQuality": dataset.data_quality_report or {},
+        "simFeedback": dataset.sim_feedback_metadata or {},
+        "factorComboFeatures": dataset.factor_combo_metadata or {"enabled": False},
         "count": len(dataset.feature_columns),
     }
 

@@ -40,6 +40,32 @@ def test_daily_closed_loop_reports_all_required_steps() -> None:
     assert models["models"][0]["paperLiveStatus"] == "paper_collecting"
 
 
+def test_daily_closed_loop_runs_default_btc_and_eth_symbols() -> None:
+    calls = []
+
+    def refresh(symbol: str, duration: str, *, run_learning_agent: bool) -> None:
+        calls.append((symbol, duration, run_learning_agent))
+
+    deps = PaperLiveDailyLoopDeps(
+        symbols=lambda: ["BTCUSDT", "ETHUSDT"],
+        refresh_candidates=refresh,
+        settle_predictions=lambda symbol, duration: {"checked": 0, "settled": 0, "pendingData": 0},
+        refresh_states=lambda symbol, duration: _candidate_report(symbol, duration),
+        candidate_report=lambda symbol, duration: _candidate_report(symbol, duration),
+        offline_screening=lambda symbol, duration: _offline_screening(symbol, duration),
+        model_candidates=lambda symbol, duration: _model_candidates(symbol, duration),
+    )
+
+    report = run_paper_live_daily_closed_loop(durations=["10m"], deps=deps)
+
+    assert report["symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert [(row["symbol"], row["duration"]) for row in report["results"]] == [
+        ("BTCUSDT", "10m"),
+        ("ETHUSDT", "10m"),
+    ]
+    assert calls == [("BTCUSDT", "10m", True), ("ETHUSDT", "10m", True)]
+
+
 def test_daily_closed_loop_surfaces_stage_failure() -> None:
     def refresh(_symbol: str, _duration: str, *, run_learning_agent: bool) -> None:
         raise RuntimeError("market refresh failed")

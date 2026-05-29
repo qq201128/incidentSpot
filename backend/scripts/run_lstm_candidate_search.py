@@ -13,12 +13,13 @@ from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.lstm_candidate_search_notification import notify_lstm_candidate_search_finished
 from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm_candidate_retry
 from app.services.lstm_candidate_search import LstmCandidateSearchConfig
+from app.services.runtime_symbols import configured_runtime_symbols
 
 
 def main() -> None:
     args = _parse_args()
     config = LstmCandidateRetryConfig(
-        symbols=_csv_strings(args.symbols),
+        symbols=_symbols(args.symbols),
         durations=_csv_strings(args.durations),
         profile=normalize_experiment_profile(args.profile),
         search=_search_config(args),
@@ -43,7 +44,7 @@ def _search_config(args: argparse.Namespace) -> LstmCandidateSearchConfig:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run LSTM candidate search and record every candidate.")
-    parser.add_argument("--symbols", default="BTCUSDT")
+    parser.add_argument("--symbols", default=None)
     parser.add_argument("--durations", default="10m,30m,60m")
     parser.add_argument("--profile", default="full", choices=("fast", "full"))
     parser.add_argument("--feature-windows", default=None)
@@ -60,6 +61,10 @@ def _csv_strings(raw: str) -> tuple[str, ...]:
     if not values:
         raise ValueError("CSV argument must include at least one value")
     return values
+
+
+def _symbols(raw: str | None) -> tuple[str, ...]:
+    return _csv_strings(raw) if raw is not None else configured_runtime_symbols()
 
 
 def _csv_ints(raw: str | None) -> tuple[int, ...] | None:

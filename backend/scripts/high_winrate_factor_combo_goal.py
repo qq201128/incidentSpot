@@ -51,6 +51,7 @@ from app.services.high_winrate_combo_goal_search import (
     RankedSearch,
     ScoreSearch,
 )
+from app.services.runtime_symbols import configured_runtime_symbols, parse_symbol_csv
 
 REPORT_PATH = BACKEND_ROOT / "reports" / "factor_backtests" / "high_winrate_factor_combo_goal.json"
 LIBRARY_PATH = BACKEND_ROOT / "models" / "factor_learning" / "high_winrate_factor_combo_goal_library.json"
@@ -127,7 +128,8 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Find high-win-rate factor combos and paper-live signals.")
-    parser.add_argument("--symbol", default="BTCUSDT")
+    parser.add_argument("--symbol", default=None)
+    parser.add_argument("--symbols", default=None)
     parser.add_argument("--duration", help="Run one duration instead of the primary multi-duration set")
     parser.add_argument("--durations", default=",".join(DEFAULT_PRIMARY_DURATIONS))
     parser.add_argument("--target-count", type=int, default=TARGET_COUNT)
@@ -144,11 +146,27 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    symbols = _selected_symbols(args)
     search_config = _search_config_from_args(args)
     durations = [] if args.duration else parse_durations(args.durations)
+    if len(symbols) > 1:
+        reports = [_run_symbol(args, symbol, search_config, durations) for symbol in symbols]
+        print(json.dumps({"symbols": reports}, ensure_ascii=False, indent=2))
+        return
+    symbol = symbols[0]
+    report = _run_symbol(args, symbol, search_config, durations)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def _run_symbol(
+    args: argparse.Namespace,
+    symbol: str,
+    search_config: GoalSearchConfig,
+    durations: list[str],
+) -> dict[str, Any]:
     if durations:
         report = run_multi_duration_goal(
-            args.symbol,
+            symbol,
             durations,
             args.target_count,
             args.output,
@@ -163,11 +181,10 @@ def main() -> None:
             ),
             parallel_workers=args.parallel_workers,
         )
-        print(json.dumps(_multi_duration_stdout(args, report), ensure_ascii=False, indent=2))
-        return
+        return {"symbol": symbol, **_multi_duration_stdout(args, report)}
     duration = args.duration or DEFAULT_PRIMARY_DURATIONS[0]
-    report = run_goal(args.symbol, duration, args.target_count, args.output, args.library, search_config)
-    print(json.dumps(_single_duration_stdout(args, report), ensure_ascii=False, indent=2))
+    report = run_goal(symbol, duration, args.target_count, args.output, args.library, search_config)
+    return {"symbol": symbol, **_single_duration_stdout(args, report)}
 
 
 def _search_config_from_args(args: argparse.Namespace) -> GoalSearchConfig:
@@ -197,6 +214,16 @@ def _single_duration_stdout(args: argparse.Namespace, report: dict[str, Any]) ->
         "promotion": report.get("promotion"),
         "ranking": report["ranking"],
     }
+
+
+def _selected_symbols(args: argparse.Namespace) -> tuple[str, ...]:
+    if args.symbols and args.symbol:
+        raise ValueError("use either --symbol or --symbols, not both")
+    if args.symbols:
+        return parse_symbol_csv(args.symbols)
+    if args.symbol:
+        return parse_symbol_csv(args.symbol)
+    return configured_runtime_symbols()
 
 
 if __name__ == "__main__":

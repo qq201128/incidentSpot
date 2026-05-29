@@ -14,13 +14,9 @@ from app.services.lstm_artifacts import (
 )
 from app.services.lstm_config import LSTM_RULE_NAME, lstm_shadow_strategy_key
 from app.services.lstm_feature_builder import (
-    _assert_columns,
     build_live_feature_window,
-    duration_feature_frame,
-    sanitize_feature_window,
 )
 from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, trade_active_status
-from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import (
     active_lstm_status,
     is_lstm_shadow_ready,
@@ -55,6 +51,7 @@ def predict_lstm_signal(
         list(features["columns"]),
         int(features["featureWindow"]),
         entry_open_time,
+        model_family="lstm",
     )
     scaled = apply_standardizer(window, scaler)
     probability_up = float((backend or TorchLstmBackend()).predict(paths.model, scaled)[0])
@@ -143,21 +140,18 @@ def _live_feature_windows(
     feature_window: int,
     entry_open_times: list[int],
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    sampled = duration_feature_frame(load_lstm_market_frame(symbol, duration), duration)
-    _assert_columns(sampled, feature_columns)
-    by_entry = {int(row["entry_open_time"]): idx for idx, row in sampled.iterrows()}
-    values = sampled[feature_columns].to_numpy(dtype=np.float32)
     windows, metas = [], []
     for entry in entry_open_times:
-        idx = by_entry.get(int(entry))
-        if idx is None:
-            raise ValueError(f"missing completed LSTM feature row for entry_open_time={entry}")
-        if idx + 1 < feature_window:
-            raise ValueError(f"insufficient LSTM feature rows before entry_open_time={entry}")
-        window = sanitize_feature_window(values[idx - feature_window + 1: idx + 1])
-        row = sampled.iloc[idx]
-        windows.append(window)
-        metas.append({"entryOpenTime": int(row["entry_open_time"]), "entryPrice": float(row["close"])})
+        window, meta = build_live_feature_window(
+            symbol,
+            duration,
+            feature_columns,
+            feature_window,
+            entry,
+            model_family="lstm",
+        )
+        windows.append(window.reshape(feature_window, len(feature_columns)))
+        metas.append(meta)
     return np.asarray(windows, dtype=np.float32), metas
 
 

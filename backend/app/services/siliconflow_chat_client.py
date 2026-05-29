@@ -8,7 +8,7 @@ from typing import Any
 import requests
 from requests import RequestException
 
-DEFAULT_SILICONFLOW_MODEL = "Pro/moonshotai/Kimi-K2.6"
+DEFAULT_SILICONFLOW_MODEL = "deepseek-ai/DeepSeek-V3.2"
 DEFAULT_CHAT_COMPLETIONS_URL = "https://api.siliconflow.cn/v1/chat/completions"
 DEFAULT_TIMEOUT_SECONDS = 180
 TIMEOUT_ENV_NAME = "SILICONFLOW_TIMEOUT_SECONDS"

@@ -248,14 +248,14 @@ def _init_db(path: Path) -> None:
             """
             CREATE TABLE auto_trade_strategies (
               strategy_key TEXT NOT NULL,
+              symbol TEXT NOT NULL,
               duration TEXT NOT NULL,
               enabled INTEGER NOT NULL,
               live_trading_enabled INTEGER NOT NULL,
-              symbol TEXT NOT NULL,
               duration_minutes INTEGER NOT NULL,
               qty REAL NOT NULL,
               updated_at TEXT NOT NULL,
-              PRIMARY KEY (strategy_key, duration)
+              PRIMARY KEY (strategy_key, symbol, duration)
             );
             CREATE TABLE predictions (
               strategy_key TEXT NOT NULL,
@@ -280,7 +280,7 @@ def _insert_slot(path: Path, duration: str, *, enabled: int, live: int) -> None:
         conn.execute(
             """
             INSERT INTO auto_trade_strategies
-            VALUES(?, ?, ?, ?, 'BTCUSDT', ?, 5.0, 'now')
+            VALUES(?, 'BTCUSDT', ?, ?, ?, ?, 5.0, 'now')
             """,
             (
                 HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
@@ -355,9 +355,9 @@ def _slot(path: Path, duration: str) -> sqlite3.Row:
         return conn.execute(
             """
             SELECT * FROM auto_trade_strategies
-            WHERE strategy_key = ? AND duration = ?
+            WHERE strategy_key = ? AND symbol = ? AND duration = ?
             """,
-            (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, duration),
+            (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, "BTCUSDT", duration),
         ).fetchone()
     finally:
         conn.close()

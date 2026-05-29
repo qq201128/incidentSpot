@@ -26,7 +26,9 @@ def _initial_delay_seconds() -> float:
 
 
 def refresh_all_configured_market_context() -> None:
-    for symbol in factor_ranking_precomputed_symbols():
+    symbols = factor_ranking_precomputed_symbols()
+    logger.info("market context refresh configured symbols=%s", symbols)
+    for symbol in symbols:
         try:
             report = ingest_market_context_data(symbol)
             logger.info("market context updated: %s", report)

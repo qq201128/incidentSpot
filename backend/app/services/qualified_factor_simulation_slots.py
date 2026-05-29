@@ -96,14 +96,14 @@ def _enable_simulation_slots(
             conn.execute(
                 """
                 INSERT OR REPLACE INTO auto_trade_strategies(
-                  strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+                  strategy_key, symbol, duration, enabled, live_trading_enabled, duration_minutes, qty, updated_at
                 )
-                VALUES(?, ?, 1, 0, ?, ?, ?, ?)
+                VALUES(?, ?, ?, 1, 0, ?, ?, ?)
                 """,
                 (
                     strategy_key,
-                    duration,
                     symbol,
+                    duration,
                     int(DURATION_TO_MINUTES[duration]),
                     float(qty),
                     ts,

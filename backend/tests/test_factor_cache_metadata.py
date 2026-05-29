@@ -61,6 +61,30 @@ def test_factor_ranking_cache_preserves_diagnostics(monkeypatch, tmp_path: Path)
     assert cached["rankingFailures"][0]["factorName"] == "agent_a"
 
 
+def test_factor_ranking_cache_is_isolated_by_symbol(monkeypatch, tmp_path: Path) -> None:
+    db_path = _init_db(tmp_path)
+    _patch_cache_db(monkeypatch, db_path)
+    _insert_kline(db_path, "10m", 0, symbol="BTCUSDT")
+    _insert_kline(db_path, "10m", 0, symbol="ETHUSDT")
+
+    factor_ranking_cache_service.save_cached_ranking(
+        "BTCUSDT",
+        "10m",
+        [{"factorName": "btc_factor", "totalPeriods": 100}],
+    )
+    factor_ranking_cache_service.save_cached_ranking(
+        "ETHUSDT",
+        "10m",
+        [{"factorName": "eth_factor", "totalPeriods": 100}],
+    )
+
+    btc = factor_ranking_cache_service.get_cached_ranking("BTCUSDT", "10m")
+    eth = factor_ranking_cache_service.get_cached_ranking("ETHUSDT", "10m")
+
+    assert btc["ranking"][0]["factorName"] == "btc_factor"
+    assert eth["ranking"][0]["factorName"] == "eth_factor"
+
+
 def test_factor_ranking_precomputed_symbols_include_enabled_auto_trade_symbols(monkeypatch) -> None:
     monkeypatch.setattr(
         factor_ranking_cache_service,
@@ -249,12 +273,12 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _insert_kline(db_path: Path, interval: str, open_time: int) -> None:
+def _insert_kline(db_path: Path, interval: str, open_time: int, *, symbol: str = "BTCUSDT") -> None:
     conn = _connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO klines(symbol, interval, open_time) VALUES('BTCUSDT', ?, ?)",
-            (interval, open_time),
+            "INSERT INTO klines(symbol, interval, open_time) VALUES(?, ?, ?)",
+            (symbol, interval, open_time),
         )
         conn.commit()
     finally:

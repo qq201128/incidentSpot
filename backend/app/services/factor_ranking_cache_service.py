@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
 from app.services.auto_trade_service import list_auto_trade_settings
+from app.services.runtime_symbols import configured_runtime_symbols
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -96,11 +96,10 @@ def save_cached_ranking(
 
 
 def factor_ranking_precomputed_symbols() -> list[str]:
-    raw = os.getenv("FACTOR_RANKING_SYMBOLS", "BTCUSDT").strip()
-    base = [p.strip().upper() for p in raw.split(",") if p.strip()] if raw else ["BTCUSDT"]
+    base = list(configured_runtime_symbols())
     enabled = [settings.symbol.strip().upper() for settings in list_auto_trade_settings() if settings.enabled]
     symbols = list(dict.fromkeys(base + enabled))
-    return symbols or ["BTCUSDT"]
+    return symbols
 
 
 def _ranking_payload(payload: Any) -> tuple[Any, dict[str, Any] | None, dict[str, Any], list[dict[str, Any]]]:

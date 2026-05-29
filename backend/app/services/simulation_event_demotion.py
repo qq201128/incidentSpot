@@ -14,6 +14,7 @@ STATUS_ACTIVE = "active"
 STATUS_DEMOTED = "demoted"
 STATUS_COLLECTING = "collecting"
 STATUS_INSUFFICIENT = "insufficient_samples"
+PAPER_FAILED_STATUS = "paper_failed"
 OBSERVE_ONLY = True
 
 
@@ -87,7 +88,7 @@ def _evaluate_strategy(
             metrics,
         )
     decision = high_winrate_decision(metrics)
-    status = STATUS_DEMOTED if decision["status"] == "demoted" else STATUS_ACTIVE
+    status = STATUS_DEMOTED if decision["status"] == PAPER_FAILED_STATUS else STATUS_ACTIVE
     return _evaluation_payload(strategy_key, status, decision["reason"], rows, metrics)
 
 

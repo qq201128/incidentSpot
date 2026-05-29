@@ -8,13 +8,9 @@ import numpy as np
 
 from app.services.lstm_artifacts import artifact_paths, read_json, require_json, required_artifacts_exist
 from app.services.lstm_feature_builder import (
-    _assert_columns,
     build_live_feature_window,
-    duration_feature_frame,
-    sanitize_feature_window,
 )
 from app.services.lstm_lifecycle import LSTM_STATUS_LEGACY_TRAINED, shadow_predictable_status, trade_active_status
-from app.services.lstm_market_feature_builder import load_lstm_market_frame
 from app.services.lstm_status_service import validation_gate_payload, validation_threshold
 from app.services.lstm_validation import apply_probability_calibrator, apply_standardizer
 from app.services.model_family_config import (
@@ -55,6 +51,7 @@ def predict_model_family_signal(
         list(features["columns"]),
         int(features["featureWindow"]),
         entry_open_time,
+        model_family=selected,
     )
     raw_probability = float((backend or _default_backend(selected)).predict(paths.model, apply_standardizer(window, scaler))[0])
     status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
@@ -87,7 +84,14 @@ def predict_model_family_shadow_predictions(
     scaler = require_json(paths.scaler, "scaler")
     version = require_json(paths.version, "version")
     report = require_json(paths.report, "training report")
-    windows, metas = _live_feature_windows(sym, duration, list(features["columns"]), int(features["featureWindow"]), entries)
+    windows, metas = _live_feature_windows(
+        sym,
+        duration,
+        list(features["columns"]),
+        int(features["featureWindow"]),
+        entries,
+        selected,
+    )
     raw_probabilities = (backend or _default_backend(selected)).predict(paths.model, apply_standardizer(windows, scaler))
     status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
     version_payload = _version_payload(version, report)
@@ -113,22 +117,19 @@ def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artif
         raise ValueError(f"{family} model is not ready for {symbol} {duration}: {reason}")
 
 
-def _live_feature_windows(symbol: str, duration: str, columns: list[str], feature_window: int, entries: list[int]):
-    sampled = duration_feature_frame(load_lstm_market_frame(symbol, duration), duration)
-    _assert_columns(sampled, columns)
-    by_entry = {int(row["entry_open_time"]): idx for idx, row in sampled.iterrows()}
-    values = sampled[columns].to_numpy(dtype=np.float32)
+def _live_feature_windows(
+    symbol: str,
+    duration: str,
+    columns: list[str],
+    feature_window: int,
+    entries: list[int],
+    family: str,
+):
     windows, metas = [], []
     for entry in entries:
-        idx = by_entry.get(int(entry))
-        if idx is None:
-            raise ValueError(f"missing completed model feature row for entry_open_time={entry}")
-        if idx + 1 < feature_window:
-            raise ValueError(f"insufficient model feature rows before entry_open_time={entry}")
-        window = sanitize_feature_window(values[idx - feature_window + 1: idx + 1])
-        row = sampled.iloc[idx]
-        windows.append(window)
-        metas.append({"entryOpenTime": int(row["entry_open_time"]), "entryPrice": float(row["close"])})
+        window, meta = build_live_feature_window(symbol, duration, columns, feature_window, entry, model_family=family)
+        windows.append(window.reshape(feature_window, len(columns)))
+        metas.append(meta)
     return np.asarray(windows, dtype=np.float32), metas
 
 

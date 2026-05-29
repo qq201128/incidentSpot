@@ -10,17 +10,22 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   const [loading, setLoading] = useState(true);
   const [updatingKey, setUpdatingKey] = useState("");
   const [error, setError] = useState("");
+  const activeSymbol = symbol.trim().toUpperCase();
+  const visibleStrategies = useMemo(
+    () => strategies.filter((item) => String(item.symbol || "").toUpperCase() === activeSymbol),
+    [activeSymbol, strategies],
+  );
 
-  const groups = useMemo(() => _groupStrategies(strategies), [strategies]);
+  const groups = useMemo(() => _groupStrategies(visibleStrategies), [visibleStrategies]);
 
   const enabledKeys = useMemo(
     () =>
-      strategies
+      visibleStrategies
         .filter((item) => item.enabled)
-        .map((item) => `${item.strategyKey}\t${item.duration}`)
+        .map((item) => `${item.strategyKey}\t${item.symbol}\t${item.duration}`)
         .sort()
         .join("|"),
-    [strategies],
+    [visibleStrategies],
   );
 
   function buildSlotUpdate(slot, enabled) {
@@ -59,7 +64,9 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   /** 交易对或数量变更时同步到已开启的周期槽位（各槽位保留自身实盘开关） */
   useEffect(() => {
     if (!enabledKeys) return;
-    const enabled = strategiesRef.current.filter((item) => item.enabled);
+    const enabled = strategiesRef.current.filter(
+      (item) => item.enabled && String(item.symbol || "").toUpperCase() === activeSymbol,
+    );
     if (!enabled.length) return;
     let stopped = false;
     Promise.all(enabled.map((item) => buildSlotUpdate(item, true)))
@@ -72,7 +79,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     return () => {
       stopped = true;
     };
-  }, [amount, enabledKeys, symbol]);
+  }, [activeSymbol, amount, enabledKeys, symbol]);
 
   const toggleStrategyLive = useCallback(
     async (group) => {
@@ -109,7 +116,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   const toggleSlot = useCallback(
     async (slot) => {
       if (slot.tradable === false) return;
-      const key = `${slot.strategyKey}:${slot.duration}`;
+      const key = `${slot.strategyKey}:${slot.symbol}:${slot.duration}`;
       setUpdatingKey(key);
       setError("");
       try {
@@ -169,7 +176,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
                     type="button"
                     className={`chip ${slot.enabled ? "active" : ""}`}
                     disabled={
-                      updatingKey === `${slot.strategyKey}:${slot.duration}` ||
+                      updatingKey === `${slot.strategyKey}:${slot.symbol}:${slot.duration}` ||
                       group.tradable === false ||
                       updatingKey === `${group.strategyKey}:__live__`
                     }
@@ -217,7 +224,10 @@ function _mergeStrategyRows(setStrategies, rows) {
   setStrategies((prev) =>
     prev.map((item) => {
       const updated = rows.find(
-        (row) => row.strategyKey === item.strategyKey && row.duration === item.duration,
+        (row) =>
+          row.strategyKey === item.strategyKey &&
+          row.symbol === item.symbol &&
+          row.duration === item.duration,
       );
       return updated ? { ...item, ...updated } : item;
     }),

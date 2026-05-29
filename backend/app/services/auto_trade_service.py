@@ -26,6 +26,7 @@ from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.rule_config import DURATION_TO_MINUTES
+from app.services.runtime_symbols import configured_runtime_symbols
 from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
@@ -57,21 +58,26 @@ async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> N
 
 
 def list_auto_trade_settings() -> list[AutoTradeSettings]:
-    """每个可交易执行项 × 每个结算周期一条配置（可同时开启多周期）。"""
+    """每个可交易执行项 × 交易对 × 结算周期一条配置。"""
     conn = get_conn()
     try:
         rows = conn.execute("SELECT * FROM auto_trade_strategies").fetchall()
-        by_pair = {(str(r["strategy_key"]), str(r["duration"])): r for r in rows}
+        by_slot = {
+            (str(r["strategy_key"]), str(r["symbol"]).upper(), str(r["duration"])): r
+            for r in rows
+        }
+        symbols = configured_runtime_symbols()
         result: list[AutoTradeSettings] = []
         for payload in strategy_payloads():
             key = str(payload["key"])
-            for dur in _payload_durations(payload):
-                row = by_pair.get((key, dur))
-                if row is not None:
-                    result.append(_settings_from_row(row))
-                else:
-                    result.append(_default_settings(key, dur))
-        result.extend(_ensemble_ranker_settings(conn, by_pair))
+            for symbol in symbols:
+                for dur in _payload_durations(payload):
+                    row = by_slot.get((key, symbol, dur))
+                    if row is not None:
+                        result.append(_settings_from_row(row))
+                    else:
+                        result.append(_default_settings(key, dur, symbol))
+        result.extend(_ensemble_ranker_settings(conn, by_slot, symbols))
         return result
     finally:
         conn.close()
@@ -81,17 +87,18 @@ def list_auto_trade_strategy_payloads() -> list[dict[str, Any]]:
     return [_strategy_payload(settings) for settings in list_auto_trade_settings()]
 
 
-def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY) -> AutoTradeSettings:
+def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, symbol: str = DEFAULT_SYMBOL) -> AutoTradeSettings:
     strategy = strategy_definition(strategy_key)
+    sym = symbol.strip().upper()
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM auto_trade_strategies WHERE strategy_key = ? AND duration = ?",
-            (strategy.key, DEFAULT_DURATION),
+            "SELECT * FROM auto_trade_strategies WHERE strategy_key = ? AND symbol = ? AND duration = ?",
+            (strategy.key, sym, DEFAULT_DURATION),
         ).fetchone()
         if row is not None:
             return _settings_from_row(row)
-        settings = _default_settings(strategy.key, DEFAULT_DURATION)
+        settings = _default_settings(strategy.key, DEFAULT_DURATION, sym)
         _write_settings(conn, settings)
         conn.commit()
         return settings

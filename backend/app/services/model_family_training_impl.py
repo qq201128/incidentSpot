@@ -30,6 +30,7 @@ from app.services.lstm_validation import (
     fit_standardizer,
 )
 from app.services.model_family_config import (
+    JOBLIB_MODEL_FAMILIES,
     ModelFamilyTrainingConfig,
     model_family_rule_name,
     validated_model_family_config,
@@ -51,6 +52,7 @@ from app.services.model_family_training_payloads import (
 )
 from app.services.model_family_training_reports import initial_baseline_report, return_stats
 from app.services.model_family_torch_backend import TorchSequenceBackend
+from app.services.trading_costs import default_backtest_cost_config, roundtrip_cost_rate
 
 DatasetBuilder = Callable[[ModelFamilyTrainingConfig], LstmDataset]
 
@@ -199,6 +201,11 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version, 
         "promotionReason": promotion_reason(status, gate),
         "losses": losses,
         "returnStats": return_stats(dataset.future_returns),
+        "featureColumns": dataset.feature_columns,
+        "explicitFactorComboFeatures": _factor_combo_report(dataset),
+        "simFeedback": dataset.sim_feedback_metadata or {"enabled": False},
+        "dataQuality": dataset.data_quality_report or {"status": "unknown"},
+        "tradingCosts": _trading_cost_report(),
         "splitPolicy": "chronological_train_validation_test_no_shuffle",
         "testEvaluationPolicy": "final_candidate_only" if not evaluate_test else "evaluated",
         "probabilitySource": "calibrated_platt" if calibrator.get("status") == "fitted" else "raw_uncalibrated",
@@ -227,6 +234,22 @@ def _predict_backend(backend, model_path: Path, x: np.ndarray) -> np.ndarray:
     if hasattr(backend, "predict_trained"):
         return backend.predict_trained(x)
     return backend.predict(model_path, x)
+
+
+def _factor_combo_report(dataset: LstmDataset) -> dict[str, Any]:
+    columns = [column for column in dataset.feature_columns if column.startswith("factor_combo_")]
+    metadata = dataset.factor_combo_metadata or {"enabled": False}
+    return {**metadata, "included": bool(columns), "columns": columns}
+
+
+def _trading_cost_report() -> dict[str, Any]:
+    config = default_backtest_cost_config()
+    return {
+        "feeRatePerSide": float(config.fee_rate_per_side),
+        "slippageRatePerSide": float(config.slippage_rate_per_side),
+        "roundtripCostRate": float(roundtrip_cost_rate(config)),
+        "minTradeGapMinutes": int(config.min_trade_gap_minutes),
+    }
 
 
 def _default_backend(cfg: ModelFamilyTrainingConfig):

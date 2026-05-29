@@ -6,9 +6,10 @@ from typing import Any
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY, STAGE_ENSEMBLE_READY
 from app.services.rule_config import DURATION_TO_MINUTES
+from app.services.runtime_symbols import DEFAULT_RUNTIME_SYMBOLS
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, strategy_definition
 
-DEFAULT_SYMBOL = "BTCUSDT"
+DEFAULT_SYMBOL = DEFAULT_RUNTIME_SYMBOLS[0]
 DEFAULT_DURATION = "10m"
 DEFAULT_DURATION_MINUTES = 10
 DEFAULT_QTY = 5.0
@@ -19,16 +20,16 @@ def write_settings(conn: Any, settings: AutoTradeSettings) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO auto_trade_strategies(
-          strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+          strategy_key, symbol, duration, enabled, live_trading_enabled, duration_minutes, qty, updated_at
         )
         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             settings.strategy_key,
+            settings.symbol,
             settings.duration,
             int(settings.enabled),
             int(settings.live_trading_enabled),
-            settings.symbol,
             settings.duration_minutes,
             settings.qty,
             datetime.now(timezone.utc).isoformat(),
@@ -48,12 +49,16 @@ def settings_from_row(row: Any) -> AutoTradeSettings:
     )
 
 
-def default_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, duration: str = DEFAULT_DURATION) -> AutoTradeSettings:
+def default_settings(
+    strategy_key: str = DEFAULT_STRATEGY_KEY,
+    duration: str = DEFAULT_DURATION,
+    symbol: str = DEFAULT_SYMBOL,
+) -> AutoTradeSettings:
     minutes = int(DURATION_TO_MINUTES.get(duration, DEFAULT_DURATION_MINUTES))
     return AutoTradeSettings(
         strategy_key=strategy_key,
         enabled=False,
-        symbol=DEFAULT_SYMBOL,
+        symbol=symbol.strip().upper(),
         duration=duration,
         duration_minutes=minutes,
         qty=DEFAULT_QTY,
@@ -88,13 +93,14 @@ def payload_durations(payload: dict[str, Any]) -> list[str]:
     return [duration for duration in AUTO_TRADE_SLOT_DURATIONS if duration in set(durations)]
 
 
-def ensemble_ranker_settings(conn: Any, by_pair: dict[tuple[str, str], Any]) -> list[AutoTradeSettings]:
+def ensemble_ranker_settings(conn: Any, by_slot: dict[tuple[str, str, str], Any], symbols: tuple[str, ...]) -> list[AutoTradeSettings]:
     if not ensemble_ranker_visible(conn):
         return []
     return [
-        settings_from_row(row) if row is not None else default_settings(ENSEMBLE_RANKER_STRATEGY_KEY, duration)
+        settings_from_row(row) if row is not None else default_settings(ENSEMBLE_RANKER_STRATEGY_KEY, duration, symbol)
+        for symbol in symbols
         for duration in AUTO_TRADE_SLOT_DURATIONS
-        for row in [by_pair.get((ENSEMBLE_RANKER_STRATEGY_KEY, duration))]
+        for row in [by_slot.get((ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration))]
     ]
 
 

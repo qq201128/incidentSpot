@@ -1,1 +1,1 @@
-set "PYTHONPATH=D:\Desktop\incidentSpot\backend" && python .\scripts\run_model_family_full_search.py --symbol BTCUSDT --durations 10m 30m 60m 1d --profile full --parallel-workers 10 --target-workers 2
+cd /d D:\Desktop\incidentSpot\backend && set "PYTHONPATH=D:\Desktop\incidentSpot\backend" && python .\scripts\run_model_family_full_search.py --symbols BTCUSDT,ETHUSDT --durations 10m 30m 60m 1d --profile full --parallel-workers 5 --target-workers 2 --reset-history --progress-interval 15

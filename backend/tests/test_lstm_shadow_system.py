@@ -19,6 +19,7 @@ from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import factor_combo_shadow_strategy_key
 from app.services.lstm_config import LstmTrainingConfig, lstm_shadow_strategy_key
 from app.services.lstm_feature_builder import LstmDataset, candidate_feature_columns, duration_labeled_frame
+from app.services.model_family_config import ModelFamilyTrainingConfig
 from app.services.lstm_prediction_service import predict_lstm_signal
 from app.services.lstm_training_service import train_lstm_model
 from app.services.rule_config import DURATION_TO_MINUTES
@@ -57,6 +58,23 @@ def test_duration_labeled_frame_uses_custom_horizon_minutes() -> None:
     assert set(one_bar["label_up"]) == {1.0}
     assert set(two_bar["label_up"]) == {1.0}
     assert two_bar["open_time"].iloc[-1] == 27 * 10 * 60_000
+
+
+def test_label_mutating_future_kline_does_not_change_current_features() -> None:
+    frame = pd.DataFrame({
+        "open_time": np.arange(12) * 600_000,
+        "close": np.full(12, 100.0),
+        "feature_a": np.arange(12, dtype=float),
+    })
+    changed = frame.copy()
+    changed.loc[5, "close"] = 150.0
+
+    base = duration_labeled_frame(frame, "10m", 50, 0.0)
+    mutated = duration_labeled_frame(changed, "10m", 50, 0.0)
+
+    assert mutated.loc[0, "feature_a"] == base.loc[0, "feature_a"]
+    assert mutated.loc[0, "close"] == base.loc[0, "close"]
+    assert mutated.loc[0, "future_return"] != base.loc[0, "future_return"]
 
 
 def test_duration_labeled_frame_rejects_unaligned_horizon_minutes() -> None:
@@ -216,9 +234,58 @@ def test_build_lstm_training_dataset_excludes_loss_memory_features(monkeypatch) 
     assert "vol_std_20" in dataset.feature_columns
     assert "factor_learning_top_weight_sum" in dataset.feature_columns
     assert "lstm_regime_trend_score" in dataset.feature_columns
+    assert "sim_feedback_win_rate" in dataset.feature_columns
     assert "momentum_10" not in dataset.feature_columns
     assert "combo_top1_score" not in dataset.feature_columns
     assert "label_threshold_bps" not in dataset.feature_columns
+
+
+def test_model_family_training_requires_historical_combo_snapshots(monkeypatch) -> None:
+    frame = _training_frame()
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_learning_memory_for", lambda *_args: None)
+    monkeypatch.setattr(lstm_feature_builder, "build_lstm_market_feature_frame", lambda *_args, **_kwargs: frame)
+    monkeypatch.setattr(lstm_feature_builder, "attach_sim_feedback_features", _empty_sim_feedback)
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_combo_feature_snapshots", lambda *_args: [])
+
+    with pytest.raises(ValueError, match="historical factor combo feature snapshots"):
+        lstm_feature_builder.build_lstm_training_dataset(
+            ModelFamilyTrainingConfig(
+                family="xgboost",
+                symbol="BTCUSDT",
+                duration="10m",
+                feature_window=8,
+                horizon_minutes=10,
+                min_samples=20,
+                epochs=1,
+            ),
+            frame_loader=lambda *_args: frame,
+        )
+
+
+def test_factor_combo_features_enter_model_family_training_matrix(monkeypatch) -> None:
+    frame = _training_frame()
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_learning_memory_for", lambda *_args: None)
+    monkeypatch.setattr(lstm_feature_builder, "build_lstm_market_feature_frame", lambda *_args, **_kwargs: frame)
+    monkeypatch.setattr(lstm_feature_builder, "attach_sim_feedback_features", _empty_sim_feedback)
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_combo_feature_snapshots", _combo_feature_snapshots)
+
+    dataset = lstm_feature_builder.build_lstm_training_dataset(
+        ModelFamilyTrainingConfig(
+            family="xgboost",
+            symbol="BTCUSDT",
+            duration="10m",
+            feature_window=8,
+            horizon_minutes=10,
+            min_samples=20,
+            epochs=1,
+        ),
+        frame_loader=lambda *_args: frame,
+    )
+
+    assert "factor_combo_top1_score" in dataset.feature_columns
+    assert "factor_combo_direction_vote" in dataset.feature_columns
+    assert dataset.factor_combo_metadata["source"] == "historical_replay"
+    assert dataset.sim_feedback_metadata["settledCount"] == 0
 
 
 def test_train_lstm_model_writes_separate_artifacts() -> None:
@@ -388,6 +455,48 @@ def _combo_ranking() -> dict:
             {"factorName": "combo_c", "members": [{"name": "factor_c"}]},
         ],
     }
+
+
+def _combo_feature_snapshots(*_args) -> list[dict]:
+    snapshots = []
+    for index in range(1, 39):
+        snapshots.append(
+            {
+                "entryOpenTime": index * 600_000,
+                "previousTopFactorName": "goal_combo__old" if index == 1 else "goal_combo__alpha",
+                "ranking": [
+                    {
+                        "factorName": "goal_combo__alpha",
+                        "direction": "up",
+                        "factorScore": 90.0 + index,
+                        "winRate": 0.7,
+                        "profitFactor": 2.0,
+                        "ir": 1.2,
+                        "totalPeriods": 80,
+                        "members": [{"name": "factor_a", "orientation": 1}, {"name": "factor_b", "orientation": 1}],
+                    },
+                    {
+                        "factorName": "goal_combo__beta",
+                        "direction": "down",
+                        "factorScore": 70.0,
+                        "winRate": 0.62,
+                        "profitFactor": 1.4,
+                        "ir": 0.8,
+                        "totalPeriods": 55,
+                        "members": [{"name": "factor_c", "orientation": -1}],
+                    },
+                ],
+            }
+        )
+    return snapshots
+
+
+def _empty_sim_feedback(labeled: pd.DataFrame, *_args, **_kwargs) -> pd.DataFrame:
+    out = labeled.copy()
+    out["sim_feedback_win_rate"] = 0.5
+    out["sim_feedback_settled_count"] = 0.0
+    out.attrs["simFeedbackMetadata"] = {"enabled": True, "settledCount": 0, "neutralFeaturesUsed": True}
+    return out
 
 
 def _create_prediction_db(path: Path) -> None:

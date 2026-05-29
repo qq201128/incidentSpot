@@ -128,7 +128,7 @@ def test_candidate_signals_affect_stage_coverage(monkeypatch, tmp_path: Path) ->
     candidate_key = factor_candidate_signal_key("rsi_14")
     _insert_predictions(db_path, candidate_key, 200, settled=True, label="rsi_14")
     _insert_predictions(db_path, FACTOR_COMBO_STRATEGY_KEY, 200, settled=True)
-    _insert_predictions(db_path, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, 200, settled=True)
+    _insert_predictions(db_path, f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top2", 200, settled=True)
     _insert_predictions(db_path, model_family_strategy_key("lstm", "10m"), 200, settled=True)
     _patch_db(monkeypatch, db_path)
 
@@ -205,8 +205,9 @@ def test_confirm_ensemble_ready_exposes_all_strategy_slots(monkeypatch, tmp_path
         item for item in auto_trade_service.list_auto_trade_settings()
         if item.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY
     ]
-    assert [slot.duration for slot in slots] == ["10m", "30m", "60m", "1d"]
-    assert [slot.enabled for slot in slots] == [True, False, False, False]
+    btc_slots = [slot for slot in slots if slot.symbol == "BTCUSDT"]
+    assert [slot.duration for slot in btc_slots] == ["10m", "30m", "60m", "1d"]
+    assert [slot.enabled for slot in btc_slots] == [True, False, False, False]
     assert all(slot.live_trading_enabled is False for slot in slots)
 
 
@@ -257,7 +258,7 @@ def test_forward_validation_settles_ensemble_predictions(monkeypatch, tmp_path: 
 def _major_keys() -> tuple[str, str, str]:
     return (
         FACTOR_COMBO_STRATEGY_KEY,
-        HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+        f"{HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY}_top2",
         model_family_strategy_key("lstm", "10m"),
         factor_candidate_signal_key("rsi_14"),
     )
@@ -293,9 +294,9 @@ def _init_db(path: Path) -> None:
               score REAL, updated_at TEXT, PRIMARY KEY(symbol, duration, signal_key)
             );
             CREATE TABLE auto_trade_strategies(
-              strategy_key TEXT, duration TEXT, enabled INTEGER, live_trading_enabled INTEGER,
-              symbol TEXT, duration_minutes INTEGER, qty REAL, updated_at TEXT,
-              PRIMARY KEY(strategy_key, duration)
+              strategy_key TEXT, symbol TEXT, duration TEXT, enabled INTEGER, live_trading_enabled INTEGER,
+              duration_minutes INTEGER, qty REAL, updated_at TEXT,
+              PRIMARY KEY(strategy_key, symbol, duration)
             );
             """
         )
@@ -340,7 +341,7 @@ def _insert_prediction_conn(
     *,
     label: str | None = None,
 ) -> None:
-    display = label or strategy_key
+    display = label if label is not None else _display_label(strategy_key)
     actual_return = 0.01 if settled else None
     conn.execute(
         """
@@ -362,6 +363,14 @@ def _insert_prediction_conn(
             "done" if settled else None,
         ),
     )
+
+
+def _display_label(strategy_key: str) -> str | None:
+    if strategy_key == factor_candidate_signal_key("rsi_14"):
+        return "rsi_14"
+    if strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
+        return "ensemble"
+    return None
 
 
 def _insert_score(path: Path, strategy_key: str) -> None:

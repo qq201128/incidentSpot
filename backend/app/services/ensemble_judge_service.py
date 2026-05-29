@@ -249,21 +249,21 @@ def _ensure_ensemble_strategy_slots(conn: Any, symbol: str, confirmed_duration: 
         conn.execute(
             """
             INSERT OR IGNORE INTO auto_trade_strategies(
-              strategy_key, duration, enabled, live_trading_enabled,
-              symbol, duration_minutes, qty, updated_at
+              strategy_key, symbol, duration, enabled, live_trading_enabled,
+              duration_minutes, qty, updated_at
             )
-            VALUES(?, ?, ?, 0, ?, ?, 5, ?)
+            VALUES(?, ?, ?, ?, 0, ?, 5, ?)
             """,
-            (ENSEMBLE_RANKER_STRATEGY_KEY, duration, enabled, symbol, DURATION_TO_MINUTES[duration], now),
+            (ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration, enabled, DURATION_TO_MINUTES[duration], now),
         )
         if enabled:
             conn.execute(
                 """
                 UPDATE auto_trade_strategies
-                SET enabled = 1, live_trading_enabled = 0, symbol = ?, updated_at = ?
-                WHERE strategy_key = ? AND duration = ?
+                SET enabled = 1, live_trading_enabled = 0, updated_at = ?
+                WHERE strategy_key = ? AND symbol = ? AND duration = ?
                 """,
-                (symbol, now, ENSEMBLE_RANKER_STRATEGY_KEY, duration),
+                (now, ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration),
             )
 
 

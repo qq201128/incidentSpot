@@ -332,6 +332,32 @@ def test_candidate_training_withholds_test_set_during_search(monkeypatch) -> Non
     assert report["searchStage"] == "coarse"
 
 
+def test_model_family_report_includes_training_input_observability(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(
+        family="knn",
+        symbol="BTCUSDT",
+        duration="10m",
+        feature_window=8,
+        min_samples=30,
+        epochs=1,
+    )
+
+    report = train_model_family(
+        config,
+        artifact_root=tmp_path,
+        backend=_LowConfidenceBackend(),
+        dataset_builder=_observable_dataset,
+        publish_initial_baseline=True,
+    )
+
+    assert report["featureColumns"] == ["a", "factor_combo_top1_score", "sim_feedback_win_rate"]
+    assert report["explicitFactorComboFeatures"]["included"] is True
+    assert report["explicitFactorComboFeatures"]["source"] == "historical_replay"
+    assert report["simFeedback"]["settledCount"] == 0
+    assert report["dataQuality"]["status"] == "passed"
+    assert report["tradingCosts"]["roundtripCostRate"] >= 0.0
+
+
 def test_candidate_score_uses_validation_not_test() -> None:
     strong_validation_bad_test = _report("trade_active", 0.80, 1)
     weak_validation_good_test = _report("trade_active", 0.60, 2)
@@ -428,4 +454,26 @@ def _fake_dataset(config: ModelFamilyTrainingConfig) -> LstmDataset:
         feature_columns=["a", "b"],
         feature_frame=pd.DataFrame({"a": np.zeros(sample_count), "b": np.zeros(sample_count)}),
         combo_snapshot=[{"rank": 1, "key": "combo"}],
+    )
+
+
+def _observable_dataset(config: ModelFamilyTrainingConfig) -> LstmDataset:
+    base = _fake_dataset(config)
+    return LstmDataset(
+        x=base.x,
+        y=base.y,
+        future_returns=base.future_returns,
+        entry_open_times=base.entry_open_times,
+        feature_columns=["a", "factor_combo_top1_score", "sim_feedback_win_rate"],
+        feature_frame=pd.DataFrame({"a": np.zeros(len(base.y))}),
+        combo_snapshot=base.combo_snapshot,
+        learning_context={},
+        data_quality_report={"status": "passed", "features": {"featureColumnCount": 3}},
+        sim_feedback_metadata={"enabled": True, "settledCount": 0, "neutralFeaturesUsed": True},
+        factor_combo_metadata={
+            "enabled": True,
+            "source": "historical_replay",
+            "snapshotCount": 400,
+            "missingRate": 0.0,
+        },
     )

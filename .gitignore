@@ -43,6 +43,7 @@ frontend/dist/
 *.log
 logs/
 runtime/
+model_family_*_logs/
 
 # --- SQLite（勿提交；否则 Git 历史会再次膨胀） ---
 backend/data.db
@@ -59,6 +60,10 @@ backend/models/factor_learning/
 
 # --- 回测/报告产物（本地生成，勿提交） ---
 **/reports/
+# 手动 --output 到仓库根目录的符号级产物（如 ethusdt_high_winrate_goal.json）
+*_factor_backtests.json
+*_high_winrate_goal*.json
+*_high_winrate_library*.json
 
 # --- OS ---
 .DS_Store

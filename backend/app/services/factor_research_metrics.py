@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 from scipy import stats
+from numpy.lib.stride_tricks import sliding_window_view
 
 QUINTILE_COUNT = 5
 IC_ROLLING_WINDOW = 20
@@ -20,16 +21,26 @@ def ic_metrics(ic_series: pd.Series) -> dict[str, float | None]:
 
 def compute_rolling_ic(factor: pd.Series, fwd_ret: pd.Series) -> pd.Series:
     values = pd.DataFrame({"factor": factor, "fwd_ret": fwd_ret}).replace([np.inf, -np.inf], np.nan)
-    correlations: list[float] = []
-    indices = []
-    for end in range(IC_ROLLING_WINDOW - 1, len(values)):
-        window = values.iloc[end - IC_ROLLING_WINDOW + 1:end + 1].dropna()
-        corr = window_spearman_ic(window)
-        if corr is None:
-            continue
-        correlations.append(corr)
-        indices.append(values.index[end])
-    return pd.Series(correlations, index=indices, dtype=float)
+    values = values.dropna()
+    if len(values) < IC_ROLLING_WINDOW:
+        return pd.Series(dtype=float)
+
+    factor_windows = sliding_window_view(values["factor"].to_numpy(dtype=float), IC_ROLLING_WINDOW)
+    return_windows = sliding_window_view(values["fwd_ret"].to_numpy(dtype=float), IC_ROLLING_WINDOW)
+    factor_ranks = stats.rankdata(factor_windows, axis=1, method="average")
+    return_ranks = stats.rankdata(return_windows, axis=1, method="average")
+    correlations = _rowwise_correlation(factor_ranks, return_ranks)
+    index = values.index[IC_ROLLING_WINDOW - 1 :]
+    return pd.Series(correlations, index=index).replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def _rowwise_correlation(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    left_centered = left - left.mean(axis=1, keepdims=True)
+    right_centered = right - right.mean(axis=1, keepdims=True)
+    numerator = np.sum(left_centered * right_centered, axis=1)
+    denominator = np.sqrt(np.sum(left_centered**2, axis=1) * np.sum(right_centered**2, axis=1))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return numerator / denominator
 
 
 def window_spearman_ic(window: pd.DataFrame) -> float | None:

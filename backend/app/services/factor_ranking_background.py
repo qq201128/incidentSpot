@@ -71,6 +71,7 @@ def _save_ranking_report(symbol: str, duration: str) -> None:
 
 def refresh_all_configured_rankings() -> None:
     symbols = factor_ranking_precomputed_symbols()
+    logger.info("factor ranking refresh configured symbols=%s", symbols)
     for sym in symbols:
         try:
             refresh_symbol_rankings(sym, None)

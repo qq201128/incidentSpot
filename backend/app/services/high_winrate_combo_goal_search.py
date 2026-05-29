@@ -31,6 +31,13 @@ from app.services.high_winrate_combo_goal_utils import (
 )
 from app.services.high_winrate_combo_goal_types import ComboHit, OrientedScore, RankedSearch, ScoreSearch
 from app.services import high_winrate_combo_goal_diagnostics as diag
+from app.services.high_winrate_combo_thresholds import (
+    best_threshold_hit,
+    best_threshold_hit_with_diagnostics,
+    combo_score_array,
+    threshold_frame,
+    threshold_hit_result,
+)
 
 TARGET_WIN_RATE = 0.62
 TARGET_COUNT = 5
@@ -128,19 +135,36 @@ def ranked_hit_search(
     payload["selectionMode"] = "train_threshold_validation_combo_v1"
     payload["nestedSplit"] = _nested_split_payload(frame, split)
     payload["testedValidationEvaluations"] = 0
+    train_threshold_frame = threshold_frame(split["train"], scores)
+    validation_threshold_frame = threshold_frame(split["validation"], scores)
     for size in COMBO_SIZES:
         for members in combinations(names, size):
-            train_best = best_combo_hit_with_diagnostics(split["train"], members, scores, payload, cfg, min_trades=train_min_trades)
+            payload["testedCombinations"] += 1
+            orientations = tuple(scores[name].orientation for name in members)
+            train_score = combo_score_array(members, train_threshold_frame)
+            train_best = best_threshold_hit_with_diagnostics(
+                members,
+                orientations,
+                train_score,
+                train_threshold_frame.index,
+                train_threshold_frame,
+                cfg.signal_thresholds,
+                payload,
+                min_win_rate=TARGET_WIN_RATE,
+                min_trades=train_min_trades,
+            )
             if train_best is None:
                 continue
-            validation_hit, rejected = combo_hit_result(
-                split["validation"],
+            validation_score = combo_score_array(members, validation_threshold_frame)
+            validation_hit, rejected = threshold_hit_result(
                 members,
-                train_best.orientations,
-                train_best.score,
+                orientations,
+                validation_score,
+                validation_threshold_frame.index,
+                validation_threshold_frame,
                 train_best.threshold,
-                cfg,
                 min_trades=min(cfg.min_trades, NESTED_VALIDATION_MIN_TRADES),
+                min_win_rate=TARGET_WIN_RATE,
             )
             payload["testedValidationEvaluations"] += 1
             diag.record_combo_gate_result(payload, validation_hit, rejected)
@@ -166,9 +190,19 @@ def search_candidate_names(
     min_trades: int | None = None,
 ) -> list[str]:
     cfg = validated_search_config(config)
+    search_data = threshold_frame(frame, scores)
     hits = [
         row for row in (
-            best_combo_hit(frame, (name,), scores, min_win_rate=0.0, min_trades=min_trades or cfg.min_trades, config=cfg)
+            best_threshold_hit(
+                (name,),
+                (scores[name].orientation,),
+                search_data.scores[name],
+                search_data.index,
+                search_data,
+                cfg.signal_thresholds,
+                min_win_rate=0.0,
+                min_trades=min_trades or cfg.min_trades,
+            )
             for name in scores
         )
         if row is not None

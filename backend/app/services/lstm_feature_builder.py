@@ -1,51 +1,44 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from math import isfinite
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from app.services.factor_duration_alignment import duration_entry_rows, duration_entry_source_open_time
-from app.services.factor_learning_controls import (
-    learning_risk_blocked_factor_names,
-    load_factor_learning_memory_for,
+from app.services.factor_learning_controls import load_factor_learning_memory_for
+from app.services.lstm_data_quality import (
+    feature_column_quality,
+    validate_duration_source_frame,
+    validate_labeled_frame,
+)
+from app.services.lstm_factor_combo_features import (
+    FACTOR_COMBO_FEATURE_PREFIX,
+    attach_live_factor_combo_features,
+    attach_training_factor_combo_features,
+    load_factor_combo_feature_snapshots,
 )
 from app.services.lstm_combo_ranking import resolve_lstm_combo_ranking
 from app.services.lstm_combo_snapshot import combo_snapshot_from_ranking
 from app.services.lstm_config import LstmTrainingConfig
+from app.services.lstm_dataset_core import (
+    LstmDataError,
+    LstmDataset,
+    _assert_columns,
+    candidate_feature_columns,
+    sanitize_feature_window,
+    windowed_lstm_dataset,
+)
 from app.services.lstm_market_feature_builder import (
     build_lstm_market_feature_frame,
     load_lstm_market_frame,
     lstm_learning_context,
 )
 from app.services.rule_config import horizon_minutes_for_duration
+from app.services.sim_feedback_features import attach_sim_feedback_features
 
 MS_PER_MINUTE = 60_000
-MIN_FEATURE_FINITE_RATIO = 0.95
-RAW_COMBO_PREFIXES = ("combo__", "goal_combo__")
-DERIVED_COMBO_PREFIX = "combo_top"
-BASE_EXCLUDED_COLUMNS = {
-    "open_time", "entry_open_time", "open", "high", "low", "close", "volume",
-    "future_return", "future_return_bps", "future_return_abs_bps", "label_threshold_bps",
-    "label_up", "y",
-}
-
-class LstmDataError(ValueError):
-    pass
-
-@dataclass(frozen=True)
-class LstmDataset:
-    x: np.ndarray
-    y: np.ndarray
-    future_returns: np.ndarray
-    entry_open_times: np.ndarray
-    feature_columns: list[str]
-    feature_frame: pd.DataFrame
-    combo_snapshot: list[dict[str, Any]]
-    learning_context: dict[str, Any] | None = None
 
 def build_lstm_training_dataset(
     config: LstmTrainingConfig,
@@ -58,9 +51,29 @@ def build_lstm_training_dataset(
         config.symbol,
         config.duration,
     )
+    model_family = getattr(config, "family", None)
     frame = _training_feature_frame(config, frame_loader, memory)
+    source_quality = validate_duration_source_frame(frame, config.duration)
     labeled = duration_labeled_frame(frame, config.duration, _horizon_minutes(config), config.min_move_bps)
+    label_quality = validate_labeled_frame(labeled, config.duration)
+    labeled, sim_metadata = _attach_sim_feedback_with_metadata(
+        labeled,
+        config.symbol,
+        config.duration,
+        model_family=model_family,
+    )
+    factor_combo_metadata = None
+    if model_family:
+        combo_result = attach_training_factor_combo_features(
+            labeled,
+            config.symbol,
+            config.duration,
+            snapshots_loader=load_factor_combo_feature_snapshots,
+        )
+        labeled = combo_result.frame
+        factor_combo_metadata = combo_result.metadata
     columns = candidate_feature_columns(labeled, learning_memory=memory)
+    quality = _data_quality_report(source_quality, label_quality, columns)
     return windowed_lstm_dataset(
         labeled,
         columns,
@@ -68,14 +81,10 @@ def build_lstm_training_dataset(
         config.min_samples,
         combo_snapshot=_legacy_combo_snapshot(config.symbol, config.duration, ranking_loader),
         learning_context=lstm_learning_context(memory),
+        data_quality_report=quality,
+        sim_feedback_metadata=sim_metadata,
+        factor_combo_metadata=factor_combo_metadata,
     )
-
-def sanitize_feature_window(window: np.ndarray) -> np.ndarray:
-    """Replace NaN/inf in a live feature window; pct_change and sparse inputs can leave edge infs."""
-    cleaned = np.asarray(window, dtype=np.float32)
-    if np.isfinite(cleaned).all():
-        return cleaned
-    return np.nan_to_num(cleaned, nan=0.0, posinf=0.0, neginf=0.0)
 
 def build_live_feature_window(
     symbol: str,
@@ -84,12 +93,21 @@ def build_live_feature_window(
     feature_window: int,
     entry_open_time: int | None = None,
     combo_snapshot: list[dict[str, Any]] | None = None,
+    model_family: str | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     del combo_snapshot
     sym = symbol.strip().upper()
     memory = load_factor_learning_memory_for(sym, duration)
     frame = load_lstm_market_frame(sym, duration, learning_memory=memory)
     sampled = duration_feature_frame(frame, duration, entry_open_time)
+    if _needs_factor_combo_features(feature_columns):
+        sampled = attach_live_factor_combo_features(sampled, sym, duration).frame
+    sampled, _metadata = _attach_sim_feedback_with_metadata(
+        sampled,
+        sym,
+        duration,
+        model_family=model_family,
+    )
     _assert_columns(sampled, feature_columns)
     if len(sampled) < feature_window:
         raise LstmDataError(f"insufficient LSTM feature rows: {len(sampled)} < {feature_window}")
@@ -131,56 +149,30 @@ def duration_feature_frame(
         _assert_live_entry_row(sampled, int(entry_open_time), duration)
     return sampled
 
-def candidate_feature_columns(
+def _attach_sim_feedback_with_metadata(
     frame: pd.DataFrame,
-    learning_memory: dict[str, Any] | None = None,
-) -> list[str]:
-    return candidate_feature_columns_for_memory(frame, learning_memory)
-
-def candidate_feature_columns_for_memory(
-    frame: pd.DataFrame,
-    learning_memory: dict[str, Any] | None,
-) -> list[str]:
-    blocked = learning_risk_blocked_factor_names(learning_memory)
-    columns = []
-    for column in frame.columns:
-        name = str(column)
-        if not _is_candidate_feature_column(name):
-            continue
-        if name in blocked:
-            continue
-        if pd.api.types.is_numeric_dtype(frame[column]) and _column_is_finite_enough(frame[column]):
-            columns.append(name)
-    if not columns:
-        raise LstmDataError("no numeric LSTM feature columns")
-    return columns
-
-def windowed_lstm_dataset(
-    frame: pd.DataFrame,
-    feature_columns: list[str],
-    feature_window: int,
-    min_samples: int,
+    symbol: str,
+    duration: str,
     *,
-    combo_snapshot: list[dict[str, Any]] | None = None,
-    learning_context: dict[str, Any] | None = None,
-) -> LstmDataset:
-    _assert_columns(frame, feature_columns)
-    values = frame[feature_columns].to_numpy(dtype=np.float32)
-    labels = frame["label_up"].to_numpy(dtype=np.float32)
-    returns = frame["future_return"].to_numpy(dtype=np.float32)
-    x, y, future_returns, entry_times = _window_arrays(frame, values, labels, returns, feature_window)
-    if len(x) < min_samples:
-        raise LstmDataError(f"insufficient LSTM samples: {len(x)} < {min_samples}")
-    return LstmDataset(
-        x,
-        y,
-        future_returns,
-        entry_times,
-        feature_columns,
-        frame,
-        combo_snapshot or [],
-        learning_context,
-    )
+    model_family: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    enriched = attach_sim_feedback_features(frame, symbol, duration, model_family=model_family)
+    return enriched, dict(enriched.attrs.get("simFeedbackMetadata") or {})
+
+def _data_quality_report(
+    source_quality: dict[str, Any],
+    label_quality: dict[str, Any],
+    columns: list[str],
+) -> dict[str, Any]:
+    return {
+        "status": "passed",
+        "sourceAlignment": source_quality,
+        "labels": label_quality,
+        "features": feature_column_quality(columns),
+    }
+
+def _needs_factor_combo_features(feature_columns: list[str]) -> bool:
+    return any(column.startswith(FACTOR_COMBO_FEATURE_PREFIX) for column in feature_columns)
 
 def _training_feature_frame(
     config: LstmTrainingConfig,
@@ -250,46 +242,5 @@ def _label_series(future_return: pd.Series, threshold: float | pd.Series) -> pd.
     labels = labels.mask(future_return <= -threshold, 0.0)
     return labels
 
-def _window_arrays(
-    frame: pd.DataFrame,
-    values: np.ndarray,
-    labels: np.ndarray,
-    returns: np.ndarray,
-    feature_window: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    x, y, future_returns, entry_times = [], [], [], []
-    for end in range(feature_window - 1, len(frame)):
-        window = values[end - feature_window + 1:end + 1]
-        if _valid_sample(window, labels[end], returns[end]):
-            x.append(window)
-            y.append(labels[end])
-            future_returns.append(returns[end])
-            entry_times.append(int(frame.iloc[end]["entry_open_time"]))
-    return (
-        np.asarray(x, dtype=np.float32),
-        np.asarray(y, dtype=np.float32),
-        np.asarray(future_returns, dtype=np.float32),
-        np.asarray(entry_times, dtype=np.int64),
-    )
-
-def _column_is_finite_enough(values: pd.Series) -> bool:
-    finite = np.isfinite(values.to_numpy(dtype=np.float32)).mean()
-    return float(finite) >= MIN_FEATURE_FINITE_RATIO
-
 def _label_threshold_bps(frame: pd.DataFrame, min_move_bps: float) -> pd.Series:
     return pd.Series(float(min_move_bps), index=frame.index, dtype=np.float32)
-
-def _valid_sample(window: np.ndarray, label: float, future_return: float) -> bool:
-    return bool(np.isfinite(window).all() and isfinite(float(label)) and isfinite(float(future_return)))
-
-def _assert_columns(frame: pd.DataFrame, columns: list[str]) -> None:
-    missing = [column for column in columns if column not in frame.columns]
-    if missing:
-        raise LstmDataError(f"LSTM feature columns missing: {', '.join(missing[:12])}")
-
-def _is_candidate_feature_column(column: str) -> bool:
-    if column in BASE_EXCLUDED_COLUMNS:
-        return False
-    if column.startswith(DERIVED_COMBO_PREFIX):
-        return False
-    return not column.startswith(RAW_COMBO_PREFIXES)

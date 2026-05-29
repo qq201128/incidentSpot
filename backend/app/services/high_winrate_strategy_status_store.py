@@ -139,21 +139,21 @@ def public_status(row: dict[str, Any], symbol: str, duration: str) -> dict[str, 
 
 
 def set_strategy_slot(conn: Any, symbol: str, duration: str, *, enabled: bool, live_trading_enabled: bool | None) -> None:
-    row = strategy_slot(conn, duration)
+    row = strategy_slot(conn, symbol, duration)
     live_enabled = live_enabled_for_row(row, live_trading_enabled)
     conn.execute(
         """
         INSERT OR REPLACE INTO auto_trade_strategies(
-          strategy_key, duration, enabled, live_trading_enabled, symbol, duration_minutes, qty, updated_at
+          strategy_key, symbol, duration, enabled, live_trading_enabled, duration_minutes, qty, updated_at
         )
         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
+            symbol,
             duration,
             int(enabled),
             int(live_enabled),
-            symbol,
             int(DURATION_TO_MINUTES[duration]),
             float(row["qty"]) if row else DEFAULT_QTY,
             utc_now(),
@@ -168,14 +168,14 @@ def sync_strategy_slot_for_status(conn: Any, symbol: str, duration: str, status:
     set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=False)
 
 
-def strategy_slot(conn: Any, duration: str) -> Any | None:
+def strategy_slot(conn: Any, symbol: str, duration: str) -> Any | None:
     return conn.execute(
         """
         SELECT qty, live_trading_enabled
         FROM auto_trade_strategies
-        WHERE strategy_key = ? AND duration = ?
+        WHERE strategy_key = ? AND symbol = ? AND duration = ?
         """,
-        (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, duration),
+        (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, symbol, duration),
     ).fetchone()
 
 
