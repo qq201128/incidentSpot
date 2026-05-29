@@ -18,6 +18,10 @@ New-Item -ItemType Directory -Path $baseTemp -Force | Out-Null
 
 Push-Location $scriptDir
 try {
+    & $venvPython "scripts\agents_quality_gate.py" "--root" $projectRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "AGENTS quality gate failed with exit code $LASTEXITCODE"
+    }
     & $venvPython -m pytest "--basetemp=$baseTemp" @args
     if ($LASTEXITCODE -ne 0) {
         throw "Backend pytest failed with exit code $LASTEXITCODE"

@@ -55,5 +55,7 @@ def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPat
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["overallAccuracy"] == 0.64
+    assert payload["trainingRules"]["targetWinRateExclusive"] == 0.62
+    assert "> 62%" in payload["trainingRules"]["text"]
     assert len(payload["models"]) == 10
     assert payload["agentCandidates"][0]["factorName"]

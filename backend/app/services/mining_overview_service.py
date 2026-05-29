@@ -7,6 +7,7 @@ from app.services.factor_learning_service import get_factor_learning_memory
 from app.services.lstm_combo_snapshot import current_combo_snapshot
 from app.services.factor_operator_library import factor_operator_payload
 from app.services.model_family_status_service import model_family_status
+from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS, TARGET_WIN_RATE_EXCLUSIVE
 from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model, siliconflow_config_from_env
 from app.services.mining_agent_candidate_rows import (
     agent_candidate_rows as _agent_candidate_rows,
@@ -144,9 +145,11 @@ def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
     }
 
 def _training_rules_payload() -> dict[str, Any]:
+    target = int(TARGET_WIN_RATE_EXCLUSIVE * 100)
     return {
-        "text": "validation 与 test 胜率都必须 > 70%，全量 search grid 并行执行",
-        "parallelWorkers": 10,
+        "text": f"候选置信阈值下胜率必须严格 > {target}%，successive-halving 分阶段筛选",
+        "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
+        "parallelWorkers": DEFAULT_PARALLEL_WORKERS,
     }
 
 def _model_card(status: dict[str, Any]) -> dict[str, Any]:

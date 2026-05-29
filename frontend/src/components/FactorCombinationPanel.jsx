@@ -4,6 +4,7 @@ import {
   fetchFactorCombinationSignals,
   requestFactorCombinationRefresh,
 } from "../api/factorCombinations";
+import FactorPaperLiveCandidatePool from "./FactorPaperLiveCandidatePool";
 import FactorComboPositionsPanel from "./FactorComboPositionsPanel";
 import FactorCombinationRankingTable from "./FactorCombinationRankingTable";
 import FactorCombinationSignalGrid, { signalKey } from "./FactorCombinationSignalGrid";
@@ -207,6 +208,7 @@ function ComboPanelView(props) {
       {selectedSignal ? (
         <FactorComboPositionsPanel signal={selectedSignal} symbol={props.symbol} />
       ) : null}
+      <FactorPaperLiveCandidatePool symbol={props.symbol} duration={props.duration} />
       <FactorCombinationRankingTable
         highWinrateRanking={props.rankingState.highWinrateItems}
         highWinrateSummary={props.rankingState.highWinrateSummary}

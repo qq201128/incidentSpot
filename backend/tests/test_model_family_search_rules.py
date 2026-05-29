@@ -7,6 +7,9 @@ def test_model_family_rules_are_successive_halving() -> None:
     rules = model_family_training_rules("xgboost")
 
     assert rules["searchMode"] == "successive_halving"
+    assert rules["targetWinRateExclusive"] == 0.62
+    assert rules["requiresValidationAndTestAboveTarget"] is False
+    assert rules["selectionMetricSource"] == "validation_only"
     assert [stage["stage"] for stage in rules["successiveHalving"]] == ["coarse", "full", "walk_forward"]
     assert rules["successiveHalving"][0]["publishesArtifacts"] is False
     assert rules["successiveHalving"][-1]["publishesArtifacts"] is True

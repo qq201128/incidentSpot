@@ -40,7 +40,9 @@ def model_family_training_rules(family: str) -> dict[str, Any]:
         "searchSpaceTotal": len(grid),
         "parallelWorkers": DEFAULT_PARALLEL_WORKERS,
         "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
-        "requiresValidationAndTestAboveTarget": True,
+        "requiresValidationAndTestAboveTarget": False,
+        "selectionMetricSource": "validation_only",
+        "testPolicy": "reported_once_for_final_candidate_not_used_for_threshold_selection",
         "successiveHalving": _successive_halving_rules(),
         "candidateSearchAxes": _axes_for_family(selected),
     }

@@ -16,6 +16,8 @@ import {
 } from "./ModelFamilyBoardLabels";
 import "./ModelFamilyBoard.css";
 
+const DEFAULT_TARGET_WIN_RATE_EXCLUSIVE = 0.62;
+
 export default function ModelFamilyBoard({ families, onSearchCandidates, onRescanCandidates, searchStatus }) {
   if (!families.length) return <p className="factor-learning-empty small">模型族状态加载中</p>;
   const searchState = normalizedSearchState(searchStatus);
@@ -23,7 +25,7 @@ export default function ModelFamilyBoard({ families, onSearchCandidates, onResca
   return (
     <div className="factor-model-board">
       <div className="factor-model-board-head">
-        <span>训练规则：validation 与 test 胜率都必须 &gt; 70%，候选按 successive-halving 分阶段筛选。</span>
+        <span>{trainingRuleSummary(families)}</span>
         <button
           type="button"
           className="factor-lstm-search-button"
@@ -76,7 +78,7 @@ function ModelShadowCard({ shadow, onSearchCandidates, onRescanCandidates, searc
         <Metric label="候选库" value={library.total ?? "—"} />
         <Metric label="搜索空间" value={rules.searchSpaceTotal ?? progress.searchSpaceTotal ?? progress.total ?? "—"} />
         <Metric label="并发" value={rules.parallelWorkers ?? progress.parallelWorkers ?? "—"} />
-        <Metric label="胜率门槛" value=">70%" strong />
+        <Metric label="胜率门槛" value={targetWinRateLabel(rules)} strong />
         <Metric label="置信阈值" value={formatNum(shadow.selectedConfidenceThreshold, 2)} />
         <Metric label="依赖" value={shadow.dependencyAvailable ?? shadow.torchAvailable ? "可用" : "不可用"} />
         <Metric label="模型版本" value={shortVersion(shadow.modelVersion)} />
@@ -174,6 +176,24 @@ function Metric({ label, value, strong = false }) {
 
 function normalizedSearchState(searchStatus) {
   return typeof searchStatus === "string" ? { status: searchStatus } : (searchStatus || {});
+}
+
+function trainingRuleSummary(families) {
+  const threshold = firstTargetWinRate(families);
+  return `训练规则：候选置信阈值下胜率必须严格 ${targetWinRateLabel({ targetWinRateExclusive: threshold })}，候选按 successive-halving 分阶段筛选。`;
+}
+
+function firstTargetWinRate(families) {
+  for (const family of families) {
+    const value = family?.trainingRules?.targetWinRateExclusive;
+    if (Number.isFinite(Number(value))) return Number(value);
+  }
+  return DEFAULT_TARGET_WIN_RATE_EXCLUSIVE;
+}
+
+function targetWinRateLabel(rules) {
+  const value = Number(rules?.targetWinRateExclusive ?? DEFAULT_TARGET_WIN_RATE_EXCLUSIVE);
+  return Number.isFinite(value) ? `>${Math.round(value * 100)}%` : "—";
 }
 
 function candidateSearchActive(progress, searchState, family) {

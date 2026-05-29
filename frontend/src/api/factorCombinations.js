@@ -3,6 +3,7 @@ import { API_BASE_URL } from "./client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 15_000;
+const DAILY_LOOP_TIMEOUT_MS = 120_000;
 
 export async function fetchFactorCombinationRanking(symbol, duration = "10m", options = {}) {
   const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/ranking`, {
@@ -27,6 +28,23 @@ export async function fetchFactorCombinationPositions(symbol, duration, factorNa
     params: { symbol, duration, factorName, limit: options.limit ?? 80 },
     signal: options.signal,
     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function fetchPaperLiveCandidates(symbol, duration = "10m", options = {}) {
+  const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/paper-live/candidates`, {
+    params: { symbol, duration },
+    signal: options.signal,
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function runPaperLiveDailyLoop(symbol, duration = "10m") {
+  const { data } = await axios.post(`${API_BASE_URL}/api/factors/combinations/paper-live/daily-loop`, null, {
+    params: { symbol, duration },
+    timeout: DAILY_LOOP_TIMEOUT_MS,
   });
   return data;
 }
