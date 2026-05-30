@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +13,7 @@ from app.services.paper_live_failure_store import (
     recent_prediction_failures,
 )
 from app.services.paper_live_candidate_ranking import (
+    ValidationMetadata,
     candidate_rank_key,
     focus_pool,
     performance_comparison,
@@ -23,6 +24,7 @@ from app.services.paper_live_candidate_status_store import (
     recent_status_changes,
     write_candidate_status,
 )
+from app.services.paper_live_json_fields import parse_json_field
 from app.services.paper_live_stage_log import recent_stage_logs
 
 STATUS_COLLECTING = "paper_collecting"
@@ -32,6 +34,16 @@ STATUS_BACKTEST = "backtest_candidate"
 STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 10
 RECENT_SAMPLE_LIMIT = 100
+
+
+@dataclass(frozen=True)
+class ReportPayloadInput:
+    symbol: str
+    duration: str
+    ranked: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+    stage_logs: list[dict[str, Any]]
+    status_changes: list[dict[str, Any]]
 
 
 def refresh_paper_live_candidate_states(symbol: str, duration: str) -> dict[str, Any]:
@@ -75,7 +87,7 @@ def _refresh_states(symbol: str, duration: str) -> dict[str, Any]:
     try:
         report = _report_from_conn(conn, symbol, duration)
         for candidate in report["allCandidates"]:
-            write_candidate_status(conn, symbol, duration, candidate)
+            write_candidate_status(conn, symbol, duration, candidate=candidate)
         report["statusChanges"] = recent_status_changes(conn, symbol, duration)
         conn.commit()
         return report
@@ -91,7 +103,7 @@ def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
     stage_logs = recent_stage_logs(conn, symbol, duration)
     status_changes = recent_status_changes(conn, symbol, duration)
     ranked = sorted(candidates, key=candidate_rank_key, reverse=True)
-    return _report_payload(symbol, duration, ranked, failures, stage_logs, status_changes)
+    return _report_payload(ReportPayloadInput(symbol, duration, ranked, failures, stage_logs, status_changes))
 
 
 def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any]]:
@@ -133,6 +145,8 @@ def _settled_rows(conn: Any, candidate: dict[str, Any]) -> list[dict[str, Any]]:
 def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     metrics = high_winrate_metrics(rows) if rows else _empty_metrics()
     decision = _candidate_decision(candidate, metrics, rows)
+    walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
+    recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
     payload = {
         "candidateKey": _candidate_key(candidate),
         "strategyKey": candidate["strategy_key"],
@@ -145,8 +159,8 @@ def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) ->
         "validationWinRate": candidate.get("validation_win_rate"),
         "backtestWinRate": candidate.get("high_winrate_gate_value"),
         "oosWinRate": candidate.get("oos_win_rate"),
-        "walkForwardResult": _json_value(candidate.get("walk_forward_result")),
-        "recentRollingResult": _json_value(candidate.get("recent_rolling_result")),
+        "walkForwardResult": walk_forward.value,
+        "recentRollingResult": recent_rolling.value,
         "paperLiveWinRate": metrics.get("winRate"),
         "paperLiveSampleCount": metrics.get("sampleCount"),
         "paperLiveStatus": decision["status"],
@@ -160,9 +174,16 @@ def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) ->
         "predictionCount": candidate.get("prediction_count"),
     }
     payload["performanceComparison"] = {
-        **performance_comparison(candidate, metrics),
+        **performance_comparison(
+            candidate,
+            metrics,
+            ValidationMetadata(walk_forward.value, recent_rolling.value),
+        ),
         "paperLiveStatus": decision["status"],
     }
+    parse_errors = [item.error for item in (walk_forward, recent_rolling) if item.error]
+    if parse_errors:
+        payload["metadataParseErrors"] = parse_errors
     return payload
 
 
@@ -177,35 +198,28 @@ def _candidate_decision(
     return high_winrate_decision(metrics)
 
 
-def _report_payload(
-    symbol: str,
-    duration: str,
-    ranked: list[dict[str, Any]],
-    failures: list[dict[str, Any]],
-    stage_logs: list[dict[str, Any]],
-    status_changes: list[dict[str, Any]],
-) -> dict[str, Any]:
-    focused = focus_pool(ranked, OBSERVATION_POOL_LIMIT)
-    avoid_next_search = _avoid_next_search(ranked, failures)
+def _report_payload(data: ReportPayloadInput) -> dict[str, Any]:
+    focused = focus_pool(data.ranked, OBSERVATION_POOL_LIMIT)
+    avoid_next_search = _avoid_next_search(data.ranked, data.failures)
     return {
         "version": "paper_live_candidate_pool_v1",
-        "symbol": symbol.strip().upper(),
-        "duration": duration,
+        "symbol": data.symbol.strip().upper(),
+        "duration": data.duration,
         "updatedAt": _utc_now(),
         "realTradingEnabled": False,
         "observationPoolLimit": OBSERVATION_POOL_LIMIT,
-        "allCandidateCount": len(ranked),
-        "allCandidates": ranked,
+        "allCandidateCount": len(data.ranked),
+        "allCandidates": data.ranked,
         "candidates": focused,
         "rankingPolicy": _ranking_policy(),
         "collecting": [row for row in focused if row["status"] == STATUS_COLLECTING],
         "stable": [row for row in focused if row["status"] == STATUS_STABLE],
-        "failed": [row for row in ranked if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}],
-        "predictionFailures": failures,
-        "stageLogs": stage_logs,
-        "statusChanges": status_changes,
+        "failed": [row for row in data.ranked if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}],
+        "predictionFailures": data.failures,
+        "stageLogs": data.stage_logs,
+        "statusChanges": data.status_changes,
         "avoidNextSearch": avoid_next_search,
-        "answers": candidate_pool_answers(focused, ranked, failures, avoid_next_search),
+        "answers": candidate_pool_answers(focused, data.ranked, data.failures, avoid_next_search),
     }
 
 
@@ -270,15 +284,6 @@ def _avoid_next_search(
     avoid = [{"candidateKey": row["candidateKey"], "reason": row["reason"]} for row in failed[:20]]
     avoid.extend({"candidateKey": row["candidateKey"], "reason": row["reason"]} for row in failures[:20])
     return avoid[:20]
-
-
-def _json_value(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
 
 
 def _utc_now() -> str:

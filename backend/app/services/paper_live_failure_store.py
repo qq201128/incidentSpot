@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.paper_live_json_fields import parse_details_json
 
 
 def ensure_prediction_failure_table(conn: Any) -> None:
@@ -100,15 +101,18 @@ def _insert_prediction_failure(
 
 def _failure_payload(row: Any) -> dict[str, Any]:
     data = dict(row)
-    details = json.loads(data["details_json"]) if data.get("details_json") else {}
-    return {
+    details = parse_details_json(data.get("details_json"))
+    payload = {
         "candidateKey": data["candidate_key"],
         "strategyKey": data["strategy_key"],
         "stage": data["stage"],
         "reason": data["reason"],
-        "details": details,
+        "details": details.value,
         "createdAt": data["created_at"],
     }
+    if details.error:
+        payload["detailsParseError"] = details.error
+    return payload
 
 
 def _utc_now() -> str:

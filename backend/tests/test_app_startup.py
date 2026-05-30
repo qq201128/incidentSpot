@@ -153,6 +153,26 @@ def test_spawned_background_task_failure_is_visible() -> None:
     assert status["lastFailureDetails"] == {"stage": "background_task", "taskName": "predict"}
 
 
+def test_spawned_background_task_base_exception_is_visible() -> None:
+    reset_background_loop_statuses()
+
+    class BaseFailure(BaseException):
+        pass
+
+    async def run_callback() -> None:
+        future = asyncio.get_running_loop().create_future()
+        future.set_exception(BaseFailure("base crashed"))
+        app_startup._record_background_task_result("predict", future)
+
+    asyncio.run(run_callback())
+
+    status = background_loop_statuses()["auto_predict"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "base crashed"
+    assert status["lastExceptionType"] == "BaseFailure"
+    assert status["lastFailureDetails"] == {"stage": "background_task", "taskName": "predict"}
+
+
 def test_spawned_background_task_keeps_specific_recorded_failure() -> None:
     reset_background_loop_statuses()
     test_app = FastAPI()
@@ -179,6 +199,7 @@ def test_spawned_background_task_keeps_specific_recorded_failure() -> None:
 
 
 def test_shutdown_logs_background_task_exceptions(monkeypatch) -> None:
+    reset_background_loop_statuses()
     logged = []
 
     class Logger:
@@ -191,7 +212,7 @@ def test_shutdown_logs_background_task_exceptions(monkeypatch) -> None:
     async def run_shutdown() -> None:
         task = asyncio.create_task(failed_task())
         await asyncio.sleep(0)
-        await app_startup._cancel_background_tasks([task])
+        await app_startup._cancel_background_tasks([("predict", task)])
 
     monkeypatch.setattr(app_startup, "logger", Logger())
 
@@ -200,3 +221,33 @@ def test_shutdown_logs_background_task_exceptions(monkeypatch) -> None:
     assert logged[0][0] == "background task failed during shutdown: %s"
     assert str(logged[0][1][0]) == "shutdown failed"
     assert logged[0][2][0] is RuntimeError
+    status = background_loop_statuses()["auto_predict"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "shutdown failed"
+    assert status["lastFailureDetails"] == {"stage": "shutdown", "taskName": "predict"}
+
+
+def test_shutdown_records_background_base_exceptions(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    logged = []
+
+    class BaseFailure(BaseException):
+        pass
+
+    class Logger:
+        def error(self, message: str, *args, exc_info=None) -> None:
+            logged.append((message, args, exc_info))
+
+    monkeypatch.setattr(app_startup, "logger", Logger())
+
+    app_startup._log_background_task_shutdown_results(
+        [("predict", object())],
+        [BaseFailure("shutdown base")],
+    )
+
+    status = background_loop_statuses()["auto_predict"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "shutdown base"
+    assert status["lastExceptionType"] == "BaseFailure"
+    assert status["lastFailureDetails"] == {"stage": "shutdown", "taskName": "predict"}
+    assert logged[0][0] == "background task failed during shutdown: %s"

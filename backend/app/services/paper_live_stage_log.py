@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.paper_live_json_fields import parse_details_json
+
 STAGE_FEATURE_CONSTRUCTION = "feature_construction"
 STAGE_PREDICTION_GENERATION = "prediction_generation"
 STAGE_LABEL_CONSTRUCTION = "label_construction"
@@ -110,7 +112,7 @@ def log_settlement_success(
     prediction_correct: bool,
 ) -> None:
     context = _row_context(row)
-    details = _settlement_details(entry_price, exit_open_time, exit_price, actual_return)
+    details = _settlement_details(entry_price, exit_open_time, exit_price, actual_return=actual_return)
     log_prediction_stage(
         conn,
         **context,
@@ -226,6 +228,7 @@ def _settlement_details(
     entry_price: float,
     exit_open_time: int,
     exit_price: float,
+    *,
     actual_return: float,
 ) -> dict[str, Any]:
     return {
@@ -253,7 +256,8 @@ def _source_open_time(result: dict[str, Any]) -> int | None:
 
 
 def _stage_log_payload(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    details = parse_details_json(row["details_json"])
+    payload = {
         "signalKey": row["signal_key"],
         "strategyKey": row["strategy_key"],
         "symbol": row["symbol"],
@@ -262,9 +266,12 @@ def _stage_log_payload(row: dict[str, Any]) -> dict[str, Any]:
         "stage": row["stage"],
         "status": row["status"],
         "reason": row["reason"],
-        "details": json.loads(row["details_json"]),
+        "details": details.value,
         "createdAt": row["created_at"],
     }
+    if details.error:
+        payload["detailsParseError"] = details.error
+    return payload
 
 
 def _utc_now() -> str:

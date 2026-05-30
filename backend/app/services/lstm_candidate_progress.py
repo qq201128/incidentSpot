@@ -129,6 +129,7 @@ def finish_lstm_candidate_progress(
     symbol: str,
     duration: str,
     status: str,
+    failure: dict[str, Any] | None = None,
     artifact_root: Path | None = None,
 ) -> dict[str, Any]:
     path = candidate_progress_path(symbol, duration, artifact_root=artifact_root)
@@ -138,7 +139,7 @@ def finish_lstm_candidate_progress(
         completed = int(current.get("completed") or 0)
         total = int(current.get("total") or completed)
         now = _utc_now()
-        return {
+        next_payload = {
             **current,
             "status": status,
             "updatedAt": now,
@@ -147,6 +148,11 @@ def finish_lstm_candidate_progress(
             "total": total,
             "percent": _percent(completed, total),
         }
+        if failure is not None:
+            return {**next_payload, "lastFailure": failure}
+        if status != "failed":
+            return {**next_payload, "lastFailure": None}
+        return next_payload
 
     return update_json(path, _updater)
 

@@ -24,7 +24,7 @@ def test_rl_strategy_is_labeled_as_qtable_direction_classifier() -> None:
 
 
 def test_rl_strategy_backend_uses_qtable_classifier_name() -> None:
-    config = model_training_config_for_profile("rl_strategy", "BTCUSDT", "10m", "fast")
+    config = model_training_config_for_profile("rl_strategy", "BTCUSDT", "10m", profile="fast")
     model = _estimator(JoblibModelOptions(config.family, config.seed, config.params))
     assert isinstance(model, QTableDirectionClassifier)
     assert model.model_kind == "q_table_direction_classifier"

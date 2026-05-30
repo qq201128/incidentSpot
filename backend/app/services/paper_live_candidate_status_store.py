@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.paper_live_json_fields import parse_details_json
+
 
 def ensure_candidate_status_tables(conn: Any) -> None:
     conn.execute(
@@ -37,11 +39,11 @@ def ensure_candidate_status_tables(conn: Any) -> None:
     )
 
 
-def write_candidate_status(conn: Any, symbol: str, duration: str, candidate: dict[str, Any]) -> None:
+def write_candidate_status(conn: Any, symbol: str, duration: str, *, candidate: dict[str, Any]) -> None:
     ensure_candidate_status_tables(conn)
-    previous = _current_status(conn, symbol, duration, candidate["candidateKey"])
+    previous = _current_status(conn, symbol, duration, candidate_key=candidate["candidateKey"])
     if previous is None or previous["status"] != candidate["status"]:
-        _write_history(conn, symbol, duration, candidate, previous)
+        _write_history(conn, symbol, duration, candidate=candidate, previous=previous)
     conn.execute(
         """
         INSERT INTO paper_live_candidate_status(
@@ -72,7 +74,7 @@ def recent_status_changes(conn: Any, symbol: str, duration: str, *, limit: int =
     return [_history_payload(dict(row)) for row in rows]
 
 
-def _current_status(conn: Any, symbol: str, duration: str, candidate_key: str) -> dict[str, Any] | None:
+def _current_status(conn: Any, symbol: str, duration: str, *, candidate_key: str) -> dict[str, Any] | None:
     row = conn.execute(
         """
         SELECT status, reason
@@ -84,7 +86,14 @@ def _current_status(conn: Any, symbol: str, duration: str, candidate_key: str) -
     return None if row is None else dict(row)
 
 
-def _write_history(conn: Any, symbol: str, duration: str, candidate: dict[str, Any], previous: dict[str, Any] | None) -> None:
+def _write_history(
+    conn: Any,
+    symbol: str,
+    duration: str,
+    *,
+    candidate: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> None:
     conn.execute(
         """
         INSERT INTO paper_live_candidate_status_history(
@@ -118,16 +127,20 @@ def _status_values(symbol: str, duration: str, candidate: dict[str, Any]) -> tup
 
 
 def _history_payload(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    details = parse_details_json(row["details_json"])
+    payload = {
         "candidateKey": row["candidate_key"],
         "symbol": row["symbol"],
         "duration": row["duration"],
         "oldStatus": row["old_status"],
         "newStatus": row["new_status"],
         "reason": row["reason"],
-        "details": json.loads(row["details_json"]),
+        "details": details.value,
         "changedAt": row["changed_at"],
     }
+    if details.error:
+        payload["detailsParseError"] = details.error
+    return payload
 
 
 def _utc_now() -> str:

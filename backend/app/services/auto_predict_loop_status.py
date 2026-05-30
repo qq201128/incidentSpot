@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
-from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_success
+from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_stopped, record_loop_success
 
 STATUS_IDLE = "idle"
 STATUS_RUNNING = "running"
 STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
+STATUS_STOPPED = "stopped"
 BACKGROUND_LOOP_NAME = "auto_predict"
 
 _LOCK = Lock()
@@ -39,8 +40,11 @@ def record_auto_predict_loop_start(*, initial_delay: float, poll_seconds: int) -
         updatedAt=_utc_now(),
         error=None,
         exceptionType=None,
+        failureDetails=None,
         initialDelaySeconds=float(initial_delay),
         pollSeconds=int(poll_seconds),
+        stoppedAt=None,
+        stopReason=None,
     )
 
 
@@ -52,8 +56,11 @@ def record_auto_predict_cycle_success(target_count: int, next_wait_seconds: floa
         updatedAt=_utc_now(),
         error=None,
         exceptionType=None,
+        failureDetails=None,
         targetCount=int(target_count),
         nextWaitSeconds=float(next_wait_seconds),
+        stoppedAt=None,
+        stopReason=None,
     )
 
 
@@ -70,7 +77,20 @@ def record_auto_predict_cycle_failure(exc: Exception, next_wait_seconds: float) 
         exceptionType=type(exc).__name__,
         failureDetails=getattr(exc, "details", None),
         nextWaitSeconds=float(next_wait_seconds),
+        stoppedAt=None,
+        stopReason=None,
     )
+
+
+def record_auto_predict_loop_stopped(reason: str) -> None:
+    record_loop_stopped(BACKGROUND_LOOP_NAME, reason)
+    stopped_at = _utc_now()
+    changes = {"updatedAt": stopped_at, "stoppedAt": stopped_at, "stopReason": reason}
+    with _LOCK:
+        failed = _STATE.get("status") == STATUS_FAILED
+    if not failed:
+        changes["status"] = STATUS_STOPPED
+    _replace_state(**changes)
 
 
 def _replace_state(**changes: Any) -> None:

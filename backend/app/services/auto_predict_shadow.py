@@ -20,7 +20,7 @@ class ShadowBackfillFailure:
     family: str
     symbol: str
     duration: str
-    exception: Exception
+    exception: BaseException
 
 
 class ShadowBackfillBatchError(RuntimeError):
@@ -56,7 +56,7 @@ def handle_backfill_summary(
     summary: object,
     logger: logging.Logger,
 ) -> ShadowBackfillFailure | None:
-    if isinstance(summary, Exception):
+    if isinstance(summary, BaseException):
         logger.error(
             "model family shadow backfill failed family=%s symbol=%s duration=%s",
             target.family,

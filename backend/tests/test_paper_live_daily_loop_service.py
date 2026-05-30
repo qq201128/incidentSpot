@@ -90,6 +90,32 @@ def test_daily_closed_loop_surfaces_stage_failure() -> None:
     assert "RuntimeError: market refresh failed" in first_stage["traceback"]
 
 
+def test_daily_closed_loop_candidate_report_failure_marks_reported_tasks_failed() -> None:
+    def candidate_report(_symbol: str, _duration: str) -> dict:
+        raise RuntimeError("candidate report failed")
+
+    deps = PaperLiveDailyLoopDeps(
+        symbols=lambda: ["BTCUSDT"],
+        refresh_candidates=lambda *_args, **_kwargs: None,
+        settle_predictions=lambda _symbol, _duration: {"checked": 0, "settled": 0, "pendingData": 0},
+        refresh_states=lambda symbol, duration: _candidate_report(symbol, duration),
+        candidate_report=candidate_report,
+        offline_screening=lambda symbol, duration: _offline_screening(symbol, duration),
+        model_candidates=lambda symbol, duration: _model_candidates(symbol, duration),
+    )
+
+    report = run_paper_live_daily_closed_loop(symbols=["BTCUSDT"], durations=["10m"], deps=deps)
+    result = report["results"][0]
+    checklist = {item["task"]: item for item in result["dailyChecklist"]}
+
+    assert report["status"] == "failed"
+    assert result["candidatePool"] == {}
+    assert checklist["eliminate_failed_candidates"]["status"] == "failed"
+    assert checklist["eliminate_failed_candidates"]["reason"] == "candidate_pool_report_failed"
+    assert checklist["retain_stable_candidates"]["status"] == "failed"
+    assert checklist["output_failure_reasons_and_next_search_direction"]["status"] == "failed"
+
+
 def _candidate_report(symbol: str, duration: str) -> dict:
     return {
         "symbol": symbol,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.exception_payloads import exception_details
 from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
 from app.services.model_family_candidate_executor import (
     CandidateDatasetCache,
@@ -46,26 +47,35 @@ class ModelCandidateSearchConfig:
 
 def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, Any]:
     cfg = _validated(config)
-    base = model_training_config_for_profile(cfg.family, cfg.symbol, cfg.duration, cfg.profile)
-    attempted = attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
-    if cfg.reset_history:
-        attempted = frozenset()
+    base = model_training_config_for_profile(cfg.family, cfg.symbol, cfg.duration, profile=cfg.profile)
+    attempted = frozenset() if cfg.reset_history else attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
     candidates = next_model_candidate_configs(base, cfg.profile, attempted)
     if not candidates:
-        current = read_model_candidate_progress(cfg.family, cfg.symbol, cfg.duration)
-        if _preserve_exhausted_progress(current):
-            status = str(current.get("status"))
-            return {"status": status, "reason": "candidate_search_exhausted", "family": cfg.family}
-        status = _exhausted_candidate_status(cfg.family, cfg.symbol, cfg.duration)
-        finish_model_candidate_progress_from_library(
-            cfg.family,
-            symbol=cfg.symbol,
-            duration=cfg.duration,
-            profile=cfg.profile,
-            parallel_workers=cfg.parallel_workers,
-            status=status,
-        )
+        return _exhausted_search_result(cfg)
+    return _run_candidate_batch(cfg, candidates)
+
+
+def _exhausted_search_result(cfg: ModelCandidateSearchConfig) -> dict[str, Any]:
+    current = read_model_candidate_progress(cfg.family, cfg.symbol, cfg.duration)
+    if _preserve_exhausted_progress(current):
+        status = str(current.get("status"))
         return {"status": status, "reason": "candidate_search_exhausted", "family": cfg.family}
+    status = _exhausted_candidate_status(cfg.family, cfg.symbol, cfg.duration)
+    finish_model_candidate_progress_from_library(
+        cfg.family,
+        symbol=cfg.symbol,
+        duration=cfg.duration,
+        profile=cfg.profile,
+        parallel_workers=cfg.parallel_workers,
+        status=status,
+    )
+    return {"status": status, "reason": "candidate_search_exhausted", "family": cfg.family}
+
+
+def _run_candidate_batch(
+    cfg: ModelCandidateSearchConfig,
+    candidates: list[ModelFamilyTrainingConfig],
+) -> dict[str, Any]:
     start_model_candidate_progress(
         cfg.family,
         symbol=cfg.symbol,
@@ -88,8 +98,14 @@ def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, 
             "trainingRules": model_family_training_rules(cfg.family),
             "successiveHalvingStages": evaluation["stages"],
         }
-    except Exception:
-        finish_model_candidate_progress(cfg.family, symbol=cfg.symbol, duration=cfg.duration, status="failed")
+    except Exception as exc:
+        finish_model_candidate_progress(
+            cfg.family,
+            symbol=cfg.symbol,
+            duration=cfg.duration,
+            status="failed",
+            failure=exception_details(exc, "candidate_search"),
+        )
         raise
 
 
@@ -97,6 +113,7 @@ def model_training_config_for_profile(
     family: str,
     symbol: str,
     duration: str,
+    *,
     profile: str,
     **overrides,
 ) -> ModelFamilyTrainingConfig:
@@ -136,14 +153,30 @@ def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset
     stages = []
     completed = 0
     coarse_configs = [coarse_candidate_config(item) for item in candidates]
-    coarse = _collect_stage(coarse_configs, candidates, cfg, dataset_builder, "coarse", completed, len(candidates))
+    coarse = _collect_stage(
+        coarse_configs,
+        candidates,
+        cfg=cfg,
+        dataset_builder=dataset_builder,
+        stage="coarse",
+        completed=completed,
+        total=len(candidates),
+    )
     completed += len(coarse)
     coarse_closed = close_halving_stage(coarse, "coarse")
     _record_stage_reports(coarse_closed.reports, cfg.profile)
     reports.extend(coarse_closed.reports)
     stages.append(coarse_closed.payload)
     total = completed + len(coarse_closed.survivors)
-    full = _collect_stage(_configs(coarse_closed.survivors), None, cfg, dataset_builder, "full", completed, total)
+    full = _collect_stage(
+        _configs(coarse_closed.survivors),
+        None,
+        cfg=cfg,
+        dataset_builder=dataset_builder,
+        stage="full",
+        completed=completed,
+        total=total,
+    )
     full_closed = close_halving_stage(full, "full")
     _record_stage_reports(full_closed.reports, cfg.profile)
     reports.extend(full_closed.reports)
@@ -155,7 +188,16 @@ def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset
     return {"reports": reports, "finalists": walk_forward_survivors, "stages": stages}
 
 
-def _collect_stage(train_configs, record_configs, cfg, dataset_builder, stage: str, completed: int, total: int):
+def _collect_stage(
+    train_configs,
+    record_configs,
+    *,
+    cfg,
+    dataset_builder,
+    stage: str,
+    completed: int,
+    total: int,
+):
     results = []
     for result in train_candidate_reports(
         train_configs,
@@ -167,7 +209,13 @@ def _collect_stage(train_configs, record_configs, cfg, dataset_builder, stage: s
     ):
         results.append(result)
         completed += 1
-        complete_model_candidate_progress(result.config, cfg.profile, result.report, completed, max(total, completed))
+        complete_model_candidate_progress(
+            result.config,
+            profile=cfg.profile,
+            report=result.report,
+            completed=completed,
+            total=max(total, completed),
+        )
     return results
 
 

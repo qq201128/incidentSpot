@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from app.db.session import get_conn
+from app.services.paper_live_json_fields import parse_json_field
 from app.services.paper_live_stage_log import log_prediction_generation_stages
 from app.services.prediction_policy import trade_policy_payload
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
+
+
+@dataclass(frozen=True)
+class PredictionResponseMetadata:
+    walk_forward_result: Any
+    recent_rolling_result: Any
+    parse_errors: list[dict[str, str]]
 
 
 INSERT_PREDICTION_SQL = """INSERT INTO predictions(
@@ -108,6 +118,21 @@ def get_latest_prediction(
 
 def prediction_response(result: dict) -> dict:
     generated_at = result["created_at"] if "created_at" in result else _utc_now_iso()
+    metadata = _response_metadata(result)
+    response = {
+        **_core_response_fields(result, generated_at),
+        **_trade_response_fields(result),
+        **_model_response_fields(result, metadata),
+        **_settlement_response_fields(result),
+        **_source_response_fields(result),
+        **trade_policy_payload(result["duration"], strategy_key=_strategy_key(result)),
+    }
+    if metadata.parse_errors:
+        response["metadataParseErrors"] = metadata.parse_errors
+    return response
+
+
+def _core_response_fields(result: dict, generated_at: str) -> dict[str, Any]:
     generated_ms = _parse_iso_ms(generated_at)
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     return {
@@ -122,6 +147,14 @@ def prediction_response(result: dict) -> dict:
         "threshold": result.get("threshold"),
         "openTime": result.get("open_time"),
         "entryOpenTime": result.get("open_time"),
+        "generatedAt": generated_at,
+        "predictionCreatedAt": generated_at,
+        "ageMs": max(now_ms - generated_ms, 0),
+    }
+
+
+def _trade_response_fields(result: dict) -> dict[str, Any]:
+    return {
         "tradeQualityScore": result.get("trade_quality_score"),
         "tradeQualityPassed": _as_bool(result.get("trade_quality_passed")),
         "tradeQualityGate": result.get("trade_quality_gate"),
@@ -131,11 +164,12 @@ def prediction_response(result: dict) -> dict:
         "highWinrateGateValue": result.get("high_winrate_gate_value"),
         "highWinrateGateMin": result.get("high_winrate_gate_min"),
         "entryPrice": result.get("entry_price"),
-        "exitPrice": result.get("exit_price"),
-        "settlementPrice": result.get("exit_price"),
-        "actualReturn": result.get("actual_return"),
-        "predictionCorrect": _as_bool(result.get("prediction_correct")),
         "expectedReturn": result.get("expected_return"),
+    }
+
+
+def _model_response_fields(result: dict, metadata: PredictionResponseMetadata) -> dict[str, Any]:
+    return {
         "modelVersion": result.get("model_version"),
         "modelFamily": result.get("model_family"),
         "validationWinRate": result.get("validation_win_rate"),
@@ -143,21 +177,38 @@ def prediction_response(result: dict) -> dict:
         "modelDuration": result.get("model_duration"),
         "modelTrainedAt": result.get("model_trained_at"),
         "oosWinRate": result.get("oos_win_rate"),
-        "walkForwardResult": _json_value(result.get("walk_forward_result")),
-        "recentRollingResult": _json_value(result.get("recent_rolling_result")),
+        "walkForwardResult": metadata.walk_forward_result,
+        "recentRollingResult": metadata.recent_rolling_result,
         "dataFreshnessStatus": result.get("data_freshness_status"),
         "missingFeatureStatus": result.get("missing_feature_status"),
+    }
+
+
+def _settlement_response_fields(result: dict) -> dict[str, Any]:
+    return {
+        "exitPrice": result.get("exit_price"),
+        "settlementPrice": result.get("exit_price"),
+        "actualReturn": result.get("actual_return"),
+        "predictionCorrect": _as_bool(result.get("prediction_correct")),
         "settledAt": result.get("settled_at"),
-        "generatedAt": generated_at,
-        "predictionCreatedAt": generated_at,
-        "ageMs": max(now_ms - generated_ms, 0),
+    }
+
+
+def _source_response_fields(result: dict) -> dict[str, Any]:
+    return {
         "signalSource": result.get("signal_source"),
         "ruleScore": result.get("rule_score"),
         "ruleReasons": result.get("rule_reasons"),
         "orderbook": result.get("orderbook"),
         "timeframeVotes": result.get("timeframe_votes"),
-        **trade_policy_payload(result["duration"], strategy_key=_strategy_key(result)),
     }
+
+
+def _response_metadata(result: dict) -> PredictionResponseMetadata:
+    walk_forward = parse_json_field("walkForwardResult", result.get("walk_forward_result"))
+    recent_rolling = parse_json_field("recentRollingResult", result.get("recent_rolling_result"))
+    errors = [item.error for item in (walk_forward, recent_rolling) if item.error]
+    return PredictionResponseMetadata(walk_forward.value, recent_rolling.value, errors)
 
 
 def _prediction_values(result: dict) -> tuple:
@@ -216,15 +267,6 @@ def _json_text(value) -> str | None:
     if value is None or isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
-
-
-def _json_value(value):
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
 
 
 def _parse_iso_ms(value: str) -> int:

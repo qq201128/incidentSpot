@@ -15,11 +15,11 @@ def test_candidate_search_runs_successive_halving(monkeypatch) -> None:
     calls = []
     recorded = []
 
-    monkeypatch.setattr(service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
     monkeypatch.setattr(service, "attempted_model_search_keys", lambda *_args: frozenset())
     monkeypatch.setattr(service, "next_model_candidate_configs", lambda *_args: candidates)
     monkeypatch.setattr(service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(service, "complete_model_candidate_progress", lambda *_args: {})
+    monkeypatch.setattr(service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(service, "record_model_candidate", lambda config, profile, report: recorded.append(report))
     monkeypatch.setattr(executor, "record_model_candidate", lambda config, profile, report: recorded.append(report))

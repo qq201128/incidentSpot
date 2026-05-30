@@ -18,7 +18,7 @@ from app.services.model_family_config import MODEL_FAMILIES, is_model_family_sha
 from app.services.model_family_shadow_backfill_service import backfill_model_family_shadow_predictions, missing_model_family_shadow_entry_times
 from app.services.prediction_cache_service import prediction_exists, prediction_response, save_prediction
 from app.services.paper_live_candidate_service import refresh_paper_live_candidate_states
-from app.services.auto_predict_loop_status import record_auto_predict_cycle_failure, record_auto_predict_cycle_success, record_auto_predict_loop_start
+from app.services.auto_predict_loop_status import record_auto_predict_cycle_failure, record_auto_predict_cycle_success, record_auto_predict_loop_start, record_auto_predict_loop_stopped
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
@@ -49,7 +49,12 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
     record_auto_predict_loop_start(initial_delay=initial, poll_seconds=poll_seconds)
     logger.info("predict loop: initial_delay=%ss poll=%ss", initial, poll_seconds)
     if initial > 0:
-        await _sleep_for(stop_event, initial)
+        if await _sleep_for(stop_event, initial):
+            record_auto_predict_loop_stopped("stop_during_initial_delay")
+            return
+    if stop_event.is_set():
+        record_auto_predict_loop_stopped("stop_before_first_cycle")
+        return
     logger.info("predict loop: running during each enabled strategy's kline entry window")
     while not stop_event.is_set():
         try:
@@ -61,7 +66,9 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
             logger.exception("auto prediction failed")
             wait_seconds = float(poll_seconds)
             record_auto_predict_cycle_failure(exc, wait_seconds)
-        await _sleep_for(stop_event, wait_seconds)
+        if await _sleep_for(stop_event, wait_seconds):
+            record_auto_predict_loop_stopped("stop_between_cycles")
+            return
 async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
     due_targets = await asyncio.to_thread(_ready_due_prediction_targets, targets)
     collection_targets = await asyncio.to_thread(_candidate_collection_targets, targets)
@@ -268,11 +275,12 @@ def _next_predict_wait(targets: list[AutoTradeSettings], poll_seconds: int) -> f
         else:
             min_wait = min(min_wait, seconds_until_next_rule_entry_for_duration(settings.duration, now_ms))
     return float(min_wait) if min_wait != float("inf") else float(poll_seconds)
-async def _sleep_for(stop_event: asyncio.Event, wait_seconds: float) -> None:
+async def _sleep_for(stop_event: asyncio.Event, wait_seconds: float) -> bool:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
+        return True
     except TimeoutError:
-        return
+        return False
 async def _broadcast(result: dict) -> None:
     await runtime_helpers.broadcast(result, _SUBSCRIBERS, DEFAULT_STRATEGY_KEY)
 def _runtime_deps() -> dict[str, Any]:

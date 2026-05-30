@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
-from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_success
+from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_stopped, record_loop_success
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.auto_trade_settings_payloads import (
@@ -42,6 +42,9 @@ LOOP_NAME = "auto_trade"
 async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> None:
     logger.info("auto trade loop: running every %ss", poll_seconds)
     record_loop_start(LOOP_NAME, {"pollSeconds": poll_seconds})
+    if stop_event.is_set():
+        record_loop_stopped(LOOP_NAME, "stop_before_first_tick")
+        return
     while not stop_event.is_set():
         started = asyncio.get_running_loop().time()
         try:
@@ -52,7 +55,9 @@ async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> N
         except Exception as exc:
             record_loop_failure(LOOP_NAME, exc)
             logger.exception("auto trade failed")
-        await _sleep_until_next_tick(stop_event, started, poll_seconds)
+        if await _sleep_until_next_tick(stop_event, started, poll_seconds):
+            record_loop_stopped(LOOP_NAME, "stop_between_ticks")
+            return
 
 
 def list_auto_trade_settings() -> list[AutoTradeSettings]:
@@ -252,10 +257,11 @@ def _production_target_passed(policy: dict[str, Any]) -> bool:
     return target.get("passed") is True
 
 
-async def _sleep_until_next_tick(stop_event: asyncio.Event, started: float, poll_seconds: int) -> None:
+async def _sleep_until_next_tick(stop_event: asyncio.Event, started: float, poll_seconds: int) -> bool:
     elapsed = asyncio.get_running_loop().time() - started
     wait_seconds = max(float(poll_seconds) - elapsed, 0.0)
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
+        return True
     except TimeoutError:
-        return
+        return False

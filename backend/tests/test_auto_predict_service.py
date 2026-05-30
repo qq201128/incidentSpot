@@ -805,7 +805,7 @@ def test_next_predict_wait_polls_when_candidate_collection_is_due(monkeypatch) -
     assert service._next_predict_wait([settings], 1) == 1.0
 
 
-def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -> None:
+def test_prediction_targets_expose_default_readiness_failure(monkeypatch) -> None:
     disabled = [_settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m", enabled=False)]
     recovery_flags = []
 
@@ -815,11 +815,38 @@ def test_prediction_targets_skip_default_when_default_cache_empty(monkeypatch) -
         service,
         "strategy_prediction_readiness",
         lambda *_args, **kwargs: recovery_flags.append(kwargs["attempt_recovery"])
-        or _readiness(False, "ranking_cache_empty"),
+        or _readiness(False, "ranking_cache_empty", recovery_attempted=True),
     )
 
-    assert service._prediction_targets() == []
+    try:
+        service._prediction_targets()
+    except service.target_helpers.PredictionTargetReadinessError as exc:
+        assert exc.details["skippedTargets"][0]["reason"] == "ranking_cache_empty"
+        assert exc.details["skippedTargets"][0]["recoveryAttempted"] is True
+    else:
+        raise AssertionError("default predict target readiness failure was silently converted to no targets")
     assert recovery_flags == [True]
+
+
+def test_auto_predict_loop_records_default_readiness_failure(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+
+    def fail_readiness(*_args, **_kwargs):
+        stop_event.set()
+        return _readiness(False, "ranking_cache_empty")
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "list_auto_trade_settings", lambda: [])
+    monkeypatch.setattr(service, "get_auto_trade_settings", lambda _key: _settings(FACTOR_COMBO_STRATEGY_KEY))
+    monkeypatch.setattr(service, "strategy_prediction_readiness", fail_readiness)
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "PredictionTargetReadinessError"
+    assert status["failureDetails"]["skippedTargets"][0]["reason"] == "ranking_cache_empty"
 
 
 def test_ready_lstm_shadow_due_does_not_sync_snapshot_mismatch(monkeypatch) -> None:
@@ -905,6 +932,29 @@ def test_candidate_collection_batch_error_has_details() -> None:
     assert logged[0][2][0] is RuntimeError
 
 
+def test_prediction_failures_include_base_exceptions() -> None:
+    class BaseFailure(BaseException):
+        pass
+
+    failure = BaseFailure("base prediction failed")
+    failures = service.runtime_helpers.prediction_failures(
+        [_settings(FACTOR_COMBO_STRATEGY_KEY)],
+        [failure],
+    )
+
+    assert len(failures) == 1
+    error = service.runtime_helpers.PredictionBatchError(failures)
+    assert error.details == [
+        {
+            "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "error": "base prediction failed",
+            "exceptionType": "BaseFailure",
+        }
+    ]
+
+
 def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions(monkeypatch) -> None:
     calls = []
     targets = [_settings(lstm_shadow_strategy_key(DEFAULT_DURATION))]
@@ -984,6 +1034,34 @@ def test_backfill_shadow_predictions_exposes_returned_exception(monkeypatch) -> 
             (RuntimeError, failure, failure.__traceback__),
         )
     ]
+
+
+def test_backfill_shadow_summary_exposes_base_exception() -> None:
+    logged = []
+
+    class BaseFailure(BaseException):
+        pass
+
+    class Logger:
+        def error(self, message: str, *args, exc_info=None) -> None:
+            logged.append((message, args, exc_info))
+
+    failure = BaseFailure("base backfill failed")
+    target = service.shadow_helpers.ShadowBackfillTarget("gru", "BTCUSDT", DEFAULT_DURATION)
+    result = service.shadow_helpers.handle_backfill_summary(target, failure, Logger())
+
+    assert result is not None
+    error = service.shadow_helpers.ShadowBackfillBatchError([result])
+    assert error.details == [
+        {
+            "family": "gru",
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "error": "base backfill failed",
+            "exceptionType": "BaseFailure",
+        }
+    ]
+    assert logged[0][2][0] is BaseFailure
 
 
 def test_auto_predict_loop_records_shadow_backfill_failure_details(monkeypatch) -> None:
@@ -1076,8 +1154,9 @@ def test_prediction_broadcast_failure_is_exposed() -> None:
 
     try:
         asyncio.run(service.runtime_helpers.broadcast(result, subscribers, service.DEFAULT_STRATEGY_KEY))
-    except RuntimeError as exc:
+    except service.runtime_helpers.BroadcastDeliveryError as exc:
         assert str(exc) == "prediction broadcast failed for 1 subscriber(s)"
+        assert exc.details == [{"error": "send failed", "exceptionType": "RuntimeError"}]
     else:
         raise AssertionError("broadcast failure was not exposed")
 
@@ -1132,8 +1211,8 @@ async def _noop_settings(_settings_list: list[AutoTradeSettings]) -> None:
     return None
 
 
-def _readiness(ready: bool, reason: str = "ready"):
-    return PredictionReadiness(ready, reason)
+def _readiness(ready: bool, reason: str = "ready", **kwargs):
+    return PredictionReadiness(ready, reason, **kwargs)
 
 
 def _model_context(family: str, deps: dict):

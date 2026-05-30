@@ -207,9 +207,6 @@ def _record_background_task_result(name: str, task: asyncio.Task) -> None:
         return
     if exc is None:
         return
-    if not isinstance(exc, Exception):
-        logger.error("background task stopped with base exception: %s", exc)
-        return
     status_name = BACKGROUND_LOOP_STATUS_NAMES.get(name, name)
     if _already_recorded_task_failure(status_name, exc):
         return
@@ -222,7 +219,7 @@ def _record_background_task_result(name: str, task: asyncio.Task) -> None:
     )
 
 
-def _already_recorded_task_failure(status_name: str, exc: Exception) -> bool:
+def _already_recorded_task_failure(status_name: str, exc: BaseException) -> bool:
     status = background_loop_statuses().get(status_name) or {}
     return status.get("status") == "failed" and status.get("lastError") == str(exc)
 
@@ -252,20 +249,17 @@ async def shutdown_application(app: FastAPI) -> None:
         if ev:
             ev.set()
     await _cancel_background_tasks(_background_tasks(app))
-
-
-def _background_tasks(app: FastAPI) -> list[asyncio.Task]:
+def _background_tasks(app: FastAPI) -> list[tuple[str, asyncio.Task]]:
     tasks = []
     for attr in BACKGROUND_TASK_ATTRS:
         task = getattr(app.state, attr, None)
         if task and not task.done():
-            tasks.append(task)
+            tasks.append((attr.removesuffix("_task"), task))
     return tasks
-
-
-async def _cancel_background_tasks(tasks: list[asyncio.Task]) -> None:
-    if not tasks:
+async def _cancel_background_tasks(task_refs: list[tuple[str, asyncio.Task]]) -> None:
+    if not task_refs:
         return
+    tasks = [task for _name, task in task_refs]
     for task in tasks:
         task.cancel()
     try:
@@ -273,18 +267,26 @@ async def _cancel_background_tasks(tasks: list[asyncio.Task]) -> None:
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS,
         )
-        _log_background_task_shutdown_results(results)
-    except asyncio.TimeoutError:
+        _log_background_task_shutdown_results(task_refs, results)
+    except asyncio.TimeoutError as exc:
+        _record_background_shutdown_timeout(task_refs, exc)
         logger.warning("background task shutdown timed out after %ss", BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS)
-
-
-def _log_background_task_shutdown_results(results: list[object]) -> None:
-    for result in results:
+def _log_background_task_shutdown_results(task_refs: list[tuple[str, asyncio.Task]], results: list[object]) -> None:
+    for (name, _task), result in zip(task_refs, results):
         if result is None or isinstance(result, asyncio.CancelledError):
             continue
-        if isinstance(result, BaseException):
-            logger.error(
-                "background task failed during shutdown: %s",
-                result,
-                exc_info=(type(result), result, result.__traceback__),
-            )
+        if not isinstance(result, BaseException):
+            continue
+        status_name = BACKGROUND_LOOP_STATUS_NAMES.get(name, name)
+        record_loop_failure(status_name, result, {"stage": "shutdown", "taskName": name})
+        logger.error(
+            "background task failed during shutdown: %s",
+            result,
+            exc_info=(type(result), result, result.__traceback__),
+        )
+def _record_background_shutdown_timeout(task_refs: list[tuple[str, asyncio.Task]], exc: BaseException) -> None:
+    details = {"stage": "shutdown", "timeoutSeconds": BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS}
+    for name, task in task_refs:
+        if not task.done():
+            status_name = BACKGROUND_LOOP_STATUS_NAMES.get(name, name)
+            record_loop_failure(status_name, exc, {**details, "taskName": name})

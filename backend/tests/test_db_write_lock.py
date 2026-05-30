@@ -74,6 +74,24 @@ def test_run_db_write_with_retry_rejects_non_positive_attempts() -> None:
         raise AssertionError("non-positive attempts were not rejected")
 
 
+def test_run_db_write_with_retry_reraises_non_lock_errors(monkeypatch) -> None:
+    slept = []
+
+    def broken_write() -> None:
+        raise sqlite3.OperationalError("syntax error near broken")
+
+    monkeypatch.setattr(time, "sleep", lambda seconds: slept.append(seconds))
+
+    try:
+        run_db_write_with_retry(broken_write)
+    except sqlite3.OperationalError as exc:
+        assert str(exc) == "syntax error near broken"
+    else:
+        raise AssertionError("non-lock sqlite errors must not be retried or swallowed")
+
+    assert slept == []
+
+
 def test_get_conn_exposes_wal_configuration_failure(monkeypatch) -> None:
     class BadConn:
         closed = False
@@ -94,6 +112,60 @@ def test_get_conn_exposes_wal_configuration_failure(monkeypatch) -> None:
         assert "failed to enable SQLite WAL mode" in str(exc)
     else:
         raise AssertionError("WAL configuration failure was not exposed")
+
+    assert conn.closed is True
+
+
+def test_get_conn_exposes_busy_timeout_configuration_failure(monkeypatch) -> None:
+    class BadConn:
+        closed = False
+        row_factory = None
+        statements = []
+
+        def execute(self, sql: str):
+            self.statements.append(sql)
+            if sql == "PRAGMA busy_timeout=30000":
+                raise sqlite3.OperationalError("busy timeout failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    conn = BadConn()
+    monkeypatch.setattr(session.sqlite3, "connect", lambda *args, **kwargs: conn)
+
+    try:
+        session.get_conn()
+    except RuntimeError as exc:
+        assert "failed to configure SQLite busy_timeout" in str(exc)
+    else:
+        raise AssertionError("busy_timeout configuration failure was not exposed")
+
+    assert conn.closed is True
+    assert conn.statements == ["PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=30000"]
+
+
+def test_init_db_closes_connection_when_schema_execution_fails(monkeypatch, tmp_path: Path) -> None:
+    class BadSchemaConn:
+        closed = False
+
+        def executescript(self, _sql: str) -> None:
+            raise RuntimeError("schema failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    schema_path = tmp_path / "schema.sql"
+    schema_path.write_text("CREATE TABLE broken(id INTEGER);", encoding="utf-8")
+    conn = BadSchemaConn()
+    monkeypatch.setattr(session, "SCHEMA_PATH", schema_path)
+    monkeypatch.setattr(session, "get_conn", lambda: conn)
+
+    try:
+        session.init_db()
+    except RuntimeError as exc:
+        assert str(exc) == "schema failed"
+    else:
+        raise AssertionError("schema execution failure was not exposed")
 
     assert conn.closed is True
 

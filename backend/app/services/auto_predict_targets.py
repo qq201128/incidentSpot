@@ -35,8 +35,6 @@ def prediction_targets(
         raise PredictionTargetConfigError(invalid)
     if enabled:
         return enabled
-    if any(item.enabled for item in settings):
-        return []
     return default_prediction_targets(get_default_settings, readiness, logger)
 
 
@@ -59,7 +57,7 @@ def default_prediction_targets(
         status.recovery_status,
         status.diagnostics,
     )
-    return []
+    raise PredictionTargetReadinessError([readiness_skip_payload(default, status)])
 
 
 def enabled_prediction_targets(

@@ -11,7 +11,7 @@ from app.services.auto_trade_types import AutoTradeSettings
 @dataclass(frozen=True)
 class PredictionFailure:
     settings: AutoTradeSettings
-    exception: Exception
+    exception: BaseException
 
 
 class PredictionBatchError(RuntimeError):
@@ -28,6 +28,12 @@ class CandidateCollectionBatchError(RuntimeError):
         self.details = [_failure_detail(failure) for failure in failures]
         failed = ", ".join(f"{failure.settings.symbol}:{failure.settings.duration}" for failure in failures)
         super().__init__(f"candidate collection failed for: {failed}")
+
+
+class BroadcastDeliveryError(RuntimeError):
+    def __init__(self, failures: list[BaseException]) -> None:
+        self.details = [_exception_detail(exc) for exc in failures]
+        super().__init__(f"prediction broadcast failed for {len(failures)} subscriber(s)")
 
 
 async def prepare_prediction_inputs(settings_list: list[AutoTradeSettings], deps: dict[str, Any]) -> None:
@@ -85,7 +91,7 @@ def prediction_failures(settings_list: list[AutoTradeSettings], results: list[ob
     return [
         PredictionFailure(settings, result)
         for settings, result in zip(settings_list, results)
-        if isinstance(result, Exception)
+        if isinstance(result, BaseException)
     ]
 
 
@@ -99,6 +105,10 @@ def _failure_detail(failure: PredictionFailure) -> dict[str, str]:
         "error": str(exc),
         "exceptionType": type(exc).__name__,
     }
+
+
+def _exception_detail(exc: BaseException) -> dict[str, str]:
+    return {"error": str(exc), "exceptionType": type(exc).__name__}
 
 
 async def broadcast(result: dict, subscribers: dict[tuple[str, str, str], set], default_strategy_key: str) -> None:
@@ -115,4 +125,4 @@ async def broadcast(result: dict, subscribers: dict[tuple[str, str, str], set], 
     if dead:
         websockets -= dead
     if failures:
-        raise RuntimeError(f"prediction broadcast failed for {len(failures)} subscriber(s)") from failures[0]
+        raise BroadcastDeliveryError(failures) from failures[0]

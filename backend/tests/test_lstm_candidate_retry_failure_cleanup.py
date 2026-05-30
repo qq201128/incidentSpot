@@ -30,7 +30,7 @@ def test_candidate_retry_finishes_progress_when_candidate_record_fails(monkeypat
         publish_trade_candidate=_forbidden("publish_trade_candidate"),
         start_progress=lambda **kwargs: calls.append(("progress_start", kwargs["total"])) or {},
         complete_progress=lambda **kwargs: calls.append(("progress_complete", kwargs["completed"])) or {},
-        finish_progress=lambda **kwargs: calls.append(("progress_finish", kwargs["status"])) or {},
+        finish_progress=lambda **kwargs: calls.append(("progress_finish", kwargs["status"], kwargs["failure"])) or {},
     )
     config = retry.LstmCandidateRetryConfig(
         symbols=("BTCUSDT",),
@@ -45,7 +45,14 @@ def test_candidate_retry_finishes_progress_when_candidate_record_fails(monkeypat
     else:
         raise AssertionError("candidate record failure should be exposed")
 
-    assert calls == [("progress_start", 1), ("progress_finish", "failed")]
+    assert calls == [
+        ("progress_start", 1),
+        ("progress_finish", "failed", {
+            "stage": "candidate_retry",
+            "error": "[WinError 5] candidate_library.json",
+            "exceptionType": "PermissionError",
+        }),
+    ]
 
 
 def _ranking() -> dict:

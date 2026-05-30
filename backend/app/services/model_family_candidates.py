@@ -76,7 +76,9 @@ def queue_model_candidate_progress(
     total: int,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
 ) -> dict:
-    payload = _progress_payload(family, symbol, duration, profile, "queued", total, parallel_workers)
+    payload = _progress_payload(
+        family, symbol, duration, profile=profile, status="queued", total=total, parallel_workers=parallel_workers
+    )
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
 
@@ -89,11 +91,13 @@ def start_model_candidate_progress(
     total: int,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
 ) -> dict:
-    payload = _progress_payload(family, symbol, duration, profile, "running", total, parallel_workers)
+    payload = _progress_payload(
+        family, symbol, duration, profile=profile, status="running", total=total, parallel_workers=parallel_workers
+    )
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
 
-def complete_model_candidate_progress(config, profile: str, report: dict, completed: int, total: int) -> dict:
+def complete_model_candidate_progress(config, *, profile: str, report: dict, completed: int, total: int) -> dict:
     latest = _candidate_payload(config, profile, report)
     path = candidate_progress_path(config.family, config.symbol, config.duration)
 
@@ -114,13 +118,20 @@ def complete_model_candidate_progress(config, profile: str, report: dict, comple
 
     return update_json(path, _updater)
 
-def finish_model_candidate_progress(family: str, *, symbol: str, duration: str, status: str) -> dict:
+def finish_model_candidate_progress(
+    family: str, *, symbol: str, duration: str, status: str, failure: dict[str, Any] | None = None
+) -> dict:
     path = candidate_progress_path(family, symbol, duration)
 
     def _updater(payload: dict[str, Any] | None) -> dict[str, Any]:
         current = payload or _empty_progress(family, symbol, duration)
         now = _utc_now()
-        return {**current, "status": status, "updatedAt": now, "finishedAt": now}
+        next_payload = {**current, "status": status, "updatedAt": now, "finishedAt": now}
+        if failure is not None:
+            return {**next_payload, "lastFailure": failure}
+        if status != "failed":
+            return {**next_payload, "lastFailure": None}
+        return next_payload
 
     return update_json(path, _updater)
 
@@ -219,13 +230,7 @@ def _candidate_score(record: dict) -> tuple[float, float, int]:
     )
 
 def _progress_payload(
-    family: str,
-    symbol: str,
-    duration: str,
-    profile: str,
-    status: str,
-    total: int,
-    parallel_workers: int,
+    family: str, symbol: str, duration: str, *, profile: str, status: str, total: int, parallel_workers: int
 ) -> dict:
     now = _utc_now()
     return {

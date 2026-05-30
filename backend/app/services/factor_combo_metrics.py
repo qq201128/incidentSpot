@@ -4,6 +4,7 @@ from typing import Any
 
 from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combo_backtest_cache_service import (
+    ComboBacktestCacheWrite,
     get_usable_combo_backtest,
     save_cached_combo_backtest,
 )
@@ -93,7 +94,14 @@ def _standard_backtest_metrics(symbol: str, duration: str, factor_name: str) -> 
     from app.services.factor_backtest_service import run_factor_backtest
 
     metrics = run_factor_backtest(factor_name, symbol, duration)
-    save_cached_combo_backtest(symbol, duration, factor_name, metrics)
+    save_cached_combo_backtest(
+        ComboBacktestCacheWrite(
+            symbol=symbol,
+            duration=duration,
+            factor_name=factor_name,
+            metrics=metrics,
+        )
+    )
     return metrics
 
 

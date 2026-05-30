@@ -170,6 +170,7 @@ def _summary_payload(results: list[dict[str, Any]], symbols: list[str], duration
 
 def _daily_checklist(stages: list[dict[str, Any]], report: dict[str, Any]) -> list[dict[str, Any]]:
     stage_status = {stage["stage"]: stage["status"] for stage in stages}
+    candidate_report_status = stage_status.get("candidate_pool_report")
     return [
         _check("refresh_market_data", stage_status.get("market_and_offline_candidates")),
         _check("update_factor_and_model_candidates", stage_status.get("market_and_offline_candidates")),
@@ -179,10 +180,23 @@ def _daily_checklist(stages: list[dict[str, Any]], report: dict[str, Any]) -> li
         _check("settle_due_predictions", stage_status.get("settle_due_predictions")),
         _check("update_paper_live_metrics", stage_status.get("paper_live_lifecycle")),
         _check("update_candidate_lifecycle_status", stage_status.get("paper_live_lifecycle")),
-        _check("eliminate_failed_candidates", "reported", f"failed={len(report.get('failed') or [])}"),
-        _check("retain_stable_candidates", "reported", f"stable={len(report.get('stable') or [])}"),
-        _check("output_failure_reasons_and_next_search_direction", stage_status.get("candidate_pool_report")),
+        _reported_candidate_check("eliminate_failed_candidates", candidate_report_status, report, key="failed"),
+        _reported_candidate_check("retain_stable_candidates", candidate_report_status, report, key="stable"),
+        _check("output_failure_reasons_and_next_search_direction", candidate_report_status),
     ]
+
+
+def _reported_candidate_check(
+    name: str,
+    candidate_report_status: str | None,
+    report: dict[str, Any],
+    *,
+    key: str,
+) -> dict[str, Any]:
+    if candidate_report_status == "passed":
+        return _check(name, "reported", f"{key}={len(report.get(key) or [])}")
+    reason = "candidate_pool_report_failed" if candidate_report_status == "failed" else "candidate_pool_report_not_run"
+    return _check(name, candidate_report_status, reason)
 
 
 def _check(name: str, status: str | None, reason: str | None = None) -> dict[str, Any]:

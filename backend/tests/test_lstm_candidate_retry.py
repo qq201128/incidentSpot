@@ -214,7 +214,12 @@ def test_parallel_candidate_reports_yield_completed_candidate_before_slow_candid
         finish_progress=_forbidden("finish_progress"),
     )
 
-    reports = retry._train_candidate_reports(configs, EXPERIMENT_PROFILE_FAST, 2, deps)
+    reports = retry._train_candidate_reports(
+        configs,
+        profile=EXPERIMENT_PROFILE_FAST,
+        workers=2,
+        deps=deps,
+    )
     first = next(reports)
     release_slow.set()
     rest = list(reports)

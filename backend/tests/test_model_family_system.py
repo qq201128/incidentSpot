@@ -226,7 +226,7 @@ def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> N
     base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
     requested = []
 
-    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
     monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset({"already_tried"}))
     monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda _base, _profile, attempted: requested.append(attempted) or [base])
     monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
@@ -252,11 +252,15 @@ def test_model_candidate_search_finishes_progress(monkeypatch) -> None:
     config = search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
     base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
 
-    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
     monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
     monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: [base])
     monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_start", kwargs["total"])) or {})
-    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_complete", args[3])) or {})
+    monkeypatch.setattr(
+        search_service,
+        "complete_model_candidate_progress",
+        lambda *args, **kwargs: calls.append(("progress_complete", kwargs["completed"])) or {},
+    )
     monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *args, **kwargs: calls.append(("progress_finish", kwargs["status"])) or {})
     monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(
@@ -273,12 +277,42 @@ def test_model_candidate_search_finishes_progress(monkeypatch) -> None:
     assert calls[-1] == ("progress_finish", "validation_failed")
 
 
+def test_model_candidate_search_records_failure_details(monkeypatch) -> None:
+    calls = []
+    config = search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: [base])
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *args, **kwargs: calls.append(kwargs) or {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        search_service,
+        "train_candidate_reports",
+        _candidate_report_iterator([base], [_report("validation_failed", 0.52, 1)]),
+    )
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _raise_walk_forward_failure)
+
+    with pytest.raises(RuntimeError, match="walk-forward exploded"):
+        search_service.run_model_candidate_search(config)
+
+    assert calls[-1]["status"] == "failed"
+    assert calls[-1]["failure"] == {
+        "stage": "candidate_search",
+        "error": "walk-forward exploded",
+        "exceptionType": "RuntimeError",
+    }
+
+
 def test_exhausted_candidate_search_uses_library_status(monkeypatch) -> None:
     captured = {}
     library = {"records": [_report("validation_failed", 0.52, 1), _report("validation_failed", 0.54, 2)]}
     base = ModelFamilyTrainingConfig(family="random_forest", symbol="BTCUSDT", duration="60m")
 
-    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args: base)
+    monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
     monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset({"a", "b"}))
     monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: [])
     monkeypatch.setattr(search_service, "read_model_candidate_library", lambda *_args: library)
@@ -428,6 +462,10 @@ def _walk_forward_passthrough(finalists, _dataset_builder):
         "advancedKeys": [item.report.get("searchKey") for item in finalists],
         "candidates": [],
     }
+
+
+def _raise_walk_forward_failure(*_args):
+    raise RuntimeError("walk-forward exploded")
 
 
 class _LowConfidenceBackend:

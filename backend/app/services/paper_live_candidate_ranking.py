@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-import json
+from dataclasses import dataclass
 from typing import Any
 
 STATUS_STABLE = "paper_stable"
 STATUS_COLLECTING = "paper_collecting"
 STATUS_BACKTEST = "backtest_candidate"
+
+
+@dataclass(frozen=True)
+class ValidationMetadata:
+    walk_forward_result: Any
+    recent_rolling_result: Any
 
 
 def candidate_rank_key(candidate: dict[str, Any]) -> tuple[float, float, float, float, float, float, float]:
@@ -23,15 +29,19 @@ def candidate_rank_key(candidate: dict[str, Any]) -> tuple[float, float, float, 
     )
 
 
-def performance_comparison(candidate: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
+def performance_comparison(
+    candidate: dict[str, Any],
+    metrics: dict[str, Any],
+    metadata: ValidationMetadata,
+) -> dict[str, Any]:
     backtest = candidate.get("high_winrate_gate_value")
     paper = metrics.get("winRate")
     return {
         "policy": "backtest_oos_walk_forward_recent_rolling_are_prefilter_only",
         "backtestWinRate": backtest,
         "oosWinRate": candidate.get("oos_win_rate"),
-        "walkForwardResult": _json_value(candidate.get("walk_forward_result")),
-        "recentRollingResult": _json_value(candidate.get("recent_rolling_result")),
+        "walkForwardResult": metadata.walk_forward_result,
+        "recentRollingResult": metadata.recent_rolling_result,
         "validationWinRate": candidate.get("validation_win_rate"),
         "paperLiveWinRate": paper,
         "paperLiveSampleCount": metrics.get("sampleCount"),
@@ -86,12 +96,3 @@ def _gap(first: Any, second: Any) -> float | None:
 
 def _num(value: Any) -> float:
     return float(value) if value is not None else float("-inf")
-
-
-def _json_value(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value

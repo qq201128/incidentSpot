@@ -45,7 +45,7 @@ def model_train(
             family,
             symbol.upper(),
             duration,
-            normalize_experiment_profile(profile),
+            profile=normalize_experiment_profile(profile),
             feature_window=feature_window,
             epochs=epochs,
             batch_size=batch_size,
@@ -121,4 +121,3 @@ def model_search_jobs_status(
         "statuses": (status,) if status else (),
     }
     return model_search_status_with_lifecycle(filters)
-

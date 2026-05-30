@@ -1,26 +1,32 @@
 from __future__ import annotations
 
 import json
-import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.cache_payloads import decode_cache_payload
 from app.services.factor_cache_metadata import cache_is_usable, cache_status, ranking_cache_metadata
 
-logger = logging.getLogger("uvicorn.error")
 
+@dataclass(frozen=True, slots=True)
+class ComboBacktestCacheWrite:
+    symbol: str
+    duration: str
+    factor_name: str
+    metrics: dict[str, Any]
 
 def get_cached_combo_backtest(symbol: str, duration: str, factor_name: str) -> dict[str, Any] | None:
     sym = symbol.strip().upper()
     row = _cache_row(sym, duration, factor_name)
     if row is None:
         return None
-    try:
-        payload = json.loads(row["payload"])
-    except json.JSONDecodeError:
-        logger.warning("factor_combo_backtest_cache corrupt JSON for %s %s %s", sym, duration, factor_name)
-        return None
+    payload = decode_cache_payload(
+        row["payload"],
+        cache_name="factor_combo_backtest_cache",
+        identity={"symbol": sym, "duration": duration, "factorName": str(factor_name)},
+    )
     if not isinstance(payload, dict):
         return None
     cache_meta = payload.get("cacheMeta")
@@ -39,20 +45,16 @@ def get_usable_combo_backtest(symbol: str, duration: str, factor_name: str) -> d
     return dict(metrics) if isinstance(metrics, dict) else None
 
 
-def save_cached_combo_backtest(
-    symbol: str,
-    duration: str,
-    factor_name: str,
-    metrics: dict[str, Any],
-) -> None:
-    sym = symbol.strip().upper()
-    name = str(factor_name)
+def save_cached_combo_backtest(record: ComboBacktestCacheWrite) -> None:
+    sym = record.symbol.strip().upper()
+    duration = str(record.duration)
+    name = str(record.factor_name)
     payload = json.dumps(
         {
             "symbol": sym,
             "duration": duration,
             "factorName": name,
-            "metrics": metrics,
+            "metrics": record.metrics,
             "cacheMeta": ranking_cache_metadata(sym, duration),
         },
         ensure_ascii=False,

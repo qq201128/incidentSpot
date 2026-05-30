@@ -28,7 +28,7 @@ def record_loop_success(name: str, details: dict[str, Any] | None = None) -> Non
 
 def record_loop_failure(
     name: str,
-    exc: Exception,
+    exc: BaseException,
     details: dict[str, Any] | None = None,
 ) -> None:
     _update(

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.cache_payloads import CachePayloadDecodeError, decode_cache_payload
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
 
 logger = logging.getLogger("uvicorn.error")
@@ -16,11 +17,11 @@ def get_cached_combination_ranking(symbol: str, duration: str) -> dict[str, Any]
     row = _cache_row(symbol, duration)
     if row is None:
         return None
-    try:
-        payload = json.loads(row["payload"])
-    except json.JSONDecodeError:
-        logger.warning("factor_combo_ranking_cache corrupt JSON for %s %s", symbol, duration)
-        return None
+    payload = decode_cache_payload(
+        row["payload"],
+        cache_name="factor_combo_ranking_cache",
+        identity={"symbol": sym, "duration": duration},
+    )
     if not isinstance(payload, dict):
         return None
     cache_meta = payload.get("cacheMeta")
@@ -37,15 +38,16 @@ def save_cached_combination_ranking(report: dict[str, Any]) -> None:
     ranking = report.get("ranking")
     if not isinstance(ranking, list):
         raise ValueError("combination ranking report must contain a ranking list")
-    existing = get_cached_combination_ranking(symbol, duration)
-    if not ranking and _cache_has_rows(existing) and not _has_search_diagnostics(report):
-        logger.warning(
-            "skip overwriting non-empty factor combo cache with legacy empty ranking: %s %s existing=%s",
-            symbol,
-            duration,
-            len(existing.get("ranking") or []),
-        )
-        return
+    if not ranking and not _has_search_diagnostics(report):
+        existing = get_cached_combination_ranking(symbol, duration)
+        if _cache_has_rows(existing):
+            logger.warning(
+                "skip overwriting non-empty factor combo cache with legacy empty ranking: %s %s existing=%s",
+                symbol,
+                duration,
+                len(existing.get("ranking") or []),
+            )
+            return
     persisted = {**report, "cacheMeta": ranking_cache_metadata(symbol, duration)}
     payload = json.dumps(persisted, ensure_ascii=False)
     config = json.dumps(persisted.get("searchConfig") or {}, ensure_ascii=False)

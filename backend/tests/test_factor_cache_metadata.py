@@ -138,15 +138,33 @@ def test_empty_combination_report_does_not_overwrite_nonempty_cache(monkeypatch,
     assert [row["factorName"] for row in cached["ranking"]] == ["combo__a__b"]
 
 
+def test_corrupt_combination_cache_payload_is_exposed(monkeypatch, tmp_path: Path) -> None:
+    db_path = _init_db(tmp_path)
+    _patch_cache_db(monkeypatch, db_path)
+    _insert_combo_cache_payload(db_path, "{broken")
+
+    try:
+        factor_combination_cache_service.get_cached_combination_ranking("btcusdt", "10m")
+    except factor_combination_cache_service.CachePayloadDecodeError as exc:
+        assert exc.details["cacheName"] == "factor_combo_ranking_cache"
+        assert exc.details["symbol"] == "BTCUSDT"
+        assert exc.details["duration"] == "10m"
+        assert exc.details["exceptionType"] == "JSONDecodeError"
+    else:
+        raise AssertionError("corrupt factor combo cache JSON was treated as missing cache")
+
+
 def test_combo_backtest_cache_becomes_stale_when_market_data_changes(monkeypatch, tmp_path: Path) -> None:
     db_path = _init_db(tmp_path)
     _patch_cache_db(monkeypatch, db_path)
     _insert_kline(db_path, "30m", 0)
     factor_combo_backtest_cache_service.save_cached_combo_backtest(
-        "BTCUSDT",
-        "30m",
-        "combo__a__b",
-        {"factorName": "combo__a__b", "factorScore": 65.8},
+        factor_combo_backtest_cache_service.ComboBacktestCacheWrite(
+            symbol="BTCUSDT",
+            duration="30m",
+            factor_name="combo__a__b",
+            metrics={"factorName": "combo__a__b", "factorScore": 65.8},
+        )
     )
 
     cached = factor_combo_backtest_cache_service.get_usable_combo_backtest("BTCUSDT", "30m", "combo__a__b")
@@ -286,17 +304,22 @@ def _insert_kline(db_path: Path, interval: str, open_time: int, *, symbol: str =
 
 
 def _insert_legacy_combo_cache(db_path: Path) -> None:
+    _insert_combo_cache_payload(
+        db_path,
+        '{"symbol":"BTCUSDT","duration":"10m","ranking":[{"factorName":"combo_a"}]}',
+    )
+
+
+def _insert_combo_cache_payload(db_path: Path, payload: str) -> None:
     conn = _connect(db_path)
     try:
         conn.execute(
             """
             INSERT INTO factor_combo_ranking_cache(
               symbol, duration, updated_at, total, search_config, payload
-            ) VALUES(
-              'BTCUSDT', '10m', '2026-05-14T00:00:00+00:00', 1, '{}',
-              '{"symbol":"BTCUSDT","duration":"10m","ranking":[{"factorName":"combo_a"}]}'
-            )
-            """
+            ) VALUES(?, ?, ?, ?, ?, ?)
+            """,
+            ("BTCUSDT", "10m", "2026-05-14T00:00:00+00:00", 1, "{}", payload),
         )
         conn.commit()
     finally:

@@ -1,26 +1,23 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.cache_payloads import decode_cache_payload
 from app.services.factor_cache_metadata import cache_status, ranking_cache_metadata
-
-logger = logging.getLogger("uvicorn.error")
-
 
 def get_cached_high_winrate_combo_ranking(symbol: str, duration: str) -> dict[str, Any] | None:
     sym = symbol.strip().upper()
     row = _cache_row(sym, duration)
     if row is None:
         return None
-    try:
-        payload = json.loads(row["payload"])
-    except json.JSONDecodeError:
-        logger.warning("high_winrate_combo_ranking_cache corrupt JSON for %s %s", sym, duration)
-        return None
+    payload = decode_cache_payload(
+        row["payload"],
+        cache_name="high_winrate_combo_ranking_cache",
+        identity={"symbol": sym, "duration": duration},
+    )
     if not isinstance(payload, dict):
         return None
     cache_meta = payload.get("cacheMeta")

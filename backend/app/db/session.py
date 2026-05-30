@@ -35,16 +35,18 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db() -> None:
   conn = get_conn()
-  with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-    conn.executescript(f.read())
-  _apply_schema_migrations(conn)
-  _ensure_prediction_signal_keys(conn)
-  _migrate_auto_trade_strategies_composite_pk(conn)
-  _ensure_auto_trade_settings(conn)
-  _ensure_auto_trade_strategies(conn)
-  _ensure_ai_event_columns(conn)
-  conn.commit()
-  conn.close()
+  try:
+    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+      conn.executescript(f.read())
+    _apply_schema_migrations(conn)
+    _ensure_prediction_signal_keys(conn)
+    _migrate_auto_trade_strategies_composite_pk(conn)
+    _ensure_auto_trade_settings(conn)
+    _ensure_auto_trade_strategies(conn)
+    _ensure_ai_event_columns(conn)
+    conn.commit()
+  finally:
+    conn.close()
 
 
 def _apply_schema_migrations(conn: sqlite3.Connection) -> None:

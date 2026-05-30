@@ -14,6 +14,7 @@ from app.services.factor_combination_cache_service import save_cached_combinatio
 from app.services.factor_combination_service import run_factor_combination_ranking
 from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
+from app.services.exception_payloads import exception_details
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.kline_timing import MS_PER_MINUTE, current_rule_entry_open_time_for_duration
 from app.services.lstm_candidate_library import attempted_search_keys, record_lstm_candidate
@@ -29,6 +30,7 @@ from app.services.lstm_candidate_search import (
     next_candidate_configs,
     search_space_size,
 )
+from app.services.lstm_candidate_retry_decision import retry_decision
 from app.services.lstm_config import LstmTrainingConfig
 from app.services.lstm_prediction_service import lstm_model_status
 from app.services.lstm_training_service import publish_lstm_staged_model, train_lstm_model
@@ -46,8 +48,6 @@ from app.services.lstm_candidate_retry_payloads import (
 )
 
 DEFAULT_RETRY_DURATIONS = ("10m", "60m")
-RETRY_TRAIN_STATUSES = {"untrained", "validation_failed", "failed", "insufficient_samples"}
-TRAINED_STATUSES = {"trained", "shadow_active", "trade_active"}
 
 
 @dataclass(frozen=True)
@@ -133,10 +133,10 @@ def _retry_symbol_duration(
     deps: LstmCandidateRetryDependencies,
 ) -> dict[str, Any]:
     status = deps.lstm_status(symbol, duration)
-    decision = _retry_decision(status, manual_trigger=config.manual_trigger)
+    decision = retry_decision(status, manual_trigger=config.manual_trigger)
     if not decision["shouldTrain"]:
         return _skipped_result(symbol, duration, status, decision)
-    configs = _next_search_configs(symbol, duration, config, deps)
+    configs = _next_search_configs(symbol, duration, config=config, deps=deps)
     if not configs:
         return _search_exhausted_result(symbol, duration, status, decision, config)
     search_total = search_space_size(config.search)
@@ -153,40 +153,32 @@ def _retry_symbol_duration(
         ranking = deps.run_combination_ranking(symbol, duration, combination_search_config_for_profile(config.profile))
         deps.save_combination_ranking(ranking)
         promotion = deps.promote_combinations(ranking)
-        trainings = _train_candidates(configs, config.profile, config.search.parallel_workers, deps)
+        trainings = _train_candidates(
+            configs,
+            profile=config.profile,
+            workers=config.search.parallel_workers,
+            deps=deps,
+        )
         if not config.manual_trigger:
             _publish_best_trade_candidate(trainings, deps)
         reports = [item.report for item in trainings]
         result = _trained_result(symbol, duration, status, decision, ranking, promotion, reports)
         deps.finish_progress(symbol=symbol, duration=duration, status=result["status"])
         return result
-    except Exception:
-        deps.finish_progress(symbol=symbol, duration=duration, status="failed")
+    except Exception as exc:
+        deps.finish_progress(
+            symbol=symbol,
+            duration=duration,
+            status="failed",
+            failure=exception_details(exc, "candidate_retry"),
+        )
         raise
-
-
-def _retry_decision(status: dict[str, Any], *, manual_trigger: bool = False) -> dict[str, Any]:
-    if manual_trigger:
-        return {"shouldTrain": True, "reason": "manual_candidate_search"}
-    if str(status.get("lastAttemptStatus") or "") == "training":
-        return {"shouldTrain": False, "reason": "training_in_progress"}
-    active_status = str(status.get("activeModelStatus") or status.get("status") or "")
-    if active_status == "shadow_active":
-        return {"shouldTrain": True, "reason": "shadow_active_candidate_search"}
-    if active_status in RETRY_TRAIN_STATUSES:
-        return {"shouldTrain": True, "reason": f"model_status_{active_status}"}
-    if not bool(status.get("comboSnapshotMatches")):
-        return {"shouldTrain": True, "reason": "combo_snapshot_mismatch"}
-    if not bool(status.get("artifactsReady")):
-        return {"shouldTrain": True, "reason": "artifacts_incomplete"}
-    if bool(status.get("shadowPredictionReady")) and bool(status.get("comboSnapshotMatches")):
-        return {"shouldTrain": False, "reason": "active_model_ready"}
-    return {"shouldTrain": False, "reason": "not_retryable"}
 
 
 def _next_search_configs(
     symbol: str,
     duration: str,
+    *,
     config: LstmCandidateRetryConfig,
     deps: LstmCandidateRetryDependencies,
 ) -> list[LstmTrainingConfig]:
@@ -202,12 +194,13 @@ def _next_search_configs(
 
 def _train_candidates(
     configs: list[LstmTrainingConfig],
+    *,
     profile: str,
     workers: int,
     deps: LstmCandidateRetryDependencies,
 ) -> list[CandidateTrainingResult]:
     trained = []
-    for item in _train_candidate_reports(configs, profile, workers, deps):
+    for item in _train_candidate_reports(configs, profile=profile, workers=workers, deps=deps):
         trained.append(item)
         deps.record_candidate(item.config, profile, item.report)
         deps.complete_progress(
@@ -222,6 +215,7 @@ def _train_candidates(
 
 def _train_candidate_reports(
     configs: list[LstmTrainingConfig],
+    *,
     profile: str,
     workers: int,
     deps: LstmCandidateRetryDependencies,
@@ -292,4 +286,3 @@ def _refresh_inputs(
     entry_open_time = current_rule_entry_open_time_for_duration(duration)
     deps.refresh_klines(symbol, "1m", entry_open_time - MS_PER_MINUTE)
     deps.refresh_klines(symbol, duration, entry_open_time - _duration_ms(duration))
-

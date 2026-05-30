@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
-
-logger = logging.getLogger("uvicorn.error")
-
+from app.services.cache_payloads import decode_cache_payload
 
 def get_cached_combination_signals(symbol: str) -> dict[str, Any] | None:
     row = _cache_row(symbol)
     if row is None:
         return None
-    try:
-        payload = json.loads(row["payload"])
-    except json.JSONDecodeError:
-        logger.warning("factor_combo_signal_cache corrupt JSON for %s", symbol)
-        return None
+    payload = decode_cache_payload(
+        row["payload"],
+        cache_name="factor_combo_signal_cache",
+        identity={"symbol": symbol.strip().upper()},
+    )
     if not isinstance(payload, dict):
         return None
     return {**payload, "updatedAt": str(row["updated_at"]), "source": "signal_cache"}
