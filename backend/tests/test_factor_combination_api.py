@@ -5,7 +5,12 @@ from app.api.factor_combinations import _stale_combination_ranking
 
 
 def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
-    config = _combination_config("full", 25, "2,3", 400)
+    config = _combination_config(
+        profile="full",
+        base_factor_limit=25,
+        combo_sizes="2,3",
+        result_limit=400,
+    )
 
     assert config.base_factor_limit == 25
     assert config.combo_sizes == (2, 3)

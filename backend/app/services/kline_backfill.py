@@ -1,7 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.binance_service import fetch_klines
+
+
+@dataclass(frozen=True)
+class BackfillState:
+    current: int
+    end_time: int | None
+    rounds: int = 0
+
+
+class KlineBackfillError(RuntimeError):
+    pass
 
 
 def upsert_klines_rows(symbol: str, interval: str, rows: list[dict]) -> None:
@@ -73,44 +86,52 @@ def backfill_1m_history(
     max_rounds: int = 200,
 ) -> int:
     """
-    Pull older 1m candles into SQLite until we reach target_rows (best effort).
+    Pull older 1m candles into SQLite until we reach target_rows.
 
     Returns final row count in DB for (symbol, 1m).
     """
     sym = symbol.upper()
-    if chunk > 1000:
-        chunk = 1000
-    if chunk < 50:
-        chunk = 50
+    bounded_chunk = _bounded_chunk(chunk)
+    state = _initial_state(sym)
+    if state.current >= target_rows:
+        return state.current
 
-    current = count_klines(sym, "1m")
-    if current >= target_rows:
-        return current
-
-    oldest = oldest_open_time(sym, "1m")
-    end_time = int(oldest) - 1 if oldest is not None else None
-
-    rounds = 0
-    while current < target_rows and rounds < max_rounds:
-        rounds += 1
-        try:
-            rows = fetch_klines(sym, "1m", limit=chunk, end_time=end_time)
-        except Exception:
-            # Network hiccups happen; shrink the chunk and retry within the same round budget.
-            if chunk > 200:
-                chunk = max(200, chunk // 2)
-            continue
-
+    while state.current < target_rows and state.rounds < max_rounds:
+        rows = _fetch_backfill_rows(sym, bounded_chunk, state.end_time)
         if not rows:
-            break
+            raise KlineBackfillError(f"no historical 1m klines returned for {sym} before {state.end_time}")
 
         upsert_klines_rows(sym, "1m", rows)
-        new_oldest = min(int(r["openTime"]) for r in rows)
-        if end_time is not None and new_oldest >= end_time:
-            # Avoid infinite loops if the API keeps returning the same window.
-            break
-        end_time = new_oldest - 1
+        state = _next_state(sym, state, rows)
 
-        current = count_klines(sym, "1m")
+    if state.current < target_rows:
+        raise KlineBackfillError(
+            f"1m kline backfill for {sym} stopped after {state.rounds} rounds: "
+            f"{state.current}/{target_rows} rows"
+        )
+    return state.current
 
-    return current
+
+def _bounded_chunk(chunk: int) -> int:
+    return min(1000, max(50, chunk))
+
+
+def _initial_state(symbol: str) -> BackfillState:
+    oldest = oldest_open_time(symbol, "1m")
+    return BackfillState(current=count_klines(symbol, "1m"), end_time=int(oldest) - 1 if oldest is not None else None)
+
+
+def _fetch_backfill_rows(symbol: str, chunk: int, end_time: int | None) -> list[dict]:
+    try:
+        return fetch_klines(symbol, "1m", limit=chunk, end_time=end_time)
+    except Exception as exc:
+        raise KlineBackfillError(
+            f"failed to fetch 1m klines for {symbol} before {end_time} with chunk={chunk}: {exc}"
+        ) from exc
+
+
+def _next_state(symbol: str, state: BackfillState, rows: list[dict]) -> BackfillState:
+    new_oldest = min(int(row["openTime"]) for row in rows)
+    if state.end_time is not None and new_oldest >= state.end_time:
+        raise KlineBackfillError(f"historical 1m kline backfill did not move earlier for {symbol}")
+    return BackfillState(current=count_klines(symbol, "1m"), end_time=new_oldest - 1, rounds=state.rounds + 1)

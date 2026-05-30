@@ -387,6 +387,8 @@ CREATE TABLE IF NOT EXISTS ensemble_signal_scores (
 
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time);
 CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at);
+CREATE INDEX IF NOT EXISTS idx_predictions_candidate_settled
+ON predictions(signal_key, COALESCE(high_winrate_rule, model_version, signal_key), settled_at, open_time DESC);
 CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_lookup ON paper_live_prediction_stage_log(symbol, duration, signal_key, open_time, stage);
 CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time);
 CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status);

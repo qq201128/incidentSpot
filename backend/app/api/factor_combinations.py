@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
+from app.services.background_loop_status import record_loop_failure, record_loop_success
 from app.services.factor_cache_metadata import cache_is_usable
 from app.services.factor_combination_background import refresh_symbol_combination_rankings
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/api/factors/combinations", tags=["factors"])
 logger = logging.getLogger("uvicorn.error")
 DEFAULT_COMBO_TOP_PER_DURATION = 3
 DEFAULT_COMBO_SIGNAL_LIMIT = 12
+BACKGROUND_REFRESH_LOOP = "factor_combo_daily"
 
 
 @router.get("/ranking")
@@ -90,6 +92,7 @@ def paper_live_daily_loop(
 @router.post("/refresh")
 def factor_combination_refresh(
     background_tasks: BackgroundTasks,
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str | None = Query(None, description="omit to refresh all supported durations"),
     profile: str = Query("full"),
@@ -99,7 +102,12 @@ def factor_combination_refresh(
 ) -> dict:
     _validate_optional_duration(duration)
     sym_u = symbol.upper()
-    config = _combination_config(profile, base_factor_limit, combo_sizes, result_limit)
+    config = _combination_config(
+        profile=profile,
+        base_factor_limit=base_factor_limit,
+        combo_sizes=combo_sizes,
+        result_limit=result_limit,
+    )
     background_tasks.add_task(_background_refresh_combo_rankings, sym_u, duration, config)
     return {
         "ok": True,
@@ -207,6 +215,7 @@ def _is_combo_name(name: object) -> bool:
 
 
 def _combination_config(
+    *,
     profile: str,
     base_factor_limit: int | None,
     combo_sizes: str | None,
@@ -274,5 +283,15 @@ def _background_refresh_combo_rankings(
 ) -> None:
     try:
         refresh_symbol_combination_rankings(symbol, duration, config)
-    except Exception:
+        record_loop_success(
+            BACKGROUND_REFRESH_LOOP,
+            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
+        )
+    except Exception as exc:
+        record_loop_failure(
+            BACKGROUND_REFRESH_LOOP,
+            exc,
+            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
+        )
         logger.exception("background factor combo refresh failed: %s %s", symbol, duration)
+        raise

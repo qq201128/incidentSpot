@@ -10,8 +10,42 @@ from app.services import lstm_feature_builder
 from app.services.sim_feedback_features import (
     SIM_FEEDBACK_PREFIX,
     attach_sim_feedback_features,
+    normalize_sim_feedback_prediction_family,
     sim_feedback_feature_names,
 )
+
+
+def test_normalize_sim_feedback_prediction_family_accepts_factor_combo() -> None:
+    assert normalize_sim_feedback_prediction_family("factor_combo") == "factor_combo"
+    assert normalize_sim_feedback_prediction_family("FACTOR") == "factor"
+    assert normalize_sim_feedback_prediction_family("lstm") == "lstm"
+
+
+def test_attach_sim_feedback_counts_factor_combo_predictions() -> None:
+    frame = _labeled_frame([3000])
+    predictions = [
+        {
+            "open_time": 2000,
+            "actual_return": 0.02,
+            "prediction_correct": 1,
+            "confidence": 0.9,
+            "model_family": "factor_combo",
+            "strategy_key": "factor_combo_goal_top1",
+        },
+    ]
+
+    enriched = attach_sim_feedback_features(
+        frame,
+        "BTCUSDT",
+        "10m",
+        model_family="factor_combo",
+        predictions_loader=lambda *_args: predictions,
+    )
+
+    row = enriched.loc[enriched["entry_open_time"] == 3000].iloc[0]
+    assert row[f"{SIM_FEEDBACK_PREFIX}settled_count"] == 1.0
+    assert row[f"{SIM_FEEDBACK_PREFIX}family_factor_combo_settled_count"] == 1.0
+    assert row[f"{SIM_FEEDBACK_PREFIX}family_factor_combo_win_rate"] == pytest.approx(1.0)
 
 
 def test_sim_feedback_feature_names_include_family_columns() -> None:

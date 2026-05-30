@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from app.services.agg_trade_normalize import normalize_agg_trade_row
+from app.services.background_loop_status import record_loop_failure, record_loop_success
 from app.services.binance_http import FAPI_BASE_URL, retry_get
 from app.services.index_price_tick_service import persist_index_price_tick
 from app.services.orderbook_feature_service import OrderbookSnapshotRequest, build_orderbook_snapshot
 
+logger = logging.getLogger(__name__)
 MS_PER_SECOND = 1000
 BPS_SCALE = 10_000.0
 MIN_DISPLAY_DEPTH = 5
@@ -21,6 +24,8 @@ PREMIUM_DISPLAY_TIMEOUT = (2, 4)
 PREMIUM_INDEX_TTL_SECONDS = 2.0
 PREMIUM_INDEX_STALE_MAX_SECONDS = 45.0
 PREMIUM_INDEX_PERSIST_MIN_INTERVAL = 5.0
+PREMIUM_INDEX_FETCH_LOOP = "premium_index_fetch"
+PREMIUM_INDEX_PERSIST_LOOP = "premium_index_persist"
 
 LAST_ORDERBOOK: dict[str, dict[str, Any]] = {}
 LAST_TICKER: dict[str, dict[str, Any]] = {}
@@ -47,10 +52,13 @@ def get_premium_index_display(symbol: str) -> dict[str, Any]:
         result = _build_premium_index_result(data)
         LAST_PREMIUM_INDEX[sym] = (now, result)
         _maybe_persist_premium_index(sym, now, result)
+        record_loop_success(PREMIUM_INDEX_FETCH_LOOP, {"stage": "fetch_premium_index", "symbol": sym})
         return result
-    except Exception:
+    except Exception as exc:
+        details = {"stage": "fetch_premium_index", "symbol": sym}
+        record_loop_failure(PREMIUM_INDEX_FETCH_LOOP, exc, details)
         if cached is not None and (now - cached[0]) <= PREMIUM_INDEX_STALE_MAX_SECONDS:
-            return {**cached[1], "stale": True}
+            return _stale_premium_index(cached[1], exc)
         raise
 
 
@@ -60,6 +68,7 @@ def fetch_premium_index(symbol: str) -> dict:
     now = time.monotonic()
     LAST_PREMIUM_INDEX[symbol.upper()] = (now, result)
     _maybe_persist_premium_index(symbol.upper(), now, result)
+    record_loop_success(PREMIUM_INDEX_FETCH_LOOP, {"stage": "fetch_premium_index", "symbol": symbol.upper()})
     return result
 
 
@@ -197,6 +206,15 @@ def _build_premium_index_result(data: dict | list) -> dict[str, Any]:
     }
 
 
+def _stale_premium_index(cached: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    return {
+        **cached,
+        "stale": True,
+        "staleReason": str(exc),
+        "staleExceptionType": type(exc).__name__,
+    }
+
+
 def _maybe_persist_premium_index(symbol: str, now: float, result: dict[str, Any]) -> None:
     last = _LAST_PREMIUM_PERSIST_AT.get(symbol, 0.0)
     if now - last < PREMIUM_INDEX_PERSIST_MIN_INTERVAL:
@@ -204,8 +222,12 @@ def _maybe_persist_premium_index(symbol: str, now: float, result: dict[str, Any]
     _LAST_PREMIUM_PERSIST_AT[symbol] = now
     try:
         persist_index_price_tick(result)
-    except Exception:
+    except Exception as exc:
+        details = {"stage": "persist_index_price_tick", "symbol": symbol}
+        record_loop_failure(PREMIUM_INDEX_PERSIST_LOOP, exc, details)
+        logger.exception("premium index persist failed: %s", symbol)
         return
+    record_loop_success(PREMIUM_INDEX_PERSIST_LOOP, {"stage": "persist_index_price_tick", "symbol": symbol})
 
 
 def _orderbook_snapshot(sym: str, data: dict[str, Any]) -> dict[str, Any]:

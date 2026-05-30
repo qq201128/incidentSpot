@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 from app.services import auto_predict_service as service
+from app.services.auto_predict_loop_status import auto_predict_loop_status
+from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import (
     factor_combo_shadow_strategy_key,
@@ -21,6 +23,57 @@ ASYNC_TEST_TIMEOUT_SECONDS = 1.0
 DEFAULT_DURATION = "10m"
 DEFAULT_QTY = 5.0
 ENTRY_OPEN_TIME = 1778121600000
+
+
+def test_auto_predict_loop_failure_is_exposed(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+
+    def fail_targets():
+        stop_event.set()
+        raise RuntimeError("target load failed")
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "_prediction_targets", fail_targets)
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["error"] == "target load failed"
+    assert status["exceptionType"] == "RuntimeError"
+    assert status["nextWaitSeconds"] == 1.0
+    background_status = background_loop_statuses()["auto_predict"]
+    assert background_status["status"] == "failed"
+    assert background_status["lastError"] == "target load failed"
+    assert background_status["lastExceptionType"] == "RuntimeError"
+    assert background_status["lastFailureDetails"] == {
+        "nextWaitSeconds": 1.0,
+        "failureDetails": None,
+    }
+
+
+def test_auto_predict_invalid_initial_delay_is_exposed(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+
+    monkeypatch.setenv("PREDICT_INITIAL_DELAY_SECONDS", "bad")
+
+    try:
+        asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+    except ValueError as exc:
+        assert "PREDICT_INITIAL_DELAY_SECONDS must be numeric" in str(exc)
+    else:
+        raise AssertionError("invalid predict initial delay was not exposed")
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "ValueError"
+    assert "PREDICT_INITIAL_DELAY_SECONDS must be numeric" in status["error"]
+    background_status = background_loop_statuses()["auto_predict"]
+    assert background_status["status"] == "failed"
+    assert background_status["lastExceptionType"] == "ValueError"
+    assert "PREDICT_INITIAL_DELAY_SECONDS must be numeric" in background_status["lastError"]
 
 
 def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None:
@@ -182,10 +235,7 @@ def test_candidate_collection_saves_top_two_and_three_shadow_rows(monkeypatch) -
     monkeypatch.setattr(service, "model_family_status", lambda *_args: {"shadowPredictionReady": False})
 
     asyncio.run(
-        service._save_candidate_collection_predictions(
-            _settings(FACTOR_COMBO_STRATEGY_KEY),
-            write_lock=asyncio.Lock(),
-        )
+        service._save_candidate_collection_predictions(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock())
     )
 
     assert saved == [
@@ -274,10 +324,7 @@ def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> Non
     monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
 
     asyncio.run(
-        service._save_candidate_collection_predictions(
-            _settings(FACTOR_COMBO_STRATEGY_KEY),
-            write_lock=asyncio.Lock(),
-        )
+        service._save_candidate_collection_predictions(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock())
     )
 
     assert saved == [(candidate_key, False)]
@@ -319,10 +366,7 @@ def test_factor_candidate_collection_failure_is_exposed(monkeypatch) -> None:
 
     try:
         asyncio.run(
-            service._save_candidate_collection_predictions(
-                _settings(FACTOR_COMBO_STRATEGY_KEY),
-                write_lock=asyncio.Lock(),
-            )
+            service._save_candidate_collection_predictions(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock())
         )
     except RuntimeError as exc:
         assert str(exc) == "candidate failed"
@@ -330,6 +374,56 @@ def test_factor_candidate_collection_failure_is_exposed(monkeypatch) -> None:
         raise AssertionError("candidate collection failure was not exposed")
 
     assert saved == []
+
+
+def test_model_family_shadow_prediction_failure_is_recorded(monkeypatch) -> None:
+    failures = []
+
+    monkeypatch.setattr(
+        service.collection_helpers,
+        "log_prediction_failure",
+        lambda **kwargs: failures.append(kwargs),
+    )
+
+    try:
+        asyncio.run(
+            service.collection_helpers.save_one_model_family_shadow_prediction(
+                _model_context("xgboost", {
+                    "model_family_status": lambda *_args: {
+                        "shadowPredictionReady": True,
+                        "modelVersion": "xgboost_v2",
+                        "status": "trade_active",
+                    },
+                    "predict_model_family_shadow_prediction": lambda *_args, **_kwargs: (
+                        _ for _ in ()
+                    ).throw(RuntimeError("xgboost failed")),
+                    "save_prediction": lambda *_args, **_kwargs: None,
+                    "create_batch_combo_simulation_trade": lambda *_args: None,
+                }),
+            )
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "xgboost failed"
+    else:
+        raise AssertionError("model family shadow failure was not exposed")
+
+    assert failures == [
+        {
+            "candidate_key": "xgboost:BTCUSDT:10m",
+            "strategy_key": FACTOR_COMBO_STRATEGY_KEY,
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "stage": "model_shadow_prediction",
+            "reason": "xgboost failed",
+            "details": {
+                "family": "xgboost",
+                "entryOpenTime": ENTRY_OPEN_TIME,
+                "exceptionType": "RuntimeError",
+                "modelVersion": "xgboost_v2",
+                "status": "trade_active",
+            },
+        }
+    ]
 
 
 def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatch) -> None:
@@ -503,9 +597,11 @@ def test_ready_model_family_shadow_creates_simulation_trade(monkeypatch) -> None
     asyncio.run(
         service._save_one_model_family_shadow_prediction(
             "lstm",
-            _settings(FACTOR_COMBO_STRATEGY_KEY),
-            ENTRY_OPEN_TIME,
-            asyncio.Lock(),
+            {
+                "settings": _settings(FACTOR_COMBO_STRATEGY_KEY),
+                "entry_open_time": ENTRY_OPEN_TIME,
+                "write_lock": asyncio.Lock(),
+            },
         )
     )
 
@@ -544,10 +640,7 @@ def test_candidate_collection_saves_ready_model_family_shadow_sim(monkeypatch) -
     )
 
     asyncio.run(
-        service._save_candidate_collection_predictions(
-            _settings(FACTOR_COMBO_STRATEGY_KEY),
-            write_lock=asyncio.Lock(),
-        )
+        service._save_candidate_collection_predictions(_settings(FACTOR_COMBO_STRATEGY_KEY), write_lock=asyncio.Lock())
     )
 
     assert lstm_key in saved
@@ -587,12 +680,43 @@ def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> N
     )
     monkeypatch.setattr(service, "_due_prediction_targets", lambda targets: targets)
 
-    targets = service._ready_due_prediction_targets(mixed)
-
-    assert [(target.strategy_key, target.duration) for target in targets] == [
-        (FACTOR_COMBO_STRATEGY_KEY, "30m")
-    ]
+    try:
+        service._ready_due_prediction_targets(mixed)
+    except service.target_helpers.PredictionTargetReadinessError as exc:
+        assert exc.details["skippedTargets"][0]["reason"] == "ranking_cache_empty"
+        assert exc.details["skippedTargets"][0]["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
+    else:
+        raise AssertionError("not-ready due target was silently skipped")
     assert recovery_flags == [False, False]
+
+
+def test_auto_predict_loop_records_due_readiness_failure_details(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+    skipped = {
+        "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+        "symbol": "BTCUSDT",
+        "duration": DEFAULT_DURATION,
+        "reason": "ranking_cache_empty",
+    }
+
+    def fail_ready(_targets):
+        stop_event.set()
+        raise service.target_helpers.PredictionTargetReadinessError([skipped])
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "_prediction_targets", lambda: [_settings(FACTOR_COMBO_STRATEGY_KEY)])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", fail_ready)
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: [])
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "PredictionTargetReadinessError"
+    assert status["failureDetails"] == {"skippedTargets": [skipped]}
+    background_status = background_loop_statuses()["auto_predict"]
+    assert background_status["lastFailureDetails"]["failureDetails"] == {"skippedTargets": [skipped]}
 
 
 def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_invalid(monkeypatch) -> None:
@@ -601,6 +725,57 @@ def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_inva
     monkeypatch.setattr(service, "list_auto_trade_settings", lambda: mixed)
 
     assert service._prediction_targets() == mixed
+
+
+def test_prediction_targets_expose_enabled_unsupported_duration(monkeypatch) -> None:
+    target = _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m")
+
+    monkeypatch.setattr(service, "list_auto_trade_settings", lambda: [target])
+    monkeypatch.setattr(service, "strategy_supports_duration", lambda *_args: False)
+
+    try:
+        service._prediction_targets()
+    except service.target_helpers.PredictionTargetConfigError as exc:
+        assert exc.details == {
+            "invalidTargets": [
+                {
+                    "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+                    "symbol": "BTCUSDT",
+                    "duration": "30m",
+                    "reason": "unsupported_duration",
+                }
+            ]
+        }
+    else:
+        raise AssertionError("unsupported enabled predict target was silently dropped")
+
+
+def test_auto_predict_loop_records_invalid_enabled_target_details(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+    invalid = {
+        "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+        "symbol": "BTCUSDT",
+        "duration": "30m",
+        "reason": "unsupported_duration",
+    }
+
+    def fail_targets():
+        stop_event.set()
+        raise service.target_helpers.PredictionTargetConfigError([invalid])
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "_prediction_targets", fail_targets)
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "PredictionTargetConfigError"
+    assert status["failureDetails"] == {"invalidTargets": [invalid]}
+    background_status = background_loop_statuses()["auto_predict"]
+    assert background_status["status"] == "failed"
+    assert background_status["lastFailureDetails"]["failureDetails"] == {"invalidTargets": [invalid]}
 
 
 def test_next_predict_wait_polls_when_candidate_collection_is_due(monkeypatch) -> None:
@@ -696,6 +871,40 @@ def test_run_prediction_batch_starts_strategies_concurrently(monkeypatch) -> Non
     assert set(completed) == {settings.strategy_key for settings in strategy_settings}
 
 
+def test_candidate_collection_batch_error_has_details() -> None:
+    setting = _settings(FACTOR_COMBO_STRATEGY_KEY)
+    failure = RuntimeError("collection failed")
+    logged = []
+
+    class Logger:
+        def error(self, message: str, *args, exc_info=None) -> None:
+            logged.append((message, args, exc_info))
+
+    async def save_collection(_setting: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
+        del write_lock
+        raise failure
+
+    try:
+        asyncio.run(service.runtime_helpers.run_candidate_collection_batch([setting], save_collection, Logger()))
+    except service.runtime_helpers.CandidateCollectionBatchError as exc:
+        assert str(exc) == "candidate collection failed for: BTCUSDT:10m"
+        assert exc.details == [
+            {
+                "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+                "symbol": "BTCUSDT",
+                "duration": DEFAULT_DURATION,
+                "error": "collection failed",
+                "exceptionType": "RuntimeError",
+            }
+        ]
+    else:
+        raise AssertionError("candidate collection batch failure details were not exposed")
+
+    assert logged[0][0] == "candidate collection failed strategy=%s symbol=%s duration=%s"
+    assert logged[0][1] == (FACTOR_COMBO_STRATEGY_KEY, "BTCUSDT", DEFAULT_DURATION)
+    assert logged[0][2][0] is RuntimeError
+
+
 def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions(monkeypatch) -> None:
     calls = []
     targets = [_settings(lstm_shadow_strategy_key(DEFAULT_DURATION))]
@@ -728,7 +937,7 @@ def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions
     ]
 
 
-def test_backfill_shadow_predictions_logs_returned_exception_traceback(monkeypatch) -> None:
+def test_backfill_shadow_predictions_exposes_returned_exception(monkeypatch) -> None:
     logged = []
     failure = RuntimeError("backfill failed")
 
@@ -752,7 +961,21 @@ def test_backfill_shadow_predictions_logs_returned_exception_traceback(monkeypat
     monkeypatch.setattr(service, "backfill_model_family_shadow_predictions", backfill)
     monkeypatch.setattr(service, "logger", Logger())
 
-    asyncio.run(service._backfill_lstm_shadow_predictions([_settings(FACTOR_COMBO_STRATEGY_KEY)]))
+    try:
+        asyncio.run(service._backfill_lstm_shadow_predictions([_settings(FACTOR_COMBO_STRATEGY_KEY)]))
+    except service.shadow_helpers.ShadowBackfillBatchError as exc:
+        assert str(exc) == "model family shadow backfill failed for: gru:BTCUSDT:10m"
+        assert exc.details == [
+            {
+                "family": "gru",
+                "symbol": "BTCUSDT",
+                "duration": DEFAULT_DURATION,
+                "error": "backfill failed",
+                "exceptionType": "RuntimeError",
+            }
+        ]
+    else:
+        raise AssertionError("shadow backfill failure was not exposed")
 
     assert logged == [
         (
@@ -761,6 +984,104 @@ def test_backfill_shadow_predictions_logs_returned_exception_traceback(monkeypat
             (RuntimeError, failure, failure.__traceback__),
         )
     ]
+
+
+def test_auto_predict_loop_records_shadow_backfill_failure_details(monkeypatch) -> None:
+    stop_event = asyncio.Event()
+    failure = RuntimeError("backfill failed")
+
+    def backfill(*_args) -> None:
+        stop_event.set()
+        raise failure
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "_prediction_targets", lambda: [_settings(FACTOR_COMBO_STRATEGY_KEY)])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda targets: targets)
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", _noop_settings)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", _noop_settings)
+    monkeypatch.setattr(
+        service,
+        "_ready_model_family_shadow_backfill_targets",
+        lambda _settings_list: [("gru", "BTCUSDT", DEFAULT_DURATION)],
+    )
+    monkeypatch.setattr(service, "current_rule_entry_open_time_for_duration", lambda _duration: ENTRY_OPEN_TIME)
+    monkeypatch.setattr(service, "backfill_model_family_shadow_predictions", backfill)
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "ShadowBackfillBatchError"
+    assert status["failureDetails"] == [
+        {
+            "family": "gru",
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "error": "backfill failed",
+            "exceptionType": "RuntimeError",
+        }
+    ]
+
+
+def test_auto_predict_loop_records_candidate_collection_failure_details(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+    setting = _settings(FACTOR_COMBO_STRATEGY_KEY)
+    failure = RuntimeError("collection failed")
+
+    async def collect(settings_list: list[AutoTradeSettings]) -> None:
+        stop_event.set()
+        raise service.runtime_helpers.CandidateCollectionBatchError(
+            [service.runtime_helpers.PredictionFailure(settings_list[0], failure)]
+        )
+
+    monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
+    monkeypatch.setattr(service, "_prediction_targets", lambda: [setting])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda targets: targets)
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", _noop_settings)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", _noop_settings)
+
+    asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
+
+    status = auto_predict_loop_status()
+    assert status["status"] == "failed"
+    assert status["exceptionType"] == "CandidateCollectionBatchError"
+    assert status["failureDetails"] == [
+        {
+            "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "error": "collection failed",
+            "exceptionType": "RuntimeError",
+        }
+    ]
+    background_status = background_loop_statuses()["auto_predict"]
+    assert background_status["lastFailureDetails"]["failureDetails"] == status["failureDetails"]
+
+
+def test_prediction_broadcast_failure_is_exposed() -> None:
+    class BadWs:
+        async def send_json(self, _payload: dict) -> None:
+            raise RuntimeError("send failed")
+
+    subscribers = {("BTCUSDT", DEFAULT_DURATION, FACTOR_COMBO_STRATEGY_KEY): {BadWs()}}
+    result = {
+        "symbol": "BTCUSDT",
+        "duration": DEFAULT_DURATION,
+        "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+    }
+
+    try:
+        asyncio.run(service.runtime_helpers.broadcast(result, subscribers, service.DEFAULT_STRATEGY_KEY))
+    except RuntimeError as exc:
+        assert str(exc) == "prediction broadcast failed for 1 subscriber(s)"
+    else:
+        raise AssertionError("broadcast failure was not exposed")
+
+    assert subscribers[("BTCUSDT", DEFAULT_DURATION, FACTOR_COMBO_STRATEGY_KEY)] == set()
 
 
 def _settings(
@@ -807,5 +1128,19 @@ async def _noop_broadcast(_result: dict) -> None:
     return None
 
 
+async def _noop_settings(_settings_list: list[AutoTradeSettings]) -> None:
+    return None
+
+
 def _readiness(ready: bool, reason: str = "ready"):
     return PredictionReadiness(ready, reason)
+
+
+def _model_context(family: str, deps: dict):
+    collection = service.collection_helpers.CandidateCollectionContext(
+        _settings(FACTOR_COMBO_STRATEGY_KEY),
+        ENTRY_OPEN_TIME,
+        asyncio.Lock(),
+        deps,
+    )
+    return service.collection_helpers.ModelFamilyShadowContext(family, collection)

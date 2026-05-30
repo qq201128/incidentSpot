@@ -3,7 +3,9 @@ from __future__ import annotations
 from fastapi import BackgroundTasks
 
 from app.api import factor_combinations as factor_combo_api
+from app.api import factors as factors_api
 from app.api import lstm as lstm_api
+from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services import experiment_profiles as profiles
 from app.services import lstm_daily_review as review
 from app.services.lstm_daily_review import LstmDailyReviewConfig, LstmDailyReviewDependencies, run_lstm_daily_review
@@ -154,7 +156,8 @@ def test_lstm_candidate_search_route_queues_background(monkeypatch) -> None:
     assert report["message"] == "LSTM候选搜索已排队。"
     assert report["candidateSearchProgress"]["status"] == "queued"
     assert tasks.tasks[0].func == lstm_api._background_lstm_candidate_search
-    assert tasks.tasks[0].args == ("BTCUSDT", "10m", "full")
+    job = tasks.tasks[0].args[0]
+    assert job == lstm_api.CandidateSearchJob("BTCUSDT", "10m", "full", False)
     assert queued["symbol"] == "BTCUSDT"
     assert queued["total"] == 225
     assert queued["parallel_workers"] == 10
@@ -175,7 +178,9 @@ def test_lstm_candidate_search_background_finishes_skipped(monkeypatch) -> None:
         lambda **kwargs: finished.append(kwargs),
     )
 
-    lstm_api._background_lstm_candidate_search("BTCUSDT", "10m", "full")
+    lstm_api._background_lstm_candidate_search(
+        lstm_api.CandidateSearchJob("BTCUSDT", "10m", "full", False)
+    )
 
     assert configs[0].symbols == ("BTCUSDT",)
     assert configs[0].durations == ("10m",)
@@ -210,6 +215,56 @@ def test_factor_combination_refresh_route_uses_profile_defaults_and_aliases() ->
     assert config.base_factor_limit == 9
     assert config.combo_sizes == (2, 3)
     assert config.result_limit == 20
+
+
+def test_factor_ranking_background_refresh_failure_is_visible(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    monkeypatch.setattr(
+        factors_api,
+        "refresh_symbol_rankings",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("ranking refresh failed")),
+    )
+
+    try:
+        factors_api._background_refresh_rankings("BTCUSDT", "10m")
+    except RuntimeError as exc:
+        assert str(exc) == "ranking refresh failed"
+    else:
+        raise AssertionError("factor ranking background refresh failure was not exposed")
+
+    status = background_loop_statuses()["factor_ranking"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "ranking refresh failed"
+    assert status["lastFailureDetails"] == {
+        "stage": "manual_api_refresh",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+    }
+
+
+def test_factor_combo_background_refresh_failure_is_visible(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    monkeypatch.setattr(
+        factor_combo_api,
+        "refresh_symbol_combination_rankings",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("combo refresh failed")),
+    )
+
+    try:
+        factor_combo_api._background_refresh_combo_rankings("BTCUSDT", "10m", None)
+    except RuntimeError as exc:
+        assert str(exc) == "combo refresh failed"
+    else:
+        raise AssertionError("factor combo background refresh failure was not exposed")
+
+    status = background_loop_statuses()["factor_combo_daily"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "combo refresh failed"
+    assert status["lastFailureDetails"] == {
+        "stage": "manual_api_refresh",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+    }
 
 
 def _forbidden(name: str):

@@ -3,7 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from dataclasses import dataclass
 
+from app.services.background_loop_status import (
+    record_loop_failure,
+    record_loop_start,
+    record_loop_stopped,
+    record_loop_success,
+)
 from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.lstm_candidate_search_notification import notify_lstm_candidate_search_finished
 from app.services.lstm_candidate_search import LstmCandidateSearchConfig
@@ -11,6 +18,7 @@ from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm
 from app.services.lstm_torch_backend import is_torch_available
 
 logger = logging.getLogger("uvicorn.error")
+LOOP_NAME = "lstm_candidate_retry"
 
 DEFAULT_RETRY_INTERVAL_SECONDS = 1800
 DEFAULT_RETRY_PROFILE = "full"
@@ -21,6 +29,14 @@ DEFAULT_EPOCHS = "8,12,16"
 DEFAULT_SEEDS = "20260513,20260519,20260601"
 DEFAULT_CANDIDATES_PER_DURATION = "all"
 DEFAULT_PARALLEL_WORKERS = 10
+
+
+@dataclass(frozen=True)
+class CandidateSearchSpace:
+    feature_windows: tuple[int, ...]
+    min_move_bps_values: tuple[float, ...]
+    epoch_values: tuple[int, ...]
+    seeds: tuple[int, ...]
 
 
 def lstm_candidate_retry_enabled() -> bool:
@@ -59,47 +75,34 @@ def _retry_config() -> LstmCandidateRetryConfig:
 
 
 def _search_config() -> LstmCandidateSearchConfig:
-    feature_windows = _int_tuple("LSTM_CANDIDATE_FEATURE_WINDOWS", DEFAULT_FEATURE_WINDOWS)
-    min_move_bps_values = _float_tuple("LSTM_CANDIDATE_MIN_MOVE_BPS", DEFAULT_MIN_MOVE_BPS)
-    epoch_values = _int_tuple("LSTM_CANDIDATE_EPOCHS", DEFAULT_EPOCHS)
-    seeds = _int_tuple("LSTM_CANDIDATE_SEEDS", DEFAULT_SEEDS)
+    space = CandidateSearchSpace(
+        feature_windows=_int_tuple("LSTM_CANDIDATE_FEATURE_WINDOWS", DEFAULT_FEATURE_WINDOWS),
+        min_move_bps_values=_float_tuple("LSTM_CANDIDATE_MIN_MOVE_BPS", DEFAULT_MIN_MOVE_BPS),
+        epoch_values=_int_tuple("LSTM_CANDIDATE_EPOCHS", DEFAULT_EPOCHS),
+        seeds=_int_tuple("LSTM_CANDIDATE_SEEDS", DEFAULT_SEEDS),
+    )
     return LstmCandidateSearchConfig(
-        feature_windows=feature_windows,
-        min_move_bps_values=min_move_bps_values,
-        epoch_values=epoch_values,
-        seeds=seeds,
-        candidates_per_duration=_candidates_per_duration(
-            feature_windows,
-            min_move_bps_values,
-            epoch_values,
-            seeds,
-        ),
+        feature_windows=space.feature_windows,
+        min_move_bps_values=space.min_move_bps_values,
+        epoch_values=space.epoch_values,
+        seeds=space.seeds,
+        candidates_per_duration=_candidates_per_duration(space),
         parallel_workers=_parallel_workers(),
     )
 
 
-def _candidates_per_duration(
-    feature_windows: tuple[int, ...],
-    min_move_bps_values: tuple[float, ...],
-    epoch_values: tuple[int, ...],
-    seeds: tuple[int, ...],
-) -> int:
+def _candidates_per_duration(space: CandidateSearchSpace) -> int:
     raw = os.getenv("LSTM_CANDIDATE_PER_DURATION", DEFAULT_CANDIDATES_PER_DURATION).strip().lower()
     if raw == "all":
-        return _search_space_size(feature_windows, min_move_bps_values, epoch_values, seeds)
+        return _search_space_size(space)
     value = int(raw)
     if value <= 0:
         raise ValueError("LSTM_CANDIDATE_PER_DURATION must be positive or 'all'")
     return value
 
 
-def _search_space_size(
-    feature_windows: tuple[int, ...],
-    min_move_bps_values: tuple[float, ...],
-    epoch_values: tuple[int, ...],
-    seeds: tuple[int, ...],
-) -> int:
-    return len(feature_windows) * len(min_move_bps_values) * len(epoch_values) * len(seeds)
+def _search_space_size(space: CandidateSearchSpace) -> int:
+    return len(space.feature_windows) * len(space.min_move_bps_values) * len(space.epoch_values) * len(space.seeds)
 
 
 def _parallel_workers() -> int:
@@ -134,8 +137,13 @@ async def _sleep_for(stop_event: asyncio.Event, seconds: float) -> None:
 
 
 async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
-    interval_seconds = _retry_interval_seconds()
-    config = _retry_config()
+    try:
+        interval_seconds = _retry_interval_seconds()
+        config = _retry_config()
+    except Exception as exc:
+        record_loop_failure(LOOP_NAME, exc, {"stage": "startup_config"})
+        logger.exception("lstm candidate retry startup config failed")
+        raise
     logger.info(
         "lstm candidate retry scheduled: intervalSeconds=%s firstRunDelaySeconds=%s "
         "torch_installed=%s profile=%s durations=%s search=%s",
@@ -146,9 +154,14 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
         list(config.durations),
         config.search,
     )
+    record_loop_start(
+        LOOP_NAME,
+        {"intervalSeconds": interval_seconds, "profile": config.profile, "durations": list(config.durations)},
+    )
     while not stop_event.is_set():
         await _sleep_for(stop_event, interval_seconds)
         if stop_event.is_set():
+            record_loop_stopped(LOOP_NAME, "stop_before_retry")
             return
         await _run_retry_once(config)
 
@@ -156,11 +169,14 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
 async def _run_retry_once(config: LstmCandidateRetryConfig) -> None:
     if not is_torch_available():
         logger.warning("lstm candidate retry skipped: PyTorch not available")
+        record_loop_success("lstm_candidate_retry", {"status": "skipped", "reason": "torch_unavailable"})
         return
     try:
         report = await asyncio.to_thread(run_lstm_candidate_retry, config)
         notification = await asyncio.to_thread(notify_lstm_candidate_search_finished, report)
         logger.info("lstm candidate retry finished status=%s results=%s", report.get("status"), report.get("results"))
         logger.info("lstm candidate retry notification: %s", notification)
-    except Exception:
+        record_loop_success(LOOP_NAME, {"status": report.get("status"), "resultCount": len(report.get("results") or [])})
+    except Exception as exc:
+        record_loop_failure(LOOP_NAME, exc, {"stage": "retry"})
         logger.exception("lstm candidate retry failed")

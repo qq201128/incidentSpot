@@ -71,6 +71,8 @@ def _family_payload(family: str, jobs: list[dict[str, Any]]) -> dict[str, Any]:
         "modelStatus": status.get("status"),
         "shadowPredictionReady": status.get("shadowPredictionReady"),
         "blockedReason": status.get("shadowPredictionBlockedReason"),
+        "modelStatusError": status.get("error"),
+        "modelStatusExceptionType": status.get("exceptionType"),
         "candidateSearchProgress": status.get("candidateSearchProgress"),
     }
 
@@ -79,7 +81,13 @@ def _model_status(job: dict[str, Any]) -> dict[str, Any]:
     try:
         return model_family_status(job["model_family"], job["symbol"], job["duration"])
     except Exception as exc:
-        return {"status": "status_failed", "shadowPredictionReady": False, "shadowPredictionBlockedReason": str(exc)}
+        return {
+            "status": "status_failed",
+            "shadowPredictionReady": False,
+            "shadowPredictionBlockedReason": str(exc),
+            "error": str(exc),
+            "exceptionType": type(exc).__name__,
+        }
 
 
 def _paper_live_payload(symbol: str, duration: str) -> dict[str, Any]:

@@ -564,7 +564,15 @@ def _settings(strategy_key: str, *, live_trading_enabled: bool = False) -> AutoT
 
 
 def _lstm_prediction(*_args, **_kwargs) -> dict:
-    return {"strategy_key": lstm_shadow_strategy_key("10m")}
+    return {
+        "strategy_key": lstm_shadow_strategy_key("10m"),
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "open_time": ENTRY_OPEN_TIME,
+        "direction": "up",
+        "probability_up": 0.55,
+        "trade_quality_score": 0.5,
+    }
 
 
 def _write_json(path: Path, payload: dict) -> None:

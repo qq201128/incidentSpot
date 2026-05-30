@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from app.services import high_winrate_strategy_demotion as demotion
+from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services.high_winrate_strategy_rotation import ensure_high_winrate_status_table
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
@@ -41,6 +42,35 @@ def test_paper_live_passed_after_live_samples_hit_target(monkeypatch, tmp_path: 
     assert result["tradable"] is False
     assert row["enabled"] == 1
     assert row["live_trading_enabled"] == 0
+
+
+def test_settled_event_lookup_failure_is_visible(monkeypatch, tmp_path: Path) -> None:
+    reset_background_loop_statuses()
+    db_path = tmp_path / "event-lookup-failed.db"
+    _init_db(db_path)
+    _insert_slot(db_path, "10m", enabled=1, live=1)
+    _insert_predictions(db_path, "10m", [True] * demotion.ACTIVE_SAMPLE_COUNT)
+    monkeypatch.setattr(demotion, "get_conn", lambda: _connect(db_path))
+    monkeypatch.setattr(demotion, "high_winrate_candidate_rule", lambda *_args: None)
+
+    def fail_event_rows(*_args) -> list[dict]:
+        raise RuntimeError("event pnl lookup failed")
+
+    monkeypatch.setattr(demotion, "settled_event_rows_for_high_winrate_rule", fail_event_rows)
+
+    result = demotion.evaluate_high_winrate_demotion("BTCUSDT", "10m")
+
+    assert result["status"] == demotion.STATUS_PAPER_LIVE_PASSED
+    assert result["metricsSource"] == "predictions"
+    status = background_loop_statuses()["high_winrate_demotion"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "event pnl lookup failed"
+    assert status["lastFailureDetails"] == {
+        "stage": "settled_event_rows",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "rule": None,
+    }
 
 
 def test_insufficient_samples_stays_paper_live_collecting(monkeypatch, tmp_path: Path) -> None:

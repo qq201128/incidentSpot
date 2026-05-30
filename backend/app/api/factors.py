@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from app.services.factor_backtest_batch_service import run_all_factor_backtests
 from app.services.factor_backtest_service import run_factor_backtest
 from app.services.factor_cache_metadata import cache_is_usable
+from app.services.background_loop_status import record_loop_failure, record_loop_success
 from app.services.factor_catalog_summaries import (
     list_combo_factor_summaries,
     list_single_factor_summaries,
@@ -35,6 +36,7 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 router = APIRouter(prefix="/api/factors", tags=["factors"])
 logger = logging.getLogger("uvicorn.error")
+BACKGROUND_REFRESH_LOOP = "factor_ranking"
 
 
 def _filter_ranking_by_category(ranking: list[dict], category: str | None) -> list[dict]:
@@ -49,6 +51,7 @@ def _ranking_sort_key(row: dict) -> tuple[float, float]:
 
 @router.get("/list")
 def list_factors(
+    *,
     category: str | None = None,
     kind: str = Query("single", pattern="^(single|combo)$"),
     q: str | None = Query(None, description="search name/formula/source"),
@@ -69,6 +72,7 @@ def list_factors(
 
 @router.get("/page")
 def factor_page(
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     category: str | None = Query(None),
@@ -192,9 +196,15 @@ def factor_ranking(
             "source": "none",
             "precomputedSymbols": precomputed,
             "hint": "排名由后台定时写入缓存；当前交易对/周期尚无数据。可将该交易对加入 FACTOR_RANKING_SYMBOLS 或使用 POST /ranking/refresh 排队重算。",
-        }
+    }
     if not cache_is_usable(cached):
-        return _stale_factor_ranking(sym_u, duration, category, cached, precomputed)
+        return _stale_factor_ranking(
+            symbol=sym_u,
+            duration=duration,
+            category=category,
+            cached=cached,
+            precomputed=precomputed,
+        )
 
     full = list(cached["ranking"])
     filtered = _filter_ranking_by_category(full, category)
@@ -217,8 +227,18 @@ def factor_ranking(
 def _background_refresh_rankings(symbol: str, duration: str | None) -> None:
     try:
         refresh_symbol_rankings(symbol, duration)
-    except Exception:
+        record_loop_success(
+            BACKGROUND_REFRESH_LOOP,
+            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
+        )
+    except Exception as exc:
+        record_loop_failure(
+            BACKGROUND_REFRESH_LOOP,
+            exc,
+            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
+        )
         logger.exception("background factor ranking refresh failed: %s %s", symbol, duration)
+        raise
 
 
 @router.post("/ranking/refresh")
@@ -240,6 +260,7 @@ def factor_ranking_refresh(
 
 
 def _stale_factor_ranking(
+    *,
     symbol: str,
     duration: str,
     category: str | None,

@@ -217,6 +217,31 @@ def test_status_report_groups_jobs_and_lifecycle_counts(monkeypatch: pytest.Monk
     assert duration["families"][0]["shadowPredictionReady"] is True
 
 
+def test_status_report_exposes_model_status_failure_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("status-failed")
+    _patch_store_db(monkeypatch, db_path)
+    _enqueue_one()
+
+    def fail_status(*_args):
+        raise RuntimeError("artifact metadata missing")
+
+    monkeypatch.setattr(status_service, "model_family_status", fail_status)
+    monkeypatch.setattr(
+        status_service,
+        "model_family_daily_candidate_report",
+        lambda symbol, duration: {"models": []},
+    )
+
+    report = status_service.model_search_status_with_lifecycle()
+
+    family = report["symbols"][0]["durations"][0]["families"][0]
+    assert family["modelStatus"] == "status_failed"
+    assert family["shadowPredictionReady"] is False
+    assert family["blockedReason"] == "artifact metadata missing"
+    assert family["modelStatusError"] == "artifact metadata missing"
+    assert family["modelStatusExceptionType"] == "RuntimeError"
+
+
 def test_candidate_search_api_only_enqueues_job(monkeypatch: pytest.MonkeyPatch) -> None:
     queued = {
         "jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}],

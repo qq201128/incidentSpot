@@ -6,13 +6,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_success
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.auto_trade_settings_payloads import (
     AUTO_TRADE_SLOT_DURATIONS,
     DEFAULT_DURATION,
-    DEFAULT_DURATION_MINUTES,
-    DEFAULT_QTY,
     DEFAULT_SYMBOL,
     default_settings as _default_settings,
     ensemble_ranker_settings as _ensemble_ranker_settings,
@@ -21,38 +20,37 @@ from app.services.auto_trade_settings_payloads import (
     strategy_payload as _strategy_payload,
     write_settings as _write_settings,
 )
-from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
+from app.services.auto_trade_settings_validation import validated_auto_trade_settings
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
-from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.runtime_symbols import configured_runtime_symbols
-from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
 from app.services.strategy_registry import (
     DEFAULT_STRATEGY_KEY,
     strategy_entry_grace_ms,
     strategy_definition,
     strategy_payloads,
-    strategy_supports_duration,
     strategy_uses_trade_policy_gates,
 )
-from app.services.model_family_config import is_model_family_shadow_strategy
 
 logger = logging.getLogger("uvicorn.error")
 
-SUPPORTED_AUTO_DURATIONS = frozenset({"10m", "30m", "60m", "1d"})
 MS_PER_SECOND = 1000
+LOOP_NAME = "auto_trade"
 
 
 async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> None:
     logger.info("auto trade loop: running every %ss", poll_seconds)
+    record_loop_start(LOOP_NAME, {"pollSeconds": poll_seconds})
     while not stop_event.is_set():
         started = asyncio.get_running_loop().time()
         try:
             results = await asyncio.to_thread(run_auto_trade_once)
+            record_loop_success(LOOP_NAME, {"placedCount": len(results)})
             if results:
                 logger.info("auto trade placed %s strategy order(s)", len(results))
-        except Exception:
+        except Exception as exc:
+            record_loop_failure(LOOP_NAME, exc)
             logger.exception("auto trade failed")
         await _sleep_until_next_tick(stop_event, started, poll_seconds)
 
@@ -62,21 +60,9 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
     conn = get_conn()
     try:
         rows = conn.execute("SELECT * FROM auto_trade_strategies").fetchall()
-        by_slot = {
-            (str(r["strategy_key"]), str(r["symbol"]).upper(), str(r["duration"])): r
-            for r in rows
-        }
+        by_slot = _settings_by_slot(rows)
         symbols = configured_runtime_symbols()
-        result: list[AutoTradeSettings] = []
-        for payload in strategy_payloads():
-            key = str(payload["key"])
-            for symbol in symbols:
-                for dur in _payload_durations(payload):
-                    row = by_slot.get((key, symbol, dur))
-                    if row is not None:
-                        result.append(_settings_from_row(row))
-                    else:
-                        result.append(_default_settings(key, dur, symbol))
+        result = _strategy_slot_settings(by_slot, symbols)
         result.extend(_ensemble_ranker_settings(conn, by_slot, symbols))
         return result
     finally:
@@ -229,43 +215,30 @@ def _has_open_position(symbol: str, strategy_key: str, duration: str) -> bool:
         conn.close()
 
 
+def _settings_by_slot(rows) -> dict[tuple[str, str, str], Any]:
+    return {(str(r["strategy_key"]), str(r["symbol"]).upper(), str(r["duration"])): r for r in rows}
+
+
+def _strategy_slot_settings(by_slot: dict[tuple[str, str, str], Any], symbols: tuple[str, ...]) -> list[AutoTradeSettings]:
+    return [
+        _slot_settings(by_slot, (str(payload["key"]), symbol, dur))
+        for payload in strategy_payloads()
+        for symbol in symbols
+        for dur in _payload_durations(payload)
+    ]
+
+
+def _slot_settings(
+    by_slot: dict[tuple[str, str, str], Any],
+    slot_key: tuple[str, str, str],
+) -> AutoTradeSettings:
+    strategy_key, symbol, duration = slot_key
+    row = by_slot.get(slot_key)
+    return _settings_from_row(row) if row is not None else _default_settings(strategy_key, duration, symbol)
+
+
 def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:
-    strategy = strategy_definition(settings.strategy_key)
-    if settings.enabled and not strategy.tradable:
-        raise ValueError(strategy.disabled_reason or f"strategy is not tradable: {strategy.key}")
-    if is_model_family_shadow_strategy(strategy.key) and settings.live_trading_enabled:
-        raise ValueError("model family shadow strategy supports simulation only; live trading must stay disabled")
-    if is_batch_combo_simulation_strategy(strategy.key) and settings.live_trading_enabled:
-        raise ValueError("batch factor combo strategy supports simulation only; live trading must stay disabled")
-    if strategy.key == ENSEMBLE_RANKER_STRATEGY_KEY and settings.live_trading_enabled:
-        raise ValueError("ensemble_ranker_v1 supports simulation only; live trading must stay disabled")
-    symbol = settings.symbol.strip().upper()
-    if len(symbol) < 6:
-        raise ValueError("symbol must contain at least 6 characters")
-    if settings.enabled and settings.duration not in SUPPORTED_AUTO_DURATIONS:
-        raise ValueError(
-            "backend auto trade duration must be one of "
-            + ", ".join(sorted(SUPPORTED_AUTO_DURATIONS))
-        )
-    if settings.enabled and not strategy_supports_duration(settings.strategy_key, settings.duration):
-        raise ValueError(
-            f"strategy {strategy.key} does not support duration {settings.duration}, "
-            f"supported: {', '.join(sorted(strategy.supported_durations))}"
-        )
-    if settings.duration_minutes <= 0:
-        raise ValueError("durationMinutes must be > 0")
-    if settings.qty <= 0:
-        raise ValueError("qty must be > 0")
-    canonical_minutes = DURATION_TO_MINUTES[settings.duration]
-    return AutoTradeSettings(
-        strategy_key=strategy.key,
-        enabled=settings.enabled,
-        symbol=symbol,
-        duration=settings.duration,
-        duration_minutes=canonical_minutes,
-        qty=settings.qty,
-        live_trading_enabled=settings.live_trading_enabled,
-    )
+    return validated_auto_trade_settings(settings)
 
 
 def _as_bool(value: Any) -> bool | None:

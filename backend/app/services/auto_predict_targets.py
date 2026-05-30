@@ -8,6 +8,20 @@ from app.services.model_family_config import MODEL_FAMILIES, is_model_family_sha
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY
 
 
+class PredictionTargetReadinessError(RuntimeError):
+    def __init__(self, skipped_targets: list[dict[str, Any]]) -> None:
+        self.details = {"skippedTargets": skipped_targets}
+        labels = ", ".join(f"{row['strategyKey']}:{row['symbol']}:{row['duration']}" for row in skipped_targets)
+        super().__init__(f"due prediction target readiness failed for: {labels}")
+
+
+class PredictionTargetConfigError(RuntimeError):
+    def __init__(self, invalid_targets: list[dict[str, Any]]) -> None:
+        self.details = {"invalidTargets": invalid_targets}
+        labels = ", ".join(f"{row['strategyKey']}:{row['symbol']}:{row['duration']}" for row in invalid_targets)
+        super().__init__(f"enabled prediction targets have unsupported durations: {labels}")
+
+
 def prediction_targets(
     settings: list[AutoTradeSettings],
     *,
@@ -16,7 +30,9 @@ def prediction_targets(
     supports_duration: Callable[[str, str], bool],
     logger: logging.Logger,
 ) -> list[AutoTradeSettings]:
-    enabled = enabled_prediction_targets(settings, supports_duration)
+    enabled, invalid = split_enabled_prediction_targets(settings, supports_duration)
+    if invalid:
+        raise PredictionTargetConfigError(invalid)
     if enabled:
         return enabled
     if any(item.enabled for item in settings):
@@ -50,7 +66,33 @@ def enabled_prediction_targets(
     settings: list[AutoTradeSettings],
     supports_duration: Callable[[str, str], bool],
 ) -> list[AutoTradeSettings]:
-    return [item for item in settings if item.enabled and supports_duration(item.strategy_key, item.duration)]
+    enabled, _invalid = split_enabled_prediction_targets(settings, supports_duration)
+    return enabled
+
+
+def split_enabled_prediction_targets(
+    settings: list[AutoTradeSettings],
+    supports_duration: Callable[[str, str], bool],
+) -> tuple[list[AutoTradeSettings], list[dict[str, Any]]]:
+    enabled = []
+    invalid = []
+    for item in settings:
+        if not item.enabled:
+            continue
+        if supports_duration(item.strategy_key, item.duration):
+            enabled.append(item)
+        else:
+            invalid.append(unsupported_duration_payload(item))
+    return enabled, invalid
+
+
+def unsupported_duration_payload(settings: AutoTradeSettings) -> dict[str, Any]:
+    return {
+        "strategyKey": settings.strategy_key,
+        "symbol": settings.symbol.upper(),
+        "duration": settings.duration,
+        "reason": "unsupported_duration",
+    }
 
 
 def ready_due_prediction_targets(
@@ -61,13 +103,30 @@ def ready_due_prediction_targets(
     logger: logging.Logger,
 ) -> list[AutoTradeSettings]:
     ready = []
+    skipped = []
     for settings in due_targets(targets):
         status = readiness(settings.strategy_key, settings.symbol, settings.duration, attempt_recovery=False)
         if status.ready:
             ready.append(settings)
             continue
         log_readiness_skip(logger, settings, status)
+        skipped.append(readiness_skip_payload(settings, status))
+    if skipped:
+        raise PredictionTargetReadinessError(skipped)
     return ready
+
+
+def readiness_skip_payload(settings: AutoTradeSettings, status: Any) -> dict[str, Any]:
+    return {
+        "strategyKey": settings.strategy_key,
+        "symbol": settings.symbol.upper(),
+        "duration": settings.duration,
+        "reason": status.reason,
+        "recoverable": bool(status.recoverable),
+        "recoveryAttempted": bool(status.recovery_attempted),
+        "recoveryStatus": status.recovery_status,
+        "diagnostics": status.diagnostics,
+    }
 
 
 def log_readiness_skip(logger: logging.Logger, settings: AutoTradeSettings, status: Any) -> None:

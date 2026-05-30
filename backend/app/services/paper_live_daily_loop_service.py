@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
+import traceback
 from typing import Any, Callable
 
 from app.services.factor_backtest_batch_service import BACKTEST_DURATION_ORDER
@@ -17,6 +19,8 @@ from app.services.paper_live_candidate_service import (
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class PaperLiveDailyLoopDeps:
@@ -27,6 +31,14 @@ class PaperLiveDailyLoopDeps:
     candidate_report: Callable[[str, str], dict[str, Any]] = paper_live_candidate_report
     offline_screening: Callable[[str, str], dict[str, Any]] = offline_candidate_screening_report
     model_candidates: Callable[[str, str], dict[str, Any]] = model_family_daily_candidate_report
+
+
+@dataclass(frozen=True)
+class CandidateReportContext:
+    stages: list[dict[str, Any]]
+    symbol: str
+    duration: str
+    deps: PaperLiveDailyLoopDeps
 
 
 def run_paper_live_daily_closed_loop(
@@ -52,7 +64,7 @@ def _run_symbol_duration(symbol: str, duration: str, deps: PaperLiveDailyLoopDep
     _append_stage(stages, "market_and_offline_candidates", lambda: _refresh_candidates(sym, duration, deps))
     _append_stage(stages, "settle_due_predictions", lambda: deps.settle_predictions(sym, duration))
     _append_stage(stages, "paper_live_lifecycle", lambda: deps.refresh_states(sym, duration))
-    report = _candidate_report_stage(stages, sym, duration, deps)
+    report = _candidate_report_stage(CandidateReportContext(stages, sym, duration, deps))
     return {
         "symbol": sym,
         "duration": duration,
@@ -77,20 +89,15 @@ def _refresh_candidates(symbol: str, duration: str, deps: PaperLiveDailyLoopDeps
     }
 
 
-def _candidate_report_stage(
-    stages: list[dict[str, Any]],
-    symbol: str,
-    duration: str,
-    deps: PaperLiveDailyLoopDeps,
-) -> dict[str, Any]:
+def _candidate_report_stage(context: CandidateReportContext) -> dict[str, Any]:
     box: dict[str, Any] = {}
 
     def load_report() -> dict[str, Any]:
-        report = deps.candidate_report(symbol, duration)
+        report = context.deps.candidate_report(context.symbol, context.duration)
         box["report"] = report
         return _candidate_summary(report)
 
-    _append_stage(stages, "candidate_pool_report", load_report)
+    _append_stage(context.stages, "candidate_pool_report", load_report)
     return box.get("report") or {}
 
 
@@ -99,6 +106,7 @@ def _append_stage(stages: list[dict[str, Any]], name: str, action: Callable[[], 
         payload = action()
         stages.append({"stage": name, "status": "passed", "payload": payload})
     except Exception as exc:
+        logger.exception("paper-live daily stage failed: %s", name)
         stages.append(_failed_stage(name, exc))
 
 
@@ -192,6 +200,7 @@ def _failed_stage(name: str, exc: Exception) -> dict[str, Any]:
         "status": "failed",
         "reason": str(exc),
         "exceptionType": type(exc).__name__,
+        "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
     }
 
 

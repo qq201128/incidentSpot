@@ -86,6 +86,8 @@ def test_daily_closed_loop_surfaces_stage_failure() -> None:
     assert report["status"] == "failed"
     assert first_stage["status"] == "failed"
     assert first_stage["reason"] == "market refresh failed"
+    assert first_stage["exceptionType"] == "RuntimeError"
+    assert "RuntimeError: market refresh failed" in first_stage["traceback"]
 
 
 def _candidate_report(symbol: str, duration: str) -> dict:

@@ -2,6 +2,7 @@ import axios from "axios";
 import { API_BASE_URL } from "./client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const PAPER_LIVE_CANDIDATES_TIMEOUT_MS = 60_000;
 const REFRESH_TIMEOUT_MS = 15_000;
 const DAILY_LOOP_TIMEOUT_MS = 120_000;
 
@@ -36,7 +37,7 @@ export async function fetchPaperLiveCandidates(symbol, duration = "10m", options
   const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/paper-live/candidates`, {
     params: { symbol, duration },
     signal: options.signal,
-    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeout: options.timeoutMs ?? PAPER_LIVE_CANDIDATES_TIMEOUT_MS,
   });
   return data;
 }

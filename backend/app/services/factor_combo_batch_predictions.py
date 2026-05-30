@@ -153,7 +153,17 @@ def _screen_cache_rows(
     rejected: list[dict[str, Any]] = []
     for rank, row in enumerate(ranking, start=1):
         ranked = {**dict(row), "comboRank": rank}
-        signal = build_live_signal_from_ranking(frame, ranked, symbol=symbol, duration=duration, apply_quality_gate=False)
+        try:
+            signal = build_live_signal_from_ranking(
+                frame,
+                ranked,
+                symbol=symbol,
+                duration=duration,
+                apply_quality_gate=False,
+            )
+        except ValueError as exc:
+            rejected.append(_rejected_row(ranked, str(exc)))
+            continue
         if signal.get("qualityPassed"):
             accepted.append(ranked)
         else:

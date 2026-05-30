@@ -45,6 +45,26 @@ def test_fetch_settlement_quote_exposes_invalid_live_price(monkeypatch) -> None:
         service._fetch_settlement_quote(_event())
 
 
+def test_due_open_event_scan_exposes_malformed_end_time(monkeypatch) -> None:
+    rows = [
+        {"id": 1, "end_time": "bad-time"},
+        {"id": 2, "end_time": "2000-01-01T00:00:00+00:00"},
+    ]
+    monkeypatch.setattr(service, "get_conn", lambda: _FakeConn(rows))
+
+    result = service.scan_due_open_events()
+
+    assert result.due_ids == [2]
+    assert result.invalid_events == [
+        {
+            "eventId": 1,
+            "endTime": "bad-time",
+            "error": "Invalid isoformat string: 'bad-time'",
+            "exceptionType": "ValueError",
+        }
+    ]
+
+
 def _event() -> dict:
     return {"symbol": "BTCUSDT", "end_time": EVENT_END_TIME}
 
@@ -55,3 +75,18 @@ def _premium_index(quote_time: int) -> dict:
 
 def _failed_live_quote(_symbol: str) -> None:
     raise RuntimeError("live quote unavailable")
+
+
+class _FakeConn:
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+        self.closed = False
+
+    def execute(self, _sql: str):
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+    def close(self) -> None:
+        self.closed = True

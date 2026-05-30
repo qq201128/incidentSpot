@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
@@ -15,6 +16,12 @@ class SettlementQuote:
     price: float
     quote_time_ms: int
     source: str
+
+
+@dataclass(frozen=True)
+class DueOpenEventScan:
+    due_ids: list[int]
+    invalid_events: list[dict[str, Any]]
 
 
 def settle_event(event_id: int) -> dict:
@@ -103,19 +110,34 @@ def _prediction_correct(event, result: str) -> int | None:
 
 
 def get_due_open_event_ids() -> list[int]:
+    return scan_due_open_events().due_ids
+
+
+def scan_due_open_events() -> DueOpenEventScan:
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     conn = get_conn()
-    rows = conn.execute("SELECT id, end_time FROM events WHERE status = 'OPEN'").fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("SELECT id, end_time FROM events WHERE status = 'OPEN'").fetchall()
+    finally:
+        conn.close()
     due_ids: list[int] = []
+    invalid_events: list[dict[str, Any]] = []
     for row in rows:
         try:
             if parse_event_end_time_ms(row["end_time"]) <= now_ms:
                 due_ids.append(int(row["id"]))
-        except Exception:
-            # Skip malformed end_time rows to keep loop resilient.
-            continue
-    return due_ids
+        except Exception as exc:
+            invalid_events.append(_invalid_due_event(row, exc))
+    return DueOpenEventScan(due_ids=due_ids, invalid_events=invalid_events)
+
+
+def _invalid_due_event(row, exc: Exception) -> dict[str, Any]:
+    return {
+        "eventId": int(row["id"]),
+        "endTime": row["end_time"],
+        "error": str(exc),
+        "exceptionType": type(exc).__name__,
+    }
 
 
 def evaluate_event_result(event: dict, close_price: float) -> str:

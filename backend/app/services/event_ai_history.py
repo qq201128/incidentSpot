@@ -69,7 +69,7 @@ def query_ai_history_success(
     page_size: int = DEFAULT_PAGE_SIZE,
     include_summaries: bool = False,
 ) -> dict:
-    from app.services.ai_history_cache import get_cached_ai_history
+    from app.services.ai_history_cache import AiHistoryCacheKey, get_cached_ai_history
 
     safe_symbol = symbol.upper()
     page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
@@ -103,7 +103,10 @@ def query_ai_history_success(
             payload["durationSummaries"] = _fetch_duration_summaries(conn, safe_symbol)
         return payload
 
-    return get_cached_ai_history(safe_symbol, duration_minutes, page, page_size, build=_build)
+    return get_cached_ai_history(
+        AiHistoryCacheKey(safe_symbol, duration_minutes, page, page_size),
+        build=_build,
+    )
 
 
 def event_interval_where(duration_minutes: int | None, *, alias: str = "e") -> tuple[str, tuple]:

@@ -2,6 +2,7 @@ const NAV_ITEMS = Object.freeze([
   { key: "trade", label: "工作台" },
   { key: "hit-rate", label: "规则命中率" },
   { key: "governance", label: "样本观测" },
+  { key: "research", label: "研究驾驶舱" },
   { key: "factors", label: "因子库" },
   { key: "learning", label: "自动挖掘" },
 ]);

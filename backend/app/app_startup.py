@@ -8,8 +8,19 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, FastAPI
 
 from app.db.session import init_db
+from app.services.background_loop_status import (
+    background_loop_statuses,
+    record_loop_failure,
+    record_loop_start,
+    record_loop_success,
+)
 
 logger = logging.getLogger(__name__)
+BOOTSTRAP_STATUS_STARTING = "starting"
+BOOTSTRAP_STATUS_RUNNING = "running"
+BOOTSTRAP_STATUS_READY = "ready"
+BOOTSTRAP_STATUS_FAILED = "failed"
+BOOTSTRAP_LOOP_NAME = "application_bootstrap"
 
 
 def _configure_asyncio_thread_pool() -> None:
@@ -40,14 +51,35 @@ BACKGROUND_TASK_ATTRS = (
     "lstm_daily_review_task",
     "combo_event_governance_task",
 )
+BACKGROUND_LOOP_STATUS_NAMES = {
+    "settlement": "auto_settlement",
+    "predict": "auto_predict",
+    "trade": "auto_trade",
+    "factor_ranking": "factor_ranking",
+    "market_context": "market_context",
+    "factor_combo_daily": "factor_combo_daily",
+    "lstm_candidate_retry": "lstm_candidate_retry",
+    "lstm_daily_review": "lstm_daily_review",
+    "combo_event_governance": "combo_event_governance",
+}
 
 
 async def bootstrap_application(app: FastAPI) -> None:
     """Fast path: migrate DB, register core APIs off-thread, then load the rest."""
-    _configure_asyncio_thread_pool()
-    await asyncio.to_thread(init_db)
-    await asyncio.to_thread(_register_core_routers, app)
-    app.state.bootstrap_task = asyncio.create_task(_deferred_bootstrap(app))
+    _set_bootstrap_state(app, BOOTSTRAP_STATUS_STARTING)
+    record_loop_start(BOOTSTRAP_LOOP_NAME, {"stage": "core_bootstrap"})
+    try:
+        _configure_asyncio_thread_pool()
+        await asyncio.to_thread(init_db)
+        await asyncio.to_thread(_register_core_routers, app)
+        _set_bootstrap_state(app, BOOTSTRAP_STATUS_RUNNING)
+        record_loop_start(BOOTSTRAP_LOOP_NAME, {"stage": "deferred_bootstrap"})
+        app.state.bootstrap_task = asyncio.create_task(_deferred_bootstrap(app))
+    except Exception as exc:
+        _set_bootstrap_state(app, BOOTSTRAP_STATUS_FAILED, exc)
+        record_loop_failure(BOOTSTRAP_LOOP_NAME, exc, _bootstrap_failure_details("core_bootstrap", exc))
+        logger.exception("application bootstrap failed")
+        raise
 
 
 def _register_core_routers(app: FastAPI) -> None:
@@ -68,9 +100,27 @@ async def _deferred_bootstrap(app: FastAPI) -> None:
         await asyncio.to_thread(_warm_background_imports)
         await asyncio.to_thread(_warm_ai_history_cache)
         _spawn_background_tasks(app)
+        _set_bootstrap_state(app, BOOTSTRAP_STATUS_READY)
+        record_loop_success(BOOTSTRAP_LOOP_NAME, {"stage": "deferred_bootstrap"})
         logger.info("deferred application bootstrap complete")
-    except Exception:
+    except Exception as exc:
+        _set_bootstrap_state(app, BOOTSTRAP_STATUS_FAILED, exc)
+        record_loop_failure(BOOTSTRAP_LOOP_NAME, exc, _bootstrap_failure_details("deferred_bootstrap", exc))
         logger.exception("deferred application bootstrap failed")
+
+
+def _set_bootstrap_state(app: FastAPI, status: str, exc: Exception | None = None) -> None:
+    app.state.bootstrap_status = status
+    app.state.bootstrap_error = str(exc) if exc else None
+    app.state.bootstrap_exception_type = type(exc).__name__ if exc else None
+
+
+def _bootstrap_failure_details(stage: str, exc: Exception) -> dict:
+    details = {"stage": stage}
+    failure_details = getattr(exc, "details", None)
+    if failure_details is not None:
+        details["failureDetails"] = failure_details
+    return details
 
 
 def _load_deferred_routers() -> list[APIRouter]:
@@ -126,47 +176,55 @@ def _spawn_background_tasks(app: FastAPI) -> None:
     )
     from app.services.market_context_background import market_context_refresh_loop
 
-    settlement_stop = asyncio.Event()
-    app.state.settlement_stop_event = settlement_stop
-    app.state.settlement_task = asyncio.create_task(auto_settlement_loop(settlement_stop))
-
-    predict_stop = asyncio.Event()
-    app.state.predict_stop_event = predict_stop
-    app.state.predict_task = asyncio.create_task(auto_predict_loop(predict_stop))
-
-    trade_stop = asyncio.Event()
-    app.state.trade_stop_event = trade_stop
-    app.state.trade_task = asyncio.create_task(auto_trade_loop(trade_stop))
-
-    factor_ranking_stop = asyncio.Event()
-    app.state.factor_ranking_stop_event = factor_ranking_stop
-    app.state.factor_ranking_task = asyncio.create_task(factor_ranking_refresh_loop(factor_ranking_stop))
-
-    market_context_stop = asyncio.Event()
-    app.state.market_context_stop_event = market_context_stop
-    app.state.market_context_task = asyncio.create_task(market_context_refresh_loop(market_context_stop))
-
-    factor_combo_stop = asyncio.Event()
-    app.state.factor_combo_daily_stop_event = factor_combo_stop
-    app.state.factor_combo_daily_task = asyncio.create_task(
-        factor_combination_daily_refresh_loop(factor_combo_stop)
-    )
+    _spawn_loop(app, "settlement", auto_settlement_loop)
+    _spawn_loop(app, "predict", auto_predict_loop)
+    _spawn_loop(app, "trade", auto_trade_loop)
+    _spawn_loop(app, "factor_ranking", factor_ranking_refresh_loop)
+    _spawn_loop(app, "market_context", market_context_refresh_loop)
+    _spawn_loop(app, "factor_combo_daily", factor_combination_daily_refresh_loop)
 
     if lstm_daily_review_enabled():
-        lstm_review_stop = asyncio.Event()
-        app.state.lstm_daily_review_stop_event = lstm_review_stop
-        app.state.lstm_daily_review_task = asyncio.create_task(lstm_daily_review_loop(lstm_review_stop))
+        _spawn_loop(app, "lstm_daily_review", lstm_daily_review_loop)
 
     if lstm_candidate_retry_enabled():
-        lstm_retry_stop = asyncio.Event()
-        app.state.lstm_candidate_retry_stop_event = lstm_retry_stop
-        app.state.lstm_candidate_retry_task = asyncio.create_task(lstm_candidate_retry_loop(lstm_retry_stop))
+        _spawn_loop(app, "lstm_candidate_retry", lstm_candidate_retry_loop)
 
-    governance_stop = asyncio.Event()
-    app.state.combo_event_governance_stop_event = governance_stop
-    app.state.combo_event_governance_task = asyncio.create_task(
-        combo_event_governance_refresh_loop(governance_stop)
+    _spawn_loop(app, "combo_event_governance", combo_event_governance_refresh_loop)
+
+
+def _spawn_loop(app: FastAPI, name: str, loop_factory) -> None:
+    stop_event = asyncio.Event()
+    setattr(app.state, f"{name}_stop_event", stop_event)
+    task = asyncio.create_task(loop_factory(stop_event))
+    task.add_done_callback(lambda done: _record_background_task_result(name, done))
+    setattr(app.state, f"{name}_task", task)
+
+
+def _record_background_task_result(name: str, task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is None:
+        return
+    if not isinstance(exc, Exception):
+        logger.error("background task stopped with base exception: %s", exc)
+        return
+    status_name = BACKGROUND_LOOP_STATUS_NAMES.get(name, name)
+    if _already_recorded_task_failure(status_name, exc):
+        return
+    details = {"stage": "background_task", "taskName": name}
+    record_loop_failure(status_name, exc, details)
+    logger.error(
+        "background task failed: %s",
+        name,
+        exc_info=(type(exc), exc, exc.__traceback__),
     )
+
+
+def _already_recorded_task_failure(status_name: str, exc: Exception) -> bool:
+    status = background_loop_statuses().get(status_name) or {}
+    return status.get("status") == "failed" and status.get("lastError") == str(exc)
 
 
 def _warm_ai_history_cache() -> None:
@@ -176,8 +234,6 @@ def _warm_ai_history_cache() -> None:
     conn = get_conn()
     try:
         warm_ai_history_cache(conn)
-    except Exception:
-        logger.exception("ai history cache warm-up failed")
     finally:
         conn.close()
 
@@ -189,7 +245,7 @@ async def shutdown_application(app: FastAPI) -> None:
         try:
             await bootstrap_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("deferred application bootstrap cancelled during shutdown")
 
     for attr in STOP_EVENT_ATTRS:
         ev = getattr(app.state, attr, None)
@@ -213,9 +269,22 @@ async def _cancel_background_tasks(tasks: list[asyncio.Task]) -> None:
     for task in tasks:
         task.cancel()
     try:
-        await asyncio.wait_for(
+        results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS,
         )
+        _log_background_task_shutdown_results(results)
     except asyncio.TimeoutError:
         logger.warning("background task shutdown timed out after %ss", BACKGROUND_SHUTDOWN_TIMEOUT_SECONDS)
+
+
+def _log_background_task_shutdown_results(results: list[object]) -> None:
+    for result in results:
+        if result is None or isinstance(result, asyncio.CancelledError):
+            continue
+        if isinstance(result, BaseException):
+            logger.error(
+                "background task failed during shutdown: %s",
+                result,
+                exc_info=(type(result), result, result.__traceback__),
+            )

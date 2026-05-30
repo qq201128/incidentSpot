@@ -1,14 +1,11 @@
 from __future__ import annotations
 import asyncio
 import logging
-import os
+from app.services.auto_predict_config import predict_initial_delay_seconds
 from app.services.auto_trade_service import get_auto_trade_settings, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
-from app.services.factor_combo_batch_predictions import (
-    eligible_factor_combo_rows,
-    predict_eligible_factor_combo_rows,
-)
+from app.services.factor_combo_batch_predictions import eligible_factor_combo_rows, predict_eligible_factor_combo_rows
 from app.services.factor_combo_batch_simulation_service import create_batch_combo_simulation_trade
 from app.services.factor_candidate_signal_service import factor_candidate_signal_keys, predict_factor_candidate_signals
 from app.services.forward_validation_service import settle_due_predictions
@@ -21,6 +18,7 @@ from app.services.model_family_config import MODEL_FAMILIES, is_model_family_sha
 from app.services.model_family_shadow_backfill_service import backfill_model_family_shadow_predictions, missing_model_family_shadow_entry_times
 from app.services.prediction_cache_service import prediction_exists, prediction_response, save_prediction
 from app.services.paper_live_candidate_service import refresh_paper_live_candidate_states
+from app.services.auto_predict_loop_status import record_auto_predict_cycle_failure, record_auto_predict_cycle_success, record_auto_predict_loop_start
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
@@ -35,13 +33,20 @@ logger = logging.getLogger("uvicorn.error")
 _SUBSCRIBERS: dict[tuple[str, str, str], set] = {}
 DEFAULT_PREDICT_SECONDS = 1
 DEFAULT_DURATION = "10m"
+
+
 def _predict_initial_delay_seconds() -> float:
-    try:
-        return max(0.0, float(os.getenv("PREDICT_INITIAL_DELAY_SECONDS", "8")))
-    except ValueError:
-        return 8.0
+    return predict_initial_delay_seconds()
+
+
 async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAULT_PREDICT_SECONDS) -> None:
-    initial = _predict_initial_delay_seconds()
+    try:
+        initial = _predict_initial_delay_seconds()
+    except Exception as exc:
+        record_auto_predict_cycle_failure(exc, float(poll_seconds))
+        logger.exception("auto prediction startup failed")
+        raise
+    record_auto_predict_loop_start(initial_delay=initial, poll_seconds=poll_seconds)
     logger.info("predict loop: initial_delay=%ss poll=%ss", initial, poll_seconds)
     if initial > 0:
         await _sleep_for(stop_event, initial)
@@ -51,9 +56,11 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
             targets = await asyncio.to_thread(_prediction_targets)
             await _predict_due_entries(targets)
             wait_seconds = _next_predict_wait(targets, poll_seconds)
-        except Exception:
+            record_auto_predict_cycle_success(len(targets), wait_seconds)
+        except Exception as exc:
             logger.exception("auto prediction failed")
             wait_seconds = float(poll_seconds)
+            record_auto_predict_cycle_failure(exc, wait_seconds)
         await _sleep_for(stop_event, wait_seconds)
 async def _predict_due_entries(targets: list[AutoTradeSettings]) -> None:
     due_targets = await asyncio.to_thread(_ready_due_prediction_targets, targets)
@@ -78,11 +85,7 @@ async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> 
     await runtime_helpers.prepare_prediction_inputs(settings_list, _runtime_deps())
 async def _run_prediction_batch(settings_list: list[AutoTradeSettings]) -> None:
     await runtime_helpers.run_prediction_batch(settings_list, _run_prediction)
-async def _run_prediction(
-    settings: AutoTradeSettings,
-    *,
-    write_lock: asyncio.Lock,
-) -> None:
+async def _run_prediction(settings: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
     entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
     result = await _predict_strategy_result(settings, entry_open_time)
     if not await _save_prediction(result, write_lock):
@@ -115,47 +118,51 @@ async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time:
         entry_open_time=entry_open_time,
         strategy_key=settings.strategy_key,
     )
-async def _save_candidate_collection_predictions(
-    settings: AutoTradeSettings,
-    *,
-    write_lock: asyncio.Lock,
-) -> None:
+async def _save_candidate_collection_predictions(settings: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
     entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
-    await collection_helpers.save_candidate_collection_predictions(settings, entry_open_time, write_lock, _collection_deps())
-async def _save_factor_combo_shadow_predictions(
-    settings: AutoTradeSettings,
-    entry_open_time: int,
-    write_lock: asyncio.Lock,
-) -> None:
-    await collection_helpers.save_factor_combo_shadow_predictions(settings, entry_open_time, write_lock, _collection_deps())
-async def _save_model_family_shadow_predictions(
-    settings: AutoTradeSettings,
-    entry_open_time: int,
-    write_lock: asyncio.Lock,
-) -> None:
+    await collection_helpers.save_candidate_collection_predictions(
+        _candidate_collection_context(settings, entry_open_time, write_lock)
+    )
+async def _save_factor_combo_shadow_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
+    await collection_helpers.save_factor_combo_shadow_predictions(
+        _candidate_collection_context(settings, entry_open_time, write_lock)
+    )
+async def _save_model_family_shadow_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
     if settings.strategy_key == FACTOR_COMBO_STRATEGY_KEY:
         for family in MODEL_FAMILIES:
-            await _save_one_model_family_shadow_prediction(family, settings, entry_open_time, write_lock)
-async def _save_factor_candidate_signals(
+            await _save_one_model_family_shadow_prediction(
+                family,
+                {"settings": settings, "entry_open_time": entry_open_time, "write_lock": write_lock},
+            )
+async def _save_factor_candidate_signals(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
+    await collection_helpers.save_factor_candidate_signals(
+        _candidate_collection_context(settings, entry_open_time, write_lock)
+    )
+async def _save_lstm_shadow_prediction(settings, entry_open_time, write_lock) -> None:
+    await _save_one_model_family_shadow_prediction(
+        "lstm",
+        {"settings": settings, "entry_open_time": entry_open_time, "write_lock": write_lock},
+    )
+async def _save_one_model_family_shadow_prediction(family, context) -> None:
+    collection_context = _candidate_collection_context(
+        context["settings"],
+        context["entry_open_time"],
+        context["write_lock"],
+    )
+    await collection_helpers.save_one_model_family_shadow_prediction(
+        collection_helpers.ModelFamilyShadowContext(family, collection_context)
+    )
+async def _save_model_family_shadow_trade(parent: AutoTradeSettings, result: dict) -> None:
+    await collection_helpers.save_model_family_shadow_trade(parent, result, create_batch_combo_simulation_trade)
+def _candidate_collection_context(
     settings: AutoTradeSettings,
     entry_open_time: int,
     write_lock: asyncio.Lock,
-) -> None:
-    await collection_helpers.save_factor_candidate_signals(settings, entry_open_time, write_lock, _collection_deps())
-async def _save_lstm_shadow_prediction(settings, entry_open_time, write_lock) -> None:
-    await _save_one_model_family_shadow_prediction("lstm", settings, entry_open_time, write_lock)
-async def _save_one_model_family_shadow_prediction(family, settings, entry_open_time, write_lock) -> None:
-    await collection_helpers.save_one_model_family_shadow_prediction(family, settings, entry_open_time, write_lock, _collection_deps())
-async def _save_model_family_shadow_trade(parent: AutoTradeSettings, result: dict) -> None:
-    await collection_helpers.save_model_family_shadow_trade(parent, result, create_batch_combo_simulation_trade)
+) -> collection_helpers.CandidateCollectionContext:
+    return collection_helpers.CandidateCollectionContext(settings, entry_open_time, write_lock, _collection_deps())
 def _collection_deps() -> dict[str, Any]:
     return {"predict_eligible_factor_combo_rows": predict_eligible_factor_combo_rows, "predict_factor_candidate_signals": predict_factor_candidate_signals, "create_batch_combo_simulation_trade": create_batch_combo_simulation_trade, "save_prediction": _save_prediction, "lstm_model_status": lstm_model_status, "model_family_status": model_family_status, "predict_lstm_shadow_prediction": predict_lstm_shadow_prediction, "predict_model_family_shadow_prediction": predict_model_family_shadow_prediction, "log_model_family_shadow_skip": _log_model_family_shadow_skip}
-async def _save_prediction(
-    result: dict,
-    write_lock: asyncio.Lock,
-    *,
-    allow_existing: bool = False,
-) -> bool:
+async def _save_prediction(result: dict, write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
     async with write_lock:
         return await asyncio.to_thread(save_prediction, result, allow_existing=allow_existing)
 def _prediction_targets() -> list[AutoTradeSettings]:
@@ -215,14 +222,14 @@ def _ready_model_family_shadow_backfill_targets(settings_list: list[AutoTradeSet
     return shadow_helpers.ready_shadow_backfill_targets(settings_list, _shadow_deps())
 def _unique_model_family_shadow_targets(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str, str]]:
     return target_helpers.unique_model_family_shadow_targets(settings_list)
-def _log_model_family_shadow_skip(
-    settings: AutoTradeSettings,
-    family: str,
-    status: dict,
-    *,
-    role: str,
-) -> None:
-    shadow_helpers.log_model_family_shadow_skip(logger, settings, family, status, role=role)
+def _log_model_family_shadow_skip(settings: AutoTradeSettings, family: str, status: dict, *, role: str) -> None:
+    shadow_helpers.log_model_family_shadow_skip(
+        logger,
+        settings=settings,
+        family=family,
+        status=status,
+        role=role,
+    )
 def _shadow_deps() -> dict[str, Any]:
     return {"ready_targets": _ready_model_family_shadow_backfill_targets, "unique_targets": _unique_model_family_shadow_targets, "backfill": backfill_model_family_shadow_predictions, "current_entry": current_rule_entry_open_time_for_duration, "lstm_status": lstm_model_status, "family_status": model_family_status, "logger": logger}
 def lstm_model_status(symbol: str, duration: str) -> dict:
@@ -238,10 +245,7 @@ def _run_prediction_db_side_effects(settings_list: list[AutoTradeSettings]) -> N
         refresh_ensemble_judge(symbol, duration)
 def _unique_symbol_durations(settings_list: list[AutoTradeSettings]) -> list[tuple[str, str]]:
     return sorted({(settings.symbol.upper(), settings.duration) for settings in settings_list})
-def _merged_targets(
-    first: list[AutoTradeSettings],
-    second: list[AutoTradeSettings],
-) -> list[AutoTradeSettings]:
+def _merged_targets(first: list[AutoTradeSettings], second: list[AutoTradeSettings]) -> list[AutoTradeSettings]:
     merged = {}
     for settings in [*first, *second]:
         merged[(settings.strategy_key, settings.symbol.upper(), settings.duration)] = settings
@@ -273,19 +277,3 @@ async def _broadcast(result: dict) -> None:
     await runtime_helpers.broadcast(result, _SUBSCRIBERS, DEFAULT_STRATEGY_KEY)
 def _runtime_deps() -> dict[str, Any]:
     return {"current_entry": current_rule_entry_open_time_for_duration, "refresh_1m": _refresh_1m_prediction_input, "refresh_duration": _refresh_duration_prediction_input, "db_side_effects": _run_prediction_db_side_effects}
-def subscribe(
-    ws,
-    symbol: str,
-    duration: str,
-    strategy_key: str = DEFAULT_STRATEGY_KEY,
-) -> None:
-    _SUBSCRIBERS.setdefault((symbol.upper(), duration, strategy_key), set()).add(ws)
-def unsubscribe(
-    ws,
-    symbol: str,
-    duration: str,
-    strategy_key: str = DEFAULT_STRATEGY_KEY,
-) -> None:
-    s = _SUBSCRIBERS.get((symbol.upper(), duration, strategy_key))
-    if s:
-        s.discard(ws)

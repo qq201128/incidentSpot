@@ -10,6 +10,7 @@ import AppNavigation from "./components/AppNavigation";
 import EventGovernancePage from "./pages/EventGovernancePage";
 import FactorLearningPage from "./pages/FactorLearningPage";
 import FactorsPage from "./pages/FactorsPage";
+import ResearchDashboardPage from "./pages/ResearchDashboardPage";
 import RuleHitRatePage from "./pages/RuleHitRatePage";
 import TradingWorkbench from "./components/TradingWorkbench";
 import "./components/EventContractPanel.css";
@@ -21,8 +22,27 @@ const EVENTS_POLL_MS = 5000;
 
 export default function App() {
   const [appView, setAppView] = useState("trade");
-  const [symbol, setSymbol] = useState("BTCUSDT");
-  const [interval, setIntervalValue] = useState("10m");
+  const [tradeSymbol, setTradeSymbol] = useState("BTCUSDT");
+  const [tradeInterval, setTradeInterval] = useState("10m");
+  const page = pageForView(appView, {
+    interval: tradeInterval,
+    onIntervalChange: setTradeInterval,
+    onSymbolChange: setTradeSymbol,
+    symbol: tradeSymbol,
+  });
+  return pageFrame(appView, setAppView, page);
+}
+
+function pageForView(appView, tradeProps) {
+  if (appView === "hit-rate") return <RuleHitRatePage />;
+  if (appView === "factors") return <FactorsPage />;
+  if (appView === "governance") return <EventGovernancePage />;
+  if (appView === "research") return <ResearchDashboardPage />;
+  if (appView === "learning") return <FactorLearningPage />;
+  return <TradingView {...tradeProps} />;
+}
+
+function TradingView({ interval, onIntervalChange, onSymbolChange, symbol }) {
   const [status, setStatus] = useState("正在初始化工作台…");
   const [summary, setSummary] = useState(null);
   const [summaryLatencyMs, setSummaryLatencyMs] = useState(null);
@@ -86,38 +106,24 @@ export default function App() {
     [reloadWorkbench],
   );
 
-  if (appView === "hit-rate") {
-    return pageFrame(appView, setAppView, <RuleHitRatePage />);
-  }
-  if (appView === "factors") {
-    return pageFrame(appView, setAppView, <FactorsPage />);
-  }
-  if (appView === "governance") {
-    return pageFrame(appView, setAppView, <EventGovernancePage />);
-  }
-  if (appView === "learning") {
-    return pageFrame(appView, setAppView, <FactorLearningPage />);
-  }
-  return pageFrame(
-    appView,
-    setAppView,
+  return (
     <TradingWorkbench
       {...market}
       interval={interval}
       latestPrediction={latestPrediction}
       onClearAllEvents={handleClearAllEvents}
       onClearStrategyEvents={handleClearStrategyEvents}
-      onIntervalChange={setIntervalValue}
+      onIntervalChange={onIntervalChange}
       onPredict={getFreshPrediction}
       onQuickTrade={handleQuickTrade}
       onSettle={handleSettle}
-      onSymbolChange={setSymbol}
+      onSymbolChange={onSymbolChange}
       recordsReloadKey={recordsReloadKey}
       status={status}
       summary={summary}
       summaryLatencyMs={summaryLatencyMs}
       symbol={symbol}
-    />,
+    />
   );
 }
 

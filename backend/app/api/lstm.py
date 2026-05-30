@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
@@ -14,6 +16,14 @@ from app.services.lstm_training_service import train_lstm_model
 
 router = APIRouter(prefix="/api/lstm", tags=["lstm"])
 logger = logging.getLogger("uvicorn.error")
+
+
+@dataclass(frozen=True)
+class CandidateSearchJob:
+    symbol: str
+    duration: str
+    profile: str
+    reset_history: bool
 
 
 @router.get("/status")
@@ -30,6 +40,7 @@ def lstm_status(
 
 @router.post("/train")
 def lstm_train(
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     profile: str = Query("full"),
@@ -67,16 +78,18 @@ def lstm_train(
 @router.post("/candidate-search")
 def lstm_candidate_search(
     background_tasks: BackgroundTasks,
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     profile: str = Query("full"),
-    reset_history: bool = Query(False, alias="resetHistory"),
+    reset_history: Annotated[bool, Query(alias="resetHistory")] = False,
 ) -> dict:
     try:
         sym_u = symbol.upper()
         selected_profile = normalize_experiment_profile(profile)
         search_config = LstmCandidateSearchConfig()
         search_total = search_space_size(search_config)
+        job = CandidateSearchJob(sym_u, duration, selected_profile, reset_history)
         queued = queue_lstm_candidate_progress(
             symbol=sym_u,
             duration=duration,
@@ -85,7 +98,7 @@ def lstm_candidate_search(
             search_space_total=search_total,
             parallel_workers=search_config.parallel_workers,
         )
-        background_tasks.add_task(_background_lstm_candidate_search, sym_u, duration, selected_profile, reset_history)
+        background_tasks.add_task(_background_lstm_candidate_search, job)
         status = lstm_model_status(sym_u, duration)
         return {
             **status,
@@ -110,22 +123,22 @@ def lstm_predict(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _background_lstm_candidate_search(symbol: str, duration: str, profile: str, reset_history: bool) -> None:
+def _background_lstm_candidate_search(job: CandidateSearchJob) -> None:
     config = LstmCandidateRetryConfig(
-        symbols=(symbol,),
-        durations=(duration,),
-        profile=profile,
+        symbols=(job.symbol,),
+        durations=(job.duration,),
+        profile=job.profile,
         manual_trigger=True,
-        reset_history=reset_history,
+        reset_history=job.reset_history,
     )
     try:
         report = run_lstm_candidate_retry(config)
         finish_lstm_candidate_progress(
-            symbol=symbol,
-            duration=duration,
+            symbol=job.symbol,
+            duration=job.duration,
             status=str(report.get("status") or "failed"),
         )
     except Exception:
-        finish_lstm_candidate_progress(symbol=symbol, duration=duration, status="failed")
-        logger.exception("lstm candidate search failed: %s %s", symbol, duration)
+        finish_lstm_candidate_progress(symbol=job.symbol, duration=job.duration, status="failed")
+        logger.exception("lstm candidate search failed: %s %s", job.symbol, job.duration)
         raise

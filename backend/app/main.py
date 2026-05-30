@@ -31,6 +31,9 @@ def _cors_allow_origins() -> list[str]:
 
 app = FastAPI(title="Incident Spot Backend")
 app.state.bootstrap_task = None
+app.state.bootstrap_status = "starting"
+app.state.bootstrap_error = None
+app.state.bootstrap_exception_type = None
 app.state.settlement_task = None
 app.state.settlement_stop_event = None
 app.state.predict_task = None
@@ -70,8 +73,28 @@ async def on_shutdown() -> None:
 @app.get("/health")
 async def health() -> dict:
     bootstrap_task = getattr(app.state, "bootstrap_task", None)
-    ready = bootstrap_task is None or bootstrap_task.done()
-    return {"ok": True, "ready": ready}
+    status = getattr(app.state, "bootstrap_status", "unknown")
+    ready = status == "ready" or (bootstrap_task is None and status != "failed")
+    return {
+        "ok": True,
+        "ready": ready,
+        "bootstrap": _bootstrap_health_payload(status),
+        "background": _background_health_payload(),
+    }
+
+
+def _bootstrap_health_payload(status: str) -> dict:
+    return {
+        "status": status,
+        "error": getattr(app.state, "bootstrap_error", None),
+        "exceptionType": getattr(app.state, "bootstrap_exception_type", None),
+    }
+
+
+def _background_health_payload() -> dict:
+    from app.services.background_loop_status import background_loop_statuses
+
+    return background_loop_statuses()
 
 
 @app.websocket("/ws/klines")
@@ -97,7 +120,7 @@ async def ws_agg_trades(websocket: WebSocket, symbol: str = "btcusdt", limit: in
     try:
         await proxy_agg_trade_stream(websocket, symbol, limit=bounded_limit)
     except WebSocketDisconnect:
-        pass
+        logger.debug("agg trade websocket disconnected: symbol=%s", symbol)
     except Exception:
         logger.exception("agg trade websocket failed: symbol=%s", symbol)
 

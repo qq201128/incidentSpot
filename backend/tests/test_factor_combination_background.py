@@ -7,6 +7,7 @@ import pytest
 
 from app.services import factor_combination_background as combo_background
 from app.services import factor_combination_service as combo_service
+from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services.factor_candidate_selection import select_base_candidates
 from app.services.factor_combination_service import CombinationSearchConfig
 from app.services.factor_registry import FactorCategory, FactorDefinition
@@ -75,6 +76,7 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
+    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)
@@ -112,6 +114,32 @@ def test_daily_refresh_loop_runs_paper_live_closed_loop(monkeypatch: pytest.Monk
     assert calls == [("sleep", None), ("run", "run_paper_live_daily_closed_loop")]
 
 
+def test_daily_refresh_loop_records_failed_paper_live_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_background_loop_statuses()
+    stop_event = asyncio.Event()
+
+    async def sleep_once(_stop_event: asyncio.Event, _seconds: float) -> None:
+        return None
+
+    async def run_once(_func):
+        stop_event.set()
+        return _failed_daily_report()
+
+    monkeypatch.setattr(combo_background, "_sleep_for", sleep_once)
+    monkeypatch.setattr(combo_background, "seconds_until_next_daily_refresh", lambda: 0.0)
+    monkeypatch.setattr(combo_background, "run_blocking_daemon", run_once)
+
+    asyncio.run(combo_background.factor_combination_daily_refresh_loop(stop_event))
+
+    status = background_loop_statuses()["factor_combo_daily"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "paper-live daily loop failed"
+    details = status["lastFailureDetails"]
+    assert details["stage"] == "paper_live_daily_loop"
+    assert details["status"] == "failed"
+    assert details["failedResults"] == [_expected_failed_daily_result()]
+
+
 def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr(
@@ -119,6 +147,7 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
         "run_factor_combination_ranking",
         lambda symbol, duration, _config: {"symbol": symbol, "duration": duration, "ranking": []},
     )
+    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", lambda _report: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", _promotion_report)
@@ -131,37 +160,11 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
     assert calls == []
 
 
-def test_startup_stale_refresh_only_rebuilds_unusable_caches(monkeypatch: pytest.MonkeyPatch) -> None:
-    refreshed = []
-    cache_by_duration = {
-        "10m": {"cacheStatus": {"usable": False, "reason": "legacy_without_fingerprint"}},
-        "30m": {"cacheStatus": {"usable": True, "reason": "usable"}},
-        "60m": None,
-        "1d": {"cacheStatus": {"usable": True, "reason": "usable"}},
-    }
-
-    monkeypatch.setattr(combo_background, "_sync_default_simulation_slots", lambda: None)
-    monkeypatch.setattr(combo_background, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
-    monkeypatch.setattr(
-        combo_background,
-        "get_cached_combination_ranking",
-        lambda _symbol, duration: cache_by_duration[duration],
-    )
-    monkeypatch.setattr(
-        combo_background,
-        "refresh_combination_ranking_for_symbol_duration",
-        lambda symbol, duration, config, **_kwargs: refreshed.append((symbol, duration, config)),
-    )
-
-    combo_background.refresh_stale_configured_combination_rankings("cfg")
-
-    assert refreshed == [("BTCUSDT", "10m", "cfg"), ("BTCUSDT", "60m", "cfg")]
-
-
 def test_combo_refresh_writes_duration_klines_before_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     rows = [_kline_row(0)]
 
+    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "fetch_klines", lambda symbol, duration, limit: rows)
     monkeypatch.setattr(combo_background, "upsert_klines_rows", lambda symbol, interval, rows: calls.append(("klines", symbol, interval, len(rows))))
     monkeypatch.setattr(combo_background, "_backfill_duration_klines", lambda *_args: None)
@@ -233,3 +236,34 @@ def _promotion_report(report: dict) -> dict:
 
 def _fail_sync(*_args, **_kwargs) -> dict:
     raise RuntimeError("lstm sync failed")
+
+
+def _failed_daily_report() -> dict:
+    return {
+        "status": "failed",
+        "results": [
+            {
+                "symbol": "BTCUSDT",
+                "duration": "10m",
+                "status": "failed",
+                "stages": [{"status": "failed", **_expected_failed_stage()}],
+            }
+        ],
+    }
+
+
+def _expected_failed_daily_result() -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "status": "failed",
+        "failedStages": [_expected_failed_stage()],
+    }
+
+
+def _expected_failed_stage() -> dict:
+    return {
+        "stage": "settle_due_predictions",
+        "reason": "settlement failed",
+        "exceptionType": "RuntimeError",
+    }

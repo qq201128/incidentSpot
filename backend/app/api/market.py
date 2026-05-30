@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
+from app.api.market_prediction_payloads import rule_prediction_response
 from app.db.session import get_conn
+from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_success
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
+from app.services.market_data_backfill_service import backfill_symbol_market_data
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 from app.services.binance_service import (
@@ -19,6 +22,7 @@ ALLOWED_INTERVALS = {"10m", "30m", "60m", "1h", "4h", "1d"}
 BINANCE_KLINE_LIMIT = 1000
 PREDICTION_MIN_REFRESH_LIMIT = 400
 DISPLAY_KLINE_REQUEST_OPTIONS = {"max_attempts": 2, "timeout": (3, 6)}
+BACKGROUND_BACKFILL_LOOP = "market_backfill"
 
 def _upsert_klines(symbol: str, interval: str, rows: list[dict]) -> None:
     conn = get_conn()
@@ -192,17 +196,12 @@ def backfill_market_data(
     duration: str | None = Query(None, description="omit to backfill all rule durations"),
 ) -> dict:
     """Queue kline / market-context backfill for factor research and combo ranking."""
-    from app.services.market_data_backfill_service import backfill_symbol_market_data
-
     sym = symbol.upper()
     durations = (duration,) if duration else None
     if duration and duration not in SUPPORTED_RULE_DURATIONS:
         raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
 
-    def _run() -> None:
-        backfill_symbol_market_data(sym, durations=durations)
-
-    background_tasks.add_task(_run)
+    background_tasks.add_task(_background_market_backfill, sym, durations)
     return {
         "ok": True,
         "symbol": sym,
@@ -211,8 +210,20 @@ def backfill_market_data(
     }
 
 
+def _background_market_backfill(symbol: str, durations: tuple[str, ...] | None) -> None:
+    details = {"stage": "manual_api_backfill", "symbol": symbol, "durations": list(durations) if durations else None}
+    record_loop_start(BACKGROUND_BACKFILL_LOOP, details)
+    try:
+        report = backfill_symbol_market_data(symbol, durations=durations)
+        record_loop_success(BACKGROUND_BACKFILL_LOOP, {**details, "durationCount": len(report.get("durations") or [])})
+    except Exception as exc:
+        record_loop_failure(BACKGROUND_BACKFILL_LOOP, exc, details)
+        raise
+
+
 @router.post("/predict")
 def predict(
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     limit: int = Query(2000, ge=300, le=5000),
@@ -230,6 +241,7 @@ def predict(
 
 @router.get("/predict/latest")
 def latest_prediction(
+    *,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     signalKey: str | None = Query(None),
@@ -272,7 +284,7 @@ def _predict_rule(symbol: str, duration: str, strategy_key: str | None) -> dict:
             entry_open_time=current_rule_entry_open_time_for_duration(duration),
             strategy_key=strategy_key,
         )
-        return _rule_prediction_response(result)
+        return rule_prediction_response(result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -285,30 +297,3 @@ def predict_10m(
     strategyKey: str | None = Query(None),
 ) -> dict:
     return predict(symbol=symbol, duration="10m", limit=limit, strategyKey=strategyKey)
-
-def _rule_prediction_response(result: dict) -> dict:
-    from app.services.prediction_policy import trade_policy_payload
-
-    return {
-        "symbol": result["symbol"],
-        "signalKey": result.get("signal_key") or result.get("strategy_key"),
-        "strategyKey": result.get("strategy_key"),
-        "duration": result["duration"],
-        "direction": result["direction"],
-        "probabilityUp": result["probability_up"],
-        "confidence": result["confidence"],
-        "certaintyLabel": result["certainty_label"],
-        "threshold": result["threshold"],
-        "tradeQualityScore": result.get("trade_quality_score"),
-        "tradeQualityPassed": result.get("trade_quality_passed"),
-        "tradeQualityGate": result.get("trade_quality_gate"),
-        "highWinrateGate": result.get("high_winrate_gate"),
-        "highWinrateGatePassed": result.get("high_winrate_gate_passed"),
-        "highWinrateGateValue": result.get("high_winrate_gate_value"),
-        "signalSource": result.get("signal_source"),
-        "ruleScore": result.get("rule_score"),
-        "ruleReasons": result.get("rule_reasons"),
-        "orderbook": result.get("orderbook"),
-        "timeframeVotes": result.get("timeframe_votes"),
-        **trade_policy_payload(result["duration"], strategy_key=result.get("strategy_key")),
-    }

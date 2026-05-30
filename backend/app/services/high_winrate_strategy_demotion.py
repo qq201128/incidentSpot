@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+from dataclasses import dataclass
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.background_loop_status import record_loop_failure
 from app.services.high_winrate_strategy_metrics import (
     ACTIVE_SAMPLE_COUNT,
     ACTIVE_WIN_RATE_MIN,
@@ -41,6 +44,7 @@ from app.services.high_winrate_strategy_status_store import (
     write_status as _write_status,
 )
 
+logger = logging.getLogger(__name__)
 STATUS_BACKTEST_CANDIDATE = "backtest_candidate"
 STATUS_PAPER_COLLECTING = "paper_collecting"
 STATUS_PAPER_STABLE = "paper_stable"
@@ -56,6 +60,26 @@ REASON_OFFLINE_PROMOTION = "offline_promotion"
 RANKING_REFRESH_FAILED_REASON = "candidate_pool_exhausted_refresh_failed"
 RANKING_REFRESH_PENDING_REASON = "ranking_refresh_pending"
 RECENT_SAMPLE_LIMIT = 100
+LOOP_NAME = "high_winrate_demotion"
+
+
+@dataclass(frozen=True)
+class SettledRowsQuery:
+    conn: Any
+    symbol: str
+    duration: str
+    rule: str | None
+
+
+@dataclass(frozen=True)
+class EvaluationContext:
+    decision: dict[str, str]
+    current: dict[str, Any]
+    metrics: dict[str, Any]
+    symbol: str
+    duration: str
+    rank: int
+    rule: str | None
 
 
 def promote_high_winrate_strategy(symbol: str, duration: str) -> dict[str, Any]:
@@ -107,10 +131,12 @@ def _evaluate_high_winrate_demotion(
         current = _current_status(conn, sym, duration)
         rank = high_winrate_active_rank_from_status(current)
         rule = high_winrate_candidate_rule(sym, duration, rank)
-        rows = _settled_rows(conn, sym, duration, rule)
+        rows = _settled_rows(SettledRowsQuery(conn, sym, duration, rule))
         metrics = high_winrate_metrics(rows)
         decision = high_winrate_decision(metrics)
-        payload, refresh_required = _evaluation_payload(decision, current, metrics, sym, duration, rank, rule)
+        payload, refresh_required = _evaluation_payload(
+            EvaluationContext(decision, current, metrics, sym, duration, rank, rule)
+        )
         if refresh_required and not allow_goal_refresh:
             payload = _pending_refresh_payload(payload)
             refresh_required = False
@@ -167,23 +193,31 @@ def high_winrate_active_rank(symbol: str, duration: str) -> int:
     return high_winrate_active_rank_from_status(row)
 
 
-def _settled_rows(conn: Any, symbol: str, duration: str, rule: str | None) -> list[dict[str, Any]]:
+def _settled_rows(query: SettledRowsQuery) -> list[dict[str, Any]]:
     try:
-        event_rows = settled_event_rows_for_high_winrate_rule(conn, symbol, duration, rule)
-    except Exception:
+        event_rows = settled_event_rows_for_high_winrate_rule(query.conn, query.symbol, query.duration, query.rule)
+    except Exception as exc:
+        details = {
+            "stage": "settled_event_rows",
+            "symbol": query.symbol,
+            "duration": query.duration,
+            "rule": query.rule,
+        }
+        record_loop_failure(LOOP_NAME, exc, details)
+        logger.exception("high winrate settled event rows failed: %s %s", query.symbol, query.duration)
         event_rows = []
     if event_rows:
         return event_rows
-    return _settled_prediction_rows(conn, symbol, duration, rule)
+    return _settled_prediction_rows(query)
 
 
-def _settled_prediction_rows(conn: Any, symbol: str, duration: str, rule: str | None) -> list[dict[str, Any]]:
-    rule_clause = "" if rule is None else " AND high_winrate_rule = ?"
-    params = [HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, symbol, duration]
-    if rule is not None:
-        params.append(rule)
+def _settled_prediction_rows(query: SettledRowsQuery) -> list[dict[str, Any]]:
+    rule_clause = "" if query.rule is None else " AND high_winrate_rule = ?"
+    params = [HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, query.symbol, query.duration]
+    if query.rule is not None:
+        params.append(query.rule)
     params.append(RECENT_SAMPLE_LIMIT)
-    rows = conn.execute(
+    rows = query.conn.execute(
         f"""
         SELECT open_time, prediction_correct, actual_return, high_winrate_rule
         FROM predictions
@@ -198,29 +232,22 @@ def _settled_prediction_rows(conn: Any, symbol: str, duration: str, rule: str | 
     return [dict(row) for row in rows]
 
 
-def _evaluation_payload(
-    decision: dict[str, str],
-    current: dict[str, Any],
-    metrics: dict[str, Any],
-    symbol: str,
-    duration: str,
-    rank: int,
-    rule: str | None,
-) -> tuple[dict[str, Any], bool]:
-    if current.get("status") == STATUS_PAUSED:
-        payload = _status_payload(STATUS_PAUSED, str(current.get("reason") or "paused"), metrics)
+def _evaluation_payload(context: EvaluationContext) -> tuple[dict[str, Any], bool]:
+    if context.current.get("status") == STATUS_PAUSED:
+        payload = _status_payload(STATUS_PAUSED, str(context.current.get("reason") or "paused"), context.metrics)
         return payload, False
-    if decision["status"] != STATUS_PAPER_FAILED or rule is None:
-        rotation = high_winrate_rotation_payload(symbol, duration, rank, high_winrate_failed_ranks_from_status(current))
-        return _status_payload(decision["status"], decision["reason"], metrics, rotation), False
-    failed = (*high_winrate_failed_ranks_from_status(current), rank)
-    previous = failed_rank_payload(rank, rule, decision, metrics)
-    next_rank = next_high_winrate_candidate_rank(rank)
+    if context.decision["status"] != STATUS_PAPER_FAILED or context.rule is None:
+        failed_ranks = high_winrate_failed_ranks_from_status(context.current)
+        rotation = high_winrate_rotation_payload(context.symbol, context.duration, context.rank, failed_ranks)
+        return _status_payload(context.decision["status"], context.decision["reason"], context.metrics, rotation), False
+    failed = (*high_winrate_failed_ranks_from_status(context.current), context.rank)
+    previous = failed_rank_payload(context.rank, context.rule, context.decision, context.metrics)
+    next_rank = next_high_winrate_candidate_rank(context.rank)
     if next_rank is None:
-        rotation = high_winrate_rotation_payload(symbol, duration, rank, failed, previous)
-        return _status_payload(STATUS_DEMOTED, RANKING_REFRESH_REASON, metrics, rotation), True
-    next_rule = high_winrate_candidate_rule(symbol, duration, next_rank)
-    rotation = high_winrate_rotation_payload(symbol, duration, next_rank, failed, previous, active_rule=next_rule)
+        rotation = high_winrate_rotation_payload(context.symbol, context.duration, context.rank, failed, previous)
+        return _status_payload(STATUS_DEMOTED, RANKING_REFRESH_REASON, context.metrics, rotation), True
+    next_rule = high_winrate_candidate_rule(context.symbol, context.duration, next_rank)
+    rotation = high_winrate_rotation_payload(context.symbol, context.duration, next_rank, failed, previous, active_rule=next_rule)
     payload = _status_payload(STATUS_PAPER_COLLECTING, ROTATED_REASON, empty_high_winrate_metrics(), rotation)
     return payload, False
 

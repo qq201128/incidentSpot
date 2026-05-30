@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def load_json_object(
@@ -45,4 +48,4 @@ def save_json_object(
             try:
                 tmp_path.unlink()
             except OSError:
-                pass
+                logger.exception("failed to remove temporary JSON file: %s", tmp_path)

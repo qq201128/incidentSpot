@@ -2,9 +2,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.services.auto_trade_types import AutoTradeSettings
+
+
+@dataclass(frozen=True)
+class PredictionFailure:
+    settings: AutoTradeSettings
+    exception: Exception
+
+
+class PredictionBatchError(RuntimeError):
+    def __init__(self, failures: list[PredictionFailure]) -> None:
+        self.failures = tuple(failures)
+        self.details = [_failure_detail(failure) for failure in failures]
+        failed_keys = ", ".join(failure.settings.strategy_key for failure in failures)
+        super().__init__(f"auto prediction failed for strategies: {failed_keys}")
+
+
+class CandidateCollectionBatchError(RuntimeError):
+    def __init__(self, failures: list[PredictionFailure]) -> None:
+        self.failures = tuple(failures)
+        self.details = [_failure_detail(failure) for failure in failures]
+        failed = ", ".join(f"{failure.settings.symbol}:{failure.settings.duration}" for failure in failures)
+        super().__init__(f"candidate collection failed for: {failed}")
 
 
 async def prepare_prediction_inputs(settings_list: list[AutoTradeSettings], deps: dict[str, Any]) -> None:
@@ -37,15 +60,16 @@ async def run_prediction_batch(settings_list: list[AutoTradeSettings], run_predi
     results = await asyncio.gather(*(run_prediction(settings, write_lock=write_lock) for settings in settings_list), return_exceptions=True)
     failures = prediction_failures(settings_list, results)
     if failures:
-        failed_keys = ", ".join(settings.strategy_key for settings, _exc in failures)
-        raise RuntimeError(f"auto prediction failed for strategies: {failed_keys}") from failures[0][1]
+        raise PredictionBatchError(failures) from failures[0].exception
 
 
 async def run_candidate_collection_batch(settings_list: list[AutoTradeSettings], save_collection: Callable[..., Awaitable[None]], logger: logging.Logger) -> None:
     write_lock = asyncio.Lock()
     results = await asyncio.gather(*(save_collection(settings, write_lock=write_lock) for settings in settings_list), return_exceptions=True)
     failures = prediction_failures(settings_list, results)
-    for settings, exc in failures:
+    for failure in failures:
+        settings = failure.settings
+        exc = failure.exception
         logger.error(
             "candidate collection failed strategy=%s symbol=%s duration=%s",
             settings.strategy_key,
@@ -54,22 +78,41 @@ async def run_candidate_collection_batch(settings_list: list[AutoTradeSettings],
             exc_info=(type(exc), exc, exc.__traceback__),
         )
     if failures:
-        failed = ", ".join(f"{item.symbol}:{item.duration}" for item, _exc in failures)
-        raise RuntimeError(f"candidate collection failed for: {failed}") from failures[0][1]
+        raise CandidateCollectionBatchError(failures) from failures[0].exception
 
 
-def prediction_failures(settings_list: list[AutoTradeSettings], results: list[object]) -> list[tuple[AutoTradeSettings, Exception]]:
-    return [(settings, result) for settings, result in zip(settings_list, results) if isinstance(result, Exception)]
+def prediction_failures(settings_list: list[AutoTradeSettings], results: list[object]) -> list[PredictionFailure]:
+    return [
+        PredictionFailure(settings, result)
+        for settings, result in zip(settings_list, results)
+        if isinstance(result, Exception)
+    ]
+
+
+def _failure_detail(failure: PredictionFailure) -> dict[str, str]:
+    settings = failure.settings
+    exc = failure.exception
+    return {
+        "strategyKey": settings.strategy_key,
+        "symbol": settings.symbol,
+        "duration": settings.duration,
+        "error": str(exc),
+        "exceptionType": type(exc).__name__,
+    }
 
 
 async def broadcast(result: dict, subscribers: dict[tuple[str, str, str], set], default_strategy_key: str) -> None:
     key = (result["symbol"].upper(), result["duration"], result.get("strategyKey") or default_strategy_key)
     websockets = subscribers.get(key, set())
     dead = set()
+    failures = []
     for ws in websockets:
         try:
             await ws.send_json(result)
-        except Exception:
+        except Exception as exc:
             dead.add(ws)
+            failures.append(exc)
     if dead:
         websockets -= dead
+    if failures:
+        raise RuntimeError(f"prediction broadcast failed for {len(failures)} subscriber(s)") from failures[0]

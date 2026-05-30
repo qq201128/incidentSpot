@@ -1,22 +1,45 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from app.db.session import get_conn
 from app.services.factor_combo_simulation_keys import factor_combo_event_strategy_filter
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.model_family_config import MODEL_FAMILIES, normalize_model_family
+from app.services.sim_feedback_math import (
+    NEUTRAL_PROFIT_FACTOR,
+    NEUTRAL_WIN_RATE,
+    avg as _avg,
+    finite_float as _finite_float,
+    neutral_feature_value as _neutral_feature_value,
+    profit_factor as _profit_factor,
+    recent_win_rate as _recent_win_rate,
+    win_rate as _win_rate,
+)
 
 SIM_FEEDBACK_PREFIX = "sim_feedback_"
 SIM_FEEDBACK_ROLLING_WINDOW = 20
-NEUTRAL_WIN_RATE = 0.5
-NEUTRAL_PROFIT_FACTOR = 1.0
+SIM_FEEDBACK_PREDICTION_FAMILIES = frozenset(
+    {
+        "factor_combo",
+        "high_winrate_combo",
+        "factor",
+    }
+)
+logger = logging.getLogger(__name__)
+
+
+def normalize_sim_feedback_prediction_family(family: str) -> str:
+    selected = family.strip().lower()
+    if selected in SIM_FEEDBACK_PREDICTION_FAMILIES:
+        return selected
+    return normalize_model_family(selected)
 
 
 def sim_feedback_feature_names(model_family: str | None = None) -> list[str]:
@@ -30,7 +53,7 @@ def sim_feedback_feature_names(model_family: str | None = None) -> list[str]:
         f"{SIM_FEEDBACK_PREFIX}confidence_mean",
     ]
     if model_family:
-        family = normalize_model_family(model_family)
+        family = normalize_sim_feedback_prediction_family(model_family)
         columns.extend(
             [
                 f"{SIM_FEEDBACK_PREFIX}family_{family}_settled_count",
@@ -202,7 +225,7 @@ class _SimFeedbackState:
             f"{SIM_FEEDBACK_PREFIX}confidence_mean": _avg(self.confidence_sum, self.settled_count, default=NEUTRAL_WIN_RATE),
         }
         if self.model_family:
-            family = normalize_model_family(self.model_family)
+            family = normalize_sim_feedback_prediction_family(self.model_family)
             stats = self.family_stats.get(family, _FamilyStats())
             payload.update(
                 {
@@ -219,9 +242,9 @@ def _prediction_family(prediction: dict[str, Any]) -> str | None:
     raw = prediction.get("model_family")
     if raw:
         try:
-            return normalize_model_family(str(raw))
-        except ValueError:
-            pass
+            return normalize_sim_feedback_prediction_family(str(raw))
+        except ValueError as exc:
+            logger.warning("unknown model_family in settled prediction feedback: %r (%s)", raw, exc)
     signal_key = str(prediction.get("signal_key") or prediction.get("strategy_key") or "")
     if not signal_key.startswith("factor_") or "_shadow_" not in signal_key:
         return None
@@ -247,49 +270,5 @@ def _prediction_confidence(prediction: dict[str, Any]) -> float:
     for key in ("confidence", "trade_quality_score"):
         value = _finite_float(prediction.get(key))
         if value is not None:
-            return float(np.clip(value, 0.0, 1.0))
+            return min(max(value, 0.0), 1.0)
     return NEUTRAL_WIN_RATE
-
-
-def _win_rate(wins: int, count: int) -> float:
-    if count <= 0:
-        return NEUTRAL_WIN_RATE
-    return float(wins / count)
-
-
-def _avg(total: float, count: int, *, default: float = 0.0) -> float:
-    if count <= 0:
-        return default
-    return float(total / count)
-
-
-def _profit_factor(win_sum: float, loss_sum: float, count: int) -> float:
-    if count <= 0:
-        return NEUTRAL_PROFIT_FACTOR
-    if loss_sum <= 0.0:
-        return float(max(win_sum, NEUTRAL_PROFIT_FACTOR))
-    return float(max(win_sum / loss_sum, 0.0))
-
-
-def _recent_win_rate(outcomes: deque[int]) -> float:
-    if not outcomes:
-        return NEUTRAL_WIN_RATE
-    return float(sum(outcomes) / len(outcomes))
-
-
-def _neutral_feature_value(column: str) -> float:
-    if column.endswith("_win_rate") or column.endswith("_confidence_mean"):
-        return NEUTRAL_WIN_RATE
-    if column.endswith("_profit_factor"):
-        return NEUTRAL_PROFIT_FACTOR
-    return 0.0
-
-
-def _finite_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if np.isfinite(number) else None

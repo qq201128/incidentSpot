@@ -64,6 +64,26 @@ def test_offline_screening_reports_no_usable_cache_reason(monkeypatch) -> None:
     assert report["rejectedReasons"][0]["reason"] == "no_usable_offline_candidate_cache"
 
 
+def test_offline_screening_rejects_rows_with_non_finite_live_score(monkeypatch) -> None:
+    rows = [_ranking_row(1), _ranking_row(2)]
+    monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "materialize_mined_factor_frame", lambda *_args, **_kwargs: SimpleNamespace(frame=object()))
+
+    def _signal(_frame, row, **_kwargs) -> dict:
+        if row["factorName"] == "combo_1":
+            raise ValueError("combination signal has no finite score at 10m entry: combo_1")
+        return {"qualityPassed": True}
+
+    monkeypatch.setattr(service, "build_live_signal_from_ranking", _signal)
+
+    report = service.offline_candidate_screening_report("BTCUSDT", "10m")
+
+    assert [row["factorName"] for row in report["focusedCandidates"]] == ["combo_2"]
+    assert report["rejectedReasons"][0]["factorName"] == "combo_1"
+    assert "no finite score" in report["rejectedReasons"][0]["reason"]
+
+
 def _ranking_row(index: int) -> dict:
     return {
         "factorName": f"combo_{index}",

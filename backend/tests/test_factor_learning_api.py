@@ -3,9 +3,12 @@ from __future__ import annotations
 from fastapi import BackgroundTasks
 
 from app.api import factor_learning
+from app.api.factor_learning import FactorLearningRefreshJob
+from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 
 
 def test_factor_learning_refresh_queues_agent(monkeypatch) -> None:
+    reset_background_loop_statuses()
     calls = []
     _patch_background_hooks(monkeypatch, calls)
 
@@ -21,6 +24,7 @@ def test_factor_learning_refresh_queues_agent(monkeypatch) -> None:
     assert response["refreshQueued"] is True
     assert response["llmAgent"]["status"] == "pending"
     assert calls == [("queued", "BTCUSDT", "10m", True), ("agent_pending", "BTCUSDT", "10m", None)]
+    assert isinstance(tasks.tasks[0].args[0], FactorLearningRefreshJob)
 
     tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
 
@@ -33,9 +37,18 @@ def test_factor_learning_refresh_queues_agent(monkeypatch) -> None:
         ("agent_running", "BTCUSDT", "10m", None),
         ("agent", "BTCUSDT", "10m", None),
     ]
+    status = background_loop_statuses()["factor_learning_refresh"]
+    assert status["status"] == "passed"
+    assert status["lastSuccessDetails"] == {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "runAgent": True,
+        "stage": "completed",
+    }
 
 
 def test_factor_learning_refresh_local_queues_background(monkeypatch) -> None:
+    reset_background_loop_statuses()
     calls = []
     _patch_background_hooks(monkeypatch, calls)
 
@@ -52,6 +65,7 @@ def test_factor_learning_refresh_local_queues_background(monkeypatch) -> None:
     assert response["refreshTask"]["status"] == "queued"
     assert len(tasks.tasks) == 1
     assert calls == [("queued", "BTCUSDT", "10m", False)]
+    assert isinstance(tasks.tasks[0].args[0], FactorLearningRefreshJob)
 
     tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
 
@@ -64,6 +78,7 @@ def test_factor_learning_refresh_local_queues_background(monkeypatch) -> None:
 
 
 def test_background_agent_refresh_marks_failure(monkeypatch) -> None:
+    reset_background_loop_statuses()
     calls = []
 
     def fake_refresh(symbol: str, duration: str, *, run_llm_agent: bool) -> dict:
@@ -87,7 +102,13 @@ def test_background_agent_refresh_marks_failure(monkeypatch) -> None:
         lambda symbol, duration, error: calls.append(("agent_failed", symbol, duration, error)),
     )
 
-    factor_learning._background_factor_learning_refresh("BTCUSDT", "10m", True)
+    job = FactorLearningRefreshJob("BTCUSDT", "10m", True)
+    try:
+        factor_learning._background_factor_learning_refresh(job)
+    except RuntimeError as exc:
+        assert str(exc) == "network stalled"
+    else:
+        raise AssertionError("factor learning background failure was swallowed")
 
     assert calls == [
         ("running", "BTCUSDT", "10m", True),
@@ -95,6 +116,16 @@ def test_background_agent_refresh_marks_failure(monkeypatch) -> None:
         ("refresh_failed", "BTCUSDT", "10m", "network stalled"),
         ("agent_failed", "BTCUSDT", "10m", "network stalled"),
     ]
+    status = background_loop_statuses()["factor_learning_refresh"]
+    assert status["status"] == "failed"
+    assert status["lastError"] == "network stalled"
+    assert status["lastExceptionType"] == "RuntimeError"
+    assert status["lastFailureDetails"] == {
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "runAgent": True,
+        "stage": "refresh_memory",
+    }
 
 
 def _patch_background_hooks(monkeypatch, calls: list) -> None:

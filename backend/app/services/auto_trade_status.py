@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.auto_predict_loop_status import auto_predict_loop_status
 from app.services.auto_trade_service import fresh_prediction_ms_for_strategy, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
@@ -17,7 +18,7 @@ MS_PER_SECOND = 1000
 def get_auto_trade_status() -> dict[str, Any]:
     strategies = [_strategy_status(settings) for settings in list_auto_trade_settings()]
     default_status = _default_status(strategies)
-    return {**default_status, "strategies": strategies}
+    return {**default_status, "strategies": strategies, "autoPredictLoop": auto_predict_loop_status()}
 
 
 def _strategy_status(settings: AutoTradeSettings) -> dict[str, Any]:
