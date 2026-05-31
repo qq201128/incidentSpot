@@ -92,9 +92,12 @@ def sentiment_derivative_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def onchain_derivative_frame(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
-    out["exchange_netflow_z_20"] = _zscore(out["exchange_netflow"], 20)
-    out["active_addresses_chg_1"] = out["active_addresses"].pct_change(1)
-    out["transaction_count_chg_1"] = out["transaction_count"].pct_change(1)
+    if "exchange_netflow_z_20" not in out.columns:
+        out["exchange_netflow_z_20"] = _zscore(out["exchange_netflow"], 20)
+    if "active_addresses_chg_1" not in out.columns and "active_addresses" in out.columns:
+        out["active_addresses_chg_1"] = out["active_addresses"].pct_change(1, fill_method=None)
+    if "transaction_count_chg_1" not in out.columns and "transaction_count" in out.columns:
+        out["transaction_count_chg_1"] = out["transaction_count"].pct_change(1, fill_method=None)
     return out
 
 
