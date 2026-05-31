@@ -21,11 +21,19 @@ from app.services.model_family_config import (
 from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
+from app.services.model_family_training_payloads import backend_options
+from app.services.model_family_prediction_service import _prediction_payload, _signal_payload
 from app.services import model_family_candidate_search_service as search_service
 from app.services import model_family_candidate_executor as candidate_executor
 from app.services import model_family_candidate_publisher as candidate_publisher
 from app.services import model_family_walk_forward
 from app.services.model_family_joblib_backend import JoblibModelOptions, XGBOOST_TREE_METHOD, _xgboost
+from app.services.model_family_joblib_extra_estimators import (
+    catboost_estimator,
+    extra_trees_estimator,
+    lightgbm_estimator,
+    logistic_elasticnet_estimator,
+)
 from app.services.lstm_training_gate import validation_gate
 
 
@@ -138,7 +146,22 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
 
 
 def test_each_model_family_has_successive_halving_training_rules() -> None:
-    families = ("lstm", "gru", "cnn", "transformer", "random_forest", "xgboost", "svm", "rl_strategy", "bayesian", "knn")
+    families = (
+        "lstm",
+        "gru",
+        "cnn",
+        "transformer",
+        "random_forest",
+        "extra_trees",
+        "xgboost",
+        "lightgbm",
+        "catboost",
+        "logistic_elasticnet",
+        "svm",
+        "rl_strategy",
+        "bayesian",
+        "knn",
+    )
 
     rules = [model_family_training_rules(family) for family in families]
 
@@ -146,9 +169,74 @@ def test_each_model_family_has_successive_halving_training_rules() -> None:
     assert all([stage["stage"] for stage in rule["successiveHalving"]] == ["coarse", "full", "walk_forward"] for rule in rules)
     assert all(rule["targetWinRateExclusive"] == 0.62 for rule in rules)
     assert all(rule["searchSpaceTotal"] > 0 for rule in rules)
-    assert model_family_training_rules("lstm")["searchSpaceTotal"] == 225
+    lstm_rules = model_family_training_rules("lstm")
+    transformer_rules = model_family_training_rules("transformer")
+    assert lstm_rules["searchSpaceTotal"] == 900
+    assert transformer_rules["searchSpaceTotal"] == 1800
+    assert "dropout" in lstm_rules["candidateSearchAxes"]
+    assert "usePositionalEncoding" in transformer_rules["candidateSearchAxes"]
     assert "nEstimators" in model_family_training_rules("random_forest")["candidateSearchAxes"]
+    assert "nEstimators" in model_family_training_rules("extra_trees")["candidateSearchAxes"]
+    assert "numLeaves" in model_family_training_rules("lightgbm")["candidateSearchAxes"]
+    assert "l2LeafReg" in model_family_training_rules("catboost")["candidateSearchAxes"]
+    assert "l1Ratio" in model_family_training_rules("logistic_elasticnet")["candidateSearchAxes"]
     assert "stateBins" in model_family_training_rules("rl_strategy")["candidateSearchAxes"]
+
+
+def test_torch_backend_options_include_regularization_params() -> None:
+    config = ModelFamilyTrainingConfig(
+        family="transformer",
+        symbol="BTCUSDT",
+        duration="10m",
+        params={
+            "dropout": 0.15,
+            "weight_decay": 1e-4,
+            "early_stopping_patience": 3,
+            "class_weight_mode": "balanced",
+            "return_weight_mode": "abs_return",
+            "transformer_nhead": 8,
+            "use_positional_encoding": True,
+        },
+    )
+
+    options = backend_options(config, input_size=5)
+
+    assert options.dropout == 0.15
+    assert options.weight_decay == 1e-4
+    assert options.early_stopping_patience == 3
+    assert options.class_weight_mode == "balanced"
+    assert options.return_weight_mode == "abs_return"
+    assert options.transformer_nhead == 8
+    assert options.use_positional_encoding is True
+
+
+def test_model_family_prediction_payload_uses_live_feature_status_metadata() -> None:
+    signal = _signal_payload(
+        "xgboost",
+        "BTCUSDT",
+        "10m",
+        0.72,
+        {
+            "entryOpenTime": 123,
+            "entryPrice": 100.5,
+            "dataFreshnessStatus": "latest_available",
+            "missingFeatureStatus": "missing_factor_combo_features",
+        },
+        {"featureWindow": 8},
+        {
+            "modelVersion": "xgb_v1",
+            "trainedAt": "2026-05-31T00:00:00+00:00",
+            "selectedConfidenceThreshold": 0.7,
+            "validationGate": {"status": "passed", "validation": {"winRate": 0.71}},
+            "returnStats": {"upMean": 0.01, "downMean": -0.01},
+        },
+        {"status": "trade_active"},
+    )
+
+    payload = _prediction_payload(signal)
+
+    assert payload["data_freshness_status"] == "latest_available"
+    assert payload["missing_feature_status"] == "missing_factor_combo_features"
 
 
 def test_candidate_search_publishes_best_trade_candidate(monkeypatch) -> None:
@@ -340,10 +428,50 @@ def test_xgboost_process_worker_override_rejects_invalid_value(monkeypatch) -> N
         candidate_executor._process_worker_count(10)
 
 
+def test_torch_worker_override_limits_thread_workers(monkeypatch) -> None:
+    config = ModelFamilyTrainingConfig(family="lstm", symbol="BTCUSDT", duration="10m")
+    monkeypatch.setenv(candidate_executor.TORCH_JOBS_ENV, "2")
+
+    assert candidate_executor._thread_worker_count([config], 10) == 2
+
+
+def test_torch_worker_override_rejects_invalid_value(monkeypatch) -> None:
+    config = ModelFamilyTrainingConfig(family="lstm", symbol="BTCUSDT", duration="10m")
+    monkeypatch.setenv(candidate_executor.TORCH_JOBS_ENV, "0")
+
+    with pytest.raises(ValueError):
+        candidate_executor._thread_worker_count([config], 10)
+
+
 def test_xgboost_uses_hist_tree_method() -> None:
     model = _xgboost(JoblibModelOptions("xgboost", 20260513, {}))
 
     assert model.get_params()["tree_method"] == XGBOOST_TREE_METHOD
+
+
+def test_lightgbm_model_family_uses_lightgbm_classifier() -> None:
+    model = lightgbm_estimator({}, 20260513)
+
+    assert model.__class__.__name__ == "LGBMClassifier"
+
+
+def test_extra_trees_model_family_uses_extra_trees_classifier() -> None:
+    model = extra_trees_estimator({}, 20260513)
+
+    assert model.__class__.__name__ == "ExtraTreesClassifier"
+
+
+def test_logistic_elasticnet_model_family_uses_elasticnet_penalty() -> None:
+    model = logistic_elasticnet_estimator({}, 20260513)
+
+    assert model.get_params()["penalty"] == "elasticnet"
+    assert model.get_params()["solver"] == "saga"
+
+
+def test_catboost_model_family_uses_catboost_classifier() -> None:
+    model = catboost_estimator({}, 20260513)
+
+    assert model.__class__.__name__ == "CatBoostClassifier"
 
 
 def test_candidate_training_withholds_test_set_during_search(monkeypatch) -> None:
@@ -364,6 +492,37 @@ def test_candidate_training_withholds_test_set_during_search(monkeypatch) -> Non
     assert captured["evaluate_test"] is False
     assert report["test"]["status"] == "withheld"
     assert report["searchStage"] == "coarse"
+
+
+def test_candidate_training_failure_records_exception_details(monkeypatch) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m")
+    captured = {}
+
+    def fail_train(*_args, **_kwargs):
+        raise RuntimeError("candidate exploded")
+
+    monkeypatch.setattr(candidate_executor, "train_model_family", fail_train)
+    monkeypatch.setattr(
+        candidate_executor,
+        "record_model_candidate",
+        lambda _cfg, _profile, report: captured.update(report=report),
+    )
+
+    report = candidate_executor.train_candidate(
+        config,
+        "fast",
+        lambda _cfg: _fake_dataset(_cfg),
+        stage="coarse",
+        record_config=config,
+    )
+
+    assert report["status"] == "failed"
+    assert report["failure"] == {
+        "stage": "candidate_training",
+        "exceptionType": "RuntimeError",
+        "error": "candidate exploded",
+    }
+    assert captured["report"]["failure"]["exceptionType"] == "RuntimeError"
 
 
 def test_model_family_report_includes_training_input_observability(tmp_path) -> None:

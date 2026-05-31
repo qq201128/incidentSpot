@@ -2,7 +2,7 @@ cd /d D:\Desktop\incidentSpot
 set "PYTHONPATH=D:\Desktop\incidentSpot\backend"
 
 REM 1. 先入队：只创建 BTCUSDT/ETHUSDT 多周期多模型族搜索任务，不直接训练。
-D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\enqueue_model_search.py --symbols BTCUSDT,ETHUSDT --durations 10m 30m 60m 1d --families lstm gru cnn transformer random_forest xgboost svm bayesian knn --profile full
+D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\enqueue_model_search.py --symbols BTCUSDT,ETHUSDT --durations 10m 30m 60m 1d --families lstm gru cnn transformer random_forest extra_trees xgboost lightgbm catboost logistic_elasticnet svm bayesian knn rl_strategy --profile full
 
 REM 2. 再启动 worker：前台慢慢跑完整个队列；每次只 claim 并训练一个 job，完成后继续 claim 下一个 pending job，队列空了自动退出。
 REM    关闭窗口会中断当前 worker，后续可重新启动继续 pending job；训练异常会直接暴露并让命令退出。

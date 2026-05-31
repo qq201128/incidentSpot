@@ -10,11 +10,12 @@ from typing import Any
 from app.services.lstm_feature_builder import LstmDataset, build_lstm_training_dataset
 from app.services.model_family_candidate_process import train_candidate_in_process
 from app.services.model_family_candidates import model_search_key, record_model_candidate
-from app.services.model_family_config import ModelFamilyTrainingConfig
+from app.services.model_family_config import ModelFamilyTrainingConfig, TORCH_MODEL_FAMILIES
 from app.services.model_family_training_service import train_model_family
 
 PROCESS_EXECUTOR_FAMILIES = frozenset({"xgboost"})
 XGBOOST_PROCESS_WORKERS_ENV = "MODEL_FAMILY_XGBOOST_PROCESS_WORKERS"
+TORCH_JOBS_ENV = "MODEL_FAMILY_TORCH_JOBS"
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,13 @@ def train_candidate_reports(
     if _uses_process_executor(configs):
         yield from _train_candidate_reports_in_processes(pairs, profile, _process_worker_count(workers), stage)
         return
-    yield from _train_candidate_reports_in_threads(pairs, profile, workers, dataset_builder, stage)
+    yield from _train_candidate_reports_in_threads(
+        pairs,
+        profile,
+        _thread_worker_count(configs, workers),
+        dataset_builder,
+        stage,
+    )
 
 
 def train_candidate(
@@ -139,6 +146,18 @@ def _process_worker_count(max_workers: int) -> int:
     return min(max_workers, selected)
 
 
+def _thread_worker_count(configs: list[ModelFamilyTrainingConfig], max_workers: int) -> int:
+    if not configs or configs[0].family not in TORCH_MODEL_FAMILIES:
+        return max_workers
+    raw = os.environ.get(TORCH_JOBS_ENV)
+    if raw is None:
+        return max_workers
+    selected = int(raw)
+    if selected <= 0:
+        raise ValueError(f"{TORCH_JOBS_ENV} must be positive")
+    return min(max_workers, selected)
+
+
 def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Exception) -> dict[str, Any]:
     return {
         "status": "failed",
@@ -149,6 +168,11 @@ def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Excepti
         "modelVersion": None,
         "searchKey": model_search_key(config, profile),
         "validationFailureReason": str(exc),
+        "failure": {
+            "stage": "candidate_training",
+            "exceptionType": type(exc).__name__,
+            "error": str(exc),
+        },
     }
 
 

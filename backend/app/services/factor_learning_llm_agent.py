@@ -12,10 +12,11 @@ from app.services.agent_formula_dedup import filter_agent_review_duplicates, lim
 from app.services.factor_operator_library import AGENT_FORMULA_RULES, factor_operator_prompt_payload
 from app.services.factor_learning_common import utc_now
 from app.services.factor_learning_llm_memory import compact_memory
+from app.services.llm_provider_registry import DEFAULT_LLM_PROVIDER, llm_provider_availability
 from app.services.siliconflow_chat_client import SiliconFlowChatClient, siliconflow_config_from_env
 
 AGENT_NAME = "siliconflow_factor_agent_v1"
-AGENT_PROVIDER = "siliconflow"
+AGENT_PROVIDER = DEFAULT_LLM_PROVIDER
 AGENT_TEMPERATURE = 0.2
 # Chinese-heavy JSON can exceed a few thousand characters; 2400 tokens often truncates mid-object.
 AGENT_MAX_TOKENS_DEFAULT = 8192
@@ -64,6 +65,9 @@ def _agent_max_tokens() -> int:
 
 class ChatCompletionClient(Protocol):
     @property
+    def provider(self) -> str: ...
+
+    @property
     def model(self) -> str: ...
 
     def create_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -74,17 +78,19 @@ def attach_llm_agent_review(
 ) -> dict[str, Any]:
     active_client = client or _factor_agent_chat_client()
     completion = active_client.create_chat_completion(_agent_payload(memory))
-    review = filter_agent_review_duplicates(
-        _review_from_completion(completion),
-        str(memory["symbol"]),
-        str(memory["duration"]),
-    )
+    try:
+        parsed_review = _review_from_completion(completion)
+    except RuntimeError as exc:
+        raise RuntimeError(_agent_failure_message(active_client, str(exc))) from exc
+    review = filter_agent_review_duplicates(parsed_review, str(memory["symbol"]), str(memory["duration"]))
     updated = deepcopy(memory)
     updated["llmAgent"] = {
         "agent": AGENT_NAME,
-        "provider": AGENT_PROVIDER,
+        "provider": _client_provider(active_client),
         "status": "completed",
         "model": active_client.model,
+        "capabilities": _client_capabilities(active_client),
+        "availability": _client_availability(active_client),
         "reviewedAt": utc_now(),
         "completionId": completion.get("id"),
         "usage": completion.get("usage") or {},
@@ -190,6 +196,22 @@ def stale_llm_agent_error(agent: dict[str, Any]) -> str:
         " 请重新点击联网挖掘；若反复失败，请检查 SILICONFLOW_API_KEY / 网络，"
         " 或在 backend/.env 设置 FACTOR_LEARNING_SILICONFLOW_TIMEOUT_SECONDS=420。"
     )
+
+def _client_provider(client: ChatCompletionClient) -> str:
+    return str(getattr(client, "provider", AGENT_PROVIDER) or AGENT_PROVIDER)
+
+def _client_capabilities(client: ChatCompletionClient) -> list[str]:
+    value = getattr(client, "capabilities", [])
+    return list(value) if isinstance(value, (list, tuple)) else []
+
+def _client_availability(client: ChatCompletionClient) -> dict[str, Any]:
+    probe = getattr(client, "availability", None)
+    if callable(probe):
+        return probe()
+    return llm_provider_availability(_client_provider(client), client.model)
+
+def _agent_failure_message(client: ChatCompletionClient, error: str) -> str:
+    return f"LLM agent review failed provider={_client_provider(client)} model={client.model}: {error}"
 
 def _review_from_completion(completion: dict[str, Any]) -> dict[str, Any]:
     content, finish_reason = _assistant_message(completion)

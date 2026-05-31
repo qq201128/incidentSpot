@@ -5,13 +5,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.mining import router as mining_router
 from app.main import app
-from app.services import factor_learning_service
+from app.services import factor_learning_memory_store
 
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(factor_learning_service, "FACTOR_LEARNING_DIR", tmp_path)
+    monkeypatch.setattr(factor_learning_memory_store, "FACTOR_LEARNING_DIR", tmp_path)
+    if "/api/mining/overview" not in {getattr(route, "path", "") for route in app.routes}:
+        app.include_router(mining_router)
     return TestClient(app)
 
 
@@ -21,9 +24,8 @@ def test_mining_overview_returns_404_without_memory(client: TestClient) -> None:
 
 
 def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "app.services.mining_overview_service.get_factor_learning_memory",
-        lambda symbol, duration: {
+    def fake_memory(symbol: str, duration: str) -> dict:
+        return {
             "symbol": symbol,
             "duration": duration,
             "updatedAt": "2026-05-21T06:32:08Z",
@@ -37,11 +39,12 @@ def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPat
             "agentMinedFactorLibrary": {"total": 0},
             "minedFactorLibrary": {"total": 0},
             "monitoring": {"issues": []},
-        },
-    )
+        }
+
+    monkeypatch.setattr("app.services.mining_overview_service.get_factor_learning_memory", fake_memory)
     monkeypatch.setattr(
         "app.services.mining_overview_service.model_family_status",
-        lambda family, symbol, duration: {
+        lambda family, symbol, duration, **_kwargs: {
             "modelFamily": family,
             "strategyKey": f"{family}_shadow",
             "status": "untrained",
@@ -51,11 +54,11 @@ def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPat
             "trainingRules": {"searchSpaceTotal": 10},
         },
     )
-    response = client.get("/api/mining/overview", params={"symbol": "BTCUSDT", "duration": "10m"})
+    response = client.get("/api/mining/overview", params={"symbol": "BTCUSDT", "duration": "10m", "fresh": "true"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["overallAccuracy"] == 0.64
     assert payload["trainingRules"]["targetWinRateExclusive"] == 0.62
     assert "> 62%" in payload["trainingRules"]["text"]
-    assert len(payload["models"]) == 10
+    assert len(payload["models"]) == 14
     assert payload["agentCandidates"][0]["factorName"]

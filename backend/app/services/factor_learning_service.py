@@ -45,6 +45,7 @@ from app.services.factor_learning_memory_store import (
     load_factor_learning_memory,
     save_factor_learning_memory,
 )
+from app.services.llm_provider_registry import llm_model_metadata, llm_provider_availability
 from app.services.factor_mined_candidates import materialize_mined_factor_frame
 from app.services.factor_mined_library import enrich_mined_factor_library_summary, mined_factor_library_summary
 from app.services.forward_validation_service import settle_due_predictions
@@ -227,6 +228,7 @@ def _agent_status_payload(
         "updatedAt": now,
         "model": _resolved_agent_model(previous),
     }
+    payload.update(_agent_registry_payload(str(payload["model"])))
     if status in {"pending", "running"}:
         payload["agentStartedAt"] = now
     elif isinstance(previous, dict) and previous.get("agentStartedAt"):
@@ -244,6 +246,14 @@ def _resolved_agent_model(previous: dict[str, Any] | None) -> str:
         return resolved_siliconflow_model()
     except RuntimeError:
         return ""
+
+def _agent_registry_payload(model: str) -> dict[str, Any]:
+    if not model:
+        return {"capabilities": [], "availability": llm_provider_availability(AGENT_PROVIDER)}
+    return {
+        "capabilities": llm_model_metadata(AGENT_PROVIDER, model)["capabilities"],
+        "availability": llm_provider_availability(AGENT_PROVIDER, model),
+    }
 
 def _queued_memory(symbol: str, duration: str) -> dict[str, Any]:
     return {

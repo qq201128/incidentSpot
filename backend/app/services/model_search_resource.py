@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.model_family_candidate_executor import XGBOOST_PROCESS_WORKERS_ENV
+from app.services.model_family_candidate_executor import TORCH_JOBS_ENV, XGBOOST_PROCESS_WORKERS_ENV
 
 DEFAULT_INTERNAL_THREADS = 4
 DEFAULT_PARALLEL_WORKERS = 1
@@ -33,6 +33,7 @@ def apply_model_search_resource_config(config: ModelSearchResourceConfig) -> dic
     for key in THREAD_ENV_VARS:
         os.environ[key] = str(selected.internal_threads)
     os.environ[XGBOOST_PROCESS_WORKERS_ENV] = str(selected.xgboost_process_workers)
+    os.environ[TORCH_JOBS_ENV] = str(selected.torch_jobs)
     return resource_payload(selected)
 
 
@@ -64,4 +65,5 @@ def resource_payload(config: ModelSearchResourceConfig) -> dict[str, Any]:
         "torchJobs": config.torch_jobs,
         "threadEnv": {key: str(config.internal_threads) for key in THREAD_ENV_VARS},
         XGBOOST_PROCESS_WORKERS_ENV: str(config.xgboost_process_workers),
+        TORCH_JOBS_ENV: str(config.torch_jobs),
     }

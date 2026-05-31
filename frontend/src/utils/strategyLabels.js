@@ -1,4 +1,5 @@
 import { factorLabel } from "./factorLearningLabels";
+import { MODEL_FAMILIES, modelFamilyLabel } from "./modelFamilies";
 
 /** 与后端 strategy_registry 执行项 key 对齐的展示名 */
 export const STRATEGY_LABELS = {
@@ -35,18 +36,11 @@ const LEGACY_STRATEGY_LABELS = {
   five_bar_10m_reverse_martingale_v1: "五根K线·10分钟·反马丁",
 };
 
-const MODEL_FAMILY_LABELS = {
-  lstm: "LSTM",
-  gru: "GRU",
-  cnn: "CNN",
-  transformer: "Transformer",
+const MODEL_STRATEGY_LABEL_OVERRIDES = {
   random_forest: "随机森林",
-  xgboost: "XGBoost",
-  svm: "SVM",
-  bayesian: "贝叶斯",
-  knn: "KNN",
   rl_strategy: "QTable方向分类器",
 };
+const MODEL_VERSION_PATTERN = new RegExp(`^(${MODEL_FAMILIES.join("|")})_([A-Z0-9]+)_(\\d+m|60m|1d)(?:_|$)`, "i");
 
 const DURATION_LABELS = {
   "10m": "10分钟",
@@ -145,27 +139,29 @@ export function isModelShadowStrategyKey(key) {
 /** 训练工件版本号，如 gru_BTCUSDT_10m_w24_m8_e16_s... */
 export function modelVersionLabel(version) {
   const raw = String(version || "").trim();
-  const match = raw.match(
-    /^(lstm|gru|cnn|transformer|random_forest|xgboost|svm|bayesian|knn|rl_strategy)_([A-Z0-9]+)_(\d+m|60m|1d)(?:_|$)/i,
-  );
+  const match = raw.match(MODEL_VERSION_PATTERN);
   if (!match) return "";
   const family = match[1].toLowerCase();
   const symbol = match[2].toUpperCase();
   const duration = match[3].toLowerCase();
-  const familyName = MODEL_FAMILY_LABELS[family] || family.toUpperCase();
+  const familyName = strategyFamilyLabel(family);
   return `${familyName} · ${symbol} · ${durationLabel(duration)}`;
 }
 
 function modelShadowLabel(key) {
   const lowered = key.toLowerCase();
-  for (const [family, label] of Object.entries(MODEL_FAMILY_LABELS)) {
+  for (const family of MODEL_FAMILIES) {
     const prefix = `factor_${family}_shadow_`;
     if (lowered.startsWith(prefix)) {
       const duration = key.slice(prefix.length);
-    return `${label}影子·${durationLabel(duration)}`;
+      return `${strategyFamilyLabel(family)}影子·${durationLabel(duration)}`;
     }
   }
   return "";
+}
+
+function strategyFamilyLabel(family) {
+  return MODEL_STRATEGY_LABEL_OVERRIDES[family] || modelFamilyLabel(family, family.toUpperCase());
 }
 
 function batchComboLabel(key) {

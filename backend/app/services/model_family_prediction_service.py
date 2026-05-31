@@ -156,6 +156,8 @@ def _signal_payload(family: str, symbol: str, duration: str, probability_up: flo
         "modelStatus": status["status"],
         "openTime": int(meta["entryOpenTime"]),
         "entryPrice": float(meta["entryPrice"]),
+        "dataFreshnessStatus": meta.get("dataFreshnessStatus") or "unknown",
+        "missingFeatureStatus": meta.get("missingFeatureStatus") or "unknown",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -189,8 +191,8 @@ def _prediction_payload(signal: dict[str, Any]) -> dict[str, Any]:
         "feature_window": signal["featureWindow"],
         "model_duration": signal["duration"],
         "model_trained_at": signal["trainedAt"],
-        "data_freshness_status": "fresh",
-        "missing_feature_status": "complete",
+        "data_freshness_status": signal["dataFreshnessStatus"],
+        "missing_feature_status": signal["missingFeatureStatus"],
     }
 
 

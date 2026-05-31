@@ -198,6 +198,20 @@ def _dependency_status(family: str) -> dict[str, Any]:
             payload = {"available": False, "error": str(exc)}
         else:
             payload = {"available": True, "version": getattr(xgboost, "__version__", None)}
+    elif family == "lightgbm":
+        try:
+            import lightgbm
+        except ImportError as exc:
+            payload = {"available": False, "error": str(exc)}
+        else:
+            payload = {"available": True, "version": getattr(lightgbm, "__version__", None)}
+    elif family == "catboost":
+        try:
+            import catboost
+        except ImportError as exc:
+            payload = {"available": False, "error": str(exc)}
+        else:
+            payload = {"available": True, "version": getattr(catboost, "__version__", None)}
     else:
         payload = {"available": family in JOBLIB_MODEL_FAMILIES}
     _DEPENDENCY_STATUS_CACHE[family] = payload

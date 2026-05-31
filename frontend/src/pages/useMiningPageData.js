@@ -4,20 +4,9 @@ import {
   requestFactorLearningRefresh,
   requestModelCandidateSearch,
 } from "../api/factorLearning";
+import { MODEL_FAMILIES } from "../utils/modelFamilies";
 
 const POLL_MS = 3000;
-const MODEL_FAMILIES = [
-  "lstm",
-  "gru",
-  "cnn",
-  "transformer",
-  "random_forest",
-  "xgboost",
-  "svm",
-  "rl_strategy",
-  "bayesian",
-  "knn",
-];
 
 export function useMiningPageData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);

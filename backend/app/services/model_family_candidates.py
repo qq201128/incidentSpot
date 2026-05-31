@@ -190,6 +190,7 @@ def _candidate_record(config, profile: str, report: dict) -> dict:
         "eliminationReason": report.get("eliminationReason"),
         "modelVersion": report.get("modelVersion"),
         "validationFailureReason": report.get("validationFailureReason"),
+        "failure": report.get("failure"),
         "validation": _metric_summary(report.get("validation") or {}),
         "test": _metric_summary(report.get("test") or {}),
     }

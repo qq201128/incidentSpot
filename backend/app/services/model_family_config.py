@@ -21,7 +21,11 @@ MODEL_FAMILIES = (
     "cnn",
     "transformer",
     "random_forest",
+    "extra_trees",
     "xgboost",
+    "lightgbm",
+    "catboost",
+    "logistic_elasticnet",
     "svm",
     "bayesian",
     "knn",
@@ -29,6 +33,22 @@ MODEL_FAMILIES = (
 )
 TORCH_MODEL_FAMILIES = frozenset({"lstm", "gru", "cnn", "transformer"})
 JOBLIB_MODEL_FAMILIES = frozenset(set(MODEL_FAMILIES) - set(TORCH_MODEL_FAMILIES))
+MODEL_FAMILY_LABELS = {
+    "lstm": "LSTM",
+    "gru": "GRU",
+    "cnn": "CNN",
+    "transformer": "Transformer",
+    "random_forest": "RandomForest",
+    "extra_trees": "ExtraTrees",
+    "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "catboost": "CatBoost",
+    "logistic_elasticnet": "LogisticElasticNet",
+    "svm": "SVM",
+    "rl_strategy": "QTableDirection",
+    "bayesian": "GaussianNB",
+    "knn": "KNN",
+}
 DEFAULT_HIDDEN_SIZE = 64
 DEFAULT_NUM_LAYERS = 1
 
@@ -58,6 +78,11 @@ def normalize_model_family(family: str) -> str:
     if selected not in MODEL_FAMILIES:
         raise ValueError(f"unsupported model family: {family}")
     return selected
+
+
+def model_family_label(family: str) -> str:
+    selected = normalize_model_family(family)
+    return MODEL_FAMILY_LABELS[selected]
 
 
 def model_family_rule_name(family: str) -> str:

@@ -11,6 +11,7 @@ pandas
 numpy
 scikit-learn==1.8.0
 lightgbm
+catboost
 joblib
 torch
 xgboost

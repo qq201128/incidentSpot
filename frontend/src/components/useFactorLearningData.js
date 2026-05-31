@@ -6,20 +6,10 @@ import {
   requestModelCandidateSearch,
   requestFactorLearningRefresh,
 } from "../api/factorLearning";
+import { MODEL_FAMILIES, modelFamilyLabel as sharedModelFamilyLabel } from "../utils/modelFamilies";
 
 const TASK_POLL_MS = 3000;
-export const MODEL_FAMILIES = [
-  "lstm",
-  "gru",
-  "cnn",
-  "transformer",
-  "random_forest",
-  "xgboost",
-  "svm",
-  "bayesian",
-  "knn",
-  "rl_strategy",
-];
+export { MODEL_FAMILIES };
 
 export function useFactorLearningData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -270,19 +260,7 @@ function lstmStatusText(data) {
 }
 
 function modelFamilyLabel(family) {
-  const labels = {
-    lstm: "LSTM",
-    gru: "GRU",
-    cnn: "CNN",
-    transformer: "Transformer",
-    random_forest: "RandomForest",
-    xgboost: "XGBoost",
-    svm: "SVM",
-    bayesian: "Bayesian",
-    knn: "KNN",
-    rl_strategy: "QTable方向",
-  };
-  return labels[family] || family;
+  return sharedModelFamilyLabel(family, family);
 }
 
 function lstmProgressText(data) {

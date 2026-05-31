@@ -146,6 +146,7 @@ def _train_with_dataset(
         options=backend_options(cfg, len(dataset.feature_columns)),
         model_path=staging_paths.model,
         persist_model=persist_artifacts,
+        **_torch_return_weight_kwargs(trainer, scaled),
     )
     report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version, evaluate_test)
     report = initial_baseline_report(report, publish_initial_baseline)
@@ -234,6 +235,12 @@ def _predict_backend(backend, model_path: Path, x: np.ndarray) -> np.ndarray:
     if hasattr(backend, "predict_trained"):
         return backend.predict_trained(x)
     return backend.predict(model_path, x)
+
+
+def _torch_return_weight_kwargs(trainer: Any, split) -> dict[str, Any]:
+    if not isinstance(trainer, TorchSequenceBackend):
+        return {}
+    return {"train_returns": split.train_returns, "val_returns": split.val_returns}
 
 
 def _factor_combo_report(dataset: LstmDataset) -> dict[str, Any]:

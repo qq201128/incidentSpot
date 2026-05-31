@@ -26,7 +26,7 @@ from app.services.model_family_candidate_search_service import (  # noqa: E402
 from app.services.model_family_candidate_executor import XGBOOST_PROCESS_WORKERS_ENV  # noqa: E402
 from app.services.model_family_candidates import read_model_candidate_progress  # noqa: E402
 from app.services.model_family_config import MODEL_FAMILIES  # noqa: E402
-from app.services.model_family_search_rules import model_family_training_rules  # noqa: E402
+from app.services.model_family_search_rules import TARGET_WIN_RATE_EXCLUSIVE, model_family_training_rules  # noqa: E402
 from app.services.model_family_status_service import model_family_status  # noqa: E402
 from app.services.runtime_symbols import configured_runtime_symbols, parse_symbol_csv  # noqa: E402
 
@@ -261,7 +261,7 @@ def _summary_payload(args, symbol: str, run_id: str, results: list[dict[str, Any
         "targetWorkers": args.target_workers,
         "resetHistory": args.reset_history,
         "xgboostProcessWorkers": args.xgboost_process_workers,
-        "targetWinRate": ">70%",
+        "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
         "generatedAt": _utc_now(),
         "results": results,
     }

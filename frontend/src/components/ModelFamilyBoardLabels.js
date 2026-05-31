@@ -1,3 +1,5 @@
+export { modelFamilyLabel } from "../utils/modelFamilies";
+
 export function statusLabel(status) {
   const labels = {
     shadow_active: "影子激活",
@@ -77,22 +79,6 @@ export function compareLabel(strategyKey) {
   if (strategyKey?.includes("top2")) return "Top2";
   if (strategyKey?.includes("top3")) return "Top3";
   return strategyKey?.startsWith("factor_lstm_shadow") ? "LSTM" : "Top1";
-}
-
-export function modelFamilyLabel(family) {
-  const labels = {
-    lstm: "LSTM",
-    gru: "GRU",
-    cnn: "CNN",
-    transformer: "Transformer",
-    random_forest: "RandomForest",
-    xgboost: "XGBoost",
-    svm: "SVM",
-    bayesian: "Bayesian",
-    knn: "KNN",
-    rl_strategy: "QTable方向",
-  };
-  return labels[family] || "模型族";
 }
 
 export function formatPct(value, digits) {

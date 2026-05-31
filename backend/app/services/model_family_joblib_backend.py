@@ -8,6 +8,13 @@ import joblib
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from app.services.model_family_joblib_extra_estimators import (
+    catboost_estimator,
+    extra_trees_estimator,
+    lightgbm_estimator,
+    logistic_elasticnet_estimator,
+)
+
 XGBOOST_EARLY_STOPPING_ROUNDS = 20
 XGBOOST_TREE_METHOD = "hist"
 SVM_ALPHA_MIN = 1e-6
@@ -58,8 +65,16 @@ class JoblibModelBackend:
 def _estimator(options: JoblibModelOptions):
     if options.family == "random_forest":
         return _random_forest(options)
+    if options.family == "extra_trees":
+        return extra_trees_estimator(options.params, options.seed)
     if options.family == "xgboost":
         return _xgboost(options)
+    if options.family == "lightgbm":
+        return lightgbm_estimator(options.params, options.seed)
+    if options.family == "catboost":
+        return catboost_estimator(options.params, options.seed)
+    if options.family == "logistic_elasticnet":
+        return logistic_elasticnet_estimator(options.params, options.seed)
     if options.family == "svm":
         return _svm(options)
     if options.family == "bayesian":
@@ -117,7 +132,6 @@ def _xgboost(options: JoblibModelOptions):
         n_jobs=1,
         early_stopping_rounds=XGBOOST_EARLY_STOPPING_ROUNDS,
     )
-
 
 def _svm(options: JoblibModelOptions):
     from sklearn.pipeline import make_pipeline

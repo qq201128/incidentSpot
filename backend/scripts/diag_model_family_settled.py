@@ -9,18 +9,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 DB = BACKEND / "data.db"
-MODEL_FAMILIES = (
-    "lstm",
-    "gru",
-    "cnn",
-    "transformer",
-    "random_forest",
-    "xgboost",
-    "svm",
-    "bayesian",
-    "knn",
-    "rl_strategy",
-)
+from app.services.model_family_config import MODEL_FAMILIES  # noqa: E402
+
 MAJOR_TYPES = ("factor_combo", "high_winrate_combo", "model_family", "factor_candidate")
 
 

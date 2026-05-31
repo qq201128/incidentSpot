@@ -9,6 +9,11 @@ from app.services.factor_learning_llm_agent import (
     attach_llm_agent_review,
 )
 from app.services.factor_operator_library import factor_operator_payload
+from app.services.llm_provider_registry import (
+    DEFAULT_LLM_PROVIDER,
+    llm_model_metadata,
+    llm_provider_availability,
+)
 from app.services.siliconflow_chat_client import (
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_SILICONFLOW_MODEL,
@@ -41,6 +46,18 @@ def test_siliconflow_config_rejects_invalid_timeout(monkeypatch: pytest.MonkeyPa
         siliconflow_config_from_env()
 
 
+def test_llm_provider_registry_reports_capabilities_and_availability(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
+
+    metadata = llm_model_metadata(DEFAULT_LLM_PROVIDER, DEFAULT_SILICONFLOW_MODEL)
+    unavailable = llm_provider_availability(DEFAULT_LLM_PROVIDER, DEFAULT_SILICONFLOW_MODEL)
+
+    assert metadata["registeredModel"] is True
+    assert "json_object_response" in metadata["capabilities"]
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["missingEnv"] == ["SILICONFLOW_API_KEY"]
+
+
 def test_siliconflow_client_sends_bearer_request(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
@@ -65,6 +82,25 @@ def test_siliconflow_client_sends_bearer_request(monkeypatch: pytest.MonkeyPatch
     assert calls[0]["json"]["model"] == DEFAULT_SILICONFLOW_MODEL
     assert calls[0]["headers"]["Authorization"] == "Bearer sk-test"
     assert calls[0]["timeout"] == DEFAULT_TIMEOUT_SECONDS
+    assert client.provider == DEFAULT_LLM_PROVIDER
+    assert "factor_mining_review" in client.capabilities
+    assert client.availability()["status"] == "available"
+
+
+def test_siliconflow_client_error_includes_provider_model_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        status_code = 500
+        url = "https://example.invalid/chat"
+        text = "server exploded"
+
+        def json(self) -> dict:
+            return {"message": "server exploded"}
+
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-test")
+    monkeypatch.setattr("app.services.siliconflow_chat_client.requests.post", lambda *_args, **_kwargs: Response())
+
+    with pytest.raises(RuntimeError, match="provider=siliconflow model=deepseek-ai/DeepSeek-V3.2"):
+        SiliconFlowChatClient().create_chat_completion({"messages": []})
 
 
 def test_parse_factor_agent_json_strips_markdown_fence() -> None:
@@ -89,6 +125,8 @@ def test_factor_agent_attaches_json_review(monkeypatch: pytest.MonkeyPatch) -> N
     updated = attach_llm_agent_review(memory, client=client)
 
     assert updated["llmAgent"]["model"] == DEFAULT_SILICONFLOW_MODEL
+    assert updated["llmAgent"]["provider"] == DEFAULT_LLM_PROVIDER
+    assert updated["llmAgent"]["availability"]["probe"] == "config_only"
     assert updated["llmAgent"]["review"]["notes"] == ["keep_loss_memory_explicit"]
     assert client.payload["response_format"] == {"type": "json_object"}
     assert client.payload["max_tokens"] == 8192

@@ -6,9 +6,11 @@ from typing import Any
 from app.services.factor_learning_service import get_factor_learning_memory
 from app.services.lstm_combo_snapshot import current_combo_snapshot
 from app.services.factor_operator_library import factor_operator_payload
+from app.services.model_family_config import MODEL_FAMILIES, model_family_label
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS, TARGET_WIN_RATE_EXCLUSIVE
-from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model, siliconflow_config_from_env
+from app.services.llm_provider_registry import DEFAULT_LLM_PROVIDER, llm_model_metadata, llm_provider_availability
+from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model
 from app.services.mining_agent_candidate_rows import (
     agent_candidate_rows as _agent_candidate_rows,
     agent_reviewed_at as _agent_reviewed_at,
@@ -23,32 +25,6 @@ from app.services.mining_overview_sidebar import (
     refresh_status_label as _refresh_status_label,
     sidebar_payload as _sidebar_payload,
 )
-
-MODEL_FAMILIES = (
-    "lstm",
-    "gru",
-    "cnn",
-    "transformer",
-    "random_forest",
-    "xgboost",
-    "svm",
-    "rl_strategy",
-    "bayesian",
-    "knn",
-)
-
-FAMILY_LABELS = {
-    "lstm": "LSTM",
-    "gru": "GRU",
-    "cnn": "CNN",
-    "transformer": "Transformer",
-    "random_forest": "RandomForest",
-    "xgboost": "XGBoost",
-    "svm": "SVM",
-    "rl_strategy": "QTableDirection",
-    "bayesian": "Bayesian",
-    "knn": "KNN",
-}
 
 def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
     sym = symbol.strip().upper()
@@ -100,6 +76,8 @@ def _header_payload(memory: dict, ideas: list, promotion: dict, agent_rows: list
     pending = sum(1 for row in agent_rows if row.get("validationStatusKey") == "pending_backtest")
     idea_count = len(ideas)
     library_pair_count = int(library.get("candidateTotal") or promotion.get("candidateCount") or 0)
+    agent_model = agent.get("model") or _configured_agent_model()
+    agent_provider = agent.get("provider") or DEFAULT_LLM_PROVIDER
     return {
         "localReplayStatus": _refresh_status_key(refresh, memory.get("source") or {}),
         "localReplayLabel": _refresh_status_label(refresh, memory.get("source") or {}),
@@ -108,7 +86,10 @@ def _header_payload(memory: dict, ideas: list, promotion: dict, agent_rows: list
         "agentCandidateCount": idea_count,
         "pendingVerificationCount": pending,
         "agentStatus": agent.get("status") or ("done" if agent.get("review") else "idle"),
-        "agentModel": agent.get("model") or _configured_agent_model(),
+        "agentProvider": agent_provider,
+        "agentModel": agent_model,
+        "agentCapabilities": agent.get("capabilities") or _agent_capabilities(agent_provider, agent_model),
+        "agentAvailability": agent.get("availability") or llm_provider_availability(agent_provider, agent_model),
         "agentReviewedAt": _agent_reviewed_at(memory),
         "memoryUpdatedAt": memory.get("updatedAt"),
     }
@@ -118,6 +99,9 @@ def _configured_agent_model() -> str:
         return resolved_siliconflow_model()
     except RuntimeError:
         return DEFAULT_SILICONFLOW_MODEL
+
+def _agent_capabilities(provider: str, model: str) -> list[str]:
+    return llm_model_metadata(provider, model)["capabilities"]
 
 def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
     adaptive = memory.get("adaptiveLearning") or {}
@@ -163,7 +147,7 @@ def _model_card(status: dict[str, Any]) -> dict[str, Any]:
         validation_win = status.get("validationWinRate")
     return {
         "modelFamily": family,
-        "label": FAMILY_LABELS.get(family, family),
+        "label": model_family_label(family),
         "strategyKey": status.get("strategyKey"),
         "cardState": _card_state(status),
         "cardStateLabel": _card_state_label(status),

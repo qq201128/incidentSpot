@@ -8,8 +8,17 @@ from typing import Any
 import requests
 from requests import RequestException
 
-DEFAULT_SILICONFLOW_MODEL = "deepseek-ai/DeepSeek-V3.2"
-DEFAULT_CHAT_COMPLETIONS_URL = "https://api.siliconflow.cn/v1/chat/completions"
+from app.services.llm_provider_registry import (
+    DEFAULT_CHAT_COMPLETIONS_URL,
+    DEFAULT_LLM_PROVIDER,
+    DEFAULT_SILICONFLOW_MODEL,
+    SILICONFLOW_API_KEY_ENV,
+    llm_model_metadata,
+    llm_provider_availability,
+    resolved_llm_model,
+    resolved_llm_url,
+)
+
 DEFAULT_TIMEOUT_SECONDS = 180
 TIMEOUT_ENV_NAME = "SILICONFLOW_TIMEOUT_SECONDS"
 
@@ -27,8 +36,19 @@ class SiliconFlowChatClient:
         self.config = config or siliconflow_config_from_env()
 
     @property
+    def provider(self) -> str:
+        return DEFAULT_LLM_PROVIDER
+
+    @property
     def model(self) -> str:
         return self.config.model
+
+    @property
+    def capabilities(self) -> list[str]:
+        return list(llm_model_metadata(self.provider, self.model)["capabilities"])
+
+    def availability(self) -> dict[str, Any]:
+        return llm_provider_availability(self.provider, self.model)
 
     def create_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         request_payload = {"model": self.config.model, **payload}
@@ -41,27 +61,30 @@ class SiliconFlowChatClient:
             )
             status_code = getattr(response, "status_code", None)
             if status_code is not None and status_code >= 400:
-                raise RuntimeError(_http_error_message(response)) from None
+                raise RuntimeError(f"{self._diagnostic_prefix()} {_http_error_message(response)}") from None
             response.raise_for_status()
         except RequestException as exc:
-            raise RuntimeError(f"SiliconFlow chat completion failed: {exc}") from exc
+            raise RuntimeError(f"{self._diagnostic_prefix()} SiliconFlow chat completion failed: {exc}") from exc
         data = response.json()
         if not isinstance(data, dict):
-            raise RuntimeError("SiliconFlow chat completion returned non-object JSON")
+            raise RuntimeError(f"{self._diagnostic_prefix()} SiliconFlow chat completion returned non-object JSON")
         return data
+
+    def _diagnostic_prefix(self) -> str:
+        return f"provider={self.provider} model={self.config.model} url={self.config.url}"
 
 
 def resolved_siliconflow_model() -> str:
     """Model id used for the next chat/completions request (from SILICONFLOW_MODEL or default)."""
-    return os.getenv("SILICONFLOW_MODEL", DEFAULT_SILICONFLOW_MODEL).strip() or DEFAULT_SILICONFLOW_MODEL
+    return resolved_llm_model(DEFAULT_LLM_PROVIDER)
 
 
 def siliconflow_config_from_env() -> SiliconFlowConfig:
-    api_key = os.getenv("SILICONFLOW_API_KEY", "").strip()
+    api_key = os.getenv(SILICONFLOW_API_KEY_ENV, "").strip()
     if not api_key:
-        raise RuntimeError("missing SILICONFLOW_API_KEY in environment or .env")
+        raise RuntimeError(f"missing {SILICONFLOW_API_KEY_ENV} in environment or .env")
     model = resolved_siliconflow_model()
-    url = os.getenv("SILICONFLOW_CHAT_COMPLETIONS_URL", DEFAULT_CHAT_COMPLETIONS_URL).strip()
+    url = resolved_llm_url(DEFAULT_LLM_PROVIDER)
     return SiliconFlowConfig(
         api_key=api_key,
         model=model,

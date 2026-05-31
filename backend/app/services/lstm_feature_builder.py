@@ -36,7 +36,7 @@ from app.services.lstm_market_feature_builder import (
     lstm_learning_context,
 )
 from app.services.rule_config import horizon_minutes_for_duration
-from app.services.sim_feedback_features import attach_sim_feedback_features
+from app.services.sim_feedback_features import SIM_FEEDBACK_PREFIX, attach_sim_feedback_features
 
 MS_PER_MINUTE = 60_000
 
@@ -100,8 +100,11 @@ def build_live_feature_window(
     memory = load_factor_learning_memory_for(sym, duration)
     frame = load_lstm_market_frame(sym, duration, learning_memory=memory)
     sampled = duration_feature_frame(frame, duration, entry_open_time)
+    factor_combo_metadata = None
     if _needs_factor_combo_features(feature_columns):
-        sampled = attach_live_factor_combo_features(sampled, sym, duration).frame
+        combo_result = attach_live_factor_combo_features(sampled, sym, duration)
+        sampled = combo_result.frame
+        factor_combo_metadata = combo_result.metadata
     sampled, _metadata = _attach_sim_feedback_with_metadata(
         sampled,
         sym,
@@ -115,7 +118,13 @@ def build_live_feature_window(
         sampled[feature_columns].tail(feature_window).to_numpy(dtype=np.float32),
     )
     last = sampled.iloc[-1]
-    meta = {"entryOpenTime": int(last["entry_open_time"]), "entryPrice": float(last["close"])}
+    meta = _live_feature_meta(
+        last,
+        entry_open_time,
+        feature_columns,
+        factor_combo_metadata,
+        _metadata,
+    )
     return window.reshape(1, feature_window, len(feature_columns)), meta
 
 def duration_labeled_frame(
@@ -173,6 +182,51 @@ def _data_quality_report(
 
 def _needs_factor_combo_features(feature_columns: list[str]) -> bool:
     return any(column.startswith(FACTOR_COMBO_FEATURE_PREFIX) for column in feature_columns)
+
+def _live_feature_meta(
+    last: pd.Series,
+    requested_entry_open_time: int | None,
+    feature_columns: list[str],
+    factor_combo_metadata: dict[str, Any] | None,
+    sim_feedback_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    actual_entry = int(last["entry_open_time"])
+    return {
+        "entryOpenTime": actual_entry,
+        "requestedEntryOpenTime": requested_entry_open_time,
+        "entryPrice": float(last["close"]),
+        "dataFreshnessStatus": _data_freshness_status(actual_entry, requested_entry_open_time),
+        "missingFeatureStatus": _missing_feature_status(feature_columns, factor_combo_metadata, sim_feedback_metadata),
+        "factorComboFeatureMetadata": factor_combo_metadata,
+        "simFeedbackMetadata": sim_feedback_metadata,
+    }
+
+def _data_freshness_status(actual_entry: int, requested_entry: int | None) -> str:
+    if requested_entry is None:
+        return "latest_available"
+    if actual_entry == int(requested_entry):
+        return "fresh"
+    return "entry_mismatch"
+
+def _missing_feature_status(
+    feature_columns: list[str],
+    factor_combo_metadata: dict[str, Any] | None,
+    sim_feedback_metadata: dict[str, Any],
+) -> str:
+    if _factor_combo_features_missing(feature_columns, factor_combo_metadata):
+        return "missing_factor_combo_features"
+    if _needs_sim_feedback_features(feature_columns) and sim_feedback_metadata.get("neutralFeaturesUsed"):
+        return "neutral_sim_feedback_features"
+    return "complete"
+
+def _factor_combo_features_missing(feature_columns: list[str], metadata: dict[str, Any] | None) -> bool:
+    if not _needs_factor_combo_features(feature_columns):
+        return False
+    if not isinstance(metadata, dict):
+        return True
+    return float(metadata.get("missingRate") or 0.0) > 0.0
+def _needs_sim_feedback_features(feature_columns: list[str]) -> bool:
+    return any(column.startswith(SIM_FEEDBACK_PREFIX) for column in feature_columns)
 
 def _training_feature_frame(
     config: LstmTrainingConfig,

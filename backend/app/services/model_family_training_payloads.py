@@ -50,9 +50,17 @@ def version_payload(report: dict[str, Any]) -> dict[str, Any]:
 def backend_options(cfg: ModelFamilyTrainingConfig, input_size: int):
     if cfg.family in JOBLIB_MODEL_FAMILIES:
         return JoblibModelOptions(cfg.family, cfg.seed, cfg.params)
+    params = cfg.params or {}
     return TorchSequenceOptions(
         cfg.family, input_size, cfg.hidden_size, cfg.num_layers,
         cfg.learning_rate, cfg.batch_size, cfg.epochs, cfg.seed,
+        dropout=float(params.get("dropout", 0.0)),
+        weight_decay=float(params.get("weight_decay", 0.0)),
+        early_stopping_patience=int(params.get("early_stopping_patience", 0)),
+        class_weight_mode=str(params.get("class_weight_mode", "none")),
+        return_weight_mode=str(params.get("return_weight_mode", "none")),
+        transformer_nhead=int(params.get("transformer_nhead", 4)),
+        use_positional_encoding=bool(params.get("use_positional_encoding", False)),
     )
 
 
