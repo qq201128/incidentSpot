@@ -19,6 +19,17 @@ class ThresholdFrame:
     scores: dict[str, np.ndarray]
 
 
+@dataclass(frozen=True)
+class ThresholdHitContext:
+    members: tuple[str, ...]
+    orientations: tuple[int, ...]
+    score_values: np.ndarray
+    score_index: pd.Index
+    frame: ThresholdFrame
+    min_win_rate: float
+    min_trades: int
+
+
 def threshold_frame(frame: pd.DataFrame, scores: dict[str, OrientedScore]) -> ThresholdFrame:
     return ThresholdFrame(
         index=frame.index,
@@ -38,15 +49,24 @@ def best_threshold_hit(
     members: tuple[str, ...],
     orientations: tuple[int, ...],
     score_values: np.ndarray,
+    *,
     score_index: pd.Index,
     frame: ThresholdFrame,
     thresholds: tuple[float, ...],
-    *,
     min_win_rate: float,
     min_trades: int,
 ) -> ComboHit | None:
+    context = _hit_context(
+        members,
+        orientations,
+        score_values,
+        score_index=score_index,
+        frame=frame,
+        min_win_rate=min_win_rate,
+        min_trades=min_trades,
+    )
     hits = [
-        _combo_hit(members, orientations, score_values, score_index, frame, threshold, min_win_rate, min_trades)[0]
+        _combo_hit(context, threshold)[0]
         for threshold in thresholds
     ]
     valid = [hit for hit in hits if hit is not None]
@@ -57,26 +77,26 @@ def best_threshold_hit_with_diagnostics(
     members: tuple[str, ...],
     orientations: tuple[int, ...],
     score_values: np.ndarray,
+    *,
     score_index: pd.Index,
     frame: ThresholdFrame,
     thresholds: tuple[float, ...],
     diagnostics: dict[str, Any],
-    *,
     min_win_rate: float,
     min_trades: int,
 ) -> ComboHit | None:
+    context = _hit_context(
+        members,
+        orientations,
+        score_values,
+        score_index=score_index,
+        frame=frame,
+        min_win_rate=min_win_rate,
+        min_trades=min_trades,
+    )
     candidates = []
     for threshold in thresholds:
-        hit, rejected = _combo_hit(
-            members,
-            orientations,
-            score_values,
-            score_index,
-            frame,
-            threshold,
-            min_win_rate,
-            min_trades,
-        )
+        hit, rejected = _combo_hit(context, threshold)
         diagnostics["testedThresholdEvaluations"] += 1
         _record_combo_gate_result(diagnostics, hit, rejected)
         if hit is not None:
@@ -88,43 +108,59 @@ def threshold_hit_result(
     members: tuple[str, ...],
     orientations: tuple[int, ...],
     score_values: np.ndarray,
+    *,
     score_index: pd.Index,
     frame: ThresholdFrame,
     threshold: float,
-    *,
     min_win_rate: float,
     min_trades: int,
 ) -> tuple[ComboHit | None, dict[str, Any] | None]:
-    return _combo_hit(members, orientations, score_values, score_index, frame, threshold, min_win_rate, min_trades)
+    context = _hit_context(
+        members,
+        orientations,
+        score_values,
+        score_index=score_index,
+        frame=frame,
+        min_win_rate=min_win_rate,
+        min_trades=min_trades,
+    )
+    return _combo_hit(context, threshold)
 
 
-def _combo_hit(
+def _hit_context(
     members: tuple[str, ...],
     orientations: tuple[int, ...],
     score_values: np.ndarray,
+    *,
     score_index: pd.Index,
     frame: ThresholdFrame,
-    threshold: float,
     min_win_rate: float,
     min_trades: int,
+) -> ThresholdHitContext:
+    return ThresholdHitContext(members, orientations, score_values, score_index, frame, min_win_rate, min_trades)
+
+
+def _combo_hit(
+    context: ThresholdHitContext,
+    threshold: float,
 ) -> tuple[ComboHit | None, dict[str, Any] | None]:
-    returns = _threshold_returns(score_values, frame.fwd_ret, threshold)
+    returns = _threshold_returns(context.score_values, context.frame.fwd_ret, threshold)
     metrics = _return_metrics(returns)
-    if metrics["trades"] < int(min_trades):
-        return None, _combo_rejection(members, threshold, "min_trades_below_min", metrics)
-    if metrics["winRate"] < min_win_rate:
-        return None, _combo_rejection(members, threshold, "win_rate_below_min", metrics)
+    if metrics["trades"] < int(context.min_trades):
+        return None, _combo_rejection(context, threshold=threshold, reason="min_trades_below_min", metrics=metrics)
+    if metrics["winRate"] < context.min_win_rate:
+        return None, _combo_rejection(context, threshold=threshold, reason="win_rate_below_min", metrics=metrics)
     if metrics["profitFactor"] < SUCCESS_PROFIT_FACTOR_MIN:
-        return None, _combo_rejection(members, threshold, "profit_factor_below_min", metrics)
+        return None, _combo_rejection(context, threshold=threshold, reason="profit_factor_below_min", metrics=metrics)
     hit = ComboHit(
-        members,
-        orientations,
+        context.members,
+        context.orientations,
         threshold,
         metrics["winRate"],
         metrics["profitFactor"],
         metrics["trades"],
         metrics["avgReturn"],
-        pd.Series(score_values, index=score_index),
+        pd.Series(context.score_values, index=context.score_index),
     )
     return hit, None
 
@@ -150,12 +186,13 @@ def _return_metrics(returns: np.ndarray) -> dict[str, Any]:
 
 
 def _combo_rejection(
-    members: tuple[str, ...],
+    context: ThresholdHitContext,
+    *,
     threshold: float,
     reason: str,
     metrics: dict[str, Any],
 ) -> dict[str, Any]:
-    return {"members": members, "threshold": threshold, "reason": reason, **metrics}
+    return {"members": context.members, "threshold": threshold, "reason": reason, **metrics}
 
 
 def _record_combo_gate_result(diagnostics: dict[str, Any], hit: ComboHit | None, rejected: dict[str, Any] | None) -> None:

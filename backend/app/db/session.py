@@ -20,17 +20,30 @@ def get_conn() -> sqlite3.Connection:
   """timeout：等锁最长时间（秒）。WAL + busy_timeout 减轻多协程/多请求下的 database is locked。"""
   conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
   conn.row_factory = sqlite3.Row
-  try:
-    conn.execute("PRAGMA journal_mode=WAL")
-  except sqlite3.Error as exc:
-    conn.close()
-    raise RuntimeError(f"failed to enable SQLite WAL mode for {DB_PATH}") from exc
-  try:
-    conn.execute("PRAGMA busy_timeout=30000")
-  except sqlite3.Error as exc:
-    conn.close()
-    raise RuntimeError(f"failed to configure SQLite busy_timeout for {DB_PATH}") from exc
+  _enable_foreign_keys(conn)
+  _execute_connection_pragma(conn, "PRAGMA journal_mode=WAL", "failed to enable SQLite WAL mode")
+  _execute_connection_pragma(conn, "PRAGMA busy_timeout=30000", "failed to configure SQLite busy_timeout")
   return conn
+
+
+def _enable_foreign_keys(conn: sqlite3.Connection) -> None:
+  try:
+    conn.execute("PRAGMA foreign_keys=ON")
+    row = conn.execute("PRAGMA foreign_keys").fetchone()
+  except sqlite3.Error as exc:
+    conn.close()
+    raise RuntimeError(f"failed to enable SQLite foreign key enforcement for {DB_PATH}") from exc
+  if row is None or int(row[0]) != 1:
+    conn.close()
+    raise RuntimeError(f"failed to enable SQLite foreign key enforcement for {DB_PATH}")
+
+
+def _execute_connection_pragma(conn: sqlite3.Connection, sql: str, failure_message: str) -> None:
+  try:
+    conn.execute(sql)
+  except sqlite3.Error as exc:
+    conn.close()
+    raise RuntimeError(f"{failure_message} for {DB_PATH}") from exc
 
 
 def init_db() -> None:

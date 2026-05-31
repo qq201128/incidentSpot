@@ -8,6 +8,14 @@ from app.db import session
 from app.db.session import run_db_write_with_retry
 
 
+class PragmaResult:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def fetchone(self) -> tuple[int]:
+        return (self.value,)
+
+
 def test_run_db_write_with_retry_recovers_from_locked(monkeypatch) -> None:
     attempts = {"count": 0}
 
@@ -92,12 +100,62 @@ def test_run_db_write_with_retry_reraises_non_lock_errors(monkeypatch) -> None:
     assert slept == []
 
 
-def test_get_conn_exposes_wal_configuration_failure(monkeypatch) -> None:
+def test_get_conn_enables_foreign_key_enforcement(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(session, "DB_PATH", tmp_path / "foreign_keys.db")
+
+    conn = session.get_conn()
+    try:
+        enabled = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        conn.execute("CREATE TABLE parent(id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE child(parent_id INTEGER REFERENCES parent(id))")
+        try:
+            conn.execute("INSERT INTO child(parent_id) VALUES(1)")
+        except sqlite3.IntegrityError as exc:
+            assert "FOREIGN KEY constraint failed" in str(exc)
+        else:
+            raise AssertionError("foreign key enforcement did not reject an orphan child row")
+    finally:
+        conn.close()
+
+    assert enabled == 1
+
+
+def test_get_conn_exposes_foreign_key_configuration_failure(monkeypatch) -> None:
     class BadConn:
         closed = False
         row_factory = None
 
         def execute(self, _sql: str):
+            raise sqlite3.OperationalError("foreign key pragma failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    conn = BadConn()
+    monkeypatch.setattr(session.sqlite3, "connect", lambda *args, **kwargs: conn)
+
+    try:
+        session.get_conn()
+    except RuntimeError as exc:
+        assert "failed to enable SQLite foreign key enforcement" in str(exc)
+    else:
+        raise AssertionError("foreign key configuration failure was not exposed")
+
+    assert conn.closed is True
+
+
+def test_get_conn_exposes_wal_configuration_failure(monkeypatch) -> None:
+    class BadConn:
+        closed = False
+        row_factory = None
+        statements = []
+
+        def execute(self, sql: str):
+            self.statements.append(sql)
+            if sql == "PRAGMA foreign_keys=ON":
+                return None
+            if sql == "PRAGMA foreign_keys":
+                return PragmaResult(1)
             raise sqlite3.OperationalError("readonly database")
 
         def close(self) -> None:
@@ -114,6 +172,7 @@ def test_get_conn_exposes_wal_configuration_failure(monkeypatch) -> None:
         raise AssertionError("WAL configuration failure was not exposed")
 
     assert conn.closed is True
+    assert conn.statements == ["PRAGMA foreign_keys=ON", "PRAGMA foreign_keys", "PRAGMA journal_mode=WAL"]
 
 
 def test_get_conn_exposes_busy_timeout_configuration_failure(monkeypatch) -> None:
@@ -124,8 +183,13 @@ def test_get_conn_exposes_busy_timeout_configuration_failure(monkeypatch) -> Non
 
         def execute(self, sql: str):
             self.statements.append(sql)
+            if sql == "PRAGMA foreign_keys=ON":
+                return None
+            if sql == "PRAGMA foreign_keys":
+                return PragmaResult(1)
             if sql == "PRAGMA busy_timeout=30000":
                 raise sqlite3.OperationalError("busy timeout failed")
+            return None
 
         def close(self) -> None:
             self.closed = True
@@ -141,7 +205,12 @@ def test_get_conn_exposes_busy_timeout_configuration_failure(monkeypatch) -> Non
         raise AssertionError("busy_timeout configuration failure was not exposed")
 
     assert conn.closed is True
-    assert conn.statements == ["PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=30000"]
+    assert conn.statements == [
+        "PRAGMA foreign_keys=ON",
+        "PRAGMA foreign_keys",
+        "PRAGMA journal_mode=WAL",
+        "PRAGMA busy_timeout=30000",
+    ]
 
 
 def test_init_db_closes_connection_when_schema_execution_fails(monkeypatch, tmp_path: Path) -> None:

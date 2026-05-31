@@ -151,6 +151,14 @@ select {
   box-shadow: none;
 }
 
+.page-loading {
+  min-height: calc(100vh - 50px);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .value-up {
   color: var(--green) !important;
 }

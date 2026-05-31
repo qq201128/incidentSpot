@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { fetchWorkbenchSummary } from "./api/workbenchClient";
 import {
   createQuickTrade,
@@ -7,11 +7,6 @@ import {
   settleEvent,
 } from "./api/client";
 import AppNavigation from "./components/AppNavigation";
-import EventGovernancePage from "./pages/EventGovernancePage";
-import FactorLearningPage from "./pages/FactorLearningPage";
-import FactorsPage from "./pages/FactorsPage";
-import ResearchDashboardPage from "./pages/ResearchDashboardPage";
-import RuleHitRatePage from "./pages/RuleHitRatePage";
 import TradingWorkbench from "./components/TradingWorkbench";
 import "./components/EventContractPanel.css";
 import { strategyLabel } from "./utils/strategyLabels";
@@ -19,6 +14,11 @@ import { useLatestPrediction } from "./hooks/useLatestPrediction";
 import { useTradingMarket } from "./hooks/useTradingMarket";
 
 const EVENTS_POLL_MS = 5000;
+const EventGovernancePage = lazy(() => import("./pages/EventGovernancePage"));
+const FactorLearningPage = lazy(() => import("./pages/FactorLearningPage"));
+const FactorsPage = lazy(() => import("./pages/FactorsPage"));
+const ResearchDashboardPage = lazy(() => import("./pages/ResearchDashboardPage"));
+const RuleHitRatePage = lazy(() => import("./pages/RuleHitRatePage"));
 
 export default function App() {
   const [appView, setAppView] = useState("trade");
@@ -34,12 +34,20 @@ export default function App() {
 }
 
 function pageForView(appView, tradeProps) {
-  if (appView === "hit-rate") return <RuleHitRatePage />;
-  if (appView === "factors") return <FactorsPage />;
-  if (appView === "governance") return <EventGovernancePage />;
-  if (appView === "research") return <ResearchDashboardPage />;
-  if (appView === "learning") return <FactorLearningPage />;
+  if (appView === "hit-rate") return lazyPage(<RuleHitRatePage />);
+  if (appView === "factors") return lazyPage(<FactorsPage />);
+  if (appView === "governance") return lazyPage(<EventGovernancePage />);
+  if (appView === "research") return lazyPage(<ResearchDashboardPage />);
+  if (appView === "learning") return lazyPage(<FactorLearningPage />);
   return <TradingView {...tradeProps} />;
+}
+
+function lazyPage(page) {
+  return <Suspense fallback={<PageLoading />}>{page}</Suspense>;
+}
+
+function PageLoading() {
+  return <main className="page-loading" role="status">正在加载页面…</main>;
 }
 
 function TradingView({ interval, onIntervalChange, onSymbolChange, symbol }) {

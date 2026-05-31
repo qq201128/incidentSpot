@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -36,41 +38,93 @@ TF_4H_VOL_WINDOWS = (3, 6, 12)
 TF_1D_VOL_WINDOWS = (3, 7)
 
 
+@dataclass(frozen=True)
+class TimeframeState:
+    context: pd.DataFrame
+    bucket_close: pd.Series
+    rule_ms: int
+
+
+@dataclass(frozen=True)
+class OnlineTimeframeSpec:
+    minutes: int
+    prefix: str
+    return_periods: tuple[int, ...]
+    ma_window: int
+    ma_column: str
+    ma_windows: tuple[int, ...]
+    vol_windows: tuple[int, ...]
+
+
+TIMEFRAME_SPECS = (
+    OnlineTimeframeSpec(
+        FIVE_MINUTES, "tf_5m", TF_5M_RETURN_PERIODS, TF_5M_MA_WINDOW,
+        "tf_5m_ma_ratio_20", TF_5M_MA_WINDOWS, TF_5M_VOL_WINDOWS,
+    ),
+    OnlineTimeframeSpec(
+        FIFTEEN_MINUTES, "tf_15m", TF_15M_RETURN_PERIODS, TF_15M_MA_WINDOW,
+        "tf_15m_ma_ratio_16", TF_15M_MA_WINDOWS, TF_15M_VOL_WINDOWS,
+    ),
+    OnlineTimeframeSpec(
+        THIRTY_MINUTES, "tf_30m", TF_30M_RETURN_PERIODS, TF_30M_MA_WINDOW,
+        "tf_30m_ma_ratio_8", TF_30M_MA_WINDOWS, TF_30M_VOL_WINDOWS,
+    ),
+    OnlineTimeframeSpec(
+        SIXTY_MINUTES, "tf_1h", TF_1H_RETURN_PERIODS, TF_1H_MA_WINDOW,
+        "tf_1h_ma_ratio_4", TF_1H_MA_WINDOWS, TF_1H_VOL_WINDOWS,
+    ),
+    OnlineTimeframeSpec(
+        FOUR_HOURS, "tf_4h", TF_4H_RETURN_PERIODS, TF_4H_MA_WINDOW,
+        "tf_4h_ma_ratio_6", TF_4H_MA_WINDOWS, TF_4H_VOL_WINDOWS,
+    ),
+    OnlineTimeframeSpec(
+        ONE_DAY, "tf_1d", TF_1D_RETURN_PERIODS, TF_1D_MA_WINDOW,
+        "tf_1d_ma_ratio_3", TF_1D_MA_WINDOWS, TF_1D_VOL_WINDOWS,
+    ),
+)
+
+
 def add_online_timeframe_features(base_df: pd.DataFrame, source_df: pd.DataFrame) -> pd.DataFrame:
     out = base_df.copy()
-    out = _add_return_features(out, source_df, FIVE_MINUTES, TF_5M_RETURN_PERIODS, "tf_5m")
-    out = _add_ma_ratio_feature(out, source_df, FIVE_MINUTES, TF_5M_MA_WINDOW, "tf_5m_ma_ratio_20")
-    out = _add_regime_features(out, source_df, FIVE_MINUTES, "tf_5m", TF_5M_MA_WINDOWS, TF_5M_VOL_WINDOWS)
-    out = _add_return_features(out, source_df, FIFTEEN_MINUTES, TF_15M_RETURN_PERIODS, "tf_15m")
-    out = _add_ma_ratio_feature(out, source_df, FIFTEEN_MINUTES, TF_15M_MA_WINDOW, "tf_15m_ma_ratio_16")
-    out = _add_regime_features(out, source_df, FIFTEEN_MINUTES, "tf_15m", TF_15M_MA_WINDOWS, TF_15M_VOL_WINDOWS)
-    out = _add_return_features(out, source_df, THIRTY_MINUTES, TF_30M_RETURN_PERIODS, "tf_30m")
-    out = _add_ma_ratio_feature(out, source_df, THIRTY_MINUTES, TF_30M_MA_WINDOW, "tf_30m_ma_ratio_8")
-    out = _add_regime_features(out, source_df, THIRTY_MINUTES, "tf_30m", TF_30M_MA_WINDOWS, TF_30M_VOL_WINDOWS)
-    out = _add_return_features(out, source_df, SIXTY_MINUTES, TF_1H_RETURN_PERIODS, "tf_1h")
-    out = _add_ma_ratio_feature(out, source_df, SIXTY_MINUTES, TF_1H_MA_WINDOW, "tf_1h_ma_ratio_4")
-    out = _add_regime_features(out, source_df, SIXTY_MINUTES, "tf_1h", TF_1H_MA_WINDOWS, TF_1H_VOL_WINDOWS)
-    out = _add_return_features(out, source_df, FOUR_HOURS, TF_4H_RETURN_PERIODS, "tf_4h")
-    out = _add_ma_ratio_feature(out, source_df, FOUR_HOURS, TF_4H_MA_WINDOW, "tf_4h_ma_ratio_6")
-    out = _add_regime_features(out, source_df, FOUR_HOURS, "tf_4h", TF_4H_MA_WINDOWS, TF_4H_VOL_WINDOWS)
-    out = _add_return_features(out, source_df, ONE_DAY, TF_1D_RETURN_PERIODS, "tf_1d")
-    out = _add_ma_ratio_feature(out, source_df, ONE_DAY, TF_1D_MA_WINDOW, "tf_1d_ma_ratio_3")
-    out = _add_regime_features(out, source_df, ONE_DAY, "tf_1d", TF_1D_MA_WINDOWS, TF_1D_VOL_WINDOWS)
+    for spec in TIMEFRAME_SPECS:
+        out = _add_return_features(
+            out,
+            source_df,
+            timeframe_minutes=spec.minutes,
+            periods=spec.return_periods,
+            prefix=spec.prefix,
+        )
+        out = _add_ma_ratio_feature(
+            out,
+            source_df,
+            timeframe_minutes=spec.minutes,
+            window=spec.ma_window,
+            column=spec.ma_column,
+        )
+        out = _add_regime_features(
+            out,
+            source_df,
+            timeframe_minutes=spec.minutes,
+            prefix=spec.prefix,
+            ma_windows=spec.ma_windows,
+            vol_windows=spec.vol_windows,
+        )
     return out
 
 
 def _add_return_features(
     base_df: pd.DataFrame,
     source_df: pd.DataFrame,
+    *,
     timeframe_minutes: int,
     periods: tuple[int, ...],
     prefix: str,
 ) -> pd.DataFrame:
-    context, bucket_close, rule_ms = _timeframe_context(base_df, source_df, timeframe_minutes)
+    state = _timeframe_context(base_df, source_df, timeframe_minutes)
     out = base_df.copy()
     for period in periods:
-        reference = _previous_bucket_close(context, bucket_close, rule_ms, period)
-        value = context["close"] / reference.replace(0, np.nan) - 1.0
+        reference = _previous_bucket_close(state, period)
+        value = state.context["close"] / reference.replace(0, np.nan) - 1.0
         out[f"{prefix}_ret_{period}"] = value.fillna(0.0).to_numpy()
     return out
 
@@ -78,41 +132,44 @@ def _add_return_features(
 def _add_ma_ratio_feature(
     base_df: pd.DataFrame,
     source_df: pd.DataFrame,
+    *,
     timeframe_minutes: int,
     window: int,
     column: str,
 ) -> pd.DataFrame:
-    context, bucket_close, rule_ms = _timeframe_context(base_df, source_df, timeframe_minutes)
-    closes = [context["close"]]
-    closes.extend(_previous_bucket_close(context, bucket_close, rule_ms, period) for period in range(1, window))
+    state = _timeframe_context(base_df, source_df, timeframe_minutes)
+    closes = [state.context["close"]]
+    closes.extend(_previous_bucket_close(state, period) for period in range(1, window))
     close_frame = pd.concat(closes, axis=1)
     mean_close = close_frame.mean(axis=1).replace(0, np.nan)
     out = base_df.copy()
-    out[column] = (context["close"] / mean_close - 1.0).fillna(0.0).to_numpy()
+    out[column] = (state.context["close"] / mean_close - 1.0).fillna(0.0).to_numpy()
     return out
 
 
 def _add_regime_features(
     base_df: pd.DataFrame,
     source_df: pd.DataFrame,
+    *,
     timeframe_minutes: int,
     prefix: str,
     ma_windows: tuple[int, ...],
     vol_windows: tuple[int, ...],
 ) -> pd.DataFrame:
-    context, bucket_close, rule_ms = _timeframe_context(base_df, source_df, timeframe_minutes)
-    out = _add_intrabar_features(base_df, source_df, timeframe_minutes, prefix)
+    state = _timeframe_context(base_df, source_df, timeframe_minutes)
+    out = _add_intrabar_features(base_df, source_df, timeframe_minutes=timeframe_minutes, prefix=prefix)
     for window in ma_windows:
-        out[f"{prefix}_ma_ratio_{window}"] = _ma_ratio(context, bucket_close, rule_ms, window).to_numpy()
+        out[f"{prefix}_ma_ratio_{window}"] = _ma_ratio(state, window).to_numpy()
     for window in vol_windows:
-        out[f"{prefix}_ret_vol_{window}"] = _return_volatility(context, bucket_close, rule_ms, window).to_numpy()
-    out[f"{prefix}_ret_accel"] = _return_acceleration(context, bucket_close, rule_ms).to_numpy()
+        out[f"{prefix}_ret_vol_{window}"] = _return_volatility(state, window).to_numpy()
+    out[f"{prefix}_ret_accel"] = _return_acceleration(state).to_numpy()
     return out
 
 
 def _add_intrabar_features(
     base_df: pd.DataFrame,
     source_df: pd.DataFrame,
+    *,
     timeframe_minutes: int,
     prefix: str,
 ) -> pd.DataFrame:
@@ -135,7 +192,7 @@ def _timeframe_context(
     base_df: pd.DataFrame,
     source_df: pd.DataFrame,
     timeframe_minutes: int,
-) -> tuple[pd.DataFrame, pd.Series, int]:
+) -> TimeframeState:
     rule_ms = timeframe_minutes * MS_PER_MINUTE
     source = source_df[["open_time", "close"]].copy()
     source["open_time"] = pd.to_numeric(source["open_time"], errors="raise")
@@ -146,7 +203,7 @@ def _timeframe_context(
     context["open_time"] = pd.to_numeric(context["open_time"], errors="raise")
     context["close"] = pd.to_numeric(context["close"], errors="coerce")
     context["bucket_start"] = _bucket_start(context["open_time"], rule_ms)
-    return context, bucket_close, rule_ms
+    return TimeframeState(context, bucket_close, rule_ms)
 
 
 def _intrabar_state(source_df: pd.DataFrame, timeframe_minutes: int) -> pd.DataFrame:
@@ -169,35 +226,30 @@ def _intrabar_state(source_df: pd.DataFrame, timeframe_minutes: int) -> pd.DataF
     })
 
 
-def _ma_ratio(context: pd.DataFrame, bucket_close: pd.Series, rule_ms: int, window: int) -> pd.Series:
-    closes = [context["close"]]
-    closes.extend(_previous_bucket_close(context, bucket_close, rule_ms, period) for period in range(1, window))
+def _ma_ratio(state: TimeframeState, window: int) -> pd.Series:
+    closes = [state.context["close"]]
+    closes.extend(_previous_bucket_close(state, period) for period in range(1, window))
     mean_close = pd.concat(closes, axis=1).mean(axis=1).replace(0, np.nan)
-    return (context["close"] / mean_close - 1.0).fillna(0.0)
+    return (state.context["close"] / mean_close - 1.0).fillna(0.0)
 
 
-def _return_volatility(context: pd.DataFrame, bucket_close: pd.Series, rule_ms: int, window: int) -> pd.Series:
-    returns = [_period_return(context, bucket_close, rule_ms, period) for period in range(1, window + 1)]
+def _return_volatility(state: TimeframeState, window: int) -> pd.Series:
+    returns = [_period_return(state, period) for period in range(1, window + 1)]
     return pd.concat(returns, axis=1).std(axis=1).fillna(0.0)
 
 
-def _return_acceleration(context: pd.DataFrame, bucket_close: pd.Series, rule_ms: int) -> pd.Series:
-    return (_period_return(context, bucket_close, rule_ms, 1) - _period_return(context, bucket_close, rule_ms, 2)).fillna(0.0)
+def _return_acceleration(state: TimeframeState) -> pd.Series:
+    return (_period_return(state, 1) - _period_return(state, 2)).fillna(0.0)
 
 
-def _period_return(context: pd.DataFrame, bucket_close: pd.Series, rule_ms: int, period: int) -> pd.Series:
-    reference = _previous_bucket_close(context, bucket_close, rule_ms, period)
-    return (context["close"] / reference.replace(0, np.nan) - 1.0).fillna(0.0)
+def _period_return(state: TimeframeState, period: int) -> pd.Series:
+    reference = _previous_bucket_close(state, period)
+    return (state.context["close"] / reference.replace(0, np.nan) - 1.0).fillna(0.0)
 
 
-def _previous_bucket_close(
-    context: pd.DataFrame,
-    bucket_close: pd.Series,
-    rule_ms: int,
-    period: int,
-) -> pd.Series:
-    target_bucket = context["bucket_start"] - int(period) * rule_ms
-    return target_bucket.map(bucket_close)
+def _previous_bucket_close(state: TimeframeState, period: int) -> pd.Series:
+    target_bucket = state.context["bucket_start"] - int(period) * state.rule_ms
+    return target_bucket.map(state.bucket_close)
 
 
 def _bucket_start(open_time: pd.Series, rule_ms: int) -> pd.Series:
