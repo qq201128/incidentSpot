@@ -151,16 +151,28 @@ def test_lstm_candidate_search_route_queues_background(monkeypatch) -> None:
     )
 
     tasks = BackgroundTasks()
-    report = lstm_api.lstm_candidate_search(tasks, symbol="btcusdt", duration="10m", profile="full")
+    report = lstm_api.lstm_candidate_search(
+        tasks,
+        symbol="btcusdt",
+        duration="10m",
+        profile="full",
+        parallel_workers=3,
+    )
 
     assert report["message"] == "LSTM候选搜索已排队。"
     assert report["candidateSearchProgress"]["status"] == "queued"
     assert tasks.tasks[0].func == lstm_api._background_lstm_candidate_search
     job = tasks.tasks[0].args[0]
-    assert job == lstm_api.CandidateSearchJob("BTCUSDT", "10m", "full", False)
+    assert job == lstm_api.CandidateSearchJob(
+        symbol="BTCUSDT",
+        duration="10m",
+        profile="full",
+        reset_history=False,
+        parallel_workers=3,
+    )
     assert queued["symbol"] == "BTCUSDT"
     assert queued["total"] == 225
-    assert queued["parallel_workers"] == 10
+    assert queued["parallel_workers"] == 3
 
 
 def test_lstm_candidate_search_background_finishes_skipped(monkeypatch) -> None:
@@ -179,11 +191,18 @@ def test_lstm_candidate_search_background_finishes_skipped(monkeypatch) -> None:
     )
 
     lstm_api._background_lstm_candidate_search(
-        lstm_api.CandidateSearchJob("BTCUSDT", "10m", "full", False)
+        lstm_api.CandidateSearchJob(
+            symbol="BTCUSDT",
+            duration="10m",
+            profile="full",
+            reset_history=False,
+            parallel_workers=4,
+        )
     )
 
     assert configs[0].symbols == ("BTCUSDT",)
     assert configs[0].durations == ("10m",)
+    assert configs[0].search.parallel_workers == 4
     assert configs[0].manual_trigger is True
     assert finished[0]["symbol"] == "BTCUSDT"
     assert finished[0]["duration"] == "10m"

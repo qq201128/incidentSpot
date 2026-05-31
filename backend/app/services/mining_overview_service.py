@@ -9,6 +9,8 @@ from app.services.factor_operator_library import factor_operator_payload
 from app.services.model_family_config import MODEL_FAMILIES, model_family_label
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS, TARGET_WIN_RATE_EXCLUSIVE
+from app.services.model_search_resource import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
+from app.services.model_search_status_service import model_search_queue_status
 from app.services.llm_provider_registry import DEFAULT_LLM_PROVIDER, llm_model_metadata, llm_provider_availability
 from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model
 from app.services.mining_agent_candidate_rows import (
@@ -34,6 +36,7 @@ def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
 
     operators = factor_operator_payload()
     models = _model_cards(sym, duration)
+    search_queue = model_search_queue_status({"symbols": (sym,), "durations": (duration,)})
     agent_rows = _agent_candidate_rows(memory)
     promotion = memory.get("agentCandidatePromotion") or {}
     ideas = _candidate_ideas(memory)
@@ -43,8 +46,9 @@ def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
         "duration": duration,
         "updatedAt": memory.get("updatedAt"),
         "header": _header_payload(memory, ideas, promotion, agent_rows),
-        "summary": _summary_payload(memory, models),
-        "trainingRules": _training_rules_payload(),
+        "summary": _summary_payload(memory, models, search_queue),
+        "trainingRules": _training_rules_payload(search_queue),
+        "modelSearchQueue": search_queue,
         "models": models,
         "agentCandidates": agent_rows,
         "sidebar": _sidebar_payload(memory, operators, ideas, promotion),
@@ -103,14 +107,15 @@ def _configured_agent_model() -> str:
 def _agent_capabilities(provider: str, model: str) -> list[str]:
     return llm_model_metadata(provider, model)["capabilities"]
 
-def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
+def _summary_payload(memory: dict, models: list[dict], search_queue: dict[str, Any]) -> dict[str, Any]:
     adaptive = memory.get("adaptiveLearning") or {}
     loss = memory.get("lossMemory") or {}
     promotion = memory.get("agentCandidatePromotion") or {}
     sample_count = int(adaptive.get("sampleCount") or loss.get("sampleCount") or 0)
     loss_count = int(loss.get("lossCount") or 0)
     win_count = max(sample_count - loss_count, 0) if sample_count else 0
-    searching = sum(1 for row in models if row.get("searchStatus") in {"queued", "running"})
+    queue_counts = search_queue.get("counts") or {}
+    searching = int(queue_counts.get("pending") or 0) + int(queue_counts.get("running") or 0)
     candidate_records = sum(int(row.get("candidateLibraryTotal") or 0) for row in models)
     candidate_records += int(promotion.get("candidateCount") or 0)
     return {
@@ -120,7 +125,9 @@ def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
         "lossSampleCount": loss_count,
         "winSampleCount": win_count,
         "searchingCount": searching,
-        "searchParallel": f"{searching} / {len(MODEL_FAMILIES)}",
+        "searchParallel": _search_parallel_label(search_queue, searching),
+        "searchPendingCount": int(queue_counts.get("pending") or 0),
+        "searchRunningCount": int(queue_counts.get("running") or 0),
         "candidateRecordCount": candidate_records,
         "candidatePending": int(promotion.get("candidateCount") or 0) - int(promotion.get("promoted") or 0),
         "candidateCompleted": int(promotion.get("promoted") or 0),
@@ -128,12 +135,39 @@ def _summary_payload(memory: dict, models: list[dict]) -> dict[str, Any]:
         "totalModelCount": len(models),
     }
 
-def _training_rules_payload() -> dict[str, Any]:
+def _training_rules_payload(search_queue: dict[str, Any]) -> dict[str, Any]:
     target = int(TARGET_WIN_RATE_EXCLUSIVE * 100)
     return {
         "text": f"候选置信阈值下胜率必须严格 > {target}%，successive-halving 分阶段筛选",
         "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
+        "internalThreads": DEFAULT_INTERNAL_THREADS,
         "parallelWorkers": DEFAULT_PARALLEL_WORKERS,
+        "xgboostProcessWorkers": DEFAULT_XGBOOST_PROCESS_WORKERS,
+        "workerStatus": _worker_status(search_queue),
+    }
+
+
+def _search_parallel_label(search_queue: dict[str, Any], searching: int) -> str:
+    running = search_queue.get("runningJobs") or []
+    workers = max(len(running), 1 if searching else 0)
+    return f"{searching} queued/running · worker {workers}"
+
+
+def _worker_status(search_queue: dict[str, Any]) -> dict[str, Any]:
+    counts = search_queue.get("counts") or {}
+    pending = int(counts.get("pending") or 0)
+    running = int(counts.get("running") or 0)
+    if pending > 0 and running == 0:
+        state = "worker_required"
+    elif running > 0:
+        state = "running"
+    else:
+        state = "idle"
+    return {
+        "state": state,
+        "pendingJobs": pending,
+        "runningJobs": running,
+        "latestLogPath": search_queue.get("latestLogPath"),
     }
 
 def _model_card(status: dict[str, Any]) -> dict[str, Any]:
@@ -170,7 +204,7 @@ def _card_state(status: dict) -> str:
     progress = status.get("candidateSearchProgress") or {}
     if progress.get("status") in {"queued", "running"}:
         return "searching"
-    if status.get("shadowPredictionReady"):
+    if _prediction_ready(status):
         return "ready"
     active = status.get("activeModelStatus") or status.get("status")
     if active in {None, "untrained", "insufficient_samples", "queued", "training"}:
@@ -187,11 +221,16 @@ def _card_state_label(status: dict) -> str:
     return mapping[_card_state(status)]
 
 def _prediction_ready_label(status: dict) -> str:
-    if status.get("shadowPredictionReady"):
+    if _prediction_ready(status):
         return "就绪"
-    if status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch":
-        return "组合变化"
     return "未就绪"
+
+
+def _prediction_ready(status: dict) -> bool:
+    return bool(
+        status.get("shadowPredictionReady")
+        or status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch"
+    )
 
 def _latest_candidate_label(progress: dict) -> str | None:
     latest = progress.get("latestCompleted")

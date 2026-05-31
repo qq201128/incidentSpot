@@ -71,7 +71,7 @@ STRATEGIES = (
         name="多因子组合执行",
         description=(
             "读取因子页缓存的最佳组合因子；每个结算周期独立使用该周期胜率最高的组合，"
-            "用当前组合分数给出多空方向，可在自动执行中按周期开启模拟或实盘。"
+            "用当前组合分数给出多空方向，可在自动执行中按周期开启模拟下单。"
         ),
         requires_vegas_confirmation=False,
         signal_source="factor_combination_ranking",
@@ -177,11 +177,11 @@ def _factor_candidate_signal_definition(strategy_key: str) -> StrategyDefinition
     return StrategyDefinition(
         key=strategy_key,
         name=f"因子候选信号·{suffix}",
-        description="单因子、Agent 因子和技术指标发布的独立候选信号，用于综合裁判观察加权。",
+        description="单因子、Agent 因子和技术指标发布的独立候选信号，可进入模拟执行和综合裁判观察。",
         requires_vegas_confirmation=False,
         signal_source="factor_candidate_signal",
         rule_names=("factor_candidate_signal_v1",),
-        tradable=False,
+        tradable=True,
         requires_kline_features=True,
         uses_trade_policy_gates=False,
     )

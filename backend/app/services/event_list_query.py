@@ -32,6 +32,7 @@ def paginated_events(
     view: str,
     strategy_key: str | None = None,
     duration_minutes: int | None = None,
+    query: str | None = None,
 ) -> dict:
     safe_view = normalize_view(view)
     safe_page = max(1, int(page))
@@ -41,6 +42,7 @@ def paginated_events(
         symbol,
         strategy_key,
         duration_minutes=duration_minutes,
+        query=query,
     )
     total = int(
         conn.execute(
@@ -78,6 +80,7 @@ def _view_where_clause(
     strategy_key: str | None = None,
     *,
     duration_minutes: int | None = None,
+    query: str | None = None,
 ) -> tuple[str, list]:
     clauses = ["1 = 1"]
     params: list = []
@@ -92,6 +95,10 @@ def _view_where_clause(
     if interval_sql:
         clauses.append(interval_sql.removeprefix(" AND "))
         params.extend(interval_params)
+    search_sql, search_params = _search_clause(query)
+    if search_sql:
+        clauses.append(search_sql)
+        params.extend(search_params)
     if view == "orders":
         clauses.append("latest_order.id IS NOT NULL")
     elif view == "settlements":
@@ -101,13 +108,43 @@ def _view_where_clause(
     return " AND ".join(clauses), params
 
 
+def _search_clause(query: str | None) -> tuple[str, list]:
+    q = (query or "").strip()
+    if not q:
+        return "", []
+    pattern = f"%{q.upper()}%"
+    return """
+    (
+        UPPER(CAST(events.id AS TEXT)) LIKE ?
+        OR UPPER(events.symbol) LIKE ?
+        OR UPPER(events.title) LIKE ?
+        OR UPPER(events.status) LIKE ?
+        OR UPPER(events.strategy_key) LIKE ?
+        OR UPPER(events.event_interval) LIKE ?
+        OR UPPER(COALESCE(events.result, '')) LIKE ?
+        OR UPPER(COALESCE(events.settlement_source, '')) LIKE ?
+        OR UPPER(COALESCE(latest_order.side, '')) LIKE ?
+        OR UPPER(COALESCE(latest_order.status, '')) LIKE ?
+        OR UPPER(COALESCE(latest_order.external_order_id, '')) LIKE ?
+        OR UPPER(COALESCE(latest_order.external_status, '')) LIKE ?
+        OR UPPER(COALESCE(latest_order.external_response, '')) LIKE ?
+    )
+    """.strip(), [pattern] * 13
+
+
 def _failure_clause() -> str:
     return """
     (
         events.status = 'FAILED'
+        OR UPPER(COALESCE(events.settlement_source, '')) GLOB '*FAIL*'
+        OR UPPER(COALESCE(events.settlement_source, '')) GLOB '*ERROR*'
+        OR UPPER(COALESCE(events.settlement_source, '')) GLOB '*REJECT*'
         OR latest_order.status = 'FAILED'
         OR UPPER(COALESCE(latest_order.external_status, '')) GLOB '*FAIL*'
         OR UPPER(COALESCE(latest_order.external_status, '')) GLOB '*ERROR*'
         OR UPPER(COALESCE(latest_order.external_status, '')) GLOB '*REJECT*'
+        OR UPPER(COALESCE(latest_order.external_response, '')) GLOB '*FAIL*'
+        OR UPPER(COALESCE(latest_order.external_response, '')) GLOB '*ERROR*'
+        OR UPPER(COALESCE(latest_order.external_response, '')) GLOB '*REJECT*'
     )
     """.strip()

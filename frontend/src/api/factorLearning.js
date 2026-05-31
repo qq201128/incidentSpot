@@ -3,6 +3,11 @@ import { API_BASE_URL } from "./client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_QUEUE_TIMEOUT_MS = 15_000;
+export const DEFAULT_MODEL_SEARCH_RESOURCE = Object.freeze({
+  internalThreads: 4,
+  parallelWorkers: 10,
+  xgboostProcessWorkers: 1,
+});
 
 export async function fetchFactorLearningMemory(symbol, duration = "10m", options = {}) {
   const { data } = await axios.get(`${API_BASE_URL}/api/factor-learning/memory`, {
@@ -39,7 +44,7 @@ export async function fetchModelFamilyStatus(family, symbol, duration = "10m", o
 }
 
 export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "full", options = {}) {
-  return requestModelCandidateSearch("lstm", symbol, duration, profile, options.parallelWorkers, options.resetHistory);
+  return requestModelCandidateSearch("lstm", symbol, duration, profile, options);
 }
 
 export async function requestModelCandidateSearch(
@@ -47,14 +52,39 @@ export async function requestModelCandidateSearch(
   symbol,
   duration = "10m",
   profile = "full",
-  parallelWorkers = 10,
-  resetHistory = false,
+  options = {},
 ) {
+  const resource = modelSearchResourceParams(options);
   const { data } = await axios.post(`${API_BASE_URL}/api/models/${family}/candidate-search`, null, {
-    params: { symbol, duration, profile, parallelWorkers, resetHistory },
+    params: {
+      symbol,
+      duration,
+      profile,
+      resetHistory: Boolean(options.resetHistory),
+      ...resource,
+    },
     timeout: REFRESH_QUEUE_TIMEOUT_MS,
   });
   return data;
+}
+
+function modelSearchResourceParams(options) {
+  return {
+    internalThreads: positiveIntOrDefault(options.internalThreads, DEFAULT_MODEL_SEARCH_RESOURCE.internalThreads),
+    parallelWorkers: positiveIntOrDefault(options.parallelWorkers, DEFAULT_MODEL_SEARCH_RESOURCE.parallelWorkers),
+    xgboostProcessWorkers: positiveIntOrDefault(
+      options.xgboostProcessWorkers,
+      DEFAULT_MODEL_SEARCH_RESOURCE.xgboostProcessWorkers,
+    ),
+  };
+}
+
+function positiveIntOrDefault(value, fallback) {
+  const selected = Number(value ?? fallback);
+  if (!Number.isInteger(selected) || selected <= 0) {
+    throw new Error(`model search resource value must be a positive integer: ${value}`);
+  }
+  return selected;
 }
 
 export async function requestFactorLearningRefresh(symbol, duration = "10m", runAgent = true) {

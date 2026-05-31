@@ -140,9 +140,11 @@ export async function fetchEventsPage({
   durationMinutes,
   page = 1,
   pageSize = 8,
+  q,
   view = "events",
 } = {}) {
   const params = { symbol, page, pageSize, view };
+  if (q) params.q = q;
   if (strategyKey) params.strategyKey = strategyKey;
   if (durationMinutes != null && Number.isFinite(Number(durationMinutes))) {
     params.durationMinutes = durationMinutes;
@@ -273,6 +275,9 @@ export async function fetchFactorBacktest(factorName, symbol, duration = "10m") 
 export async function fetchFactorRanking(symbol, duration = "10m", category, options = {}) {
   const params = { symbol, duration };
   if (category) params.category = category;
+  if (options.q) params.q = options.q;
+  if (options.page) params.page = options.page;
+  if (options.pageSize) params.pageSize = options.pageSize;
   const { data } = await axios.get(`${BASE_URL}/api/factors/ranking`, {
     params,
     signal: options.signal,

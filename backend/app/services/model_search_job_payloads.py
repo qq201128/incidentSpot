@@ -22,9 +22,19 @@ from app.services.model_search_job_types import (
 )
 
 
-def job_spec(*, symbol: str, duration: str, family: str, profile: str, priority: int) -> dict[str, Any]:
+def job_spec(
+    *,
+    symbol: str,
+    duration: str,
+    family: str,
+    profile: str,
+    priority: int,
+    resource: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     selected = normalize_model_family(family)
     params = {"target": "model_family_candidate_search", "trainingRules": model_family_training_rules(selected)}
+    if resource:
+        params["resource"] = _job_resource_spec(resource)
     params_json = json_dumps(params)
     params_hash = hashlib.sha256(params_json.encode("utf-8")).hexdigest()
     selected_profile = normalize_experiment_profile(profile)
@@ -43,6 +53,14 @@ def job_spec(*, symbol: str, duration: str, family: str, profile: str, priority:
             profile=selected_profile,
             params_hash=params_hash,
         ),
+    }
+
+
+def _job_resource_spec(resource: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: resource[key]
+        for key in ("resourceProfile", "internalThreads", "parallelWorkers", "xgboostProcessWorkers")
+        if key in resource
     }
 
 
@@ -83,17 +101,26 @@ def insert_sql() -> str:
     return """
         INSERT INTO model_search_jobs(
           job_id, symbol, duration, model_family, profile, stage, params_json,
-          params_hash, status, priority, created_at
+          params_hash, status, priority, created_at, resource_profile,
+          internal_threads, parallel_workers, xgboost_process_workers,
+          reset_history
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
 
-def insert_values(spec: dict[str, Any]) -> tuple[Any, ...]:
+def insert_values(
+    spec: dict[str, Any],
+    resource: dict[str, Any] | None = None,
+    reset_history: bool = False,
+) -> tuple[Any, ...]:
+    selected = resource or {}
     return (
         spec["job_id"], spec["symbol"], spec["duration"], spec["model_family"],
         spec["profile"], JOB_STAGE_QUEUED, spec["params_json"], spec["params_hash"],
-        JOB_STATUS_PENDING, spec["priority"], utc_now(),
+        JOB_STATUS_PENDING, spec["priority"], utc_now(), selected.get("resourceProfile"),
+        selected.get("internalThreads"), selected.get("parallelWorkers"),
+        selected.get("xgboostProcessWorkers"), 1 if reset_history else 0,
     )
 
 

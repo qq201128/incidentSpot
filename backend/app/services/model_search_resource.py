@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.model_family_candidate_executor import TORCH_JOBS_ENV, XGBOOST_PROCESS_WORKERS_ENV
+from app.services.model_search_resource_defaults import (
+    DEFAULT_INTERNAL_THREADS,
+    DEFAULT_XGBOOST_PROCESS_WORKERS,
+)
 
-DEFAULT_INTERNAL_THREADS = 4
 DEFAULT_PARALLEL_WORKERS = 1
-DEFAULT_XGBOOST_PROCESS_WORKERS = 1
 DEFAULT_TORCH_JOBS = 1
 DEFAULT_RESOURCE_PROFILE = "local_safe"
 THREAD_ENV_VARS = (
@@ -37,6 +39,25 @@ def apply_model_search_resource_config(config: ModelSearchResourceConfig) -> dic
     return resource_payload(selected)
 
 
+def resource_config_from_job(
+    base: ModelSearchResourceConfig,
+    job: dict[str, Any],
+) -> ModelSearchResourceConfig:
+    return validated_resource_config(
+        ModelSearchResourceConfig(
+            resource_profile=str(job.get("resource_profile") or base.resource_profile),
+            internal_threads=_int_resource_value(job, "internal_threads", base.internal_threads),
+            parallel_workers=_int_resource_value(job, "parallel_workers", base.parallel_workers),
+            xgboost_process_workers=_int_resource_value(
+                job,
+                "xgboost_process_workers",
+                base.xgboost_process_workers,
+            ),
+            torch_jobs=base.torch_jobs,
+        )
+    )
+
+
 def validated_resource_config(config: ModelSearchResourceConfig) -> ModelSearchResourceConfig:
     if config.internal_threads <= 0:
         raise ValueError("internal_threads must be positive")
@@ -53,6 +74,11 @@ def validated_resource_config(config: ModelSearchResourceConfig) -> ModelSearchR
         xgboost_process_workers=int(config.xgboost_process_workers),
         torch_jobs=int(config.torch_jobs),
     )
+
+
+def _int_resource_value(job: dict[str, Any], key: str, default: int) -> int:
+    value = job.get(key)
+    return int(default if value is None else value)
 
 
 def resource_payload(config: ModelSearchResourceConfig) -> dict[str, Any]:

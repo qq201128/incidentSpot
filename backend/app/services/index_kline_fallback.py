@@ -4,11 +4,11 @@ import asyncio
 import logging
 import time
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from requests.exceptions import RequestException
-from websockets.exceptions import ConnectionClosed
 
 from app.services.binance_service import fetch_index_price_klines
+from app.services.ws_client_disconnect import CLIENT_WS_GONE_EXC
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ async def send_index_rest_fallback(
                 interval,
                 reason,
             )
-    except (WebSocketDisconnect, ConnectionClosed):
+    except CLIENT_WS_GONE_EXC:
         raise
     except TimeoutError:
         _start_network_cooldown(symbol, interval)

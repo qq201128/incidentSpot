@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchFactorBacktest,
   fetchFactorDetail,
-  fetchFactorsList,
-  fetchFactorRanking,
-  requestFactorRankingRefresh,
 } from "../api/client";
 import { fetchFactorPageOverview, fetchFactorPeriodScores } from "../api/factorPageClient";
+import { useDebouncedValue, useFactorsList } from "./useFactorList";
+import { useFactorRanking } from "./useFactorRanking";
 
 const DEFAULT_SYMBOL = "BTCUSDT";
 const DEFAULT_DURATION = "10m";
 const MIN_SYMBOL_LENGTH = 6;
-const RANKING_DEBOUNCE_MS = 320;
-const RANKING_REFRESH_DELAY_MS = 2500;
-const LIST_DEBOUNCE_MS = 280;
 
 export function useFactorsPageData() {
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
@@ -40,7 +36,7 @@ export function useFactorsPageData() {
   const detail = useFactorDetail(selectedName, symbol, duration);
   const previewMetrics = usePreviewMetrics(selectedName, symbol, previewDuration);
   const ranking = useFactorRanking({ category, duration, symbol });
-  const debouncedQuery = useDebouncedValue(query, LIST_DEBOUNCE_MS);
+  const debouncedQuery = useDebouncedValue(query);
 
   const selectedFactor = useMemo(() => {
     if (!selectedName) return null;
@@ -59,6 +55,10 @@ export function useFactorsPageData() {
   useEffect(() => {
     setListPage(1);
   }, [category, debouncedQuery, listTab, listPageSize]);
+
+  useEffect(() => {
+    if (list.page !== listPage) setListPage(list.page);
+  }, [list.page, listPage]);
 
   useEffect(() => {
     const first = list.factors[0]?.name;
@@ -151,12 +151,14 @@ export function useFactorsPageData() {
       setListTab,
       setPreviewDuration,
       setQuery,
+      setRankingPage: ranking.setPage,
+      setRankingQuery: ranking.setQuery,
       setSelectedName,
       setSymbol,
     },
     animationKeys: {
       listKey: `${list.factors.length}:${listTab}:${listPage}:${debouncedQuery}:${category}`,
-      rankingKey: `${ranking.items.length}:${ranking.status}`,
+      rankingKey: `${ranking.items.length}:${ranking.status}:${ranking.page}:${ranking.query}`,
     },
     state: {
       alerts: overview?.alerts ?? [],
@@ -190,83 +192,6 @@ export function useFactorsPageData() {
       symbol,
       total: list.total,
     },
-  };
-}
-
-function useDebouncedValue(value, delayMs) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [delayMs, value]);
-  return debounced;
-}
-
-function useFactorsList({ category, kind, listPage, listPageSize, query, reloadKey }) {
-  const debouncedQuery = useDebouncedValue(query, LIST_DEBOUNCE_MS);
-  const [status, setStatus] = useState("加载中…");
-  const [factors, setFactors] = useState([]);
-  const [comboFactors, setComboFactors] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [comboTotal, setComboTotal] = useState(0);
-  const [listTotal, setListTotal] = useState(0);
-  const [pageCount, setPageCount] = useState(1);
-  const [sourceSummary, setSourceSummary] = useState({});
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("加载中…");
-    fetchFactorsList({
-      category: category || undefined,
-      kind,
-      q: debouncedQuery.trim() || undefined,
-      page: listPage,
-      pageSize: listPageSize,
-    })
-      .then((data) => {
-        if (cancelled) return;
-        setFactors(Array.isArray(data.factors) ? data.factors : []);
-        setComboFactors(Array.isArray(data.comboFactors) ? data.comboFactors : []);
-        setCategories(Array.isArray(data.categories) ? data.categories : []);
-        setTotal(data.total ?? 0);
-        setComboTotal(data.comboTotal ?? 0);
-        setListTotal(data.listTotal ?? data.factors?.length ?? 0);
-        setPageCount(data.pageCount ?? 1);
-        setSourceSummary(data.sourceSummary ?? {});
-        setStatus(
-          kind === "combo"
-            ? `已加载组合因子 ${data.listTotal ?? 0} 条`
-            : `已加载单因子 ${data.total ?? 0} 条`,
-        );
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setStatus(`列表失败：${error.message}`);
-        setCategories([]);
-        setFactors([]);
-        setComboFactors([]);
-        setTotal(0);
-        setComboTotal(0);
-        setListTotal(0);
-        setPageCount(1);
-        setSourceSummary({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [category, debouncedQuery, kind, listPage, listPageSize, reloadKey]);
-
-  return {
-    categories,
-    comboFactors,
-    comboTotal,
-    factors,
-    listTotal,
-    pageCount,
-    sourceSummary,
-    status,
-    total,
   };
 }
 
@@ -396,109 +321,6 @@ function rankingRowToFactorSnapshot(row) {
     name,
     displayName: row.displayName || row.factorDisplayName || row.description,
   };
-}
-
-function useFactorRanking({ category, duration, symbol }) {
-  const [items, setItems] = useState([]);
-  const [status, setStatus] = useState("");
-  const abortRef = useRef(null);
-  const seqRef = useRef(0);
-  const loadRef = useRef(async () => {});
-
-  const load = useCallback(async () => {
-    const seq = ++seqRef.current;
-    const sym = normalizeSymbol(symbol);
-    if (!validateRankingSymbol({ seq, seqRef, setItems, setStatus, sym })) return;
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setStatus("加载排名缓存…");
-    setItems([]);
-    try {
-      const data = await fetchFactorRanking(sym, duration, category || undefined, { signal: ac.signal });
-      if (seqRef.current !== seq || ac.signal.aborted) return;
-      setItems(
-        (Array.isArray(data.ranking) ? data.ranking : []).map((row) => ({
-          ...row,
-          duration: data.duration || duration,
-        })),
-      );
-      setStatus(formatRankingStatus(data, sym, duration));
-    } catch (error) {
-      if (isAbortError(error, ac.signal) || seqRef.current !== seq) return;
-      setStatus(`排名失败：${error.message}`);
-    }
-  }, [category, duration, symbol]);
-
-  loadRef.current = load;
-  useDebouncedRankingLoad({ category, duration, loadRef, setItems, setStatus, symbol });
-  const requestRefresh = useRankingRefresh({ loadRef, setStatus, symbol });
-  return { items, requestRefresh, status };
-}
-
-function useDebouncedRankingLoad({ category, duration, loadRef, setItems, setStatus, symbol }) {
-  useEffect(() => {
-    const sym = normalizeSymbol(symbol);
-    if (sym.length < MIN_SYMBOL_LENGTH) {
-      setStatus("请输入有效交易对（如 BTCUSDT）");
-      setItems([]);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void loadRef.current();
-    }, RANKING_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [category, duration, loadRef, setItems, setStatus, symbol]);
-}
-
-function useRankingRefresh({ loadRef, setStatus, symbol }) {
-  return useCallback(async () => {
-    const sym = normalizeSymbol(symbol);
-    if (sym.length < MIN_SYMBOL_LENGTH) {
-      setStatus("请输入有效交易对（如 BTCUSDT）");
-      return;
-    }
-    try {
-      setStatus("已排队后台重算，请稍候…");
-      await requestFactorRankingRefresh(sym);
-      window.setTimeout(() => {
-        void loadRef.current();
-      }, RANKING_REFRESH_DELAY_MS);
-    } catch (error) {
-      setStatus(`排队刷新失败：${error.message}`);
-    }
-  }, [loadRef, setStatus, symbol]);
-}
-
-function validateRankingSymbol({ seq, seqRef, setItems, setStatus, sym }) {
-  if (sym.length >= MIN_SYMBOL_LENGTH) return true;
-  if (seqRef.current === seq) {
-    setStatus("请输入有效交易对（如 BTCUSDT）");
-    setItems([]);
-  }
-  return false;
-}
-
-function formatRankingStatus(data, sym, duration) {
-  if (data.source === "none") {
-    return formatEmptyRankingStatus(data, sym, duration);
-  }
-  const src = data.source === "cache" ? "后台缓存" : "无缓存";
-  const when = data.updatedAt ? ` · 更新 ${data.updatedAt}` : "";
-  return `排名：${data.total ?? 0} 个因子（${sym} / ${duration} · ${src}${when}）`;
-}
-
-function formatEmptyRankingStatus(data, sym, duration) {
-  const extra = Array.isArray(data.precomputedSymbols)
-    ? `预计算交易对：${data.precomputedSymbols.join(", ")}。`
-    : "";
-  return `暂无该组合的排名缓存（${sym} / ${duration}）。${extra}`;
-}
-
-function isAbortError(error, signal) {
-  return error?.code === "ERR_CANCELED" || error?.code === "ECONNABORTED" || error?.name === "CanceledError" || signal.aborted;
 }
 
 function normalizeSymbol(symbol) {

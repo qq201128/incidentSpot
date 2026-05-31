@@ -82,6 +82,8 @@ def reset_sql() -> str:
     SET status = ?, stage = ?, started_at = NULL, finished_at = NULL,
         heartbeat_at = NULL, artifact_path = NULL, metrics_json = NULL,
         training_report_json = NULL, failure_type = NULL, failure_reason = NULL,
-        rejection_reason = NULL, failure_context_json = NULL, log_path = NULL
+        rejection_reason = NULL, failure_context_json = NULL, log_path = NULL,
+        resource_profile = ?, internal_threads = ?, parallel_workers = ?,
+        xgboost_process_workers = ?, reset_history = ?
     WHERE job_id = ?
     """

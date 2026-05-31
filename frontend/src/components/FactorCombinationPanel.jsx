@@ -12,6 +12,7 @@ import "./FactorCombinationPanel.css";
 
 const TOP_PER_DURATION = 3;
 const SIGNAL_LIMIT = 12;
+const RANKING_PAGE_SIZE = 6;
 const REFRESH_RELOAD_DELAY_MS = 3000;
 const DURATION_LABELS = { "10m": "10 分钟", "30m": "30 分钟", "60m": "60 分钟", "1d": "1 天" };
 const SIGNAL_IDLE_STATUS = "等待加载周期信号…";
@@ -24,12 +25,25 @@ export default function FactorCombinationPanel({ symbol, duration }) {
 function useFactorCombinationData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [rankingState, setRankingState] = useState(initialRankingState);
+  const [rankingPage, setRankingPage] = useState(1);
+  const [rankingQuery, setRankingQuery] = useState("");
   const [baseSummary, setBaseSummary] = useState("");
   const [signalState, setSignalState] = useState(initialSignalState);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingSignals, setLoadingSignals] = useState(false);
   const signalAbortRef = useRef(null);
-  const loadRanking = useRankingLoader({ duration, setBaseSummary, setRankingState, symbol: normalizedSymbol });
+  const loadRanking = useRankingLoader({
+    duration,
+    page: rankingPage,
+    query: rankingQuery,
+    setBaseSummary,
+    setRankingState,
+    symbol: normalizedSymbol,
+  });
+
+  useEffect(() => {
+    setRankingPage(1);
+  }, [duration, normalizedSymbol, rankingQuery]);
 
   useRankingEffect(loadRanking);
   useResetSignalState({ setLoadingSignals, setSignalState, signalAbortRef, symbol: normalizedSymbol });
@@ -53,10 +67,14 @@ function useFactorCombinationData(symbol, duration) {
     symbol: normalizedSymbol,
     baseSummary,
     rankingState,
+    rankingPage,
+    rankingQuery,
     signalState,
     refreshing,
     loadingSignals,
     onLoadSignals: () => void loadSignals(),
+    onRankingPageChange: setRankingPage,
+    onRankingQueryChange: setRankingQuery,
     onRefreshCurrent: () => void refresh(duration),
     onRefreshAll: () => void refresh(undefined),
   };
@@ -88,7 +106,7 @@ function useAutoSignalLoad(loadSignals) {
   }, [loadSignals]);
 }
 
-function useRankingLoader({ duration, setBaseSummary, setRankingState, symbol }) {
+function useRankingLoader({ duration, page, query, setBaseSummary, setRankingState, symbol }) {
   return useCallback(async (signal) => {
     if (!isValidSymbol(symbol)) {
       setBaseSummary("");
@@ -96,8 +114,16 @@ function useRankingLoader({ duration, setBaseSummary, setRankingState, symbol })
       return;
     }
     setRankingState((state) => ({ ...state, status: "加载多因子组合缓存…" }));
-    await loadRankingState({ duration, setBaseSummary, setState: setRankingState, signal, symbol });
-  }, [duration, setBaseSummary, setRankingState, symbol]);
+    await loadRankingState({
+      duration,
+      page,
+      query,
+      setBaseSummary,
+      setState: setRankingState,
+      signal,
+      symbol,
+    });
+  }, [duration, page, query, setBaseSummary, setRankingState, symbol]);
 }
 
 function useRefreshHandler({ loadRanking, loadSignals, setRankingState, setRefreshing, symbol }) {
@@ -133,9 +159,14 @@ function useSignalLoader({ symbol, signalAbortRef, setLoadingSignals, setSignalS
   }, [setLoadingSignals, setSignalState, signalAbortRef, symbol]);
 }
 
-async function loadRankingState({ symbol, duration, signal, setBaseSummary, setState }) {
+async function loadRankingState({ symbol, duration, page, query, signal, setBaseSummary, setState }) {
   try {
-    const data = await fetchFactorCombinationRanking(symbol, duration, { signal });
+    const data = await fetchFactorCombinationRanking(symbol, duration, {
+      page,
+      pageSize: RANKING_PAGE_SIZE,
+      q: query.trim(),
+      signal,
+    });
     if (signal.aborted) return;
     const items = Array.isArray(data.ranking) ? data.ranking : [];
     const highWinrateItems = Array.isArray(data.highWinrateRanking) ? data.highWinrateRanking : [];
@@ -147,6 +178,11 @@ async function loadRankingState({ symbol, duration, signal, setBaseSummary, setS
       dataCoverage: data.dataCoverage || null,
       status: rankingStatus(data, symbol, duration),
       updatedAt: data.updatedAt,
+      page: data.page ?? page,
+      pageCount: data.pageCount ?? 1,
+      pageSize: data.pageSize ?? RANKING_PAGE_SIZE,
+      total: data.total ?? items.length,
+      unfilteredTotal: data.unfilteredTotal ?? data.total ?? items.length,
     });
   } catch (error) {
     if (isCanceled(error, signal)) return;
@@ -212,7 +248,14 @@ function ComboPanelView(props) {
       <FactorCombinationRankingTable
         highWinrateRanking={props.rankingState.highWinrateItems}
         highWinrateSummary={props.rankingState.highWinrateSummary}
+        onPageChange={props.onRankingPageChange}
+        onQueryChange={props.onRankingQueryChange}
+        page={props.rankingState.page}
+        pageCount={props.rankingState.pageCount}
+        query={props.rankingQuery}
         ranking={props.rankingState.items}
+        total={props.rankingState.total}
+        unfilteredTotal={props.rankingState.unfilteredTotal}
       />
     </section>
   );
@@ -369,6 +412,11 @@ function initialRankingState() {
     dataCoverage: null,
     status: "",
     updatedAt: null,
+    page: 1,
+    pageCount: 1,
+    pageSize: RANKING_PAGE_SIZE,
+    total: 0,
+    unfilteredTotal: 0,
   };
 }
 

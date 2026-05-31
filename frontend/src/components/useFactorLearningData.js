@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  DEFAULT_MODEL_SEARCH_RESOURCE,
   fetchFactorLearningMemory,
   fetchFactorLearningOperators,
   fetchModelFamilyStatus,
@@ -163,21 +164,18 @@ function useStartModelSearch({ duration, normalizedSymbol, setLstmSearchState, s
     }
     setLstmSearchState({ status: "running", family, resetHistory: Boolean(options.resetHistory) });
     try {
+      const searchOptions = {
+        ...DEFAULT_MODEL_SEARCH_RESOURCE,
+        resetHistory: Boolean(options.resetHistory),
+      };
       if (family === "__all__") {
         await Promise.all(
           MODEL_FAMILIES.map((item) =>
-            requestModelCandidateSearch(item, normalizedSymbol, duration, "full", 10, Boolean(options.resetHistory)),
+            requestModelCandidateSearch(item, normalizedSymbol, duration, "full", searchOptions),
           ),
         );
       } else {
-        await requestModelCandidateSearch(
-          family,
-          normalizedSymbol,
-          duration,
-          "full",
-          10,
-          Boolean(options.resetHistory),
-        );
+        await requestModelCandidateSearch(family, normalizedSymbol, duration, "full", searchOptions);
       }
       const data = await fetchAllModelStatuses(normalizedSymbol, duration);
       setLstmState({ data, status: modelStatusesText(data) });

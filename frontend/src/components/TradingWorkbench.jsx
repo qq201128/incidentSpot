@@ -13,9 +13,11 @@ export default function TradingWorkbench(props) {
   const chartUi = useKlineChartUi();
   const [ensembleReloadKey, setEnsembleReloadKey] = useState(0);
   const [recordsPage, setRecordsPage] = useState(1);
+  const [compactRecordsPage, setCompactRecordsPage] = useState(1);
 
   useEffect(() => {
     setRecordsPage(1);
+    setCompactRecordsPage(1);
   }, [props.symbol]);
 
   return (
@@ -88,8 +90,8 @@ export default function TradingWorkbench(props) {
           <EventRecordsTable
             symbol={props.symbol}
             compact
-            page={recordsPage}
-            onPageChange={setRecordsPage}
+            page={compactRecordsPage}
+            onPageChange={setCompactRecordsPage}
             reloadKey={props.recordsReloadKey}
             ensembleReloadKey={ensembleReloadKey}
           />

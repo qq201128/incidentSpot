@@ -20,6 +20,7 @@ from app.services.model_family_config import (
 )
 from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_family_status_service import model_family_status
+from app.services import model_family_status_service
 from app.services.model_family_training_service import train_model_family
 from app.services.model_family_training_payloads import backend_options
 from app.services.model_family_prediction_service import _prediction_payload, _signal_payload
@@ -93,6 +94,26 @@ def test_models_route_is_family_scoped_and_lstm_alias_is_removed(monkeypatch) ->
     assert "/api/lstm/status" not in app_paths
 
 
+def test_model_train_route_normalizes_query_defaults(monkeypatch) -> None:
+    captured = {}
+
+    def fake_train(config, *, publish_initial_baseline):
+        captured["config"] = config
+        captured["publish_initial_baseline"] = publish_initial_baseline
+        return {"status": "trained", "duration": config.duration}
+
+    monkeypatch.setattr(models_api, "train_model_family", fake_train)
+
+    response = models_api.model_train("knn", symbol="btcusdt")
+
+    config = captured["config"]
+    assert response["duration"] == "10m"
+    assert config.family == "knn"
+    assert config.symbol == "BTCUSDT"
+    assert config.duration == "10m"
+    assert captured["publish_initial_baseline"] is True
+
+
 def test_validation_gate_requires_win_rate_above_62() -> None:
     metrics = {
         "confidenceThresholds": [
@@ -145,6 +166,88 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
     assert status["realTradingEnabled"] is False
 
 
+def test_model_family_status_reflects_queued_search_job(monkeypatch) -> None:
+    _patch_untrained_model_status(monkeypatch)
+    monkeypatch.setattr(
+        model_family_status_service,
+        "list_model_search_jobs",
+        lambda _filters: [
+            {
+                "job_id": "job-1",
+                "status": "pending",
+                "profile": "full",
+                "created_at": "2026-05-31T00:00:00+00:00",
+                "parallel_workers": 4,
+                "internal_threads": 2,
+                "xgboost_process_workers": 1,
+            }
+        ],
+    )
+
+    status = model_family_status("knn", "BTCUSDT", "10m")
+
+    progress = status["candidateSearchProgress"]
+    assert progress["status"] == "queued"
+    assert progress["modelSearchJob"]["job_id"] == "job-1"
+    assert progress["searchSpaceTotal"] == model_family_training_rules("knn")["searchSpaceTotal"]
+    assert progress["total"] == model_family_training_rules("knn")["searchSpaceTotal"]
+    assert progress["parallelWorkers"] == 4
+    assert progress["internalThreads"] == 2
+
+
+def test_model_family_status_prefers_running_job_over_newer_pending_job(monkeypatch) -> None:
+    _patch_untrained_model_status(monkeypatch)
+    monkeypatch.setattr(
+        model_family_status_service,
+        "list_model_search_jobs",
+        lambda _filters: [
+            {
+                "job_id": "job-pending",
+                "status": "pending",
+                "profile": "full",
+                "created_at": "2026-05-31T00:05:00+00:00",
+                "parallel_workers": 4,
+                "internal_threads": 2,
+                "xgboost_process_workers": 1,
+            },
+            {
+                "job_id": "job-running",
+                "status": "running",
+                "profile": "full",
+                "created_at": "2026-05-31T00:00:00+00:00",
+                "started_at": "2026-05-31T00:01:00+00:00",
+                "parallel_workers": 8,
+                "internal_threads": 3,
+                "xgboost_process_workers": 1,
+            },
+        ],
+    )
+
+    status = model_family_status("knn", "BTCUSDT", "10m")
+
+    progress = status["candidateSearchProgress"]
+    assert progress["status"] == "running"
+    assert progress["modelSearchJob"]["job_id"] == "job-running"
+    assert progress["parallelWorkers"] == 8
+    assert progress["internalThreads"] == 3
+
+
+def _patch_untrained_model_status(monkeypatch) -> None:
+    monkeypatch.setattr(model_family_status_service, "read_json", lambda *_args: None)
+    monkeypatch.setattr(model_family_status_service, "required_artifacts_exist", lambda _paths: False)
+    monkeypatch.setattr(
+        model_family_status_service,
+        "read_model_candidate_progress",
+        lambda *_args, **_kwargs: {"status": "idle", "total": 0},
+    )
+    monkeypatch.setattr(
+        model_family_status_service,
+        "model_candidate_library_summary",
+        lambda *_args, **_kwargs: {"total": 0},
+    )
+    monkeypatch.setattr(model_family_status_service, "current_combo_snapshot", lambda *_args: [])
+
+
 def test_each_model_family_has_successive_halving_training_rules() -> None:
     families = (
         "lstm",
@@ -169,6 +272,9 @@ def test_each_model_family_has_successive_halving_training_rules() -> None:
     assert all([stage["stage"] for stage in rule["successiveHalving"]] == ["coarse", "full", "walk_forward"] for rule in rules)
     assert all(rule["targetWinRateExclusive"] == 0.62 for rule in rules)
     assert all(rule["searchSpaceTotal"] > 0 for rule in rules)
+    assert all(rule["internalThreads"] == 4 for rule in rules)
+    assert all(rule["parallelWorkers"] == 10 for rule in rules)
+    assert all(rule["xgboostProcessWorkers"] == 1 for rule in rules)
     lstm_rules = model_family_training_rules("lstm")
     transformer_rules = model_family_training_rules("transformer")
     assert lstm_rules["searchSpaceTotal"] == 900

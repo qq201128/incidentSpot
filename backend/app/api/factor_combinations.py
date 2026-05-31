@@ -24,30 +24,56 @@ router = APIRouter(prefix="/api/factors/combinations", tags=["factors"])
 logger = logging.getLogger("uvicorn.error")
 DEFAULT_COMBO_TOP_PER_DURATION = 3
 DEFAULT_COMBO_SIGNAL_LIMIT = 12
+DEFAULT_RANKING_PAGE_SIZE = 6
+MAX_RANKING_PAGE_SIZE = 100
 BACKGROUND_REFRESH_LOOP = "factor_combo_daily"
+
+
+def _query_str(value: object, default: str | None = None) -> str | None:
+    return value if isinstance(value, str) else default
+
+
+def _query_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 @router.get("/ranking")
 def factor_combination_ranking(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
+    q: str | None = Query(None, description="search combo name/member/display name"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_RANKING_PAGE_SIZE, alias="pageSize", ge=1, le=MAX_RANKING_PAGE_SIZE),
 ) -> dict:
-    _validate_duration(duration)
+    safe_duration = _query_str(duration, "10m") or "10m"
+    _validate_duration(safe_duration)
     sym_u = symbol.upper()
-    cached = get_cached_combination_ranking(sym_u, duration)
-    high_winrate_view = _high_winrate_view(sym_u, duration)
+    query = _query_str(q)
+    safe_page = _query_int(page) or 1
+    safe_page_size = _query_int(page_size) or DEFAULT_RANKING_PAGE_SIZE
+    cached = get_cached_combination_ranking(sym_u, safe_duration)
+    high_winrate_view = _high_winrate_view(sym_u, safe_duration)
     if cached is None:
-        return {**_empty_combination_ranking(sym_u, duration), **high_winrate_view}
+        return {
+            **_empty_combination_ranking(sym_u, safe_duration),
+            **_paginated_ranking_payload([], query, safe_page, safe_page_size),
+            **high_winrate_view,
+        }
     if not cache_is_usable(cached):
-        return {**_stale_combination_ranking(sym_u, duration, cached), **high_winrate_view}
+        return {
+            **_stale_combination_ranking(sym_u, safe_duration, cached),
+            **_paginated_ranking_payload(_stale_regular_rows(cached), query, safe_page, safe_page_size),
+            **high_winrate_view,
+        }
     ranking = regular_ranking_view(_regular_ranking_rows(cached))
     visibility = _ranking_visibility(cached, ranking)
+    page_payload = _paginated_ranking_payload(ranking, query, safe_page, safe_page_size)
     return {
         **cached,
-        "ranking": ranking,
-        "regularRanking": ranking,
-        "total": len(ranking),
+        "ranking": page_payload["ranking"],
+        "total": page_payload["total"],
         "source": "cache",
+        **page_payload,
         **visibility,
         **high_winrate_view,
     }
@@ -62,8 +88,8 @@ def factor_combination_signals(
     try:
         return build_combination_signal_watchlist(
             symbol.upper(),
-            limit=limit,
-            top_per_duration=top_per_duration,
+            limit=_query_int(limit),
+            top_per_duration=_query_int(top_per_duration),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -74,8 +100,9 @@ def paper_live_candidates(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
 ) -> dict:
-    _validate_duration(duration)
-    return paper_live_candidate_report(symbol.upper(), duration)
+    safe_duration = _query_str(duration, "10m") or "10m"
+    _validate_duration(safe_duration)
+    return paper_live_candidate_report(symbol.upper(), safe_duration)
 
 
 @router.post("/paper-live/daily-loop")
@@ -83,9 +110,11 @@ def paper_live_daily_loop(
     symbol: str | None = Query(None, min_length=6),
     duration: str | None = Query(None),
 ) -> dict:
-    _validate_optional_duration(duration)
-    symbols = [symbol.upper()] if symbol else None
-    durations = [duration] if duration else None
+    safe_symbol = _query_str(symbol)
+    safe_duration = _query_str(duration)
+    _validate_optional_duration(safe_duration)
+    symbols = [safe_symbol.upper()] if safe_symbol else None
+    durations = [safe_duration] if safe_duration else None
     return run_paper_live_daily_closed_loop(symbols=symbols, durations=durations)
 
 
@@ -100,20 +129,21 @@ def factor_combination_refresh(
     combo_sizes: str | None = Query(None, alias="comboSizes"),
     result_limit: int | None = Query(None, alias="resultLimit"),
 ) -> dict:
-    _validate_optional_duration(duration)
+    safe_duration = _query_str(duration)
+    _validate_optional_duration(safe_duration)
     sym_u = symbol.upper()
     config = _combination_config(
-        profile=profile,
-        base_factor_limit=base_factor_limit,
-        combo_sizes=combo_sizes,
-        result_limit=result_limit,
+        profile=_query_str(profile, "full") or "full",
+        base_factor_limit=_query_int(base_factor_limit),
+        combo_sizes=_query_str(combo_sizes),
+        result_limit=_query_int(result_limit),
     )
-    background_tasks.add_task(_background_refresh_combo_rankings, sym_u, duration, config)
+    background_tasks.add_task(_background_refresh_combo_rankings, sym_u, safe_duration, config)
     return {
         "ok": True,
         "symbol": sym_u,
-        "duration": duration,
-        "profile": normalize_experiment_profile(profile),
+        "duration": safe_duration,
+        "profile": normalize_experiment_profile(_query_str(profile, "full") or "full"),
         "searchConfig": _config_response(config),
         "message": "已排队后台重算多因子组合并写入缓存。",
     }
@@ -136,13 +166,11 @@ def _empty_combination_ranking(symbol: str, duration: str) -> dict:
 
 
 def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict:
-    ranking = regular_ranking_view(_regular_ranking_rows(cached))
+    ranking = _stale_regular_rows(cached)
     visibility = _ranking_visibility(cached, ranking)
     return {
         "symbol": symbol,
         "duration": duration,
-        "ranking": ranking,
-        "regularRanking": ranking,
         "total": len(ranking),
         "updatedAt": cached.get("updatedAt"),
         "source": "stale_cache",
@@ -151,6 +179,10 @@ def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict
         "precomputedSymbols": factor_ranking_precomputed_symbols(),
         "hint": "多因子组合缓存对应的历史数据已变化或缺少数据指纹；当前展示旧缓存，请刷新重算后再用于实盘判断。",
     }
+
+
+def _stale_regular_rows(cached: dict) -> list[dict]:
+    return regular_ranking_view(_regular_ranking_rows(cached))
 
 
 def _high_winrate_view(symbol: str, duration: str) -> dict:
@@ -200,6 +232,57 @@ def _ranking_visibility(cached: dict, ranking: list[dict]) -> dict[str, int]:
 def _ranking_rows(cached: dict) -> list[dict]:
     ranking = cached.get("ranking")
     return list(ranking) if isinstance(ranking, list) else []
+
+
+def _paginated_ranking_payload(
+    ranking: list[dict],
+    query: str | None,
+    page: int,
+    page_size: int,
+) -> dict:
+    filtered = _filter_ranking_rows(ranking, query)
+    size = max(1, min(int(page_size), MAX_RANKING_PAGE_SIZE))
+    page_count = max(1, (len(filtered) + size - 1) // size) if filtered else 1
+    current = min(max(1, int(page)), page_count)
+    start = (current - 1) * size
+    return {
+        "ranking": filtered[start:start + size],
+        "total": len(filtered),
+        "unfilteredTotal": len(ranking),
+        "page": current,
+        "pageSize": size,
+        "pageCount": page_count,
+        "query": (query or "").strip(),
+    }
+
+
+def _filter_ranking_rows(ranking: list[dict], query: str | None) -> list[dict]:
+    q = (query or "").strip().lower()
+    if not q:
+        return list(ranking)
+    return [row for row in ranking if _ranking_row_matches(row, q)]
+
+
+def _ranking_row_matches(row: dict, query: str) -> bool:
+    haystack = " ".join(
+        [
+            str(row.get("factorName") or ""),
+            str(row.get("factorDisplayName") or ""),
+            str(row.get("description") or ""),
+            _member_search_text(row.get("members")),
+        ]
+    ).lower()
+    return query in haystack
+
+
+def _member_search_text(members: object) -> str:
+    if not isinstance(members, list):
+        return ""
+    return " ".join(
+        f"{member.get('name', '')} {member.get('displayName', '')}"
+        for member in members
+        if isinstance(member, dict)
+    )
 
 
 def _has_combo_member(row: dict) -> bool:

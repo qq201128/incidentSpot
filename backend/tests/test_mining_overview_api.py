@@ -3,27 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
-from app.api.mining import router as mining_router
-from app.main import app
+from app.api import mining as mining_api
 from app.services import factor_learning_memory_store
 
 
 @pytest.fixture()
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def isolated_memory_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(factor_learning_memory_store, "FACTOR_LEARNING_DIR", tmp_path)
-    if "/api/mining/overview" not in {getattr(route, "path", "") for route in app.routes}:
-        app.include_router(mining_router)
-    return TestClient(app)
+    return tmp_path
 
 
-def test_mining_overview_returns_404_without_memory(client: TestClient) -> None:
-    response = client.get("/api/mining/overview", params={"symbol": "BTCUSDT", "duration": "10m"})
-    assert response.status_code == 404
+def test_mining_overview_returns_404_without_memory(isolated_memory_dir: Path) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        mining_api.get_mining_overview(symbol="BTCUSDT", duration="10m", fresh=True)
+    assert exc_info.value.status_code == 404
 
 
-def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_memory(symbol: str, duration: str) -> dict:
         return {
             "symbol": symbol,
@@ -43,6 +41,14 @@ def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("app.services.mining_overview_service.get_factor_learning_memory", fake_memory)
     monkeypatch.setattr(
+        "app.services.mining_overview_service.model_search_queue_status",
+        lambda _filters: {
+            "counts": {"pending": 2, "running": 0},
+            "runningJobs": [],
+            "latestLogPath": None,
+        },
+    )
+    monkeypatch.setattr(
         "app.services.mining_overview_service.model_family_status",
         lambda family, symbol, duration, **_kwargs: {
             "modelFamily": family,
@@ -54,11 +60,34 @@ def test_mining_overview_shape(client: TestClient, monkeypatch: pytest.MonkeyPat
             "trainingRules": {"searchSpaceTotal": 10},
         },
     )
-    response = client.get("/api/mining/overview", params={"symbol": "BTCUSDT", "duration": "10m", "fresh": "true"})
-    assert response.status_code == 200
-    payload = response.json()
+    payload = mining_api.get_mining_overview(symbol="BTCUSDT", duration="10m", fresh=True)
     assert payload["summary"]["overallAccuracy"] == 0.64
     assert payload["trainingRules"]["targetWinRateExclusive"] == 0.62
+    assert payload["trainingRules"]["internalThreads"] == 4
+    assert payload["trainingRules"]["parallelWorkers"] == 10
+    assert payload["trainingRules"]["xgboostProcessWorkers"] == 1
     assert "> 62%" in payload["trainingRules"]["text"]
+    assert payload["trainingRules"]["workerStatus"]["state"] == "worker_required"
+    assert payload["summary"]["searchPendingCount"] == 2
     assert len(payload["models"]) == 14
     assert payload["agentCandidates"][0]["factorName"]
+
+
+def test_mining_overview_model_card_treats_combo_mismatch_as_ready() -> None:
+    from app.services.mining_overview_service import _model_card
+
+    card = _model_card(
+        {
+            "modelFamily": "knn",
+            "strategyKey": "factor_knn_shadow_10m",
+            "status": "shadow_active",
+            "shadowPredictionReady": False,
+            "shadowPredictionBlockedReason": "combo_snapshot_mismatch",
+            "candidateSearchProgress": {"status": "idle"},
+            "candidateLibrary": {"total": 0},
+            "trainingRules": {"searchSpaceTotal": 24},
+        }
+    )
+
+    assert card["cardState"] == "ready"
+    assert card["predictionReadyLabel"] == "就绪"

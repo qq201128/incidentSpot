@@ -58,6 +58,17 @@ def test_list_events_orders_view_filters_to_rows_with_orders(monkeypatch) -> Non
     assert result["items"][0]["orderSide"] is not None
 
 
+def test_list_events_route_normalizes_optional_query_defaults(monkeypatch) -> None:
+    conn = _memory_conn()
+    _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
+    monkeypatch.setattr(events, "get_conn", lambda: conn)
+
+    result = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="events")
+
+    assert result["total"] == 1
+    assert result["items"][0]["symbol"] == "BTCUSDT"
+
+
 def _memory_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row

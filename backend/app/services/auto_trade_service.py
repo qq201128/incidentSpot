@@ -21,6 +21,8 @@ from app.services.auto_trade_settings_payloads import (
     write_settings as _write_settings,
 )
 from app.services.auto_trade_settings_validation import validated_auto_trade_settings
+from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
+from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
@@ -67,7 +69,9 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
         rows = conn.execute("SELECT * FROM auto_trade_strategies").fetchall()
         by_slot = _settings_by_slot(rows)
         symbols = configured_runtime_symbols()
-        result = _strategy_slot_settings(by_slot, symbols)
+        static_keys = _strategy_slot_keys(symbols)
+        result = _strategy_slot_settings(by_slot, static_keys)
+        result.extend(_dynamic_simulation_settings(rows, set(static_keys)))
         result.extend(_ensemble_ranker_settings(conn, by_slot, symbols))
         return result
     finally:
@@ -224,13 +228,20 @@ def _settings_by_slot(rows) -> dict[tuple[str, str, str], Any]:
     return {(str(r["strategy_key"]), str(r["symbol"]).upper(), str(r["duration"])): r for r in rows}
 
 
-def _strategy_slot_settings(by_slot: dict[tuple[str, str, str], Any], symbols: tuple[str, ...]) -> list[AutoTradeSettings]:
+def _strategy_slot_keys(symbols: tuple[str, ...]) -> list[tuple[str, str, str]]:
     return [
-        _slot_settings(by_slot, (str(payload["key"]), symbol, dur))
+        (str(payload["key"]), symbol, dur)
         for payload in strategy_payloads()
         for symbol in symbols
         for dur in _payload_durations(payload)
     ]
+
+
+def _strategy_slot_settings(
+    by_slot: dict[tuple[str, str, str], Any],
+    slot_keys: list[tuple[str, str, str]],
+) -> list[AutoTradeSettings]:
+    return [_slot_settings(by_slot, slot_key) for slot_key in slot_keys]
 
 
 def _slot_settings(
@@ -240,6 +251,24 @@ def _slot_settings(
     strategy_key, symbol, duration = slot_key
     row = by_slot.get(slot_key)
     return _settings_from_row(row) if row is not None else _default_settings(strategy_key, duration, symbol)
+
+
+def _dynamic_simulation_settings(rows: list[Any], static_keys: set[tuple[str, str, str]]) -> list[AutoTradeSettings]:
+    settings = [
+        _settings_from_row(row)
+        for row in rows
+        if _dynamic_simulation_slot_key(row) not in static_keys
+        and _is_dynamic_simulation_strategy(str(row["strategy_key"]))
+    ]
+    return sorted(settings, key=lambda item: (item.strategy_key, item.symbol, item.duration_minutes))
+
+
+def _dynamic_simulation_slot_key(row: Any) -> tuple[str, str, str]:
+    return (str(row["strategy_key"]), str(row["symbol"]).upper(), str(row["duration"]))
+
+
+def _is_dynamic_simulation_strategy(strategy_key: str) -> bool:
+    return is_batch_combo_simulation_strategy(strategy_key) or is_factor_candidate_signal_key(strategy_key)
 
 
 def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:

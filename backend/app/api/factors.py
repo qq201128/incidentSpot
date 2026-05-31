@@ -18,6 +18,7 @@ from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
     get_cached_ranking,
 )
+from app.services.factor_ranking_page import DEFAULT_RANKING_PAGE_SIZE, build_ranking_page
 from app.services.factor_catalog import (
     get_factor_payload_by_name,
     list_single_factor_categories,
@@ -49,6 +50,14 @@ def _ranking_sort_key(row: dict) -> tuple[float, float]:
     return (float(row.get("factorScore") or 0.0), abs(float(row.get("ir") or 0.0)))
 
 
+def _query_str(value: object, default: str | None = None) -> str | None:
+    return value if isinstance(value, str) else default
+
+
+def _query_int(value: object, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
 @router.get("/list")
 def list_factors(
     *,
@@ -58,13 +67,15 @@ def list_factors(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
 ) -> dict:
+    safe_category = _query_str(category)
+    query = _query_str(q)
     try:
         return build_factor_list_page(
-            category=category,
-            kind=kind,
-            query=q,
-            page=page,
-            page_size=page_size,
+            category=safe_category,
+            kind=_query_str(kind, "single") or "single",
+            query=query,
+            page=_query_int(page, 1),
+            page_size=_query_int(page_size, 20),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -81,17 +92,20 @@ def factor_page(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
 ) -> dict:
-    if duration not in SUPPORTED_RULE_DURATIONS:
-        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    safe_duration = _query_str(duration, "10m") or "10m"
+    safe_category = _query_str(category)
+    query = _query_str(q)
+    if safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
     try:
         return build_factor_page_bundle(
             symbol,
-            duration,
-            category=category,
-            kind=kind,
-            query=q,
-            page=page,
-            page_size=page_size,
+            safe_duration,
+            category=safe_category,
+            kind=_query_str(kind, "single") or "single",
+            query=query,
+            page=_query_int(page, 1),
+            page_size=_query_int(page_size, 20),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -103,9 +117,10 @@ def factor_overview(
     duration: str = Query("10m"),
     category: str | None = Query(None),
 ) -> dict:
-    if duration not in SUPPORTED_RULE_DURATIONS:
-        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
-    return build_factor_page_context(symbol, duration, category=category)
+    safe_duration = _query_str(duration, "10m") or "10m"
+    if safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
+    return build_factor_page_context(symbol, safe_duration, category=_query_str(category))
 
 
 @router.get("/alerts")
@@ -113,13 +128,14 @@ def factor_alerts(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
 ) -> dict:
-    if duration not in SUPPORTED_RULE_DURATIONS:
-        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    safe_duration = _query_str(duration, "10m") or "10m"
+    if safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
     sym_u = symbol.upper()
     return {
         "symbol": sym_u,
-        "duration": duration,
-        "alerts": build_factor_alerts(sym_u, duration),
+        "duration": safe_duration,
+        "alerts": build_factor_alerts(sym_u, safe_duration),
     }
 
 
@@ -143,10 +159,12 @@ def get_factor_detail(
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Factor not found: {factor_name}")
     enriched = enrich_factor_summary(payload)
-    if symbol and duration:
-        if duration not in SUPPORTED_RULE_DURATIONS:
-            raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
-        metrics = _metrics_for_factor(symbol.upper(), duration, factor_name)
+    safe_symbol = _query_str(symbol)
+    safe_duration = _query_str(duration)
+    if safe_symbol and safe_duration:
+        if safe_duration not in SUPPORTED_RULE_DURATIONS:
+            raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
+        metrics = _metrics_for_factor(safe_symbol.upper(), safe_duration, factor_name)
         if metrics:
             enriched = enrich_factor_summary(payload, metrics)
     return enriched
@@ -177,50 +195,61 @@ def factor_ranking(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     category: str | None = Query(None),
+    q: str | None = Query(None, description="search factor name/category/source"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_RANKING_PAGE_SIZE, alias="pageSize", ge=1, le=100),
 ) -> dict:
-    if duration not in SUPPORTED_RULE_DURATIONS:
-        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    safe_duration = _query_str(duration, "10m") or "10m"
+    if safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
 
     sym_u = symbol.upper()
+    safe_category = _query_str(category)
+    query = _query_str(q)
     precomputed = factor_ranking_precomputed_symbols()
-    cached = get_cached_ranking(sym_u, duration)
+    safe_page = _query_int(page, 1)
+    safe_page_size = _query_int(page_size, DEFAULT_RANKING_PAGE_SIZE)
+    cached = get_cached_ranking(sym_u, safe_duration)
 
     if cached is None:
         return {
             "symbol": sym_u,
-            "duration": duration,
-            "category": category,
-            "ranking": [],
-            "total": 0,
+            "duration": safe_duration,
+            "category": safe_category,
             "updatedAt": None,
             "source": "none",
             "precomputedSymbols": precomputed,
             "hint": "排名由后台定时写入缓存；当前交易对/周期尚无数据。可将该交易对加入 FACTOR_RANKING_SYMBOLS 或使用 POST /ranking/refresh 排队重算。",
-    }
+            **build_ranking_page([], query, safe_page, safe_page_size),
+        }
     if not cache_is_usable(cached):
         return _stale_factor_ranking(
             symbol=sym_u,
-            duration=duration,
-            category=category,
+            duration=safe_duration,
+            category=safe_category,
+            query=query,
+            page=safe_page,
+            page_size=safe_page_size,
             cached=cached,
             precomputed=precomputed,
         )
 
     full = list(cached["ranking"])
-    filtered = _filter_ranking_by_category(full, category)
+    filtered = _filter_ranking_by_category(full, safe_category)
     filtered.sort(key=_ranking_sort_key, reverse=True)
+    page_payload = build_ranking_page(filtered, query, safe_page, safe_page_size)
 
     return {
         "symbol": sym_u,
-        "duration": duration,
-        "category": category,
-        "ranking": filtered,
-        "total": len(filtered),
+        "duration": safe_duration,
+        "category": safe_category,
+        "ranking": page_payload["ranking"],
         "updatedAt": cached["updatedAt"],
         "source": "cache",
         "precomputedSymbols": precomputed,
         "rankingDiagnostics": cached.get("rankingDiagnostics") or {},
         "rankingFailures": cached.get("rankingFailures") or [],
+        **page_payload,
     }
 
 
@@ -247,14 +276,15 @@ def factor_ranking_refresh(
     symbol: str = Query(..., min_length=6),
     duration: str | None = Query(None, description="omit to refresh all supported durations"),
 ) -> dict:
-    if duration is not None and duration not in SUPPORTED_RULE_DURATIONS:
-        raise HTTPException(status_code=400, detail=f"unsupported duration: {duration}")
+    safe_duration = _query_str(duration)
+    if safe_duration is not None and safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
     sym_u = symbol.upper()
-    background_tasks.add_task(_background_refresh_rankings, sym_u, duration)
+    background_tasks.add_task(_background_refresh_rankings, sym_u, safe_duration)
     return {
         "ok": True,
         "symbol": sym_u,
-        "duration": duration,
+        "duration": safe_duration,
         "message": "已排队后台重算并写入缓存；完成后刷新页面或稍候再加载排名。",
     }
 
@@ -264,21 +294,24 @@ def _stale_factor_ranking(
     symbol: str,
     duration: str,
     category: str | None,
+    query: str | None,
+    page: int,
+    page_size: int,
     cached: dict,
     precomputed: list[str],
 ) -> dict:
+    stale_rows = _filter_ranking_by_category(list(cached.get("ranking") or []), category)
     return {
         "symbol": symbol,
         "duration": duration,
         "category": category,
-        "ranking": [],
-        "total": 0,
         "updatedAt": cached.get("updatedAt"),
         "source": "stale_cache",
         "staleRankingTotal": cached.get("total"),
         "cacheStatus": cached.get("cacheStatus"),
         "precomputedSymbols": precomputed,
         "hint": "因子排名缓存对应的历史数据已变化或缺少数据指纹；请刷新重算后再使用。",
+        **build_ranking_page(stale_rows, query, page, page_size),
     }
 
 

@@ -6,7 +6,14 @@ const COMBO_PAGE_SIZE = 6;
 export default function FactorCombinationRankingTable({
   highWinrateRanking = [],
   highWinrateSummary = null,
+  onPageChange,
+  onQueryChange,
+  page = 1,
+  pageCount = 1,
+  query = "",
   ranking,
+  total,
+  unfilteredTotal,
 }) {
   return (
     <div className="factor-combo-ranking-stack">
@@ -17,7 +24,16 @@ export default function FactorCombinationRankingTable({
         title="高胜率目标组合"
         variant="goal"
       />
-      <RankingSection emptyText="暂无普通组合" ranking={ranking} title="普通组合" variant="regular" />
+      <RegularRankingSection
+        onPageChange={onPageChange}
+        onQueryChange={onQueryChange}
+        page={page}
+        pageCount={pageCount}
+        query={query}
+        ranking={ranking}
+        total={total}
+        unfilteredTotal={unfilteredTotal}
+      />
     </div>
   );
 }
@@ -59,6 +75,45 @@ function RankingSection({ emptyText, ranking, summary = "", title, variant = "re
         <ComboPagination page={page} pageCount={pageCount} total={total} onPageChange={setPage} />
       ) : total ? (
         <p className="factor-combo-rank-total">共 {total} 条</p>
+      ) : null}
+    </section>
+  );
+}
+
+function RegularRankingSection({
+  onPageChange,
+  onQueryChange,
+  page,
+  pageCount,
+  query,
+  ranking,
+  total,
+  unfilteredTotal,
+}) {
+  const safeTotal = Number(total ?? ranking.length);
+  return (
+    <section className="factor-combo-ranking factor-combo-ranking-regular card-surface">
+      <header className="factor-combo-ranking-title">
+        <div>
+          <span className="section-kicker">排名列表</span>
+          <h3>普通组合</h3>
+        </div>
+        <span>{regularCountText(safeTotal, unfilteredTotal)}</span>
+      </header>
+      <label className="factor-combo-rank-search">
+        <span className="sr-only">搜索普通组合</span>
+        <input
+          value={query}
+          onChange={(event) => onQueryChange?.(event.target.value)}
+          placeholder="搜索组合名或成员因子"
+        />
+      </label>
+      <div className="factor-combo-rank-list">
+        {ranking.map((row, index) => renderRankingRow(row, (page - 1) * COMBO_PAGE_SIZE + index))}
+        {!safeTotal ? <p className="factor-combo-empty">暂无普通组合</p> : null}
+      </div>
+      {safeTotal ? (
+        <ComboPagination page={page} pageCount={pageCount} total={safeTotal} onPageChange={onPageChange} />
       ) : null}
     </section>
   );
@@ -133,6 +188,11 @@ function comboTypeClass(row) {
 
 function countText(count, summary) {
   return summary ? `${count} 项 · ${summary}` : `${count} 项`;
+}
+
+function regularCountText(total, unfilteredTotal) {
+  const raw = Number(unfilteredTotal ?? total);
+  return raw !== total ? `${total} / ${raw} 项` : `${total} 项`;
 }
 
 function highWinrateSummaryText(summary) {

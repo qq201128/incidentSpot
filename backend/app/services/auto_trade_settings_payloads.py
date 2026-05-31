@@ -13,6 +13,7 @@ DEFAULT_SYMBOL = DEFAULT_RUNTIME_SYMBOLS[0]
 DEFAULT_DURATION = "10m"
 DEFAULT_DURATION_MINUTES = 10
 DEFAULT_QTY = 5.0
+LIVE_TRADING_ENABLED = False
 AUTO_TRADE_SLOT_DURATIONS: tuple[str, ...] = ("10m", "30m", "60m", "1d")
 
 
@@ -45,7 +46,7 @@ def settings_from_row(row: Any) -> AutoTradeSettings:
         duration=str(row["duration"]),
         duration_minutes=int(row["duration_minutes"]),
         qty=float(row["qty"]),
-        live_trading_enabled=bool(row["live_trading_enabled"]),
+        live_trading_enabled=LIVE_TRADING_ENABLED,
     )
 
 
@@ -62,7 +63,7 @@ def default_settings(
         duration=duration,
         duration_minutes=minutes,
         qty=DEFAULT_QTY,
-        live_trading_enabled=False,
+        live_trading_enabled=LIVE_TRADING_ENABLED,
     )
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
+from app.services.ws_client_disconnect import CLIENT_WS_GONE_EXC
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.app_startup import bootstrap_application, shutdown_application
@@ -108,6 +110,8 @@ async def ws_klines(websocket: WebSocket, symbol: str = "btcusdt", interval: str
 
     try:
         await proxy_kline_stream(websocket, symbol, interval)
+    except CLIENT_WS_GONE_EXC:
+        logger.debug("kline websocket disconnected: symbol=%s interval=%s", symbol, interval)
     except Exception:
         logger.exception("kline websocket failed: symbol=%s interval=%s", symbol, interval)
 
@@ -119,7 +123,7 @@ async def ws_agg_trades(websocket: WebSocket, symbol: str = "btcusdt", limit: in
     bounded_limit = max(1, min(int(limit), 200))
     try:
         await proxy_agg_trade_stream(websocket, symbol, limit=bounded_limit)
-    except WebSocketDisconnect:
+    except CLIENT_WS_GONE_EXC:
         logger.debug("agg trade websocket disconnected: symbol=%s", symbol)
     except Exception:
         logger.exception("agg trade websocket failed: symbol=%s", symbol)
@@ -136,5 +140,9 @@ async def ws_index_klines(websocket: WebSocket, symbol: str = "btcusdt", interva
 
     try:
         await proxy_index_kline_stream(websocket, symbol, interval)
+    except CLIENT_WS_GONE_EXC:
+        logger.debug(
+            "index kline websocket disconnected: symbol=%s interval=%s", symbol, interval
+        )
     except Exception:
         logger.exception("index kline websocket failed: symbol=%s interval=%s", symbol, interval)

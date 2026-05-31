@@ -7,6 +7,8 @@ from app.services import auto_trade_service, auto_trade_status
 from app.services.runtime_symbols import configured_runtime_symbols
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.auto_trade_service import AUTO_TRADE_SLOT_DURATIONS
+from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
+from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
@@ -160,6 +162,49 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
     assert created == [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")]
 
 
+def test_list_auto_trade_settings_includes_dynamic_simulation_slots(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "slots.db"
+    conn = _auto_trade_conn(db_path)
+    factor_key = factor_candidate_signal_key("agent__alpha")
+    combo_key = simulation_strategy_key_for_factor_name("combo__a__b")
+    _insert_dynamic_strategy(conn, factor_key, "BTCUSDT", "10m")
+    _insert_dynamic_strategy(conn, combo_key, "BTCUSDT", "30m")
+    conn.close()
+    monkeypatch.setattr(auto_trade_service, "get_conn", lambda: _connect(db_path))
+    monkeypatch.delenv("FACTOR_RANKING_SYMBOLS", raising=False)
+
+    settings = auto_trade_service.list_auto_trade_settings()
+    by_key = {(item.strategy_key, item.symbol, item.duration): item for item in settings}
+
+    assert by_key[(factor_key, "BTCUSDT", "10m")].enabled is True
+    assert by_key[(combo_key, "BTCUSDT", "30m")].enabled is True
+    assert by_key[(factor_key, "BTCUSDT", "10m")].live_trading_enabled is False
+    assert by_key[(combo_key, "BTCUSDT", "30m")].live_trading_enabled is False
+
+
+def test_factor_candidate_signal_settings_are_simulation_only() -> None:
+    factor_key = factor_candidate_signal_key("agent__alpha")
+    settings = AutoTradeSettings(factor_key, True, "BTCUSDT", "10m", 10, 5.0, True)
+
+    try:
+        auto_trade_service.update_auto_trade_settings(settings)
+    except ValueError as exc:
+        assert "simulation only" in str(exc)
+    else:
+        raise AssertionError("factor candidate live trading must be rejected")
+
+
+def test_live_trading_is_rejected_for_all_auto_trade_strategies() -> None:
+    settings = AutoTradeSettings(FACTOR_COMBO_STRATEGY_KEY, True, "BTCUSDT", "10m", 10, 5.0, True)
+
+    try:
+        auto_trade_service.update_auto_trade_settings(settings)
+    except ValueError as exc:
+        assert "real trading is disabled" in str(exc)
+    else:
+        raise AssertionError("live trading must be rejected globally")
+
+
 def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:
     settings = AutoTradeSettings(
         strategy_key=FACTOR_COMBO_STRATEGY_KEY,
@@ -246,6 +291,19 @@ def _insert_strategy(
         VALUES(?, 'BTCUSDT', ?, ?, ?, ?, 5, '2026-01-01T00:00:00+00:00')
         """,
         (strategy_key, duration, enabled, live, DURATION_TO_MINUTES[duration]),
+    )
+    conn.commit()
+
+
+def _insert_dynamic_strategy(conn: sqlite3.Connection, strategy_key: str, symbol: str, duration: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO auto_trade_strategies(
+          strategy_key, symbol, duration, enabled, live_trading_enabled, duration_minutes, qty, updated_at
+        )
+        VALUES(?, ?, ?, 1, 1, ?, 5, '2026-01-01T00:00:00+00:00')
+        """,
+        (strategy_key, symbol, duration, DURATION_TO_MINUTES[duration]),
     )
     conn.commit()
 

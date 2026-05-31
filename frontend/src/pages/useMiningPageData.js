@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchMiningOverview } from "../api/miningClient";
 import {
+  DEFAULT_MODEL_SEARCH_RESOURCE,
   requestFactorLearningRefresh,
   requestModelCandidateSearch,
 } from "../api/factorLearning";
 import { MODEL_FAMILIES } from "../utils/modelFamilies";
 
 const POLL_MS = 3000;
+const REFRESH_SETTLE_DELAY_MS = 400;
 
 export function useMiningPageData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -24,7 +26,7 @@ export function useMiningPageData(symbol, duration) {
         return;
       }
       try {
-        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, { signal, fresh });
+        const data = await fetchMiningOverview(normalizedSymbol, duration, { signal, fresh });
         if (!signal?.aborted) {
           setOverview(data);
           setStatus("");
@@ -52,7 +54,7 @@ export function useMiningPageData(symbol, duration) {
       setStatus(runAgent ? "联网挖掘排队中…" : "本地复盘排队中…");
       try {
         await requestFactorLearningRefresh(normalizedSymbol, duration, runAgent);
-        await sleep(400);
+        await sleep(REFRESH_SETTLE_DELAY_MS);
         await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`刷新失败：${errorMessage(error)}`);
@@ -78,7 +80,7 @@ export function useMiningPageData(symbol, duration) {
     let timer;
     const poll = async () => {
       try {
-        const data = await fetchMiningOverviewWithRetry(normalizedSymbol, duration, {
+        const data = await fetchMiningOverview(normalizedSymbol, duration, {
           signal: ac.signal,
           fresh: true,
         });
@@ -103,7 +105,9 @@ export function useMiningPageData(symbol, duration) {
     setBusy("search-all");
     try {
       await Promise.all(
-        MODEL_FAMILIES.map((family) => requestModelCandidateSearch(family, normalizedSymbol, duration)),
+        MODEL_FAMILIES.map((family) =>
+          requestModelCandidateSearch(family, normalizedSymbol, duration, "full", DEFAULT_MODEL_SEARCH_RESOURCE),
+        ),
       );
       await load(undefined, { fresh: true });
     } catch (error) {
@@ -118,7 +122,7 @@ export function useMiningPageData(symbol, duration) {
       if (!isValidSymbol(normalizedSymbol)) return;
       setBusy(`search-${family}`);
       try {
-        await requestModelCandidateSearch(family, normalizedSymbol, duration);
+        await requestModelCandidateSearch(family, normalizedSymbol, duration, "full", DEFAULT_MODEL_SEARCH_RESOURCE);
         await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`${family} 搜索失败：${errorMessage(error)}`);
@@ -168,26 +172,6 @@ function isCanceled(error, signal) {
 
 function errorMessage(error) {
   return error?.response?.data?.detail || error?.message || "unknown_error";
-}
-
-async function fetchMiningOverviewWithRetry(symbol, duration, options = {}) {
-  const retries = 3;
-  let lastError;
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    try {
-      return await fetchMiningOverview(symbol, duration, options);
-    } catch (error) {
-      lastError = error;
-      if (options.signal?.aborted || isCanceled(error, options.signal)) throw error;
-      const retryable =
-        error?.response?.status === 503 ||
-        String(errorMessage(error)).includes("delimiter") ||
-        String(errorMessage(error)).includes("JSON");
-      if (!retryable || attempt + 1 >= retries) throw error;
-      await sleep(200 * (attempt + 1));
-    }
-  }
-  throw lastError;
 }
 
 function sleep(ms) {

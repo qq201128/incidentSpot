@@ -34,7 +34,9 @@ export default function MiningKpiCards({
       <article className="mining-kpi-card">
         <span className="mining-kpi-label">搜索中</span>
         <strong className="mining-kpi-value">{summary?.searchingCount ?? 0}</strong>
-        <small>并行任务 {summary?.searchParallel ?? "0 / 10"}</small>
+        <small>
+          {summary?.searchPendingCount ?? 0} pending | {summary?.searchRunningCount ?? 0} running
+        </small>
       </article>
 
       <article className="mining-kpi-card">
@@ -49,6 +51,7 @@ export default function MiningKpiCards({
         <div className="mining-kpi-rules-text">
           <span className="mining-kpi-label">训练规则</span>
           <p>{trainingRules?.text || "—"}</p>
+          <small>{workerStatusLabel(trainingRules?.workerStatus)}</small>
         </div>
         <div className="mining-kpi-actions">
           <button type="button" disabled={busy === "local"} onClick={onRefreshLocal}>
@@ -64,4 +67,11 @@ export default function MiningKpiCards({
       </article>
     </section>
   );
+}
+
+function workerStatusLabel(status) {
+  if (!status) return "worker: unknown";
+  if (status.state === "worker_required") return `worker: 需启动（pending ${status.pendingJobs}）`;
+  if (status.state === "running") return `worker: 运行中（running ${status.runningJobs}）`;
+  return "worker: idle";
 }

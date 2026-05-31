@@ -10,6 +10,7 @@ import EnsembleRankingTable from "./EnsembleRankingTable";
 const PAGE_SIZE = 8;
 const EVENT_TAB = "events";
 const ENSEMBLE_TAB = "ensemble-ranking";
+const SEARCH_DEBOUNCE_MS = 280;
 const TABS = Object.freeze([
   { key: EVENT_TAB, label: "事件合约记录" },
   { key: "orders", label: "订单记录" },
@@ -29,8 +30,11 @@ export default function EventRecordsTable({
 }) {
   const [activeTab, setActiveTab] = useState(EVENT_TAB);
   const [items, setItems] = useState([]);
+  const [query, setQuery] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [total, setTotal] = useState(0);
   const [pageCount, setPageCount] = useState(1);
+  const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   const showEnsemble = !compact && activeTab === ENSEMBLE_TAB;
   const viewKey = compact ? EVENT_TAB : activeTab;
 
@@ -41,23 +45,28 @@ export default function EventRecordsTable({
         symbol,
         page,
         pageSize: PAGE_SIZE,
+        q: compact ? undefined : debouncedQuery.trim(),
         view: viewKey,
       });
+      const serverPage = Math.max(1, Number(data.page) || 1);
+      setErrorMessage("");
       setItems(Array.isArray(data.items) ? data.items : []);
       setTotal(Number(data.total) || 0);
       setPageCount(Math.max(1, Number(data.pageCount) || 1));
+      if (serverPage !== page) onPageChange?.(serverPage);
     } catch (err) {
       console.error("事件记录加载失败", err);
+      setErrorMessage(`事件记录加载失败：${errorMessageFrom(err)}`);
       setItems([]);
       setTotal(0);
       setPageCount(1);
     }
-  }, [page, showEnsemble, symbol, viewKey]);
+  }, [compact, debouncedQuery, onPageChange, page, showEnsemble, symbol, viewKey]);
 
   useEffect(() => {
     if (compact) return;
     onPageChange?.(1);
-  }, [activeTab, compact, onPageChange, symbol]);
+  }, [activeTab, compact, debouncedQuery, onPageChange, symbol]);
 
   useEffect(() => {
     void loadRecords();
@@ -87,6 +96,9 @@ export default function EventRecordsTable({
         onChange={setActiveTab}
         page={page}
         pageCount={pageCount}
+        query={query}
+        errorMessage={errorMessage}
+        onQueryChange={setQuery}
         total={total}
       />
       {showEnsemble ? (
@@ -104,7 +116,8 @@ export default function EventRecordsTable({
                 <RecordRow key={row.key} cells={row.cells} viewKey={view.key} />
               ))}
             </div>
-            {!total ? <p className="event-records-empty">{view.emptyText}</p> : null}
+            {errorMessage ? <p className="event-records-error">{errorMessage}</p> : null}
+            {!total && !errorMessage ? <p className="event-records-empty">{view.emptyText}</p> : null}
           </div>
           {total ? (
             <RecordsPagination page={page} pageCount={pageCount} total={total} onPageChange={onPageChange} />
@@ -115,9 +128,22 @@ export default function EventRecordsTable({
   );
 }
 
-function RecordTabs({ activeTab, compact, ensembleTab, onChange, page, pageCount, total }) {
+function RecordTabs({
+  activeTab,
+  compact,
+  ensembleTab,
+  errorMessage,
+  onChange,
+  onQueryChange,
+  page,
+  pageCount,
+  query,
+  total,
+}) {
   const meta = ensembleTab
     ? "综合裁判候选列表"
+    : errorMessage
+      ? "加载失败"
     : total
       ? `共 ${total} 条 · ${page}/${pageCount} 页`
       : "暂无记录";
@@ -145,9 +171,30 @@ function RecordTabs({ activeTab, compact, ensembleTab, onChange, page, pageCount
           </button>
         ))}
       </div>
+      <label className="event-records-search">
+        <span className="sr-only">搜索事件记录</span>
+        <input
+          value={query}
+          onChange={(event) => onQueryChange?.(event.target.value)}
+          placeholder="搜索事件ID/策略/状态/失败原因"
+        />
+      </label>
       <span className="event-records-meta">{meta}</span>
     </div>
   );
+}
+
+function useDebouncedValue(value, delayMs) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+  return debounced;
+}
+
+function errorMessageFrom(error) {
+  return error?.response?.data?.detail || error?.message || "unknown_error";
 }
 
 function RecordsPagination({ page, pageCount, total, onPageChange }) {

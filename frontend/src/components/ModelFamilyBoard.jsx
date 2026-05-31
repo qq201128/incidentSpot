@@ -78,6 +78,8 @@ function ModelShadowCard({ shadow, onSearchCandidates, onRescanCandidates, searc
         <Metric label="候选库" value={library.total ?? "—"} />
         <Metric label="搜索空间" value={rules.searchSpaceTotal ?? progress.searchSpaceTotal ?? progress.total ?? "—"} />
         <Metric label="并发" value={rules.parallelWorkers ?? progress.parallelWorkers ?? "—"} />
+        <Metric label="内部线程" value={rules.internalThreads ?? progress.internalThreads ?? "—"} />
+        <Metric label="XGB进程" value={rules.xgboostProcessWorkers ?? progress.xgboostProcessWorkers ?? "—"} />
         <Metric label="胜率门槛" value={targetWinRateLabel(rules)} strong />
         <Metric label="置信阈值" value={formatNum(shadow.selectedConfidenceThreshold, 2)} />
         <Metric label="依赖" value={shadow.dependencyAvailable ?? shadow.torchAvailable ? "可用" : "不可用"} />
@@ -140,6 +142,8 @@ function CandidateProgress({ progress }) {
       </div>
       <div className="factor-lstm-progress-meta">
         <span>并发 {progress.parallelWorkers ?? "—"}</span>
+        <span>线程 {progress.internalThreads ?? "—"}</span>
+        <span>XGB {progress.xgboostProcessWorkers ?? "—"}</span>
         <span>交易 {counts.tradeActive ?? 0}</span>
         <span>影子 {counts.shadowActive ?? 0}</span>
         <span>基线 {counts.initialBaseline ?? 0}</span>

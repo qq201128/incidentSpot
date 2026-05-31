@@ -7,8 +7,12 @@ const REFRESH_TIMEOUT_MS = 15_000;
 const DAILY_LOOP_TIMEOUT_MS = 120_000;
 
 export async function fetchFactorCombinationRanking(symbol, duration = "10m", options = {}) {
+  const params = { symbol, duration };
+  if (options.q) params.q = options.q;
+  if (options.page) params.page = options.page;
+  if (options.pageSize) params.pageSize = options.pageSize;
   const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/ranking`, {
-    params: { symbol, duration },
+    params,
     signal: options.signal,
     timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });

@@ -50,9 +50,11 @@ def enqueue_model_search_jobs(
     profile: str,
     priority: int = DEFAULT_MODEL_SEARCH_PRIORITY,
     reset_existing: bool = False,
+    reset_history: bool = False,
+    resource: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     specs = [
-        job_spec(symbol=sym, duration=dur, family=fam, profile=profile, priority=priority)
+        job_spec(symbol=sym, duration=dur, family=fam, profile=profile, priority=priority, resource=resource)
         for sym in symbols
         for dur in durations
         for fam in families
@@ -62,7 +64,7 @@ def enqueue_model_search_jobs(
         conn = get_conn()
         try:
             ensure_model_search_jobs_table(conn)
-            rows = [_enqueue_one(conn, spec, reset_existing) for spec in specs]
+            rows = [_enqueue_one(conn, spec, reset_existing, reset_history, resource) for spec in specs]
             conn.commit()
             return enqueue_payload(rows)
         finally:
@@ -197,13 +199,19 @@ def list_model_search_jobs(filters: dict[str, Any] | None = None) -> list[dict[s
         conn.close()
 
 
-def _enqueue_one(conn: Any, spec: dict[str, Any], reset_existing: bool) -> dict[str, Any]:
+def _enqueue_one(
+    conn: Any,
+    spec: dict[str, Any],
+    reset_existing: bool,
+    reset_history: bool,
+    resource: dict[str, Any] | None,
+) -> dict[str, Any]:
     existing = _find_existing(conn, spec)
     if existing is None:
-        conn.execute(insert_sql(), insert_values(spec))
+        conn.execute(insert_sql(), insert_values(spec, resource, reset_history))
         return {**decode_job(_required_job(conn, spec["job_id"])), "enqueueAction": "created"}
     if reset_existing:
-        _reset_existing_job(conn, existing["job_id"])
+        _reset_existing_job(conn, existing["job_id"], reset_history, resource)
         return {**decode_job(_required_job(conn, existing["job_id"])), "enqueueAction": "reset"}
     return {**decode_job(existing), "enqueueAction": "existing"}
 
@@ -251,5 +259,23 @@ def _required_job(conn: Any, job_id: str) -> Any:
     return row
 
 
-def _reset_existing_job(conn: Any, job_id: str) -> None:
-    conn.execute(reset_sql(), (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, job_id))
+def _reset_existing_job(
+    conn: Any,
+    job_id: str,
+    reset_history: bool,
+    resource: dict[str, Any] | None,
+) -> None:
+    selected = resource or {}
+    conn.execute(
+        reset_sql(),
+        (
+            JOB_STATUS_PENDING,
+            JOB_STAGE_QUEUED,
+            selected.get("resourceProfile"),
+            selected.get("internalThreads"),
+            selected.get("parallelWorkers"),
+            selected.get("xgboostProcessWorkers"),
+            1 if reset_history else 0,
+            job_id,
+        ),
+    )

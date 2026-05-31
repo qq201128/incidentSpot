@@ -10,8 +10,6 @@ export default function TradeControls({
   predictLoading,
   predictInfo,
   predictError,
-  liveTradingEnabled,
-  onLiveTradingChange,
   onAmountChange,
   onDurationChange,
   onPredictClick,
@@ -24,17 +22,15 @@ export default function TradeControls({
       <header className="trade-panel-top">
         <button
           type="button"
-          className={liveTradingEnabled ? "trade-mode-btn live" : "trade-mode-btn sim"}
-          aria-pressed={liveTradingEnabled}
-          onClick={() => onLiveTradingChange((value) => !value)}
+          className="trade-mode-btn sim"
+          aria-pressed={false}
+          disabled
         >
           <span className="mode-dot" />
-          <strong>{liveTradingEnabled ? "真实交易：开启" : "模拟交易：关闭"}</strong>
+          <strong>仅模拟交易</strong>
         </button>
         <p className="toggle-hint trade-mode-hint trade-live-mode-hint">
-          {liveTradingEnabled
-            ? "手动与规则下单将调用 Binance 事件合约接口。"
-            : "仅创建本地事件与订单记录，不请求交易所。"}
+          当前阶段仅创建本地事件与订单记录，不请求交易所。
         </p>
       </header>
 

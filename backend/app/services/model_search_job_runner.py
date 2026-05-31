@@ -23,6 +23,7 @@ from app.services.model_search_job_store import (
 from app.services.model_search_resource import (
     ModelSearchResourceConfig,
     apply_model_search_resource_config,
+    resource_config_from_job,
 )
 from app.services.model_search_status_service import model_search_queue_status
 from app.services.model_search_job_types import DEFAULT_STALE_AFTER_SECONDS
@@ -70,13 +71,13 @@ class ModelSearchHeartbeat:
 
 def run_one_model_search_job(config: ModelSearchWorkerConfig | None = None) -> dict[str, Any]:
     selected = config or ModelSearchWorkerConfig()
-    resource = apply_model_search_resource_config(selected.resource)
     job = claim_next_model_search_job(
         max_running_jobs=selected.max_running_jobs,
         stale_after_seconds=selected.stale_after_seconds,
     )
     if job is None:
         return {"status": "idle", "reason": "no_pending_job", "queue": model_search_queue_status()}
+    resource = apply_model_search_resource_config(resource_config_from_job(selected.resource, job))
     return _run_claimed_job(job, selected, resource)
 
 

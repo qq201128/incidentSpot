@@ -4,6 +4,7 @@ from itertools import product
 from typing import Any
 
 from app.services.model_family_config import normalize_model_family
+from app.services.model_search_resource_defaults import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
 
 DEFAULT_PARALLEL_WORKERS = 10
 TARGET_WIN_RATE_EXCLUSIVE = 0.62
@@ -56,7 +57,9 @@ def model_family_training_rules(family: str) -> dict[str, Any]:
         "modelFamily": selected,
         "searchMode": "successive_halving",
         "searchSpaceTotal": len(grid),
+        "internalThreads": DEFAULT_INTERNAL_THREADS,
         "parallelWorkers": DEFAULT_PARALLEL_WORKERS,
+        "xgboostProcessWorkers": DEFAULT_XGBOOST_PROCESS_WORKERS,
         "targetWinRateExclusive": TARGET_WIN_RATE_EXCLUSIVE,
         "requiresValidationAndTestAboveTarget": False,
         "selectionMetricSource": "validation_only",

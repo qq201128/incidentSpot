@@ -253,8 +253,15 @@ function FactorsWorkspacePanel({ actions, state, tab, onSelectFactor, onTabChang
             </div>
             <div className="factors-workspace-bottom">
               <FactorRankingTable
+                onPageChange={actions.setRankingPage}
+                onQueryChange={actions.setRankingQuery}
+                page={state.ranking.page}
+                pageCount={state.ranking.pageCount}
+                query={state.ranking.query}
                 ranking={state.ranking.items}
                 selectedName={state.selectedName}
+                total={state.ranking.total}
+                unfilteredTotal={state.ranking.unfilteredTotal}
                 onSelectFactor={onSelectFactor}
               />
               <FactorHighWinrateCard combo={state.highWinrateCombo} />

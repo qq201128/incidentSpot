@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,67 @@ def test_enqueue_deduplicates_matching_jobs(monkeypatch: pytest.MonkeyPatch) -> 
     assert first["created"] == 1
     assert second["existing"] == 1
     assert len(store.list_model_search_jobs()) == 1
+
+
+def test_enqueue_keeps_distinct_resource_configs(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("enqueue-resource")
+    _patch_store_db(monkeypatch, db_path)
+
+    first = store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        resource={**_resource_payload(), "parallelWorkers": 2},
+    )
+    second = store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        resource={**_resource_payload(), "parallelWorkers": 4},
+    )
+
+    rows = store.list_model_search_jobs()
+    assert first["created"] == 1
+    assert second["created"] == 1
+    assert len(rows) == 2
+    assert {row["parallel_workers"] for row in rows} == {2, 4}
+
+
+def test_enqueue_persists_reset_history_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("enqueue-reset-history")
+    _patch_store_db(monkeypatch, db_path)
+
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        reset_history=True,
+    )
+
+    job = store.claim_next_model_search_job(max_running_jobs=1)
+    assert job["resetHistory"] is True
+
+
+def test_reset_existing_job_updates_reset_history_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("reset-existing-reset-history")
+    _patch_store_db(monkeypatch, db_path)
+    _enqueue_one()
+
+    reset = store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        reset_existing=True,
+        reset_history=True,
+    )
+
+    assert reset["reset"] == 1
+    job = store.claim_next_model_search_job(max_running_jobs=1)
+    assert job["resetHistory"] is True
 
 
 def test_claim_marks_pending_job_running(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,6 +224,34 @@ def test_worker_runs_one_job_and_persists_resource(monkeypatch: pytest.MonkeyPat
     assert Path(report["job"]["log_path"]).exists()
 
 
+def test_worker_uses_resource_config_stored_on_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("worker-resource")
+    log_dir = _runtime_path("worker-resource-logs")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        resource={
+            "resourceProfile": "api_requested",
+            "internalThreads": 2,
+            "parallelWorkers": 3,
+            "xgboostProcessWorkers": 1,
+        },
+    )
+    calls = []
+    monkeypatch.setattr(runner, "run_model_candidate_search", lambda config: calls.append(config) or {"status": "shadow_active"})
+
+    report = runner.run_one_model_search_job(
+        runner.ModelSearchWorkerConfig(log_dir=log_dir, resource=resource.ModelSearchResourceConfig(parallel_workers=1))
+    )
+
+    assert calls[0].parallel_workers == 3
+    assert report["job"]["resource_profile"] == "api_requested"
+    assert report["job"]["parallel_workers"] == 3
+
+
 def test_worker_surfaces_heartbeat_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _db_path("heartbeat")
     log_dir = _runtime_path("heartbeat-logs")
@@ -266,11 +356,97 @@ def test_candidate_search_api_only_enqueues_job(monkeypatch: pytest.MonkeyPatch)
         },
     )
 
-    response = models_api.model_candidate_search("knn", symbol="btcusdt", duration="10m", profile="fast")
+    response = models_api.model_candidate_search(
+        "knn",
+        symbol="btcusdt",
+        duration="10m",
+        profile="fast",
+        parallel_workers=4,
+        internal_threads=4,
+        xgboost_process_workers=1,
+    )
 
     assert response["modelSearchJob"]["job_id"] == "job-1"
     assert calls[0]["symbols"] == ("BTCUSDT",)
     assert calls[0]["families"] == ("knn",)
+    assert calls[0]["resource"]["parallelWorkers"] == 4
+    assert calls[0]["reset_history"] is False
+
+
+def test_candidate_search_api_passes_reset_history_to_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
+    calls = []
+    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(
+        models_api,
+        "model_family_status",
+        lambda family, symbol, duration: {"modelFamily": family, "symbol": symbol, "duration": duration},
+    )
+
+    models_api.model_candidate_search(
+        "knn",
+        symbol="btcusdt",
+        duration="10m",
+        profile="fast",
+        reset_history=True,
+        parallel_workers=4,
+        internal_threads=4,
+        xgboost_process_workers=1,
+    )
+
+    assert calls[0]["reset_existing"] is True
+    assert calls[0]["reset_history"] is True
+
+
+def test_candidate_search_api_default_resource_matches_training_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
+    calls = []
+    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(
+        models_api,
+        "model_family_status",
+        lambda family, symbol, duration: {"modelFamily": family, "symbol": symbol, "duration": duration},
+    )
+    route_default = signature(models_api.model_candidate_search).parameters["parallel_workers"].default
+    assert route_default.default == 10
+    assert route_default.alias == "parallelWorkers"
+
+    models_api.model_candidate_search(
+        "knn",
+        symbol="btcusdt",
+        duration="10m",
+        profile="fast",
+        parallel_workers=10,
+        internal_threads=4,
+        xgboost_process_workers=1,
+    )
+
+    assert calls[0]["resource"]["internalThreads"] == 4
+    assert calls[0]["resource"]["parallelWorkers"] == 10
+    assert calls[0]["resource"]["xgboostProcessWorkers"] == 1
+
+
+def test_candidate_search_api_normalizes_query_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
+    calls = []
+    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(
+        models_api,
+        "model_family_status",
+        lambda family, symbol, duration: {"modelFamily": family, "symbol": symbol, "duration": duration},
+    )
+
+    response = models_api.model_candidate_search("knn", symbol="btcusdt")
+
+    assert response["duration"] == "10m"
+    assert calls[0]["durations"] == ("10m",)
+    assert calls[0]["profile"] == "full"
+    assert calls[0]["reset_history"] is False
+    assert calls[0]["resource"]["internalThreads"] == 4
+    assert calls[0]["resource"]["parallelWorkers"] == 10
+    assert calls[0]["resource"]["xgboostProcessWorkers"] == 1
 
 
 def _enqueue_one(symbol: str = "BTCUSDT") -> None:

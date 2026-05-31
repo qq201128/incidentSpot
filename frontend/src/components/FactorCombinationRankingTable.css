@@ -48,6 +48,22 @@
   min-width: 0;
 }
 
+.factor-combo-rank-search {
+  display: block;
+  padding: 10px 12px 0;
+}
+
+.factor-combo-rank-search input {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(7, 11, 15, 0.72);
+  color: var(--text);
+  padding: 0 10px;
+}
+
 .factor-combo-rank-card {
   box-sizing: border-box;
   width: 100%;

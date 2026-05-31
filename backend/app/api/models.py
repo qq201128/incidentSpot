@@ -7,20 +7,38 @@ from app.services.model_family_candidate_search_service import (
     model_training_config_for_profile,
 )
 from app.services.model_family_config import normalize_model_family
+from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS
 from app.services.model_family_prediction_service import predict_model_family_signal
 from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
 from app.services.model_search_job_store import enqueue_model_search_jobs
+from app.services.model_search_resource import ModelSearchResourceConfig, resource_payload, validated_resource_config
 from app.services.model_search_status_service import model_search_status_with_lifecycle
 from app.services.runtime_symbols import parse_symbol_csv
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 
+def _query_str(value: object, default: str | None = None) -> str | None:
+    return value if isinstance(value, str) else default
+
+
+def _query_bool(value: object, default: bool = False) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _query_int(value: object, default: int | None = None) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _query_float(value: object) -> float | None:
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
 @router.get("/{family}/status")
 def model_status(family: str, symbol: str = Query(..., min_length=6), duration: str = Query("10m")) -> dict:
     try:
-        return model_family_status(family, symbol.upper(), duration)
+        return model_family_status(family, symbol.upper(), _query_str(duration, "10m") or "10m")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -41,19 +59,21 @@ def model_train(
     min_move_bps: float | None = Query(None, alias="minMoveBps"),
 ) -> dict:
     try:
+        selected_duration = _query_str(duration, "10m") or "10m"
+        selected_profile = normalize_experiment_profile(_query_str(profile, "full") or "full")
         config = model_training_config_for_profile(
             family,
             symbol.upper(),
-            duration,
-            profile=normalize_experiment_profile(profile),
-            feature_window=feature_window,
-            epochs=epochs,
-            batch_size=batch_size,
-            min_samples=min_samples,
-            learning_rate=learning_rate,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            min_move_bps=min_move_bps,
+            selected_duration,
+            profile=selected_profile,
+            feature_window=_query_int(feature_window),
+            epochs=_query_int(epochs),
+            batch_size=_query_int(batch_size),
+            min_samples=_query_int(min_samples),
+            learning_rate=_query_float(learning_rate),
+            hidden_size=_query_int(hidden_size),
+            num_layers=_query_int(num_layers),
+            min_move_bps=_query_float(min_move_bps),
         )
         return train_model_family(config, publish_initial_baseline=True)
     except ValueError as exc:
@@ -69,19 +89,37 @@ def model_candidate_search(
     duration: str = Query("10m"),
     profile: str = Query("full"),
     reset_history: bool = Query(False, alias="resetHistory"),
+    parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
+    internal_threads: int = Query(4, alias="internalThreads", ge=1),
+    xgboost_process_workers: int = Query(1, alias="xgboostProcessWorkers", ge=1),
 ) -> dict:
     try:
         selected = normalize_model_family(family)
         sym = symbol.upper()
-        selected_profile = normalize_experiment_profile(profile)
+        selected_duration = _query_str(duration, "10m") or "10m"
+        selected_profile = normalize_experiment_profile(_query_str(profile, "full") or "full")
+        reset_requested = _query_bool(reset_history)
+        internal = _query_int(internal_threads, 4) or 4
+        parallel = _query_int(parallel_workers, DEFAULT_PARALLEL_WORKERS) or DEFAULT_PARALLEL_WORKERS
+        xgb_workers = _query_int(xgboost_process_workers, 1) or 1
         queued_job = enqueue_model_search_jobs(
             symbols=(sym,),
-            durations=(duration,),
+            durations=(selected_duration,),
             families=(selected,),
             profile=selected_profile,
-            reset_existing=reset_history,
+            reset_existing=reset_requested,
+            reset_history=reset_requested,
+            resource=resource_payload(
+                validated_resource_config(
+                    ModelSearchResourceConfig(
+                        internal_threads=internal,
+                        parallel_workers=parallel,
+                        xgboost_process_workers=xgb_workers,
+                    )
+                )
+            ),
         )
-        status = model_family_status(selected, sym, duration)
+        status = model_family_status(selected, sym, selected_duration)
         return {
             **status,
             "modelSearchJob": queued_job["jobs"][0],
@@ -100,7 +138,13 @@ def model_predict(
     entry_open_time: int | None = Query(None, alias="entryOpenTime"),
 ) -> dict:
     try:
-        return predict_model_family_signal(family, symbol.upper(), duration, entry_open_time=entry_open_time)
+        selected_duration = _query_str(duration, "10m") or "10m"
+        return predict_model_family_signal(
+            family,
+            symbol.upper(),
+            selected_duration,
+            entry_open_time=_query_int(entry_open_time),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ImportError as exc:
@@ -114,10 +158,14 @@ def model_search_jobs_status(
     family: str | None = Query(None),
     status: str | None = Query(None),
 ) -> dict:
+    selected_symbols = _query_str(symbols)
+    selected_duration = _query_str(duration)
+    selected_family = _query_str(family)
+    selected_status = _query_str(status)
     filters = {
-        "symbols": parse_symbol_csv(symbols) if symbols else (),
-        "durations": (duration,) if duration else (),
-        "families": (normalize_model_family(family),) if family else (),
-        "statuses": (status,) if status else (),
+        "symbols": parse_symbol_csv(selected_symbols) if selected_symbols else (),
+        "durations": (selected_duration,) if selected_duration else (),
+        "families": (normalize_model_family(selected_family),) if selected_family else (),
+        "statuses": (selected_status,) if selected_status else (),
     }
     return model_search_status_with_lifecycle(filters)

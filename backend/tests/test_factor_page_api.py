@@ -4,6 +4,7 @@ import pytest
 
 from app.api import factors as factors_api
 from app.services import factor_page_service
+from app.services.factor_ranking_page import build_ranking_page
 from app.services.factor_metric_enrichment import factor_score
 
 
@@ -72,6 +73,35 @@ def test_combo_factor_list_page_sorts_by_score(monkeypatch) -> None:
     assert [row["name"] for row in page["factors"]] == ["combo__high", "combo__mid", "combo__low"]
 
 
+def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
+    cached = {
+        "ranking": [
+            {"factorName": "ret_high", "category": "trend", "factorScore": 90.0, "ir": 1.0},
+            {"factorName": "ret_low", "category": "trend", "factorScore": 10.0, "ir": 0.5},
+            {"factorName": "risk_high", "category": "risk", "factorScore": 80.0, "ir": 1.5},
+        ],
+        "updatedAt": "2026-05-21T00:00:00+00:00",
+    }
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: [])
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+    monkeypatch.setattr(factor_page_service, "agent_factor_rows_for_duration", lambda *_a: [])
+    monkeypatch.setattr(factor_page_service, "_high_winrate_card", lambda *_a: None)
+    monkeypatch.setattr(factor_page_service, "get_cached_ranking", lambda *_a: cached)
+
+    payload = factor_page_service.build_factor_page_bundle(
+        "btcusdt",
+        "10m",
+        category="trend",
+        page=1,
+        page_size=1,
+    )
+
+    assert "ranking" not in payload
+    assert payload["rankingPageTotal"] == 2
+    assert payload["rankingTotal"] == 2
+
+
 def test_build_factor_period_scores_from_cache(monkeypatch) -> None:
     def fake_cached(symbol: str, duration: str):
         if duration != "10m":
@@ -132,6 +162,25 @@ def test_combo_period_scores_use_combination_cache(monkeypatch: pytest.MonkeyPat
     payload = factors_api.factor_period_scores("combo__a__b", symbol="BTCUSDT")
 
     assert payload["scores"][0]["factorScore"] == 88.0
+
+
+def test_factor_detail_ignores_query_defaults_without_symbol_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        factors_api,
+        "get_factor_payload_by_name",
+        lambda _name: {"name": "ret_1", "sourceFile": "kline_features.py"},
+    )
+
+    def fail_metrics(*_args):
+        raise AssertionError("metrics should not be loaded without explicit symbol and duration")
+
+    monkeypatch.setattr(factors_api, "_metrics_for_factor", fail_metrics)
+
+    detail = factors_api.get_factor_detail("ret_1")
+
+    assert detail["name"] == "ret_1"
 
 
 def test_library_combo_detail_merges_full_backtest_without_overwriting_score(
@@ -199,3 +248,93 @@ def test_library_combo_detail_uses_backtest_cache(monkeypatch: pytest.MonkeyPatc
 
     assert detail["factorScore"] == factor_score(row["metrics"])
     assert detail["icMean"] == 0.12
+
+
+def test_factor_ranking_page_filters_and_paginates() -> None:
+    rows = [
+        {"factorName": "ret_1", "category": "momentum", "factorScore": 90.0},
+        {"factorName": "volatility_1", "description": "rolling risk", "factorScore": 80.0},
+        {"factorName": "basis_gap", "sourceLabel": "local_definition", "factorScore": 70.0},
+    ]
+
+    page = build_ranking_page(rows, "risk", page=1, page_size=1)
+
+    assert page["ranking"][0]["factorName"] == "volatility_1"
+    assert page["total"] == 1
+    assert page["unfilteredTotal"] == 3
+    assert page["page"] == 1
+    assert page["pageCount"] == 1
+    assert page["query"] == "risk"
+
+
+def test_factor_ranking_api_returns_backend_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    cached = {
+        "ranking": [
+            {"factorName": "ret_low", "category": "trend", "factorScore": 10.0, "ir": 1.0},
+            {"factorName": "ret_high", "category": "trend", "factorScore": 30.0, "ir": 1.0},
+            {"factorName": "risk_high", "category": "risk", "factorScore": 50.0, "ir": 1.0},
+        ],
+        "updatedAt": "2026-05-21T00:00:00+00:00",
+        "rankingDiagnostics": {},
+        "rankingFailures": [],
+    }
+    monkeypatch.setattr(factors_api, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
+    monkeypatch.setattr(factors_api, "get_cached_ranking", lambda *_args: cached)
+    monkeypatch.setattr(factors_api, "cache_is_usable", lambda _cached: True)
+
+    payload = factors_api.factor_ranking(
+        symbol="btcusdt",
+        duration="10m",
+        category="trend",
+        q=None,
+        page=1,
+        page_size=1,
+    )
+
+    assert payload["ranking"][0]["factorName"] == "ret_high"
+    assert payload["total"] == 2
+    assert payload["unfilteredTotal"] == 2
+    assert payload["pageCount"] == 2
+    assert payload["pageSize"] == 1
+    assert "regularRanking" not in payload
+
+
+def test_factor_ranking_api_normalizes_query_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    cached = {
+        "ranking": [
+            {"factorName": "ret_low", "category": "trend", "factorScore": 10.0, "ir": 1.0},
+            {"factorName": "ret_high", "category": "trend", "factorScore": 30.0, "ir": 1.0},
+        ],
+        "updatedAt": "2026-05-21T00:00:00+00:00",
+    }
+    monkeypatch.setattr(factors_api, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
+    monkeypatch.setattr(factors_api, "get_cached_ranking", lambda *_args: cached)
+    monkeypatch.setattr(factors_api, "cache_is_usable", lambda _cached: True)
+
+    payload = factors_api.factor_ranking(symbol="btcusdt", duration="10m", page=1, page_size=1)
+
+    assert payload["query"] == ""
+    assert payload["ranking"][0]["factorName"] == "ret_high"
+    assert "regularRanking" not in payload
+
+
+def test_factor_page_route_normalizes_optional_query_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def fake_bundle(symbol, duration, **kwargs):
+        captured.update({"symbol": symbol, "duration": duration, **kwargs})
+        return {"ok": True}
+
+    monkeypatch.setattr(factors_api, "build_factor_page_bundle", fake_bundle)
+
+    payload = factors_api.factor_page(symbol="BTCUSDT")
+
+    assert payload == {"ok": True}
+    assert captured["duration"] == "10m"
+    assert captured["category"] is None
+    assert captured["query"] is None
+    assert captured["kind"] == "single"
+    assert captured["page"] == 1
+    assert captured["page_size"] == 20

@@ -108,7 +108,6 @@ def build_factor_page_bundle(
     return {
         **list_payload,
         **context,
-        "ranking": ranking_rows,
         "rankingPageTotal": len(ranking_rows),
     }
 

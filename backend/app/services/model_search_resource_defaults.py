@@ -1,0 +1,4 @@
+from __future__ import annotations
+
+DEFAULT_INTERNAL_THREADS = 4
+DEFAULT_XGBOOST_PROCESS_WORKERS = 1

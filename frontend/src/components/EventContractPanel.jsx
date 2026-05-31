@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import AutoStrategyControls from "./AutoStrategyControls";
 import EnsembleJudgePanel from "./EnsembleJudgePanel";
 import TradeControls from "./TradeControls";
-const STORAGE_LIVE_TRADING = "eventContract:liveTradingEnabled";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
+const LIVE_TRADING_ENABLED = false;
 const PANEL_TABS = /** @type {const} */ (["execution", "judge", "trade"]);
 
 export default function EventContractPanel({
@@ -27,17 +27,10 @@ export default function EventContractPanel({
   const [predictError, setPredictError] = useState("");
   const [predictInfo, setPredictInfo] = useState("");
   const [localOpenPositionPending, setLocalOpenPositionPending] = useState(false);
-  const [liveTradingEnabled, setLiveTradingEnabled] = useState(
-    () => localStorage.getItem(STORAGE_LIVE_TRADING) === "1",
-  );
   const [clearAllLoading, setClearAllLoading] = useState(false);
   const [panelTab, setPanelTab] = useState(() => _initialPanelTab());
   const [strategyReloadKey, setStrategyReloadKey] = useState(0);
   const hasOpenPosition = dbHasOpenPosition || localOpenPositionPending;
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_LIVE_TRADING, liveTradingEnabled ? "1" : "0");
-  }, [liveTradingEnabled]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_PANEL_TAB, panelTab);
@@ -84,7 +77,7 @@ export default function EventContractPanel({
         amount,
         currentPrice,
         durationMinutes,
-        liveTradingEnabled,
+        liveTradingEnabled: LIVE_TRADING_ENABLED,
         result,
         symbol,
       }));
@@ -96,7 +89,7 @@ export default function EventContractPanel({
     } finally {
       setPredictLoading(false);
     }
-  }, [amount, currentPrice, durationMinutes, hasOpenPosition, liveTradingEnabled, onPredict, onQuickTrade, symbol]);
+  }, [amount, currentPrice, durationMinutes, hasOpenPosition, onPredict, onQuickTrade, symbol]);
 
   async function handleTrade(direction) {
     if (hasOpenPosition) {
@@ -110,7 +103,7 @@ export default function EventContractPanel({
         currentPrice,
         direction,
         durationMinutes,
-        liveTradingEnabled,
+        liveTradingEnabled: LIVE_TRADING_ENABLED,
         symbol,
       }));
       setLocalOpenPositionPending(true);
@@ -217,8 +210,7 @@ export default function EventContractPanel({
             predictLoading={predictLoading}
             predictInfo={predictInfo}
             predictError={predictError}
-            liveTradingEnabled={liveTradingEnabled}
-            onLiveTradingChange={setLiveTradingEnabled}
+            liveTradingEnabled={LIVE_TRADING_ENABLED}
             onAmountChange={setAmount}
             onDurationChange={setDurationMinutes}
             onPredictClick={handlePredictClick}
@@ -240,7 +232,7 @@ function AutomationCard({ amount, clearAllLoading, reloadKey, onClearAllEvents, 
   return (
     <div className="card automation-toggles">
       <p className="toggle-hint trade-mode-hint automation-intro">
-        每条执行项右侧可单独切换「模拟 / 实盘」；同一执行项下各结算周期共用该开关。仅对已点亮的周期自动下单；多执行项可并行。
+        当前阶段所有执行项均为模拟下单，仅对已点亮的周期自动创建本地事件与订单；多执行项可并行。
       </p>
       <AutoStrategyControls symbol={symbol} amount={amount} reloadKey={reloadKey} />
       <p className="toggle-hint trade-mode-hint">

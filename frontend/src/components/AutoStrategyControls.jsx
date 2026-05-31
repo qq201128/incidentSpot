@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
 
-const ENSEMBLE_RANKER_STRATEGY_KEY = "ensemble_ranker_v1";
-const MODEL_FAMILY_SHADOW_PATTERN = /^factor_.+_shadow_/;
+const LIVE_TRADING_ENABLED = false;
 
 export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) {
   const [strategies, setStrategies] = useState([]);
@@ -32,7 +31,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     return updateAutoTradeStrategy(slot.strategyKey, {
       strategyKey: slot.strategyKey,
       enabled,
-      liveTradingEnabled: !!slot.liveTradingEnabled,
+      liveTradingEnabled: LIVE_TRADING_ENABLED,
       symbol,
       duration: slot.duration,
       durationMinutes: slot.durationMinutes,
@@ -61,7 +60,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     };
   }, [reloadKey]);
 
-  /** 交易对或数量变更时同步到已开启的周期槽位（各槽位保留自身实盘开关） */
+  /** 交易对或数量变更时同步到已开启的周期槽位；当前阶段强制仅模拟。 */
   useEffect(() => {
     if (!enabledKeys) return;
     const enabled = strategiesRef.current.filter(
@@ -80,38 +79,6 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
       stopped = true;
     };
   }, [activeSymbol, amount, enabledKeys, symbol]);
-
-  const toggleStrategyLive = useCallback(
-    async (group) => {
-      if (group.tradable === false) return;
-      if (_simulationOnlyGroup(group)) return;
-      const nextLive = !group.slots.some((s) => s.liveTradingEnabled);
-      const busyKey = `${group.strategyKey}:__live__`;
-      setUpdatingKey(busyKey);
-      setError("");
-      try {
-        const rows = await Promise.all(
-          group.slots.map((slot) =>
-            updateAutoTradeStrategy(slot.strategyKey, {
-              strategyKey: slot.strategyKey,
-              enabled: slot.enabled,
-              liveTradingEnabled: nextLive,
-              symbol,
-              duration: slot.duration,
-              durationMinutes: slot.durationMinutes,
-              qty: Number(amount),
-            }),
-          ),
-        );
-        _mergeStrategyRows(setStrategies, rows);
-      } catch (err) {
-        setError(_errorMessage(err, "更新执行实盘开关失败"));
-      } finally {
-        setUpdatingKey("");
-      }
-    },
-    [amount, symbol],
-  );
 
   const toggleSlot = useCallback(
     async (slot) => {
@@ -146,14 +113,13 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
               </div>
               <button
                 type="button"
-                className={`strategy-live-mode-btn ${group.slots.some((s) => s.liveTradingEnabled) ? "live" : "sim"}`}
-                aria-pressed={group.slots.some((s) => s.liveTradingEnabled)}
+                className="strategy-live-mode-btn sim"
+                aria-pressed={false}
                 disabled={
                   updatingKey === `${group.strategyKey}:__live__` ||
                   group.tradable === false ||
                   _simulationOnlyGroup(group)
                 }
-                onClick={() => void toggleStrategyLive(group)}
                 title={_liveButtonTitle(group)}
               >
                 <span className="mode-dot" />
@@ -234,19 +200,16 @@ function _mergeStrategyRows(setStrategies, rows) {
   );
 }
 
-function _liveButtonLabel(group) {
-  if (_simulationOnlyGroup(group)) return "仅模拟";
-  return group.slots.some((s) => s.liveTradingEnabled) ? "实盘" : "模拟";
+function _liveButtonLabel() {
+  return "仅模拟";
 }
 
-function _liveButtonTitle(group) {
-  if (group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY) return "综合裁判后端强制仅模拟。";
-  if (MODEL_FAMILY_SHADOW_PATTERN.test(group.strategyKey)) return "模型族执行项后端强制仅模拟。";
-  return "该执行项下所有结算周期共用此开关；仅对已点亮的周期自动下单。";
+function _liveButtonTitle() {
+  return "当前阶段后端强制仅模拟。";
 }
 
 function _simulationOnlyGroup(group) {
-  return group.strategyKey === ENSEMBLE_RANKER_STRATEGY_KEY || MODEL_FAMILY_SHADOW_PATTERN.test(group.strategyKey);
+  return true;
 }
 
 function StrategyBacktestSummary({ summary }) {

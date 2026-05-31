@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
 from app.services.lstm_candidate_progress import finish_lstm_candidate_progress, queue_lstm_candidate_progress
 from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm_candidate_retry
-from app.services.lstm_candidate_search import LstmCandidateSearchConfig, search_space_size
+from app.services.lstm_candidate_search import (
+    DEFAULT_PARALLEL_WORKERS,
+    LstmCandidateSearchConfig,
+    search_space_size,
+)
 from app.services.lstm_prediction_service import lstm_model_status, predict_lstm_signal
 from app.services.lstm_shadow_learning import lstm_shadow_learning_summary
 from app.services.lstm_training_service import train_lstm_model
@@ -24,6 +27,7 @@ class CandidateSearchJob:
     duration: str
     profile: str
     reset_history: bool
+    parallel_workers: int
 
 
 @router.get("/status")
@@ -82,14 +86,22 @@ def lstm_candidate_search(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     profile: str = Query("full"),
-    reset_history: Annotated[bool, Query(alias="resetHistory")] = False,
+    reset_history: bool = Query(False, alias="resetHistory"),
+    parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
 ) -> dict:
     try:
         sym_u = symbol.upper()
         selected_profile = normalize_experiment_profile(profile)
-        search_config = LstmCandidateSearchConfig()
+        reset_requested = reset_history is True
+        search_config = LstmCandidateSearchConfig(parallel_workers=parallel_workers)
         search_total = search_space_size(search_config)
-        job = CandidateSearchJob(sym_u, duration, selected_profile, reset_history)
+        job = CandidateSearchJob(
+            symbol=sym_u,
+            duration=duration,
+            profile=selected_profile,
+            reset_history=reset_requested,
+            parallel_workers=search_config.parallel_workers,
+        )
         queued = queue_lstm_candidate_progress(
             symbol=sym_u,
             duration=duration,
@@ -124,10 +136,12 @@ def lstm_predict(
 
 
 def _background_lstm_candidate_search(job: CandidateSearchJob) -> None:
+    search_config = LstmCandidateSearchConfig(parallel_workers=job.parallel_workers)
     config = LstmCandidateRetryConfig(
         symbols=(job.symbol,),
         durations=(job.duration,),
         profile=job.profile,
+        search=search_config,
         manual_trigger=True,
         reset_history=job.reset_history,
     )

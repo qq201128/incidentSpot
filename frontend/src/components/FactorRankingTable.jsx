@@ -1,34 +1,38 @@
-import { useEffect, useMemo, useState } from "react";
 import { factorTitle, formatNum, formatPct } from "./factorDisplayUtils";
 import { factorTableCategoryLabel } from "../utils/factorCatalogLabels";
 import "./FactorRankingTable.css";
 
 const RANKING_PAGE_SIZE = 8;
 
-export default function FactorRankingTable({ ranking, selectedName, onSelectFactor }) {
-  const [page, setPage] = useState(1);
-
-  const total = ranking.length;
-  const pageCount = Math.max(1, Math.ceil(total / RANKING_PAGE_SIZE));
-
-  useEffect(() => {
-    setPage(1);
-  }, [ranking]);
-
-  useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
-
-  const pageRows = useMemo(() => {
-    const start = (page - 1) * RANKING_PAGE_SIZE;
-    return ranking.slice(start, start + RANKING_PAGE_SIZE);
-  }, [page, ranking]);
-
+export default function FactorRankingTable({
+  onPageChange,
+  onQueryChange,
+  onSelectFactor,
+  page = 1,
+  pageCount = 1,
+  query = "",
+  ranking,
+  selectedName,
+  total,
+  unfilteredTotal,
+}) {
+  const safeTotal = Number(total ?? ranking.length);
   const rankOffset = (page - 1) * RANKING_PAGE_SIZE;
 
   return (
     <section className="factors-ranking-block">
-      <h3 className="factors-subhead">排名缓存 (按综合评分排名)</h3>
+      <header className="factors-ranking-header">
+        <h3 className="factors-subhead">排名缓存 (按综合评分排名)</h3>
+        <span>{rankingCountText(safeTotal, unfilteredTotal)}</span>
+      </header>
+      <label className="factors-ranking-search">
+        <span className="sr-only">搜索排名缓存</span>
+        <input
+          value={query}
+          onChange={(event) => onQueryChange?.(event.target.value)}
+          placeholder="搜索因子名/类别/来源"
+        />
+      </label>
       <div className="factors-ranking-wrap">
         <table className="factors-table factors-ranking-table">
           <thead>
@@ -46,7 +50,7 @@ export default function FactorRankingTable({ ranking, selectedName, onSelectFact
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((row, index) => {
+            {ranking.map((row, index) => {
               const name = row.factorName || row.name;
               return (
                 <tr
@@ -76,15 +80,20 @@ export default function FactorRankingTable({ ranking, selectedName, onSelectFact
             })}
           </tbody>
         </table>
-        {!total ? <p className="factors-empty factors-ranking-empty">暂无排名数据</p> : null}
+        {!safeTotal ? <p className="factors-empty factors-ranking-empty">暂无排名数据</p> : null}
       </div>
-      {total > RANKING_PAGE_SIZE ? (
-        <RankingPagination page={page} pageCount={pageCount} total={total} onPageChange={setPage} />
-      ) : total ? (
-        <p className="factors-ranking-page-total">共 {total} 条</p>
+      {safeTotal > RANKING_PAGE_SIZE ? (
+        <RankingPagination page={page} pageCount={pageCount} total={safeTotal} onPageChange={onPageChange} />
+      ) : safeTotal ? (
+        <p className="factors-ranking-page-total">共 {safeTotal} 条</p>
       ) : null}
     </section>
   );
+}
+
+function rankingCountText(total, unfilteredTotal) {
+  const raw = Number(unfilteredTotal ?? total);
+  return raw !== total ? `${total} / ${raw} 项` : `${total} 项`;
 }
 
 function RankingPagination({ page, pageCount, total, onPageChange }) {

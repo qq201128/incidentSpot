@@ -6,13 +6,13 @@ from asyncio import sleep
 from dataclasses import dataclass, replace
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
-from websockets.exceptions import ConnectionClosed
+from fastapi import WebSocket
 from websockets.legacy.client import connect as upstream_ws_connect
 
 from app.services.agg_trade_normalize import normalize_agg_trade_row
 from app.services.binance_market_data import fetch_agg_trades_display
 from app.services.binance_upstream_connect import upstream_websocket_connect_kwargs
+from app.services.ws_client_disconnect import CLIENT_WS_GONE_EXC
 from app.services.ws_kline_transform import unwrap_fstream_ws_message
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ async def proxy_agg_trade_stream(
     await client_ws.accept()
     try:
         await send_agg_trade_snapshot(client_ws, sym, limit=limit)
-    except (WebSocketDisconnect, ConnectionClosed):
+    except CLIENT_WS_GONE_EXC:
         return
     await run_agg_trade_loop(client_ws, state)
 
@@ -56,7 +56,7 @@ async def run_agg_trade_loop(client_ws: WebSocket, state: AggTradeStreamState) -
     while True:
         try:
             state = await run_agg_trade_stream(client_ws, state)
-        except (WebSocketDisconnect, ConnectionClosed):
+        except CLIENT_WS_GONE_EXC:
             break
         except TimeoutError:
             log_agg_trade_timeout(state)

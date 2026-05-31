@@ -38,6 +38,22 @@
   overflow: hidden;
 }
 
+.event-records-search {
+  flex: 0 1 260px;
+  min-width: 160px;
+}
+
+.event-records-search input {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(79, 116, 139, 0.38);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d1d7e0;
+  font-size: 12px;
+}
+
 .event-records-head h2,
 .event-records-meta,
 .event-records-head > span {
@@ -178,6 +194,13 @@
   margin: 14px 12px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.event-records-error {
+  margin: 14px 12px;
+  color: #ff8b83;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .event-records-pagination {

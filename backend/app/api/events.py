@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
@@ -95,18 +96,25 @@ def list_events(
     page: int = Query(1, ge=1),
     pageSize: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     view: str = Query("events"),
+    q: str | None = Query(None, description="search event id/title/status/strategy/order response"),
 ) -> dict:
     conn = get_conn()
     try:
+        selected_symbol = symbol if isinstance(symbol, str) else None
+        selected_strategy = strategyKey if isinstance(strategyKey, str) else None
+        selected_duration = durationMinutes if isinstance(durationMinutes, int) else None
+        selected_view = view if isinstance(view, str) else "events"
+        query = q if isinstance(q, str) else None
         try:
             payload = paginated_events(
                 conn,
-                symbol=symbol,
+                symbol=selected_symbol,
                 page=page,
                 page_size=pageSize,
-                view=view,
-                strategy_key=strategyKey,
-                duration_minutes=durationMinutes,
+                view=selected_view,
+                strategy_key=selected_strategy,
+                duration_minutes=selected_duration,
+                query=query,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -299,12 +307,19 @@ def _insert_order(conn, event_id: int, side: str, payload: OrderCreate) -> int:
     now = datetime.now(timezone.utc).isoformat()
     cursor = conn.execute(
         """
-        INSERT INTO orders(event_id, side, price, qty, status, created_at)
-        VALUES(?, ?, ?, ?, 'OPEN', ?)
+        INSERT INTO orders(event_id, side, price, qty, status, created_at, external_status, external_response)
+        VALUES(?, ?, ?, ?, 'OPEN', ?, 'SIMULATED', ?)
         """,
-        (event_id, side, payload.price, payload.qty, now),
+        (event_id, side, payload.price, payload.qty, now, _simulated_order_response()),
     )
     return int(cursor.lastrowid)
+
+
+def _simulated_order_response() -> str:
+    return json.dumps(
+        {"simulation": True, "message": "模拟订单：未调用 Binance 下单接口"},
+        ensure_ascii=False,
+    )
 
 
 @router.post("/{event_id}/settle")

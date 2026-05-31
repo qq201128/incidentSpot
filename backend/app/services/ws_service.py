@@ -5,8 +5,7 @@ from asyncio import sleep
 from typing import Any
 from dataclasses import dataclass, replace
 
-from fastapi import WebSocket, WebSocketDisconnect
-from websockets.exceptions import ConnectionClosed
+from fastapi import WebSocket
 from websockets.legacy.client import connect as upstream_ws_connect
 
 from app.db.session import get_conn
@@ -15,6 +14,7 @@ from app.services.binance_service import (
     kline_ws_stream_name,
 )
 from app.services.index_kline_fallback import send_index_rest_fallback
+from app.services.ws_client_disconnect import CLIENT_WS_GONE_EXC
 from app.services.binance_upstream_connect import upstream_websocket_connect_kwargs
 from app.services.ws_kline_transform import (
     candle_for_interval,
@@ -54,7 +54,7 @@ async def proxy_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -
         try:
             await _backfill_contract_state(state)
             state = await _run_kline_stream(client_ws, state, persist=True)
-        except (WebSocketDisconnect, ConnectionClosed):
+        except CLIENT_WS_GONE_EXC:
             break
         except TimeoutError:
             _log_stream_timeout("kline", state)
@@ -79,7 +79,7 @@ async def proxy_index_kline_stream(client_ws: WebSocket, symbol: str, interval: 
     while True:
         try:
             state = await _run_kline_stream(client_ws, state, persist=False)
-        except (WebSocketDisconnect, ConnectionClosed):
+        except CLIENT_WS_GONE_EXC:
             break
         except TimeoutError:
             _log_stream_timeout("index kline", state)
