@@ -6,6 +6,11 @@ const ANIMATION_SCOPE_METHODS = {
   refreshList: "refreshList",
   refreshRanking: "refreshRanking",
 };
+const PAGE_ENTRY_SELECTOR = "[data-factor-motion]";
+const TOOLBAR_ITEM_SELECTOR = ".factors-toolbar-row > *";
+const FACTOR_LIST_ROW_SELECTOR = ".factors-list-panel .factors-table tbody tr";
+const RANK_HINT_SELECTOR = ".factors-rank-hint";
+const RANKING_ROW_SELECTOR = ".factors-ranking-table tbody tr";
 
 export function useFactorPageAnimations({ listKey, pageRef, rankingKey }) {
   const animationScopeRef = useRef(null);
@@ -39,20 +44,23 @@ function registerFactorPageAnimations(scope) {
 }
 
 function animatePageEntry() {
-  createTimeline({
+  const timeline = createTimeline({
     defaults: {
       duration: 520,
       ease: "outCubic",
       composition: "replace",
     },
-  })
-    .add("[data-factor-motion]", {
+  });
+  if (hasTargets(PAGE_ENTRY_SELECTOR)) {
+    timeline.add(PAGE_ENTRY_SELECTOR, {
       opacity: [0, 1],
       y: [18, 0],
       delay: stagger(70),
-    })
-    .add(
-      ".factors-toolbar-row > *",
+    });
+  }
+  if (hasTargets(TOOLBAR_ITEM_SELECTOR)) {
+    timeline.add(
+      TOOLBAR_ITEM_SELECTOR,
       {
         opacity: [0, 1],
         x: [-10, 0],
@@ -61,10 +69,12 @@ function animatePageEntry() {
       },
       "<<+=160",
     );
+  }
 }
 
 function animateFactorListRefresh() {
-  animate(".factors-list-panel .factors-table tbody tr", {
+  if (!hasTargets(FACTOR_LIST_ROW_SELECTOR)) return;
+  animate(FACTOR_LIST_ROW_SELECTOR, {
     opacity: [0, 1],
     x: [-10, 0],
     duration: 300,
@@ -75,14 +85,15 @@ function animateFactorListRefresh() {
 }
 
 function animateRankingRefresh() {
-  animate(".factors-rank-hint", {
+  if (hasTargets(RANK_HINT_SELECTOR)) animate(RANK_HINT_SELECTOR, {
     opacity: [0.52, 1],
     color: ["#e8bf63", "#9aa9a5"],
     duration: 420,
     ease: "outQuad",
     composition: "replace",
   });
-  animate(".factors-ranking-table tbody tr", {
+  if (!hasTargets(RANKING_ROW_SELECTOR)) return;
+  animate(RANKING_ROW_SELECTOR, {
     opacity: [0, 1],
     x: [12, 0],
     duration: 320,
@@ -92,3 +103,6 @@ function animateRankingRefresh() {
   });
 }
 
+function hasTargets(selector) {
+  return document.querySelector(selector) !== null;
+}

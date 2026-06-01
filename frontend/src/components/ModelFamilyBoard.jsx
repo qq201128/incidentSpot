@@ -184,7 +184,7 @@ function normalizedSearchState(searchStatus) {
 
 function trainingRuleSummary(families) {
   const threshold = firstTargetWinRate(families);
-  return `训练规则：候选置信阈值下胜率必须严格 ${targetWinRateLabel({ targetWinRateExclusive: threshold })}，候选按 successive-halving 分阶段筛选。`;
+  return `训练规则：交易激活仍需 ${targetWinRateLabel({ targetWinRateExclusive: threshold })}，优于当前模型的候选可先进入影子模拟观察。`;
 }
 
 function firstTargetWinRate(families) {

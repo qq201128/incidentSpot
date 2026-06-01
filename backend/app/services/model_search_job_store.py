@@ -21,6 +21,7 @@ from app.services.model_search_job_sql import (
     existing_select_sql,
     failure_sql,
     finish_sql,
+    pending_resource_update_sql,
     pending_select_sql,
     reset_sql,
     retry_sql,
@@ -188,6 +189,35 @@ def retry_failed_model_search_job(job_id: str) -> dict[str, Any]:
     return run_db_write_with_retry(_operation)
 
 
+def update_pending_model_search_job_resources(
+    *,
+    symbols: tuple[str, ...],
+    durations: tuple[str, ...],
+    families: tuple[str, ...],
+    profile: str,
+    resource: dict[str, Any],
+    priority: int = DEFAULT_MODEL_SEARCH_PRIORITY,
+) -> dict[str, Any]:
+    specs = [
+        job_spec(symbol=sym, duration=dur, family=fam, profile=profile, priority=priority, resource=resource)
+        for sym in symbols
+        for dur in durations
+        for fam in families
+    ]
+
+    def _operation() -> dict[str, Any]:
+        conn = get_conn()
+        try:
+            ensure_model_search_jobs_table(conn)
+            updated = [_update_pending_resource(conn, spec, resource) for spec in specs]
+            conn.commit()
+            return {"version": "model_search_jobs_resource_update_v1", "matched": sum(updated), "requested": len(specs)}
+        finally:
+            conn.close()
+
+    return run_db_write_with_retry(_operation)
+
+
 def list_model_search_jobs(filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     conn = get_conn()
     try:
@@ -197,6 +227,25 @@ def list_model_search_jobs(filters: dict[str, Any] | None = None) -> list[dict[s
         return [decode_job(row) for row in rows]
     finally:
         conn.close()
+
+
+def _update_pending_resource(conn: Any, spec: dict[str, Any], resource: dict[str, Any]) -> bool:
+    selected = resource or {}
+    cursor = conn.execute(
+        pending_resource_update_sql(),
+        (
+            selected.get("resourceProfile"),
+            selected.get("internalThreads"),
+            selected.get("parallelWorkers"),
+            selected.get("xgboostProcessWorkers"),
+            JOB_STATUS_PENDING,
+            spec["symbol"],
+            spec["duration"],
+            spec["model_family"],
+            spec["profile"],
+        ),
+    )
+    return int(cursor.rowcount or 0) > 0
 
 
 def _enqueue_one(

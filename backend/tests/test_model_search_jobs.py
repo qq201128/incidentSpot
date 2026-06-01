@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import time
 import uuid
 from inspect import signature
@@ -104,6 +105,39 @@ def test_reset_existing_job_updates_reset_history_flag(monkeypatch: pytest.Monke
     assert reset["reset"] == 1
     job = store.claim_next_model_search_job(max_running_jobs=1)
     assert job["resetHistory"] is True
+
+
+def test_update_pending_resources_does_not_touch_running_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("pending-resource-update")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        resource={**_resource_payload(), "parallelWorkers": 1},
+    )
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("svm",),
+        profile="fast",
+        resource={**_resource_payload(), "parallelWorkers": 1},
+    )
+    running = store.claim_next_model_search_job(max_running_jobs=1)
+
+    result = store.update_pending_model_search_job_resources(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn", "svm"),
+        profile="fast",
+        resource={**_resource_payload(), "parallelWorkers": 6},
+    )
+    jobs = store.list_model_search_jobs({"symbols": ("BTCUSDT",), "durations": ("10m",)})
+
+    assert result["matched"] == 1
+    assert next(job for job in jobs if job["job_id"] == running["job_id"])["parallel_workers"] == 1
+    assert next(job for job in jobs if job["status"] == JOB_STATUS_PENDING)["parallel_workers"] == 6
 
 
 def test_claim_marks_pending_job_running(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -476,7 +510,7 @@ def _db_path(name: str) -> Path:
 
 
 def _runtime_path(name: str) -> Path:
-    path = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / f"{name}-{uuid.uuid4().hex}"
+    path = Path(tempfile.gettempdir()) / "incidentSpot-pytest-temp" / f"{name}-{uuid.uuid4().hex}"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

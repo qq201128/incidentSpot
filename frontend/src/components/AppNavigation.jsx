@@ -1,13 +1,15 @@
+import { NavLink } from "react-router-dom";
+
 const NAV_ITEMS = Object.freeze([
-  { key: "trade", label: "工作台" },
-  { key: "hit-rate", label: "规则命中率" },
-  { key: "governance", label: "样本观测" },
-  { key: "research", label: "研究驾驶舱" },
-  { key: "factors", label: "因子库" },
-  { key: "learning", label: "自动挖掘" },
+  { key: "trade", label: "工作台", path: "/" },
+  { key: "hit-rate", label: "规则命中率", path: "/rule-hit-rate" },
+  { key: "governance", label: "样本观测", path: "/event-governance" },
+  { key: "research", label: "研究驾驶舱", path: "/research-dashboard" },
+  { key: "factors", label: "因子库", path: "/factors" },
+  { key: "learning", label: "自动挖掘", path: "/learning" },
 ]);
 
-export default function AppNavigation({ appView, onViewChange }) {
+export default function AppNavigation({ appView }) {
   return (
     <header className="app-shell-header">
       <a className="brand-lockup" href="/" aria-label="incidentSpot 工作台">
@@ -21,15 +23,15 @@ export default function AppNavigation({ appView, onViewChange }) {
       </a>
       <nav className="app-nav" aria-label="主导航">
         {NAV_ITEMS.map((item) => (
-          <button
+          <NavLink
             key={item.key}
-            type="button"
             className={`app-nav-link${appView === item.key ? " app-nav-link-active" : ""}`}
-            onClick={() => onViewChange(item.key)}
+            to={item.path}
+            end={item.path === "/"}
             aria-current={appView === item.key ? "page" : undefined}
           >
             {item.label}
-          </button>
+          </NavLink>
         ))}
       </nav>
     </header>

@@ -65,7 +65,6 @@ def _warming_monitoring_payload(symbol: str, duration: str) -> dict[str, Any]:
             "symbol": symbol,
             "duration": duration,
             "summary": {"pairedCount": 0},
-            "issues": [],
             "byStrategy": [],
             "pairs": [],
         },

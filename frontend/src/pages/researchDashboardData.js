@@ -2,6 +2,7 @@ export const DURATIONS = Object.freeze(["10m", "30m", "60m", "1d"]);
 export const SYMBOLS = Object.freeze(["BTCUSDT", "ETHUSDT"]);
 export const EMPTY = "—";
 export const TOP_ROW_LIMIT = 18;
+export const MODEL_ROW_RESERVE = 14;
 export const EVIDENCE_TARGETS = Object.freeze({
   backtestGapWarn: 0.1,
   lossStreakLimit: 5,
@@ -15,7 +16,7 @@ export const EVIDENCE_TARGETS = Object.freeze({
 const TOP_REASON_LIMIT = 6;
 const STATUS_KEYS = Object.freeze({
   collecting: new Set(["paper_collecting", "backtest_candidate"]),
-  failed: new Set(["paper_failed", "invalid_data_leakage"]),
+  failed: new Set(["paper_failed", "invalid_data_leakage", "model_status_failed"]),
   stable: new Set(["paper_stable"]),
 });
 const STATUS_PRIORITY = Object.freeze({
@@ -24,17 +25,47 @@ const STATUS_PRIORITY = Object.freeze({
   backtest_candidate: 1,
   paper_failed: 0,
   invalid_data_leakage: 0,
+  model_status_failed: 0,
 });
 
 export function settledRows(report) {
-  const rows = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
-  return rows.map(rowPayload).filter((row) => row.sampleCount > 0).sort(sampleSort);
+  const rows = [
+    ...(Array.isArray(report?.allCandidates) ? report.allCandidates : []),
+    ...(Array.isArray(report?.modelFamilyStatusRows) ? report.modelFamilyStatusRows : []),
+  ];
+  return rows.map(rowPayload).filter(visibleResearchRow).sort(sampleSort);
+}
+
+export function mergeModelFamilyStatusRows(report, models) {
+  const statusRows = Array.isArray(models) ? models.map(normalizeModelStatusRow) : [];
+  const statusByFamily = modelStatusByFamily(statusRows);
+  const allCandidates = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
+  const mergedCandidates = allCandidates.map((row) => enrichModelCandidate(row, statusByFamily));
+  const presentFamilies = new Set(
+    mergedCandidates.filter((row) => row?.candidateType === "model").map((row) => row.modelFamily),
+  );
+  const modelFamilyStatusRows = statusRows.filter((row) => row?.modelFamily && !presentFamilies.has(row.modelFamily));
+  return {
+    ...report,
+    allCandidates: mergedCandidates,
+    allCandidateCount: mergedCandidates.length + modelFamilyStatusRows.length,
+    modelFamilyStatusRows,
+  };
+}
+
+export function visibleSettledRows(rows, limit = TOP_ROW_LIMIT) {
+  const modelRows = rows.filter((row) => row.type === "model").slice(0, MODEL_ROW_RESERVE);
+  const reserved = new Set(modelRows.map((row) => row.rowKey));
+  const slots = Math.max(limit - modelRows.length, 0);
+  const primary = rows.filter((row) => !reserved.has(row.rowKey)).slice(0, slots);
+  return [...primary, ...modelRows].sort(sampleSort);
 }
 
 export function researchSummary(report, rows) {
-  const sampleCount = rows.reduce((sum, row) => sum + row.sampleCount, 0);
-  const weightedWins = rows.reduce((sum, row) => sum + (row.winRate ?? 0) * row.sampleCount, 0);
-  const settledCandidateCount = rows.length;
+  const settled = settledEvidenceRows(rows);
+  const sampleCount = settled.reduce((sum, row) => sum + row.sampleCount, 0);
+  const weightedWins = settled.reduce((sum, row) => sum + (row.winRate ?? 0) * row.sampleCount, 0);
+  const settledCandidateCount = settled.length;
   const totalCandidates = candidateTotal(report);
   return {
     reportLoaded: Boolean(report),
@@ -43,18 +74,18 @@ export function researchSummary(report, rows) {
     settledCoverage: totalCandidates > 0 ? settledCandidateCount / totalCandidates : null,
     weightedWinRate: sampleCount > 0 ? weightedWins / sampleCount : null,
     avgSamplesPerCandidate: settledCandidateCount > 0 ? sampleCount / settledCandidateCount : null,
-    sampleRichCandidateCount: rows.filter((row) => row.sampleCount >= EVIDENCE_TARGETS.sampleRichMin).length,
-    stableCount: countRowStatus(rows, STATUS_KEYS.stable),
-    collectingCount: countRowStatus(rows, STATUS_KEYS.collecting),
-    failedCount: countRowStatus(rows, STATUS_KEYS.failed),
-    stableSampleCount: sumRowStatus(rows, STATUS_KEYS.stable),
-    collectingSampleCount: sumRowStatus(rows, STATUS_KEYS.collecting),
-    failedSampleCount: sumRowStatus(rows, STATUS_KEYS.failed),
+    sampleRichCandidateCount: settled.filter((row) => row.sampleCount >= EVIDENCE_TARGETS.sampleRichMin).length,
+    stableCount: countRowStatus(settled, STATUS_KEYS.stable),
+    collectingCount: countRowStatus(settled, STATUS_KEYS.collecting),
+    failedCount: countRowStatus(settled, STATUS_KEYS.failed),
+    stableSampleCount: sumRowStatus(settled, STATUS_KEYS.stable),
+    collectingSampleCount: sumRowStatus(settled, STATUS_KEYS.collecting),
+    failedSampleCount: sumRowStatus(settled, STATUS_KEYS.failed),
     modelEvidenceCount: rows.filter((row) => row.type === "model").length,
-    backtestGapRiskCount: rows.filter(hasBacktestGapRisk).length,
-    recentWeakCount: rows.filter(hasRecentWeakness).length,
-    dataIssueCount: issueCount(rows, "dataFreshnessStatus"),
-    featureIssueCount: issueCount(rows, "missingFeatureStatus"),
+    backtestGapRiskCount: settled.filter(hasBacktestGapRisk).length,
+    recentWeakCount: settled.filter(hasRecentWeakness).length,
+    dataIssueCount: issueCount(settled, "dataFreshnessStatus"),
+    featureIssueCount: issueCount(settled, "missingFeatureStatus"),
     unsettledCandidateCount: unsettledCandidateCount(report),
     predictionFailureCount: Array.isArray(report?.predictionFailures) ? report.predictionFailures.length : 0,
     stageFailureCount: stageLogRows(report).filter((row) => row.status === "failed").length,
@@ -66,7 +97,7 @@ export function prefilterRows(report) {
   const rows = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
   return rows
     .map(rowPayload)
-    .filter((row) => row.sampleCount === 0)
+    .filter((row) => row.sampleCount === 0 && row.type !== "model")
     .sort(prefilterSort)
     .slice(0, 6);
 }
@@ -74,7 +105,7 @@ export function prefilterRows(report) {
 export function topReasons(rows, report) {
   const counts = new Map();
   for (const row of rows) {
-    if (row.status !== "paper_failed" && row.status !== "invalid_data_leakage") continue;
+    if (row.status !== "paper_failed" && row.status !== "invalid_data_leakage" && row.status !== "model_status_failed") continue;
     incrementReason(counts, row.reason || "unknown");
   }
   for (const failure of report?.predictionFailures || []) {
@@ -111,43 +142,6 @@ export function candidateTypeLabel(row) {
   return "因子";
 }
 
-export function statusClass(status) {
-  if (status === "paper_stable") return "is-stable";
-  if (status === "paper_failed" || status === "invalid_data_leakage") return "is-failed";
-  return "is-collecting";
-}
-
-export function statusLabel(status) {
-  const labels = {
-    backtest_candidate: "预筛",
-    paper_stable: "稳定",
-    paper_collecting: "观察",
-    paper_failed: "失败",
-    invalid_data_leakage: "泄漏",
-  };
-  return labels[status] || status || EMPTY;
-}
-
-export function reasonLabel(reason) {
-  const labels = {
-    consecutive_losses: "连续亏损",
-    insufficient_settled_samples: "样本不足",
-    invalid_data_leakage: "数据泄漏",
-    paper_live_avg_return_below_target: "均收益不足",
-    paper_live_profit_factor_below_target: "PF不足",
-    paper_live_win_rate_below_target: "胜率不足",
-    prediction_failed: "预测失败",
-    recent_profit_factor_below_target: "近期PF不足",
-    recent_samples_below_min: "近期样本不足",
-    recent_win_rate_below_target: "近期胜率不足",
-    rolling_windows_below_min: "滚动窗口不足",
-    rolling_window_samples_below_min: "滚动样本不足",
-    rolling_window_win_rate_below_target: "滚动胜率不足",
-    stable_paper_live_target_met: "纸盘达标",
-  };
-  return labels[reason] || reason || EMPTY;
-}
-
 export function reportStatus(report) {
   if (!report) return "未返回结算样本";
   const total = candidateTotal(report);
@@ -178,9 +172,12 @@ export function formatDateTime(value) {
 
 function rowPayload(row) {
   const metrics = row.metrics || {};
-  const paperWinRate = numberOrNull(row.paperLiveWinRate ?? metrics.winRate);
-  const backtestWinRate = numberOrNull(row.backtestWinRate);
   const type = row.candidateType || "factor";
+  const paperWinRate = numberOrNull(row.paperLiveWinRate ?? (type === "model" ? null : metrics.winRate));
+  const validationWinRate = numberOrNull(row.validationWinRate ?? metrics.validationWinRate);
+  const winRate = paperWinRate ?? (type === "model" ? validationWinRate : null);
+  const validationSampleCount = Number(row.validationSampleCount ?? metrics.validationSampleCount ?? 0);
+  const backtestWinRate = numberOrNull(row.backtestWinRate);
   const name = candidateName(row, type);
   return {
     rowKey: rowKey(row, name),
@@ -190,8 +187,10 @@ function rowPayload(row) {
     type,
     status: row.paperLiveStatus || row.status,
     reason: row.reason,
-    sampleCount: Number(row.paperLiveSampleCount || metrics.sampleCount || 0),
-    winRate: paperWinRate,
+    sampleCount: Number(row.paperLiveSampleCount || (type === "model" ? 0 : metrics.sampleCount) || 0),
+    validationSampleCount,
+    validationWinRate,
+    winRate,
     backtestWinRate,
     backtestGap: gapValue(backtestWinRate, paperWinRate),
     oosWinRate: numberOrNull(row.oosWinRate),
@@ -203,6 +202,55 @@ function rowPayload(row) {
     stability: metrics.paperStability || {},
     windows: metrics.paperLiveWindows || {},
   };
+}
+
+function visibleResearchRow(row) {
+  return row.sampleCount > 0 || row.type === "model";
+}
+
+function modelStatusByFamily(rows) {
+  return new Map(rows.filter((row) => row?.modelFamily).map((row) => [row.modelFamily, row]));
+}
+
+function normalizeModelStatusRow(row) {
+  const family = row?.modelFamily;
+  const symbol = row?.symbol || "";
+  const duration = row?.duration || "";
+  return {
+    ...row,
+    candidateKey: row?.candidateKey || row?.modelVersion || `${family}:${symbol}:${duration}`,
+    candidateType: "model",
+    paperLiveStatus: normalizedPaperLiveStatus(row),
+    paperLiveSampleCount: Number(row?.paperLiveSampleCount || 0),
+    paperLiveWinRate: numberOrNull(row?.paperLiveWinRate),
+    validationSampleCount: row?.validationSampleCount ?? row?.sampleCounts?.validation ?? row?.validationGate?.validation?.sampleCount,
+    metrics: { sampleCount: 0, ...(row?.metrics || {}) },
+  };
+}
+
+function normalizedPaperLiveStatus(row) {
+  const status = row?.paperLiveStatus || row?.paperLiveAdmission?.status;
+  if (status) return status;
+  const fallback = String(row?.status || "");
+  if (fallback.startsWith("paper_") || fallback === "backtest_candidate" || fallback === "model_status_failed") {
+    return fallback;
+  }
+  return "backtest_candidate";
+}
+
+function enrichModelCandidate(row, statusByFamily) {
+  if (row?.candidateType !== "model" || !row.modelFamily) return row;
+  const status = statusByFamily.get(row.modelFamily);
+  if (!status) return row;
+  return {
+    ...status,
+    ...row,
+    metrics: { ...(status.metrics || {}), ...(row.metrics || {}) },
+  };
+}
+
+function settledEvidenceRows(rows) {
+  return rows.filter((row) => row.sampleCount > 0);
 }
 
 function candidateName(row, type) {

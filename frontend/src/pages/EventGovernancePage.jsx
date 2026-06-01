@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchEventGovernance } from "../api/workbenchClient";
-import { strategyLabel } from "../utils/strategyLabels";
 import {
   AllEvaluationsSection,
   SimulationObservationSection,
@@ -15,11 +14,6 @@ const DURATIONS = [
 ];
 
 const POLL_MS = 8000;
-
-const ISSUE_LABELS = {
-  systemic_shadow_win_event_loss: "系统性：Shadow 正确但 Event 亏损",
-  strategy_shadow_win_event_loss: "策略级：Shadow 与 Event 偏差偏高",
-};
 
 export default function EventGovernancePage() {
   const [symbol, setSymbol] = useState("BTCUSDT");
@@ -69,7 +63,6 @@ export default function EventGovernancePage() {
   const totalWatchlistCount =
     observation?.watchlistCount ?? batchWatchlist.length + singleWatchlist.length;
   const summary = deviation?.summary ?? {};
-  const issues = deviation?.issues ?? [];
 
   return (
     <main className="event-governance-page layout">
@@ -122,32 +115,6 @@ export default function EventGovernancePage() {
             <KpiCard label="关注策略数" value={totalWatchlistCount} warn={totalWatchlistCount > 0} />
             <KpiCard label="多因子关注" value={observation?.batchComboWatchlistCount ?? batchWatchlist.length} />
             <KpiCard label="单因子关注" value={observation?.factorCandidateWatchlistCount ?? singleWatchlist.length} />
-          </section>
-
-          <section className="event-gov-panel">
-            <div className="event-gov-panel-head">
-              <h2>偏差告警</h2>
-              <span>{issues.length ? `${issues.length} 条` : "暂无告警"}</span>
-            </div>
-            {issues.length === 0 ? (
-              <p className="event-gov-empty">当前未发现系统性 Shadow/Event 偏差问题。</p>
-            ) : (
-              <ul className="event-gov-issue-list">
-                {issues.map((issue, index) => (
-                  <li
-                    key={`${issue.code}-${issue.strategyKey ?? index}`}
-                    className={`event-gov-issue severity-${issue.severity}`}
-                  >
-                    <strong>{ISSUE_LABELS[issue.code] ?? issue.code}</strong>
-                    <span>{issue.message}</span>
-                    {issue.strategyKey ? <code>{strategyLabel(issue.strategyKey)}</code> : null}
-                    {issue.shadowWinEventLossRate != null ? (
-                      <span className="event-gov-meta">偏差率 {formatRate(issue.shadowWinEventLossRate)}</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
 
           <SimulationObservationSection

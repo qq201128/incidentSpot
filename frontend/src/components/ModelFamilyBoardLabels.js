@@ -28,6 +28,8 @@ export function blockedReasonLabel(reason) {
     model_status_untrained: "模型未训练",
     validation_gate_missing: "验证闸门缺失",
     no_validation_confidence_threshold_met: "未达验证门槛",
+    candidate_win_rate_beats_active_model: "胜率优于当前模型",
+    active_model_win_rate_missing: "当前模型胜率缺失",
     dependency_unavailable: "依赖不可用",
     trained_combo_snapshot_missing: "训练组合快照缺失",
     trained_combo_snapshot_incomplete: "训练组合不足Top3",

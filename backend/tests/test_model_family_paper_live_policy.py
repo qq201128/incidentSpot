@@ -31,5 +31,16 @@ def test_validation_gate_failure_is_not_paper_live_stable() -> None:
 
     assert payload["paperLiveAdmission"]["allowed"] is False
     assert payload["paperLiveStatus"] == "backtest_candidate"
-    assert payload["validationRole"] == "validation_gate_allows_paper_live_only"
+    assert payload["validationRole"] == "validation_gate_or_relative_shadow_observation"
+    assert payload["realTradingEnabled"] is False
+
+
+def test_shadow_active_collects_paper_live_without_trade_gate() -> None:
+    gate = {"status": "failed", "reason": "no_validation_confidence_threshold_met"}
+
+    payload = model_status_policy_payload("shadow_active", gate)
+
+    assert payload["paperLiveAdmission"]["allowed"] is True
+    assert payload["paperLiveStatus"] == "paper_collecting"
+    assert payload["paperLiveAdmission"]["reason"] == "shadow_observation_allowed_without_trade_gate"
     assert payload["realTradingEnabled"] is False

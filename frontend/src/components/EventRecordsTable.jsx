@@ -29,6 +29,7 @@ export default function EventRecordsTable({
   ensembleReloadKey = 0,
 }) {
   const [activeTab, setActiveTab] = useState(EVENT_TAB);
+  const [scope, setScope] = useState("ALL");
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -37,12 +38,13 @@ export default function EventRecordsTable({
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   const showEnsemble = !compact && activeTab === ENSEMBLE_TAB;
   const viewKey = compact ? EVENT_TAB : activeTab;
+  const effectiveSymbol = scope === "ALL" ? "" : scope;
 
   const loadRecords = useCallback(async () => {
-    if (!symbol || showEnsemble) return;
+    if (showEnsemble) return;
     try {
       const data = await fetchEventsPage({
-        symbol,
+        symbol: effectiveSymbol,
         page,
         pageSize: PAGE_SIZE,
         q: compact ? undefined : debouncedQuery.trim(),
@@ -61,12 +63,12 @@ export default function EventRecordsTable({
       setTotal(0);
       setPageCount(1);
     }
-  }, [compact, debouncedQuery, onPageChange, page, showEnsemble, symbol, viewKey]);
+  }, [compact, debouncedQuery, effectiveSymbol, onPageChange, page, showEnsemble, viewKey]);
 
   useEffect(() => {
     if (compact) return;
     onPageChange?.(1);
-  }, [activeTab, compact, debouncedQuery, onPageChange, symbol]);
+  }, [activeTab, compact, debouncedQuery, effectiveSymbol, onPageChange]);
 
   useEffect(() => {
     void loadRecords();
@@ -93,7 +95,10 @@ export default function EventRecordsTable({
         activeTab={activeTab}
         compact={compact}
         ensembleTab={showEnsemble}
+        scopeLabel={scopeText(scope)}
+        scope={scope}
         onChange={setActiveTab}
+        onScopeChange={setScope}
         page={page}
         pageCount={pageCount}
         query={query}
@@ -133,20 +138,23 @@ function RecordTabs({
   compact,
   ensembleTab,
   errorMessage,
+  onScopeChange,
   onChange,
   onQueryChange,
   page,
   pageCount,
   query,
+  scope,
+  scopeLabel,
   total,
 }) {
   const meta = ensembleTab
     ? "综合裁判候选列表"
     : errorMessage
       ? "加载失败"
-    : total
-      ? `共 ${total} 条 · ${page}/${pageCount} 页`
-      : "暂无记录";
+      : total
+        ? `${scopeLabel} · 共 ${total} 条 · ${page}/${pageCount} 页`
+        : `${scopeLabel} · 暂无记录`;
   if (compact) {
     return (
       <div className="event-records-head">
@@ -156,8 +164,8 @@ function RecordTabs({
     );
   }
   return (
-    <div className="event-records-head" role="tablist" aria-label="事件记录视图">
-      <div className="event-records-tabs">
+    <div className="event-records-head">
+      <div className="event-records-tabs" role="tablist" aria-label="事件记录视图">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -171,6 +179,14 @@ function RecordTabs({
           </button>
         ))}
       </div>
+      <label className="event-records-scope">
+        <span className="sr-only">交易对筛选</span>
+        <select value={scope} onChange={(event) => onScopeChange?.(event.target.value)}>
+          <option value="ALL">全部交易对</option>
+          <option value="BTCUSDT">BTCUSDT</option>
+          <option value="ETHUSDT">ETHUSDT</option>
+        </select>
+      </label>
       <label className="event-records-search">
         <span className="sr-only">搜索事件记录</span>
         <input
@@ -195,6 +211,12 @@ function useDebouncedValue(value, delayMs) {
 
 function errorMessageFrom(error) {
   return error?.response?.data?.detail || error?.message || "unknown_error";
+}
+
+function scopeText(scope) {
+  if (scope === "BTCUSDT") return "BTCUSDT";
+  if (scope === "ETHUSDT") return "ETHUSDT";
+  return "全部交易对";
 }
 
 function RecordsPagination({ page, pageCount, total, onPageChange }) {

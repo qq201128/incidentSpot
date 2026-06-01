@@ -6,13 +6,18 @@ from typing import Any
 from app.services.model_family_daily_candidates import model_family_daily_candidate_report
 from app.services.model_family_status_service import model_family_status
 from app.services.model_search_job_store import list_model_search_jobs
+from app.services.model_search_job_types import JOB_STATUS_RUNNING
 
 MODEL_SEARCH_WORKER_COMMAND = "python backend/scripts/run_model_search_worker.py --loop"
 
 
-def model_search_queue_status(filters: dict[str, Any] | None = None) -> dict[str, Any]:
+def model_search_queue_status(
+    filters: dict[str, Any] | None = None,
+    *,
+    include_symbol_details: bool = True,
+) -> dict[str, Any]:
     jobs = list_model_search_jobs(filters)
-    grouped = _group_jobs(jobs)
+    grouped = _group_jobs(jobs) if include_symbol_details else {}
     worker = model_search_worker_status(jobs, active_jobs=_active_worker_jobs(filters, jobs))
     return {
         "version": "model_search_status_v1",
@@ -20,7 +25,7 @@ def model_search_queue_status(filters: dict[str, Any] | None = None) -> dict[str
         "totalJobs": len(jobs),
         "counts": dict(Counter(str(job["status"]) for job in jobs)),
         "symbols": [_symbol_payload(symbol, rows) for symbol, rows in grouped.items()],
-        "runningJobs": [job for job in jobs if job["status"] == "running"],
+        "runningJobs": [job for job in jobs if job["status"] == JOB_STATUS_RUNNING],
         "failedJobs": _failure_rows(jobs),
         "rejectedJobs": _rejected_rows(jobs),
         "latestLogPath": worker["latestLogPath"],
@@ -79,11 +84,22 @@ def _active_worker_jobs(filters: dict[str, Any] | None, jobs: list[dict[str, Any
         return jobs
     if _has_running_job(jobs):
         return jobs
-    return list_model_search_jobs()
+    running = list_model_search_jobs({"statuses": (JOB_STATUS_RUNNING,)})
+    if not running:
+        return jobs
+    seen = {str(job["job_id"]) for job in jobs}
+    merged = list(jobs)
+    for job in running:
+        job_id = str(job["job_id"])
+        if job_id in seen:
+            continue
+        seen.add(job_id)
+        merged.append(job)
+    return merged
 
 
 def _has_running_job(jobs: list[dict[str, Any]]) -> bool:
-    return any(job["status"] == "running" for job in jobs)
+    return any(job["status"] == JOB_STATUS_RUNNING for job in jobs)
 
 
 def _group_jobs(jobs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

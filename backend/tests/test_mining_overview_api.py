@@ -42,7 +42,7 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr("app.services.mining_overview_service.get_factor_learning_memory", fake_memory)
     monkeypatch.setattr(
         "app.services.mining_overview_service.model_search_queue_status",
-        lambda _filters: {
+        lambda _filters, **_kwargs: {
             "counts": {"pending": 2, "running": 0},
             "runningJobs": [],
             "latestLogPath": None,
@@ -56,7 +56,7 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
         },
     )
     monkeypatch.setattr(
-        "app.services.mining_overview_service.model_family_status",
+        "app.services.mining_overview_model_cards.model_family_status",
         lambda family, symbol, duration, **_kwargs: {
             "modelFamily": family,
             "strategyKey": f"{family}_shadow",
@@ -103,6 +103,26 @@ def test_mining_overview_model_card_treats_combo_mismatch_as_ready() -> None:
 
     assert card["cardState"] == "ready"
     assert card["predictionReadyLabel"] == "就绪"
+
+
+def test_mining_overview_model_card_hides_stale_baseline_validation_reason() -> None:
+    from app.services.mining_overview_service import _model_card
+
+    card = _model_card(
+        {
+            "modelFamily": "knn",
+            "strategyKey": "factor_knn_shadow_10m",
+            "status": "initial_baseline",
+            "shadowPredictionReady": True,
+            "validationFailureReason": "no_validation_confidence_threshold_met",
+            "candidateSearchProgress": {"status": "trade_active", "completed": 3, "total": 3},
+            "candidateLibrary": {"total": 3, "bestTradeCandidate": {"status": "trade_active"}},
+            "trainingRules": {"searchSpaceTotal": 24},
+        }
+    )
+
+    assert card["cardState"] == "ready"
+    assert card["latestFailureReason"] is None
 
 
 def test_mining_run_status_reports_ready_running_and_failed_models() -> None:

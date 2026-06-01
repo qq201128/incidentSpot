@@ -7,6 +7,7 @@ from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.high_winrate_strategy_metrics import high_winrate_decision, high_winrate_metrics
+from app.services.live_readiness_gate import live_readiness_gate
 from app.services.paper_live_failure_store import (
     ensure_prediction_failure_table,
     log_prediction_failure,
@@ -33,7 +34,6 @@ STATUS_FAILED = "paper_failed"
 STATUS_BACKTEST = "backtest_candidate"
 STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 10
-RECENT_SAMPLE_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -135,9 +135,8 @@ def _settled_rows(conn: Any, candidate: dict[str, Any]) -> list[dict[str, Any]]:
         WHERE signal_key = ? AND COALESCE(high_winrate_rule, model_version, signal_key) = ?
           AND settled_at IS NOT NULL
         ORDER BY open_time DESC
-        LIMIT ?
         """,
-        (candidate["signal_key"], identity, RECENT_SAMPLE_LIMIT),
+        (candidate["signal_key"], identity),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -164,6 +163,7 @@ def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) ->
         "paperLiveWinRate": metrics.get("winRate"),
         "paperLiveSampleCount": metrics.get("sampleCount"),
         "paperLiveStatus": decision["status"],
+        "liveReadiness": live_readiness_gate(metrics, decision["status"], status_reason=decision["reason"]),
         "status": decision["status"],
         "reason": decision["reason"],
         "metrics": metrics,

@@ -288,6 +288,34 @@ def test_factor_combo_features_enter_model_family_training_matrix(monkeypatch) -
     assert dataset.sim_feedback_metadata["settledCount"] == 0
 
 
+def test_factor_combo_features_use_latest_prior_snapshot(monkeypatch) -> None:
+    frame = _training_frame()
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_learning_memory_for", lambda *_args: None)
+    monkeypatch.setattr(lstm_feature_builder, "build_lstm_market_feature_frame", lambda *_args, **_kwargs: frame)
+    monkeypatch.setattr(lstm_feature_builder, "attach_sim_feedback_features", _empty_sim_feedback)
+    monkeypatch.setattr(lstm_feature_builder, "load_factor_combo_feature_snapshots", _sparse_combo_feature_snapshots)
+
+    dataset = lstm_feature_builder.build_lstm_training_dataset(
+        ModelFamilyTrainingConfig(
+            family="xgboost",
+            symbol="BTCUSDT",
+            duration="10m",
+            feature_window=4,
+            horizon_minutes=10,
+            min_samples=8,
+            epochs=1,
+        ),
+        frame_loader=lambda *_args: frame,
+    )
+
+    assert dataset.factor_combo_metadata["snapshotCount"] == 2
+    assert dataset.factor_combo_metadata["missingRate"] < 0.1
+    first_values = dataset.feature_frame["factor_combo_top1_score"].iloc[0:5].tolist()
+    later_values = dataset.feature_frame["factor_combo_top1_score"].iloc[10:15].tolist()
+    assert first_values == [11.0] * 5
+    assert later_values == [22.0] * 5
+
+
 def test_train_lstm_model_writes_separate_artifacts() -> None:
     artifact_root = _runtime_path("artifacts")
     config = LstmTrainingConfig(
@@ -489,6 +517,39 @@ def _combo_feature_snapshots(*_args) -> list[dict]:
             }
         )
     return snapshots
+
+
+def _sparse_combo_feature_snapshots(*_args) -> list[dict]:
+    return [
+        {
+            "entryOpenTime": 600_000,
+            "ranking": [
+                {
+                    "factorName": "goal_combo__early",
+                    "direction": "up",
+                    "factorScore": 11.0,
+                    "winRate": 0.61,
+                    "profitFactor": 1.3,
+                    "totalPeriods": 80,
+                    "members": [{"name": "factor_a", "orientation": 1}],
+                },
+            ],
+        },
+        {
+            "entryOpenTime": 6_000_000,
+            "ranking": [
+                {
+                    "factorName": "goal_combo__later",
+                    "direction": "up",
+                    "factorScore": 22.0,
+                    "winRate": 0.66,
+                    "profitFactor": 1.7,
+                    "totalPeriods": 100,
+                    "members": [{"name": "factor_b", "orientation": 1}],
+                },
+            ],
+        },
+    ]
 
 
 def _empty_sim_feedback(labeled: pd.DataFrame, *_args, **_kwargs) -> pd.DataFrame:

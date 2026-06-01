@@ -87,3 +87,13 @@ def reset_sql() -> str:
         xgboost_process_workers = ?, reset_history = ?
     WHERE job_id = ?
     """
+
+
+def pending_resource_update_sql() -> str:
+    return """
+    UPDATE model_search_jobs
+    SET resource_profile = ?, internal_threads = ?, parallel_workers = ?,
+        xgboost_process_workers = ?
+    WHERE status = ? AND symbol = ? AND duration = ? AND model_family = ?
+      AND profile = ?
+    """

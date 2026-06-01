@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -39,7 +40,7 @@ def attach_training_factor_combo_features(
         )
     indexed = _snapshots_by_entry(snapshots)
     out = frame.sort_values("entry_open_time").reset_index(drop=True).copy()
-    rows = [_features_for_entry(indexed.get(int(entry))) for entry in out["entry_open_time"]]
+    rows = [_features_for_entry(indexed.snapshot_for(int(entry))) for entry in out["entry_open_time"]]
     features = pd.DataFrame(rows)
     result = pd.concat([out, features], axis=1)
     return FactorComboFeatureResult(result, _metadata(snapshots, features, "historical_replay"))
@@ -66,12 +67,21 @@ def _load_snapshots(
     return [dict(item) for item in loader(symbol.strip().upper(), duration)]
 
 
-def _snapshots_by_entry(snapshots: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
-    indexed: dict[int, dict[str, Any]] = {}
-    for snapshot in snapshots:
-        entry = _entry_open_time(snapshot)
-        indexed[entry] = snapshot
-    return indexed
+@dataclass(frozen=True)
+class _SnapshotIndex:
+    entries: tuple[int, ...]
+    snapshots: dict[int, dict[str, Any]]
+
+    def snapshot_for(self, entry_open_time: int) -> dict[str, Any] | None:
+        position = bisect_right(self.entries, int(entry_open_time)) - 1
+        if position < 0:
+            return None
+        return self.snapshots[self.entries[position]]
+
+
+def _snapshots_by_entry(snapshots: list[dict[str, Any]]) -> _SnapshotIndex:
+    indexed = {_entry_open_time(snapshot): snapshot for snapshot in snapshots}
+    return _SnapshotIndex(tuple(sorted(indexed)), indexed)
 
 
 def _features_for_entry(snapshot: dict[str, Any] | None) -> dict[str, float]:

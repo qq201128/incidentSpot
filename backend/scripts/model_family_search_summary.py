@@ -107,11 +107,14 @@ def _compact_table(rows: list[dict[str, Any]]) -> str:
 
 
 def _row(symbol: str, duration: str, family: str) -> dict[str, Any]:
-    status = model_family_status(family, symbol, duration)
-    progress = status.get("candidateSearchProgress") or {}
-    library = read_model_candidate_library(family, symbol, duration)
-    records = library.get("records") or []
     rules = model_family_training_rules(family)
+    try:
+        status = model_family_status(family, symbol, duration)
+        progress = status.get("candidateSearchProgress") or {}
+        library = read_model_candidate_library(family, symbol, duration)
+        records = library.get("records") or []
+    except Exception as exc:
+        return _status_error_row(symbol, duration, family, rules, exc)
     return {
         "duration": duration,
         "family": family,
@@ -125,6 +128,32 @@ def _row(symbol: str, duration: str, family: str) -> dict[str, Any]:
         "libraryTotal": len(records),
         "counts": progress.get("counts"),
         "best": _best(records),
+    }
+
+
+def _status_error_row(
+    symbol: str,
+    duration: str,
+    family: str,
+    rules: dict[str, Any],
+    exc: Exception,
+) -> dict[str, Any]:
+    return {
+        "duration": duration,
+        "family": family,
+        "modelStatus": "status_failed",
+        "shadowPredictionReady": False,
+        "blockedReason": str(exc),
+        "progressStatus": "status_failed",
+        "completed": None,
+        "total": rules.get("searchSpaceTotal"),
+        "searchSpaceTotal": rules.get("searchSpaceTotal"),
+        "libraryTotal": None,
+        "counts": None,
+        "best": None,
+        "error": str(exc),
+        "exceptionType": type(exc).__name__,
+        "symbol": symbol,
     }
 
 

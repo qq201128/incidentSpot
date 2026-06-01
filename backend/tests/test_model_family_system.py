@@ -11,6 +11,7 @@ from app.services.lstm_feature_builder import LstmDataset
 from app.services.model_family_candidates import (
     attempted_model_search_keys,
     candidate_library_path,
+    model_search_space_size,
     record_model_candidate,
 )
 from app.services.model_family_config import (
@@ -21,6 +22,7 @@ from app.services.model_family_config import (
 from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_family_status_service import model_family_status
 from app.services import model_family_status_service
+from app.services import model_family_status_progress
 from app.services.model_family_training_service import train_model_family
 from app.services.model_family_training_payloads import backend_options
 from app.services.model_family_prediction_service import _prediction_payload, _signal_payload
@@ -161,15 +163,16 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
     assert status["activeModelStatus"] == "initial_baseline"
     assert status["shadowPredictionReady"] is True
     assert status["tradePredictionReady"] is False
-    assert status["paperLiveAdmission"]["allowed"] is False
-    assert status["validationRole"] == "validation_gate_allows_paper_live_only"
+    assert status["paperLiveAdmission"]["allowed"] is True
+    assert status["paperLiveStatus"] == "paper_collecting"
+    assert status["validationRole"] == "validation_gate_or_relative_shadow_observation"
     assert status["realTradingEnabled"] is False
 
 
 def test_model_family_status_reflects_queued_search_job(monkeypatch) -> None:
     _patch_untrained_model_status(monkeypatch)
     monkeypatch.setattr(
-        model_family_status_service,
+        model_family_status_progress,
         "list_model_search_jobs",
         lambda _filters: [
             {
@@ -198,7 +201,7 @@ def test_model_family_status_reflects_queued_search_job(monkeypatch) -> None:
 def test_model_family_status_prefers_running_job_over_newer_pending_job(monkeypatch) -> None:
     _patch_untrained_model_status(monkeypatch)
     monkeypatch.setattr(
-        model_family_status_service,
+        model_family_status_progress,
         "list_model_search_jobs",
         lambda _filters: [
             {
@@ -232,20 +235,79 @@ def test_model_family_status_prefers_running_job_over_newer_pending_job(monkeypa
     assert progress["internalThreads"] == 3
 
 
+def test_model_family_status_marks_stale_runtime_progress_paused(monkeypatch) -> None:
+    _patch_untrained_model_status(monkeypatch)
+    monkeypatch.setattr(
+        model_family_status_progress,
+        "read_model_candidate_progress_view",
+        lambda *_args, **_kwargs: {"status": "running", "completed": 12, "total": 100},
+    )
+    monkeypatch.setattr(model_family_status_progress, "list_model_search_jobs", lambda _filters: [])
+
+    status = model_family_status("knn", "BTCUSDT", "10m")
+
+    progress = status["candidateSearchProgress"]
+    assert progress["status"] == "paused"
+    assert progress["staleRuntimeStatus"] == "running"
+
+
+def test_model_family_status_recovers_zero_progress_from_candidate_library(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+    record_model_candidate(config, "fast", _report("trade_active", 0.74, 1), artifact_root=tmp_path)
+
+    status = model_family_status(
+        "knn",
+        "BTCUSDT",
+        "10m",
+        artifact_root=tmp_path,
+        current_combo_snapshot=[],
+    )
+
+    progress = status["candidateSearchProgress"]
+    assert progress["source"] == "candidate_library"
+    assert progress["status"] == "trade_active"
+    assert progress["completed"] == 1
+    assert progress["total"] == model_search_space_size("knn")
+    assert progress["counts"]["tradeActive"] == 1
+    assert progress["latestCompleted"]["status"] == "trade_active"
+
+
+def test_model_family_status_hides_stale_validation_reason_after_successful_candidate(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+    paths = artifact_paths("BTCUSDT", "10m", tmp_path, family="knn")
+    paths.root.mkdir(parents=True, exist_ok=True)
+    paths.status.write_text(
+        '{"status":"initial_baseline","reason":"no_validation_confidence_threshold_met"}',
+        encoding="utf-8",
+    )
+    record_model_candidate(config, "fast", _report("trade_active", 0.74, 1), artifact_root=tmp_path)
+
+    status = model_family_status(
+        "knn",
+        "BTCUSDT",
+        "10m",
+        artifact_root=tmp_path,
+        current_combo_snapshot=[],
+    )
+
+    assert status["activeValidationFailureReason"] == "no_validation_confidence_threshold_met"
+    assert status["validationFailureReason"] is None
+
+
 def _patch_untrained_model_status(monkeypatch) -> None:
     monkeypatch.setattr(model_family_status_service, "read_json", lambda *_args: None)
     monkeypatch.setattr(model_family_status_service, "required_artifacts_exist", lambda _paths: False)
-    monkeypatch.setattr(
-        model_family_status_service,
-        "read_model_candidate_progress",
-        lambda *_args, **_kwargs: {"status": "idle", "total": 0},
-    )
+    monkeypatch.setattr(model_family_status_progress, "read_model_candidate_progress_view", _empty_candidate_progress)
     monkeypatch.setattr(
         model_family_status_service,
         "model_candidate_library_summary",
         lambda *_args, **_kwargs: {"total": 0},
     )
     monkeypatch.setattr(model_family_status_service, "current_combo_snapshot", lambda *_args: [])
+
+
+def _empty_candidate_progress(*_args, **_kwargs) -> dict:
+    return {"status": "idle", "total": 0}
 
 
 def test_each_model_family_has_successive_halving_training_rules() -> None:
@@ -413,6 +475,192 @@ def test_candidate_search_publishes_initial_baseline_when_untrained(monkeypatch)
     assert result["status"] == "initial_baseline"
     assert training_calls[-1][0] == configs[1]
     assert training_calls[-1][1]["publish_initial_baseline"] is True
+
+
+def test_candidate_search_publishes_relative_shadow_when_candidate_beats_active(monkeypatch) -> None:
+    configs = [
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5}),
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 9}),
+    ]
+    reports = [_report("validation_failed", 0.58, 1), _report("validation_failed", 0.61, 2)]
+    training_calls = []
+
+    def fake_status(*_args):
+        return {
+            "activeModelStatus": "shadow_active",
+            "validationWinRate": 0.56,
+            "validationGate": {"validation": {"winRate": 0.56, "profitFactor": 1.1, "sampleCount": 60}},
+        }
+
+    def fake_train_model_family(config, **kwargs):
+        training_calls.append((config, kwargs))
+        return {"status": "shadow_active", "relativePromotion": {"promoted": True}}
+
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: configs)
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", fake_status)
+    monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
+
+    result = search_service.run_model_candidate_search(
+        search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    )
+
+    assert result["status"] == "shadow_active"
+    assert training_calls[-1][0] == configs[1]
+    assert training_calls[-1][1]["active_status_loader"] is candidate_publisher.model_family_status
+
+
+def test_candidate_search_publishes_relative_shadow_on_win_rate_improvement(monkeypatch) -> None:
+    configs = [
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5}),
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 9}),
+    ]
+    weak_profit_factor = _report("validation_failed", 0.61, 2)
+    weak_profit_factor["validation"]["profitFactor"] = 0.8
+    reports = [_report("validation_failed", 0.58, 1), weak_profit_factor]
+    training_calls = []
+
+    def fake_status(*_args):
+        return {
+            "activeModelStatus": "shadow_active",
+            "validationGate": {"validation": {"winRate": 0.60, "profitFactor": 1.2, "sampleCount": 80}},
+        }
+
+    def fake_train_model_family(config, **kwargs):
+        training_calls.append((config, kwargs))
+        return {"status": "shadow_active", "relativePromotion": {"promoted": True}}
+
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: configs)
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", fake_status)
+    monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
+
+    result = search_service.run_model_candidate_search(
+        search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    )
+
+    assert result["status"] == "shadow_active"
+    assert training_calls[-1][0] == configs[1]
+
+
+def test_candidate_search_updates_shadow_candidate_when_it_beats_active(monkeypatch) -> None:
+    configs = [
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5}),
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 9}),
+    ]
+    reports = [_report("shadow_active", 0.59, 1), _report("shadow_active", 0.63, 2)]
+    training_calls = []
+
+    def fake_status(*_args):
+        return {
+            "activeModelStatus": "shadow_active",
+            "validationWinRate": 0.60,
+            "validationGate": {"validation": {"winRate": 0.60, "profitFactor": 1.2, "sampleCount": 80}},
+        }
+
+    def fake_train_model_family(config, **kwargs):
+        training_calls.append((config, kwargs))
+        return {"status": "shadow_active", "relativePromotion": {"promoted": True}}
+
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: configs)
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", fake_status)
+    monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
+
+    result = search_service.run_model_candidate_search(
+        search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    )
+
+    assert result["status"] == "shadow_active"
+    assert training_calls[-1][0] == configs[1]
+    assert training_calls[-1][1]["active_status_loader"] is candidate_publisher.model_family_status
+
+
+def test_candidate_search_keeps_current_shadow_when_candidate_is_not_better(monkeypatch) -> None:
+    configs = [ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})]
+    reports = [_report("shadow_active", 0.59, 1)]
+    training_calls = []
+
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: configs)
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", _walk_forward_passthrough)
+    monkeypatch.setattr(
+        candidate_publisher,
+        "model_family_status",
+        lambda *_args: {"activeModelStatus": "shadow_active", "validationWinRate": 0.60},
+    )
+    monkeypatch.setattr(candidate_publisher, "train_model_family", lambda *args, **kwargs: training_calls.append((args, kwargs)))
+
+    result = search_service.run_model_candidate_search(
+        search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    )
+
+    assert result["status"] == "shadow_active"
+    assert training_calls == []
+
+
+def test_candidate_search_publishes_relative_shadow_from_full_stage(monkeypatch) -> None:
+    configs = [
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5}),
+        ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 9}),
+    ]
+    reports = [_report("validation_failed", 0.58, 1), _report("validation_failed", 0.61, 2)]
+    training_calls = []
+
+    def fake_status(*_args):
+        return {
+            "activeModelStatus": "shadow_active",
+            "validationGate": {"validation": {"winRate": 0.60, "profitFactor": 1.2, "sampleCount": 80}},
+        }
+
+    def fake_train_model_family(config, **kwargs):
+        training_calls.append((config, kwargs))
+        return {"status": "shadow_active", "relativePromotion": {"promoted": True}}
+
+    def fail_walk_forward(finalists, _dataset_builder):
+        return [], {"stage": "walk_forward", "evaluated": len(finalists), "advanced": 0, "candidates": []}
+
+    monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset())
+    monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda *_args: configs)
+    monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "complete_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "finish_model_candidate_progress", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "record_model_candidate", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(search_service, "train_candidate_reports", _candidate_report_iterator(configs, reports))
+    monkeypatch.setattr(search_service, "run_walk_forward_stage", fail_walk_forward)
+    monkeypatch.setattr(candidate_publisher, "model_family_status", fake_status)
+    monkeypatch.setattr(candidate_publisher, "train_model_family", fake_train_model_family)
+
+    result = search_service.run_model_candidate_search(
+        search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1)
+    )
+
+    assert result["status"] == "shadow_active"
+    assert training_calls[-1][0] == configs[1]
+    assert training_calls[-1][1]["active_status_loader"] is candidate_publisher.model_family_status
 
 
 def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> None:

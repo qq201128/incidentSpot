@@ -28,7 +28,8 @@ def test_shadow_event_deviation_flags_prediction_win_event_loss(monkeypatch, tmp
 
     assert report["summary"]["pairedCount"] == 5
     assert report["summary"]["shadowWinEventLossCount"] == 5
-    assert any(issue["code"] == "systemic_shadow_win_event_loss" for issue in report["issues"])
+    assert "issues" not in report
+    assert report["byStrategy"][0]["shadowWinEventLossCount"] == 5
 
 
 def test_high_winrate_demotion_prefers_event_pnl_rows(monkeypatch, tmp_path: Path) -> None:
@@ -121,7 +122,7 @@ def test_combo_event_monitoring_includes_single_and_batch_sections(monkeypatch, 
     monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(
         "app.services.combo_event_governance.shadow_event_deviation_report",
-        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}, "issues": []},
+        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}},
     )
 
     from app.services.combo_event_governance import compute_combo_event_monitoring
@@ -145,7 +146,7 @@ def test_combo_event_monitoring_reports_model_shadow_simulation(monkeypatch, tmp
     monkeypatch.setattr("app.services.model_shadow_simulation_monitor.get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(
         "app.services.combo_event_governance.shadow_event_deviation_report",
-        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}, "issues": []},
+        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}},
     )
 
     from app.services.combo_event_governance import compute_combo_event_monitoring

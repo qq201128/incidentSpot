@@ -143,7 +143,8 @@ export async function fetchEventsPage({
   q,
   view = "events",
 } = {}) {
-  const params = { symbol, page, pageSize, view };
+  const params = { page, pageSize, view };
+  if (symbol && String(symbol).trim()) params.symbol = symbol;
   if (q) params.q = q;
   if (strategyKey) params.strategyKey = strategyKey;
   if (durationMinutes != null && Number.isFinite(Number(durationMinutes))) {

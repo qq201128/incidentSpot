@@ -77,7 +77,7 @@ def _evaluate_strategy(
 ) -> dict[str, Any]:
     if not validate_strategy_key(strategy_key):
         return _evaluation_payload(strategy_key, STATUS_INSUFFICIENT, "unsupported_strategy_key", [], {})
-    rows = settled_event_metric_rows(conn, symbol, duration, strategy_key=strategy_key)
+    rows = settled_event_metric_rows(conn, symbol, duration, strategy_key=strategy_key, limit=None)
     metrics = high_winrate_metrics(rows)
     if metrics["sampleCount"] < ACTIVE_SAMPLE_COUNT:
         return _evaluation_payload(

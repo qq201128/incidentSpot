@@ -38,6 +38,22 @@
   overflow: hidden;
 }
 
+.event-records-scope {
+  flex: 0 0 132px;
+  min-width: 132px;
+}
+
+.event-records-scope select {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(79, 116, 139, 0.38);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d1d7e0;
+  font-size: 12px;
+}
+
 .event-records-search {
   flex: 0 1 260px;
   min-width: 160px;
@@ -250,5 +266,10 @@
 
   .event-records-tab {
     font-size: 12px;
+  }
+
+  .event-records-scope {
+    min-width: 120px;
+    flex-basis: 120px;
   }
 }

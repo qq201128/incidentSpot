@@ -39,6 +39,8 @@ def test_paper_live_passed_after_live_samples_hit_target(monkeypatch, tmp_path: 
     assert result["reason"] == "stable_paper_live_target_met"
     assert result["sampleCount"] == demotion.ACTIVE_SAMPLE_COUNT
     assert result["requiredSampleCount"] == demotion.ACTIVE_SAMPLE_COUNT
+    assert result["liveReadiness"]["eligible"] is False
+    assert result["liveReadiness"]["reason"] == "paper_live_total_pnl_missing"
     assert result["tradable"] is False
     assert row["enabled"] == 1
     assert row["live_trading_enabled"] == 0
@@ -110,7 +112,7 @@ def test_demotion_below_live_target_keeps_collecting_predictions(monkeypatch, tm
     db_path = tmp_path / "below-target.db"
     _init_db(db_path)
     _insert_slot(db_path, "30m", enabled=1, live=1)
-    _insert_predictions(db_path, "30m", ([True] * 3 + [False] * 2) * 6)
+    _insert_predictions(db_path, "30m", ([True, True, False, False] * 7) + [True, False])
     monkeypatch.setattr(demotion, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(demotion, "high_winrate_candidate_rule", lambda *_args: None)
 

@@ -259,6 +259,7 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -333,6 +334,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
   padding: 8px;
   height: auto;
   align-self: start;
@@ -364,10 +366,15 @@
   justify-content: space-between;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .mining-model-card-head strong {
+  min-width: 0;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mining-model-state {
@@ -451,15 +458,20 @@
 .mining-model-runtime {
   display: grid;
   gap: 3px;
+  min-width: 0;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.35;
 }
 
+.mining-model-runtime span,
 .mining-model-runtime code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mining-model-runtime code {
   color: #ffd9a8;
 }
 
@@ -663,6 +675,7 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
+  min-width: 0;
   min-height: 0;
   max-height: min(38vh, 320px);
   overflow: hidden;

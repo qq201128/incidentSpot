@@ -4,11 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.shadow_event_deviation_metrics import (
-    MIN_PAIRED_SAMPLES,
-    SYSTEMIC_MIN_SHADOW_WIN_EVENT_LOSS,
-    SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE,
     by_strategy as _by_strategy,
-    issues as _issues,
     summary as _summary,
     utc_now as _utc_now,
 )
@@ -67,18 +63,11 @@ def shadow_event_deviation_report(symbol: str, duration: str, *, limit: int = 50
     pairs = [_pair_row(dict(row), settled_expected_profit_usdt) for row in rows]
     summary = _summary(pairs)
     by_strategy = _by_strategy(pairs)
-    issues = _issues(summary, by_strategy)
     return {
         "symbol": sym,
         "duration": duration,
         "updatedAt": _utc_now(),
-        "thresholds": {
-            "minPairedSamples": MIN_PAIRED_SAMPLES,
-            "systemicShadowWinEventLossRate": SYSTEMIC_SHADOW_WIN_EVENT_LOSS_RATE,
-            "systemicMinShadowWinEventLoss": SYSTEMIC_MIN_SHADOW_WIN_EVENT_LOSS,
-        },
         "summary": summary,
-        "issues": issues,
         "byStrategy": by_strategy,
         "pairs": pairs[:50],
     }
@@ -268,4 +257,3 @@ def _divergence_type(shadow_correct: bool, event_profitable: bool) -> str:
     if not shadow_correct and event_profitable:
         return "shadow_loss_event_win"
     return "aligned_loss"
-

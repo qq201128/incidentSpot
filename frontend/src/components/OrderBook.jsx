@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchOrderbookDepth } from "../api/client";
 
-const POLL_MS = 1500;
+const POLL_MS = 3000;
 /** 侧边栏列出数量严格大于该值的档位，便于快速识别相对大单 */
 const HEAVY_QTY_THRESHOLD = 1;
 const STORAGE_VIEW = "incidentSpot:orderbookView";
 /** 与后端 / Binance depth 一致，每侧拉取档位数（界面不再提供修改） */
-const DEPTH_LEVELS_PER_SIDE = 1000;
+const DEPTH_LEVELS_PER_SIDE = 100;
 /** 列表仅展示距价差最近的若干档（压低高度，便于首屏露出最新成交） */
 const DISPLAY_ROWS_PER_SIDE = 5;
 /** 前端合并精度（无下拉，固定 0.1） */

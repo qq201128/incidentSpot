@@ -175,11 +175,11 @@ def test_validation_rejects_goal_combo_when_oos_win_rate_falls_below_target() ->
     assert validation.passed == []
     rejection = validation.payload["rejections"][0]
     assert rejection["status"] == "rejected"
-    assert any("winRate" in reason and "< 0.7" in reason for reason in rejection["reasons"])
+    assert any("winRate" in reason and "< 0.6" in reason for reason in rejection["reasons"])
     assert validation.payload["thresholds"]["recomputedMinWinRate"] == goal.TARGET_WIN_RATE
-    assert validation.payload["thresholds"]["oosMinWinRate"] == 0.70
+    assert validation.payload["thresholds"]["oosMinWinRate"] == 0.60
     assert set(rejection["recomputed"]["nested"]) == {"train", "validation", "test"}
-    assert rejection["recomputed"]["nested"]["test"]["winRate"] < 0.70
+    assert rejection["recomputed"]["nested"]["test"]["winRate"] < 0.60
 
 
 def test_empty_candidate_factors_expose_filter_reason(monkeypatch: pytest.MonkeyPatch) -> None:

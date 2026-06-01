@@ -35,6 +35,7 @@ def test_predict_factor_candidate_signals_from_ranking_cache(monkeypatch) -> Non
 
     monkeypatch.setattr(service, "get_cached_ranking", lambda *_args: {"ranking": ranking})
     monkeypatch.setattr(service, "refresh_prediction_klines", lambda *_args: None)
+    monkeypatch.setattr(service, "refresh_positioning_features_for_lookback", lambda *_args: 0)
     monkeypatch.setattr(service, "_backfill_duration_klines_if_needed", lambda *_args: None)
     monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: frame)
 
@@ -82,6 +83,7 @@ def test_predict_factor_candidate_signals_refreshes_required_source_kline(monkey
 
     monkeypatch.setattr(service, "get_cached_ranking", lambda *_args: {"ranking": ranking})
     monkeypatch.setattr(service, "refresh_prediction_klines", lambda *args: calls.append(args))
+    monkeypatch.setattr(service, "refresh_positioning_features_for_lookback", lambda *_args: 0)
     monkeypatch.setattr(service, "_backfill_duration_klines_if_needed", lambda *_args: None)
     monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: frame)
 
@@ -111,6 +113,7 @@ def test_predict_factor_candidate_signals_keeps_valid_rows_when_one_candidate_fa
 
     monkeypatch.setattr(service, "get_cached_ranking", lambda *_args: {"ranking": ranking})
     monkeypatch.setattr(service, "refresh_prediction_klines", lambda *_args: None)
+    monkeypatch.setattr(service, "refresh_positioning_features_for_lookback", lambda *_args: 0)
     monkeypatch.setattr(service, "_backfill_duration_klines_if_needed", lambda *_args: None)
     monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: frame)
 
@@ -135,10 +138,11 @@ def test_predict_factor_candidate_signals_raises_when_all_candidates_fail(monkey
 
     monkeypatch.setattr(service, "get_cached_ranking", lambda *_args: {"ranking": [_ranking_row("bad_factor")]})
     monkeypatch.setattr(service, "refresh_prediction_klines", lambda *_args: None)
+    monkeypatch.setattr(service, "refresh_positioning_features_for_lookback", lambda *_args: 0)
     monkeypatch.setattr(service, "_backfill_duration_klines_if_needed", lambda *_args: None)
     monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: frame)
 
-    with pytest.raises(ValueError, match="all factor candidate signals failed"):
+    with pytest.raises(ValueError, match=r"all factor candidate signals failed.*bad_factor"):
         service.predict_factor_candidate_signals("btcusdt", "10m", entry_open_time=520 * step_ms)
 
 

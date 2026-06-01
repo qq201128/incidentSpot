@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 ACTIVE_SAMPLE_COUNT = 30
-ACTIVE_WIN_RATE_MIN = 0.62
-MIN_PROFIT_FACTOR = 1.05
+ACTIVE_WIN_RATE_MIN = 0.58
+MIN_PROFIT_FACTOR = 1.0
 MIN_AVG_RETURN = 0.0
 LOSS_STREAK_LIMIT = 5
 RECENT_SAMPLE_COUNT = 20
@@ -12,7 +12,7 @@ RECENT_WIN_RATE_MIN = 0.58
 RECENT_PROFIT_FACTOR_MIN = 1.0
 ROLLING_WINDOW_SIZE = 10
 ROLLING_WINDOW_COUNT = 3
-ROLLING_WINDOW_WIN_RATE_MIN = 0.50
+ROLLING_WINDOW_WIN_RATE_MIN = 0.58
 
 
 def high_winrate_thresholds() -> dict[str, Any]:
@@ -79,6 +79,8 @@ def high_winrate_decision(metrics: dict[str, Any]) -> dict[str, str]:
         return {"status": "paper_failed", "reason": "paper_live_win_rate_below_target"}
     if _lt(metrics["profitFactor"], MIN_PROFIT_FACTOR):
         return {"status": "paper_failed", "reason": "paper_live_profit_factor_below_target"}
+    if _not_positive_event_pnl(metrics):
+        return {"status": "paper_failed", "reason": "paper_live_total_pnl_below_target"}
     if _lt_or_equal(metrics["avgReturn"], MIN_AVG_RETURN):
         return {"status": "paper_failed", "reason": "paper_live_avg_return_below_target"}
     stability_reason = _stability_failure_reason(metrics["paperStability"])
@@ -254,6 +256,11 @@ def _total_event_pnl(rows: list[dict[str, Any]]) -> float | None:
     if not values:
         return None
     return round(sum(values), 6)
+
+
+def _not_positive_event_pnl(metrics: dict[str, Any]) -> bool:
+    value = metrics.get("totalEventPnlU")
+    return value is not None and float(value) <= 0.0
 
 
 def _ratio(numerator: int, denominator: int) -> float | None:

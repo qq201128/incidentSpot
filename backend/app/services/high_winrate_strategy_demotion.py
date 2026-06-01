@@ -36,6 +36,7 @@ from app.services.high_winrate_strategy_status_store import (
     current_status as _current_status,
     has_rankings as _has_rankings,
     public_status as _public_status,
+    payload_with_live_readiness as _payload_with_live_readiness,
     refresh_failed_payload as _refresh_failed_payload,
     set_strategy_slot as _set_strategy_slot,
     status_payload as _status_payload,
@@ -253,9 +254,9 @@ def _evaluation_payload(context: EvaluationContext) -> tuple[dict[str, Any], boo
 
 
 def _pending_refresh_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
+    return _payload_with_live_readiness({
         **payload,
         "status": STATUS_PAPER_FAILED,
         "reason": RANKING_REFRESH_PENDING_REASON,
         "pendingGoalRefresh": True,
-    }
+    })

@@ -28,8 +28,43 @@ def candidate_failure(row: dict[str, Any], exc: Exception) -> dict[str, str]:
 
 
 def candidate_failure_message(symbol: str, duration: str, failures: list[dict[str, str]]) -> str:
-    names = ", ".join(item["factorName"] for item in failures[:5])
-    return f"all factor candidate signals failed for {symbol.strip().upper()} {duration}: {names}"
+    details = ", ".join(
+        f"{item['factorName']} ({item.get('error') or 'unknown'})" for item in failures[:5]
+    )
+    return f"all factor candidate signals failed for {symbol.strip().upper()} {duration}: {details}"
+
+
+def agent_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    return {
+        **row,
+        "winRate": metrics.get("winRate"),
+        "profitFactor": metrics.get("profitFactor"),
+        "totalPeriods": metrics.get("totalPeriods"),
+        "backtestValid": bool(metrics.get("backtestValid")),
+    }
+
+
+def oos_win_rate(row: dict[str, Any]) -> Any:
+    walk_forward = row.get("walkForward")
+    if isinstance(walk_forward, dict):
+        return walk_forward.get("oosWinRate")
+    return row.get("oosWinRate")
+
+
+def signal_rule_reasons(row: dict[str, Any], signal: Any, *, rule_name: str, decimals: int) -> list[str]:
+    return [
+        f"rule={rule_name}",
+        f"factor={row['factorName']}",
+        f"category={row.get('category')}",
+        f"source_file={row.get('sourceFile')}",
+        f"orientation={signal.orientation}",
+        f"score={round(signal.score, decimals)}",
+        f"historical_median={round(signal.median, decimals)}",
+        f"factor_score={row.get('factorScore')}",
+        f"historical_win_rate={row.get('winRate')}",
+        f"historical_profit_factor={row.get('profitFactor')}",
+    ]
 
 
 def factor_orientation(row: dict[str, Any]) -> int:

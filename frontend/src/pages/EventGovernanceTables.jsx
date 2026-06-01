@@ -23,7 +23,7 @@ export function SimulationObservationSection({ title, emptyText, demotion, watch
     <section className="event-gov-panel">
       <div className="event-gov-panel-head">
         <h2>{title}</h2>
-        <span>观察模式 · 已评估 {demotion?.evaluatedCount ?? 0} 个 · 不自动 disable</span>
+        <span>观察模式 · 全量已结算样本 · 已评估 {demotion?.evaluatedCount ?? 0} 个 · 不自动 disable</span>
       </div>
       {watchlist.length === 0 ? (
         <p className="event-gov-empty">{emptyText}</p>

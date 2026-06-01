@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import errno
+import hashlib
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -14,9 +16,13 @@ from pathlib import Path
 from typing import Any
 
 MODELS_ROOT = Path(__file__).resolve().parent.parent.parent / "models"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ML_MODEL_DIR = MODELS_ROOT / "ml"
 LEGACY_LSTM_MODEL_DIR = MODELS_ROOT / "lstm"
 MODEL_DIR = ML_MODEL_DIR / "lstm"
+JSON_ARTIFACT_LOCK_DIR = (
+    Path(tempfile.gettempdir()) / f"incidentSpot-json-artifact-locks-{hashlib.sha256(str(PROJECT_ROOT).encode('utf-8')).hexdigest()[:12]}"
+)
 LOCK_BYTE_COUNT = 1
 LOCK_FILE_PREFIX = "."
 LOCK_FILE_SUFFIX = ".lock"
@@ -24,6 +30,8 @@ JSON_REPLACE_MAX_ATTEMPTS = 5
 JSON_REPLACE_RETRY_SECONDS = 0.05
 LOCK_ACQUIRE_MAX_ATTEMPTS = 5
 LOCK_ACQUIRE_RETRY_SECONDS = 0.05
+LOCK_OPEN_MAX_ATTEMPTS = 240
+LOCK_OPEN_RETRY_SECONDS = 0.05
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[Path, threading.RLock] = {}
 
@@ -165,7 +173,7 @@ def _json_artifact_lock(path: Path) -> Iterator[None]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     process_lock = _process_lock(lock_path)
     with process_lock:
-        with lock_path.open("a+b") as handle:
+        with _open_lock_file(lock_path) as handle:
             _ensure_lock_byte(handle)
             _lock_file(handle)
             try:
@@ -175,7 +183,18 @@ def _json_artifact_lock(path: Path) -> Iterator[None]:
 
 
 def _lock_path(path: Path) -> Path:
-    return path.with_name(f"{LOCK_FILE_PREFIX}{path.name}{LOCK_FILE_SUFFIX}")
+    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
+    return JSON_ARTIFACT_LOCK_DIR / f"{LOCK_FILE_PREFIX}{digest}{LOCK_FILE_SUFFIX}"
+
+
+def _open_lock_file(lock_path: Path):
+    for attempt in range(1, LOCK_OPEN_MAX_ATTEMPTS + 1):
+        try:
+            return lock_path.open("a+b")
+        except PermissionError:
+            if attempt >= LOCK_OPEN_MAX_ATTEMPTS:
+                raise
+            time.sleep(LOCK_OPEN_RETRY_SECONDS)
 
 
 def _process_lock(lock_path: Path) -> threading.RLock:

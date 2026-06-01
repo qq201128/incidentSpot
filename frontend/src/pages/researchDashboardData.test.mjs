@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import {
+  mergeModelFamilyStatusRows,
   prefilterRows,
-  reasonLabel,
   researchSummary,
   candidateTypeLabel,
   settledRows,
   topReasons,
+  visibleSettledRows,
 } from "./researchDashboardData.js";
+import { reasonLabel } from "./researchDashboardLabels.js";
 
 const report = {
   allCandidateCount: 4,
@@ -107,3 +109,139 @@ assert.equal(topReasons(rows, report)[0].reason, "paper_live_win_rate_below_targ
 assert.equal(reasonLabel("paper_live_win_rate_below_target"), "胜率不足");
 
 assert.equal(researchSummary(null, []).reportLoaded, false);
+
+const observationReport = {
+  allCandidateCount: 1,
+  allCandidates: [],
+  modelFamilyStatusRows: [
+    {
+      candidateKey: "knn:BTCUSDT:10m",
+      candidateType: "model",
+      modelFamily: "knn",
+      modelVersion: "knn_v1",
+      paperLiveStatus: "paper_collecting",
+      paperLiveSampleCount: 0,
+      validationWinRate: 0.61,
+      validationSampleCount: 60,
+      reason: "shadow_observation_allowed_without_trade_gate",
+      metrics: { sampleCount: 0 },
+    },
+  ],
+};
+const observationRows = settledRows(observationReport);
+assert.equal(observationRows.length, 1);
+assert.equal(observationRows[0].type, "model");
+assert.equal(observationRows[0].sampleCount, 0);
+assert.equal(observationRows[0].validationSampleCount, 60);
+assert.equal(observationRows[0].winRate, 0.61);
+const observationSummary = researchSummary(observationReport, observationRows);
+assert.equal(observationSummary.sampleCount, 0);
+assert.equal(observationSummary.settledCandidateCount, 0);
+assert.equal(observationSummary.modelEvidenceCount, 1);
+assert.equal(observationSummary.weightedWinRate, null);
+assert.equal(reasonLabel("shadow_observation_allowed_without_trade_gate"), "影子观察");
+assert.equal(reasonLabel("candidate_win_rate_beats_active_model"), "胜率优于当前模型");
+
+const mergedModelReport = mergeModelFamilyStatusRows(
+  {
+    allCandidateCount: 1,
+    allCandidates: [
+      {
+        candidateKey: "xgboost_v2",
+        candidateType: "model",
+        modelFamily: "xgboost",
+        modelVersion: "xgboost_v2",
+        paperLiveStatus: "paper_failed",
+        paperLiveWinRate: 0.5,
+        paperLiveSampleCount: 30,
+        reason: "paper_live_win_rate_below_target",
+        metrics: { sampleCount: 30, winRate: 0.5 },
+      },
+    ],
+  },
+  [
+    {
+      candidateKey: "xgboost_v2",
+      candidateType: "model",
+      modelFamily: "xgboost",
+      modelVersion: "xgboost_v2",
+      validationWinRate: 0.64,
+      validationSampleCount: 80,
+      paperLiveStatus: "paper_collecting",
+      metrics: { sampleCount: 0 },
+    },
+    {
+      candidateKey: "knn_v1",
+      candidateType: "model",
+      modelFamily: "knn",
+      modelVersion: "knn_v1",
+      validationWinRate: 0.61,
+      validationSampleCount: 60,
+      paperLiveStatus: "paper_collecting",
+      metrics: { sampleCount: 0 },
+    },
+  ],
+);
+const mergedModelRows = settledRows(mergedModelReport);
+const mergedXgboost = mergedModelRows.find((row) => row.name === "xgboost · xgboost_v2");
+assert.equal(mergedModelReport.modelFamilyStatusRows.length, 1);
+assert.equal(mergedModelReport.modelFamilyStatusRows[0].modelFamily, "knn");
+assert.equal(mergedModelReport.allCandidateCount, 2);
+assert.equal(mergedXgboost.sampleCount, 30);
+assert.equal(mergedXgboost.validationSampleCount, 80);
+assert.equal(mergedXgboost.winRate, 0.5);
+
+const backendModelStatusReport = mergeModelFamilyStatusRows(
+  { allCandidates: [] },
+  [
+    {
+      modelFamily: "bayesian",
+      status: "passed",
+      validationWinRate: 0.57,
+      sampleCounts: { validation: 72 },
+      paperLiveAdmission: {
+        status: "paper_collecting",
+        reason: "candidate_win_rate_beats_active_model",
+        validationWinRate: 0.57,
+      },
+    },
+  ],
+);
+const backendModelRows = settledRows(backendModelStatusReport);
+assert.equal(backendModelStatusReport.allCandidateCount, 1);
+assert.equal(backendModelRows.length, 1);
+assert.equal(backendModelRows[0].type, "model");
+assert.equal(backendModelRows[0].status, "paper_collecting");
+assert.equal(backendModelRows[0].name, "bayesian");
+assert.equal(backendModelRows[0].validationSampleCount, 72);
+assert.equal(backendModelRows[0].winRate, 0.57);
+
+const manyFactorRows = Array.from({ length: 20 }, (_, index) => ({
+  rowKey: `factor-${index}`,
+  type: "factor",
+  sampleCount: 100 - index,
+  winRate: 0.6,
+  status: "paper_collecting",
+}));
+const hiddenModel = {
+  rowKey: "model-hidden",
+  type: "model",
+  sampleCount: 1,
+  winRate: 0.4,
+  status: "paper_failed",
+};
+const visible = visibleSettledRows([...manyFactorRows, hiddenModel], 18);
+assert.equal(visible.length, 18);
+assert.ok(visible.some((row) => row.rowKey === "model-hidden"));
+
+const allModelsVisible = visibleSettledRows([
+  ...manyFactorRows,
+  ...Array.from({ length: 14 }, (_, index) => ({
+    rowKey: `model-${index}`,
+    type: "model",
+    sampleCount: 0,
+    winRate: 0.5,
+    status: "paper_collecting",
+  })),
+], 18);
+assert.equal(allModelsVisible.filter((row) => row.type === "model").length, 14);

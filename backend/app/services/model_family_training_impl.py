@@ -37,6 +37,7 @@ from app.services.model_family_config import (
 )
 from app.services.model_family_joblib_backend import JoblibModelBackend
 from app.services.model_family_paper_live_policy import paper_live_admission_payload
+from app.services.model_family_relative_promotion import relative_shadow_report
 from app.services.model_family_training_payloads import (
     attempt_payload,
     attempt_payload_from_report,
@@ -68,6 +69,7 @@ def train_model_family(
     persist_artifacts: bool = True,
     publish_initial_baseline: bool = False,
     evaluate_test: bool = True,
+    active_status_loader: Callable[[str, str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     cfg = validated_model_family_config(config)
     paths = artifact_paths(cfg.symbol, cfg.duration, artifact_root, family=cfg.family)
@@ -99,6 +101,7 @@ def train_model_family(
             persist_artifacts=persist_artifacts,
             publish_initial_baseline=publish_initial_baseline,
             evaluate_test=evaluate_test,
+            active_status_loader=active_status_loader,
         )
     except Exception as exc:
         if write_attempt:
@@ -134,6 +137,7 @@ def _train_with_dataset(
     persist_artifacts: bool,
     publish_initial_baseline: bool,
     evaluate_test: bool,
+    active_status_loader: Callable[[str, str, str], dict[str, Any]] | None,
 ) -> dict[str, Any]:
     split = chronological_split(dataset.x, dataset.y, dataset.future_returns, cfg.train_ratio, cfg.val_ratio)
     scaler = fit_standardizer(split.train_x)
@@ -150,6 +154,8 @@ def _train_with_dataset(
     )
     report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version, evaluate_test)
     report = initial_baseline_report(report, publish_initial_baseline)
+    if active_status_loader is not None:
+        report = relative_shadow_report(report, active_status_loader(cfg.family, cfg.symbol, cfg.duration))
     should_publish = _should_publish(report["status"], publish_shadow_active, publish_trade_active)
     if persist_artifacts or should_publish:
         write_training_artifacts(staging_paths, cfg, dataset, scaler, report)

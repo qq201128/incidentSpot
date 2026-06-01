@@ -5,6 +5,23 @@ import "./FactorHighWinrateCard.css";
 const MEMBERS_PAGE_SIZE = 4;
 
 export default function FactorHighWinrateCard({ combo }) {
+  const members = combo?.members ?? [];
+  const [memberPage, setMemberPage] = useState(1);
+  const memberPageCount = Math.max(1, Math.ceil(members.length / MEMBERS_PAGE_SIZE));
+
+  useEffect(() => {
+    setMemberPage(1);
+  }, [combo?.factorName, members.length]);
+
+  useEffect(() => {
+    if (memberPage > memberPageCount) setMemberPage(memberPageCount);
+  }, [memberPage, memberPageCount]);
+
+  const memberSlice = useMemo(() => {
+    const start = (memberPage - 1) * MEMBERS_PAGE_SIZE;
+    return members.slice(start, start + MEMBERS_PAGE_SIZE);
+  }, [memberPage, members]);
+
   if (!combo?.available) {
     return (
       <aside className="factor-hwr-card card-surface">
@@ -16,23 +33,6 @@ export default function FactorHighWinrateCard({ combo }) {
       </aside>
     );
   }
-
-  const members = combo.members ?? [];
-  const [memberPage, setMemberPage] = useState(1);
-  const memberPageCount = Math.max(1, Math.ceil(members.length / MEMBERS_PAGE_SIZE));
-
-  useEffect(() => {
-    setMemberPage(1);
-  }, [combo.factorName, members.length]);
-
-  useEffect(() => {
-    if (memberPage > memberPageCount) setMemberPage(memberPageCount);
-  }, [memberPage, memberPageCount]);
-
-  const memberSlice = useMemo(() => {
-    const start = (memberPage - 1) * MEMBERS_PAGE_SIZE;
-    return members.slice(start, start + MEMBERS_PAGE_SIZE);
-  }, [memberPage, members]);
 
   return (
     <aside className="factor-hwr-card card-surface">

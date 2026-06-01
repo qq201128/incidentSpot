@@ -87,7 +87,10 @@ def _run_candidate_batch(
     dataset_cache = CandidateDatasetCache()
     try:
         evaluation = _run_successive_halving(candidates, cfg, dataset_cache.build)
-        published = publish_best_model_candidate(evaluation["finalists"])
+        published = publish_best_model_candidate(
+            evaluation["finalists"],
+            observation_trainings=evaluation["observationCandidates"],
+        )
         reports = [item.report for item in evaluation["reports"]]
         status = _batch_status(reports, published)
         finish_model_candidate_progress(cfg.family, symbol=cfg.symbol, duration=cfg.duration, status=status)
@@ -185,7 +188,12 @@ def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset
     _record_stage_reports(walk_forward_survivors, cfg.profile)
     reports.extend(walk_forward_survivors)
     stages.append(walk_forward_payload)
-    return {"reports": reports, "finalists": walk_forward_survivors, "stages": stages}
+    return {
+        "reports": reports,
+        "finalists": walk_forward_survivors,
+        "observationCandidates": full_closed.reports,
+        "stages": stages,
+    }
 
 
 def _collect_stage(

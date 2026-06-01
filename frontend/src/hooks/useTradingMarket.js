@@ -8,7 +8,8 @@ import {
 import { currentIntervalBucketMs, ensureFormingKline } from "../utils/klineFormingCandle";
 import { mergeKlineCandle, normalizeChartCandle } from "../utils/klineCandles";
 
-const PRICE_POLL_MS = 2000;
+const PRICE_POLL_MS = 5000;
+const PRICE_REST_FALLBACK_AFTER_MS = 15000;
 const AGG_TRADES_CAP = 40;
 
 export function useTradingMarket(symbol, interval, setStatus) {
@@ -20,12 +21,22 @@ export function useTradingMarket(symbol, interval, setStatus) {
   const [aggTrades, setAggTrades] = useState(null);
   const lastKlineAtRef = useRef(0);
   const chartWsGraceStartRef = useRef(0);
+  const latestOpenTimeRef = useRef(null);
 
   useMarketClock(setPriceTick);
-  useInitialKlines(symbol, interval, setHistory, setLatest, setStatus);
-  usePricePolling(symbol, setTickerPrice, setStatus);
+  usePricePolling(symbol, setTickerPrice, setStatus, lastKlineAtRef);
   useAggTradeSocket(symbol, setAggTrades, setStatus);
-  useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, chartWsGraceStartRef, latest);
+  useLatestOpenTimeRef(latest, latestOpenTimeRef);
+  useRestKlineRefresh(
+    symbol,
+    interval,
+    setHistory,
+    setLatest,
+    setStatus,
+    lastKlineAtRef,
+    chartWsGraceStartRef,
+    latestOpenTimeRef,
+  );
   useIndexKlineSocket(symbol, interval, setHistory, setLatest, setLastKlineAt, setStatus, lastKlineAtRef, chartWsGraceStartRef);
 
   const chartData = useMemo(() => history.map(normalizeChartCandle), [history]);
@@ -42,25 +53,23 @@ function useMarketClock(setPriceTick) {
   }, [setPriceTick]);
 }
 
-function useInitialKlines(symbol, interval, setHistory, setLatest, setStatus) {
+function useLatestOpenTimeRef(latest, latestOpenTimeRef) {
   useEffect(() => {
-    async function load() {
-      setStatus("正在加载指数K线...");
-      const rows = await fetchIndexKlines(symbol, interval, 500);
-      setHistory(rows);
-      if (rows.length) setLatest(rows[rows.length - 1]);
-      setStatus(`指数K线已加载：${rows.length} 条`);
-    }
-    load().catch((err) => setStatus(`指数K线加载失败：${err.message}`));
-  }, [symbol, interval, setHistory, setLatest, setStatus]);
+    latestOpenTimeRef.current = latest?.openTime != null ? Number(latest.openTime) : null;
+  }, [latest, latestOpenTimeRef]);
 }
 
-function usePricePolling(symbol, setTickerPrice, setStatus) {
+function usePricePolling(symbol, setTickerPrice, setStatus, lastKlineAtRef) {
   useEffect(() => {
     let timer;
     let stopped = false;
     let hasPrice = false;
     const tick = async () => {
+      if (stopped) return;
+      if (Date.now() - lastKlineAtRef.current < PRICE_REST_FALLBACK_AFTER_MS) {
+        timer = window.setTimeout(tick, PRICE_POLL_MS);
+        return;
+      }
       try {
         const p = await fetchLastPrice(symbol);
         if (!stopped) {
@@ -81,7 +90,7 @@ function usePricePolling(symbol, setTickerPrice, setStatus) {
       stopped = true;
       if (timer) clearTimeout(timer);
     };
-  }, [symbol, setTickerPrice, setStatus]);
+  }, [symbol, setTickerPrice, setStatus, lastKlineAtRef]);
 }
 
 function useAggTradeSocket(symbol, setAggTrades, setStatus) {
@@ -119,6 +128,7 @@ function useAggTradeSocket(symbol, setAggTrades, setStatus) {
         state.retryCount = 0;
       };
       state.ws.onerror = (err) => {
+        if (state.stopped) return;
         console.error("近期成交 WebSocket 异常", err);
       };
       state.ws.onclose = () => {
@@ -143,17 +153,16 @@ function useAggTradeSocket(symbol, setAggTrades, setStatus) {
   }, [symbol, setAggTrades, setStatus]);
 }
 
-function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latest) {
+function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latestOpenTimeRef) {
   useEffect(() => {
     let timer;
     let stopped = false;
     graceRef.current = Date.now();
     lastKlineAtRef.current = 0;
     const poll = async () => {
-      const latestOpenTime = latest?.openTime != null ? Number(latest.openTime) : null;
       if (
         stopped ||
-        !shouldRefreshKlines(lastKlineAtRef.current, graceRef.current, latestOpenTime, interval)
+        !shouldRefreshKlines(lastKlineAtRef.current, graceRef.current, latestOpenTimeRef.current, interval)
       ) {
         return;
       }
@@ -172,7 +181,7 @@ function useRestKlineRefresh(symbol, interval, setHistory, setLatest, setStatus,
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latest]);
+  }, [symbol, interval, setHistory, setLatest, setStatus, lastKlineAtRef, graceRef, latestOpenTimeRef]);
 }
 
 function useIndexKlineSocket(symbol, interval, setHistory, setLatest, setLastKlineAt, setStatus, lastKlineAtRef, graceRef) {
@@ -202,6 +211,7 @@ function connectIndexSocket(state, deps) {
   }
   state.ws.onopen = () => handleSocketOpen(state, deps);
   state.ws.onerror = (err) => {
+    if (state.stopped) return;
     console.error("指数K线实时连接异常", err);
     deps.setStatus("指数K线实时连接异常");
   };
@@ -223,6 +233,9 @@ async function handleSocketOpen(state, deps) {
     const rows = await fetchIndexKlines(deps.symbol, deps.interval, 500);
     deps.setHistory(rows);
     if (rows.length) deps.setLatest(rows[rows.length - 1]);
+    const t = Date.now();
+    deps.lastKlineAtRef.current = t;
+    deps.setLastKlineAt(t);
   } catch (err) {
     console.error("指数K线重连刷新失败", err);
     deps.setStatus(`指数K线重连刷新失败：${err.message}`);

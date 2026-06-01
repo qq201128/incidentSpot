@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.high_winrate_strategy_metrics import high_winrate_thresholds
+from app.services.live_readiness_gate import live_readiness_gate
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY
 
@@ -44,16 +45,30 @@ def status_payload(
     }
     if extra:
         payload.update(extra)
-    return payload
+    return payload_with_live_readiness(payload)
 
 
 def refresh_failed_payload(payload: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
-    return {
+    return payload_with_live_readiness({
         **payload,
         "status": STATUS_DEMOTED,
         "reason": RANKING_REFRESH_FAILED_REASON,
         "evaluatedAt": utc_now(),
         "refreshReport": refresh_report_summary(report),
+    })
+
+
+def payload_with_live_readiness(payload: dict[str, Any]) -> dict[str, Any]:
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return payload
+    return {
+        **payload,
+        "liveReadiness": live_readiness_gate(
+            metrics,
+            str(payload.get("status") or ""),
+            status_reason=str(payload.get("reason") or ""),
+        ),
     }
 
 

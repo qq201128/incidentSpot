@@ -78,7 +78,7 @@ def test_validation_rejects_recent_rolling_instability() -> None:
     assert result.passed == []
     rejection = result.payload["rejections"][0]
     assert rejection["factorName"] == "goal_combo__factor_a__factor_b"
-    assert any("recent rolling 3: winRate 0.5 < 0.62" in reason for reason in rejection["reasons"])
+    assert any("recent rolling 3: winRate 0.5 < 0.56" in reason for reason in rejection["reasons"])
     assert rejection["recomputed"]["oos"]["winRate"] > 0.7
 
 

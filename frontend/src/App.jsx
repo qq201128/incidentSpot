@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { fetchWorkbenchSummary } from "./api/workbenchClient";
 import {
   createQuickTrade,
@@ -19,9 +20,18 @@ const FactorLearningPage = lazy(() => import("./pages/FactorLearningPage"));
 const FactorsPage = lazy(() => import("./pages/FactorsPage"));
 const ResearchDashboardPage = lazy(() => import("./pages/ResearchDashboardPage"));
 const RuleHitRatePage = lazy(() => import("./pages/RuleHitRatePage"));
+const VIEW_BY_PATH = Object.freeze({
+  "/": "trade",
+  "/rule-hit-rate": "hit-rate",
+  "/event-governance": "governance",
+  "/research-dashboard": "research",
+  "/factors": "factors",
+  "/learning": "learning",
+});
 
 export default function App() {
-  const [appView, setAppView] = useState("trade");
+  const location = useLocation();
+  const appView = VIEW_BY_PATH[location.pathname] || "trade";
   const [tradeSymbol, setTradeSymbol] = useState("BTCUSDT");
   const [tradeInterval, setTradeInterval] = useState("10m");
   const page = pageForView(appView, {
@@ -30,7 +40,7 @@ export default function App() {
     onSymbolChange: setTradeSymbol,
     symbol: tradeSymbol,
   });
-  return pageFrame(appView, setAppView, page);
+  return pageFrame(appView, page);
 }
 
 function pageForView(appView, tradeProps) {
@@ -159,10 +169,10 @@ function useReloadWorkbench(symbol, interval, setSummary, setLatency, setStatus,
   }, [symbol, interval, setSummary, setLatency, setStatus, setRecordsReloadKey]);
 }
 
-function pageFrame(appView, setAppView, children) {
+function pageFrame(appView, children) {
   return (
     <>
-      <AppNavigation appView={appView} onViewChange={setAppView} />
+      <AppNavigation appView={appView} />
       {children}
     </>
   );

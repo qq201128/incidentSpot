@@ -9,13 +9,12 @@ import {
   formatPct,
   formatWindow,
   prefilterRows,
-  reasonLabel,
   stageLogRows,
-  statusClass,
   statusChangeRows,
-  statusLabel,
   topReasons,
+  visibleSettledRows,
 } from "./researchDashboardData";
+import { reasonLabel, statusClass, statusLabel } from "./researchDashboardLabels";
 
 export function SettledSampleMatrix({ loadError, loading, reportLoaded, rows }) {
   const candidateCountText = matrixStatusText({
@@ -54,7 +53,7 @@ export function SettledSampleMatrix({ loadError, loading, reportLoaded, rows }) 
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, TOP_ROW_LIMIT).map((row) => <SettledRow key={row.rowKey} row={row} />)}
+              {visibleSettledRows(rows, TOP_ROW_LIMIT).map((row) => <SettledRow key={row.rowKey} row={row} />)}
             </tbody>
           </table>
         </div>
@@ -69,7 +68,7 @@ export function SettledSampleMatrix({ loadError, loading, reportLoaded, rows }) 
 
 export function ResearchSidePanel({ report, rows, summary }) {
   const reasons = topReasons(rows, report);
-  const models = rows.filter((row) => row.type === "model").slice(0, 6);
+  const models = rows.filter((row) => row.type === "model");
   const stages = stageLogRows(report).filter((row) => row.status !== "passed").slice(0, 5);
   const changes = statusChangeRows(report).slice(0, 5);
   return (
@@ -96,7 +95,7 @@ function SettledRow({ row }) {
         </div>
       </td>
       <td><StatusPill status={row.status} /></td>
-      <td>{row.sampleCount}</td>
+      <td>{sampleCountText(row)}</td>
       <td className={metricClass(row.winRate, EVIDENCE_TARGETS.winRateMin)}>{formatPct(row.winRate)}</td>
       <td>{formatWindow(row.windows?.recent30)}</td>
       <td>{formatWindow(row.windows?.recent60)}</td>
@@ -118,6 +117,13 @@ function SettledRow({ row }) {
 
 function StatusPill({ status }) {
   return <span className={`research-status-pill ${statusClass(status)}`}>{statusLabel(status)}</span>;
+}
+
+function sampleCountText(row) {
+  if (row.type === "model" && row.sampleCount > 0 && row.validationSampleCount > 0) return `${row.sampleCount} / 验证 ${row.validationSampleCount}`;
+  if (row.sampleCount > 0) return row.sampleCount;
+  if (row.type === "model" && row.validationSampleCount > 0) return `验证 ${row.validationSampleCount}`;
+  return row.sampleCount;
 }
 
 function LifecyclePanel({ summary }) {
@@ -216,11 +222,16 @@ function ModelEvidencePanel({ models }) {
       {models.length ? models.map((row) => (
         <article key={row.rowKey} className="research-model-evidence">
           <strong>{row.name}</strong>
-          <span>{row.sampleCount} 样本 · {formatPct(row.winRate)} · {statusLabel(row.status)} · {reasonLabel(row.reason)}</span>
+          <span>{modelEvidenceText(row)}</span>
         </article>
       )) : <p className="research-empty small">暂无模型族结算样本</p>}
     </section>
   );
+}
+
+function modelEvidenceText(row) {
+  const samples = row.sampleCount > 0 ? `${row.sampleCount} 纸盘 / 验证 ${row.validationSampleCount || 0}` : `验证 ${row.validationSampleCount || 0} 样本`;
+  return `${samples} · ${formatPct(row.winRate)} · ${statusLabel(row.status)} · ${reasonLabel(row.reason)}`;
 }
 
 function PrefilterPanel({ rows }) {
@@ -266,13 +277,13 @@ function metricClass(value, target) {
 function matrixStatusText({ loadError, loading, reportLoaded, rowCount }) {
   if (loadError) return "候选报告读取失败";
   if (loading) return "正在读取候选报告";
-  if (reportLoaded) return `${rowCount} 个有结算证据的候选`;
+  if (reportLoaded) return `${rowCount} 个候选，含模型族观察行`;
   return "等待报告返回";
 }
 
 function matrixEmptyText(loadError, loading, reportLoaded) {
   if (loadError) return `候选报告读取失败：${loadError}`;
   if (loading) return "正在读取候选报告…";
-  if (reportLoaded) return "暂无已结算样本";
+  if (reportLoaded) return "暂无候选或模型族状态";
   return "尚未返回候选报告";
 }

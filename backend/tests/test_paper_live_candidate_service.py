@@ -4,6 +4,7 @@ import json
 import sqlite3
 import uuid
 from pathlib import Path
+from tempfile import gettempdir
 
 import pytest
 
@@ -35,6 +36,8 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     assert report["rankingPolicy"][0] == "paper-live lifecycle stability"
     assert candidate["candidateKey"] == "factor_gamma"
     assert candidate["paperLiveStatus"] == "paper_collecting"
+    assert candidate["liveReadiness"]["eligible"] is False
+    assert candidate["liveReadiness"]["reason"] == "insufficient_settled_samples"
     assert failed["candidateKey"] == "factor_alpha"
     assert failed["backtestWinRate"] == pytest.approx(0.82)
     assert failed["oosWinRate"] == pytest.approx(0.61)
@@ -43,7 +46,9 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     assert failed["paperLiveWinRate"] == pytest.approx(0.6)
     assert failed["paperLiveSampleCount"] == 30
     assert failed["paperLiveStatus"] == "paper_failed"
-    assert failed["reason"] == "paper_live_win_rate_below_target"
+    assert failed["liveReadiness"]["eligible"] is False
+    assert failed["liveReadiness"]["reason"] == "paper_live_profit_factor_below_target"
+    assert failed["reason"] == "paper_live_profit_factor_below_target"
     assert failed["metrics"]["paperLiveWindows"]["recent30"]["winRate"] == pytest.approx(0.6)
     assert failed["metrics"]["maxConsecutiveLosses"] == 2
     assert failed["performanceComparison"]["winRateGap"] == pytest.approx(0.22)
@@ -324,6 +329,6 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def _runtime_path(name: str) -> Path:
-    path = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / f"{name}-{uuid.uuid4().hex}"
+    path = Path(gettempdir()) / "incidentSpot-pytest-temp" / f"{name}-{uuid.uuid4().hex}"
     path.mkdir(parents=True, exist_ok=True)
     return path

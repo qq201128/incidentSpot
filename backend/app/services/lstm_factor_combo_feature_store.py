@@ -33,28 +33,49 @@ def save_factor_combo_feature_snapshot(
     entry_open_time: int,
     ranking: dict[str, Any],
 ) -> None:
-    payload = json.dumps(
-        {"entryOpenTime": int(entry_open_time), "ranking": ranking.get("ranking") or []},
-        ensure_ascii=False,
-    )
+    snapshot = {"entryOpenTime": int(entry_open_time), "ranking": ranking.get("ranking") or []}
+    save_factor_combo_feature_snapshots(symbol, duration, (snapshot,))
+
+
+def save_factor_combo_feature_snapshots(
+    symbol: str,
+    duration: str,
+    snapshots: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> None:
+    rows = [_snapshot_values(symbol, duration, snapshot) for snapshot in snapshots]
+    if not rows:
+        raise ValueError("factor combo feature snapshot batch must not be empty")
 
     def _persist() -> None:
         conn = get_conn()
         try:
             _ensure_table(conn)
-            conn.execute(
+            conn.executemany(
                 f"""
                 INSERT INTO {FEATURE_SNAPSHOT_TABLE}(symbol, duration, entry_open_time, payload)
                 VALUES(?, ?, ?, ?)
                 ON CONFLICT(symbol, duration, entry_open_time) DO UPDATE SET payload = excluded.payload
                 """,
-                (symbol.strip().upper(), duration, int(entry_open_time), payload),
+                rows,
             )
             conn.commit()
         finally:
             conn.close()
 
     run_db_write_with_retry(_persist)
+
+
+def _snapshot_values(symbol: str, duration: str, snapshot: dict[str, Any]) -> tuple[str, str, int, str]:
+    entry_open_time = int(snapshot["entryOpenTime"])
+    payload = {"entryOpenTime": entry_open_time, "ranking": snapshot.get("ranking") or []}
+    if snapshot.get("previousTopFactorName"):
+        payload["previousTopFactorName"] = str(snapshot["previousTopFactorName"])
+    return (
+        symbol.strip().upper(),
+        duration,
+        entry_open_time,
+        json.dumps(payload, ensure_ascii=False),
+    )
 
 
 def _snapshot_from_row(row: Any) -> dict[str, Any]:

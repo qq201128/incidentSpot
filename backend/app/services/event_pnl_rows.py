@@ -16,6 +16,7 @@ from app.services.strategy_registry import (
 )
 
 RECENT_EVENT_SAMPLE_LIMIT = 30
+MIN_EVENT_SAMPLE_LIMIT = 1
 SETTLED_EVENT_JOIN = """
     FROM events e
     LEFT JOIN orders o ON o.id = (
@@ -41,7 +42,7 @@ def settled_event_metric_rows(
     *,
     strategy_key: str | None = None,
     high_winrate_rule: str | None = None,
-    limit: int = RECENT_EVENT_SAMPLE_LIMIT,
+    limit: int | None = RECENT_EVENT_SAMPLE_LIMIT,
 ) -> list[dict[str, Any]]:
     if not _events_table_available(conn):
         return []
@@ -53,7 +54,7 @@ def settled_event_metric_rows(
     if high_winrate_rule is not None:
         clauses.append("AND e.ai_high_winrate_rule = ?")
         params.append(high_winrate_rule)
-    params.append(int(limit))
+    limit_sql, limit_params = _limit_clause(limit)
     rows = conn.execute(
         f"""
         SELECT
@@ -71,9 +72,9 @@ def settled_event_metric_rows(
           o.price AS order_price
         {' '.join(clauses)}
         ORDER BY e.start_time DESC
-        LIMIT ?
+        {limit_sql}
         """,
-        tuple(params),
+        (*params, *limit_params),
     ).fetchall()
     return [_metric_row(dict(row)) for row in rows]
 
@@ -84,7 +85,7 @@ def settled_event_rows_for_high_winrate_rule(
     duration: str,
     rule: str | None,
     *,
-    limit: int = RECENT_EVENT_SAMPLE_LIMIT,
+    limit: int | None = RECENT_EVENT_SAMPLE_LIMIT,
 ) -> list[dict[str, Any]]:
     if not _events_table_available(conn):
         return []
@@ -97,6 +98,7 @@ def settled_event_rows_for_high_winrate_rule(
             strategy_key=HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
             limit=limit,
         )
+    limit_sql, limit_params = _limit_clause(limit)
     rows = conn.execute(
         f"""
         SELECT
@@ -120,7 +122,7 @@ def settled_event_rows_for_high_winrate_rule(
           )
           AND e.ai_high_winrate_rule = ?
         ORDER BY e.start_time DESC
-        LIMIT ?
+        {limit_sql}
         """,
         (
             symbol.strip().upper(),
@@ -130,10 +132,19 @@ def settled_event_rows_for_high_winrate_rule(
             f"{BATCH_HIGH_WINRATE_KEY_PREFIX}%",
             f"{BATCH_COMBO_KEY_PREFIX}%",
             rule,
-            int(limit),
+            *limit_params,
         ),
     ).fetchall()
     return [_metric_row(dict(row)) for row in rows]
+
+
+def _limit_clause(limit: int | None) -> tuple[str, tuple[int, ...]]:
+    if limit is None:
+        return "", ()
+    safe_limit = int(limit)
+    if safe_limit < MIN_EVENT_SAMPLE_LIMIT:
+        raise ValueError("limit must be positive or None")
+    return "LIMIT ?", (safe_limit,)
 
 
 def batch_combo_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str]:

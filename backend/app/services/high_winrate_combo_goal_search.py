@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 
 from app.services.factor_duration_alignment import duration_entry_rows
-from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
 from app.services.trading_costs import roundtrip_cost_rate
 from app.services.high_winrate_combo_goal_config import (
     GoalSearchConfig,
+    OFFLINE_CANDIDATE_MIN_PROFIT_FACTOR,
+    OFFLINE_CANDIDATE_MIN_WIN_RATE,
     SEARCH_CANDIDATE_LIMIT,
     SIGNAL_THRESHOLDS,
     THRESHOLD_MAX,
@@ -39,7 +40,8 @@ from app.services.high_winrate_combo_thresholds import (
     threshold_hit_result,
 )
 
-TARGET_WIN_RATE = 0.62
+TARGET_WIN_RATE = OFFLINE_CANDIDATE_MIN_WIN_RATE
+TARGET_PROFIT_FACTOR = OFFLINE_CANDIDATE_MIN_PROFIT_FACTOR
 TARGET_COUNT = 5
 TARGET_MIN_TRADES = BACKTEST_MIN_PERIODS
 NEXT_ENTRY_HORIZON_BARS = 1
@@ -277,7 +279,7 @@ def combo_hit_result(
         return None, combo_rejection(members, threshold, "min_trades_below_min", metrics)
     if metrics["winRate"] < min_win_rate:
         return None, combo_rejection(members, threshold, "win_rate_below_min", metrics)
-    if metrics["profitFactor"] < SUCCESS_PROFIT_FACTOR_MIN:
+    if metrics["profitFactor"] < TARGET_PROFIT_FACTOR:
         return None, combo_rejection(members, threshold, "profit_factor_below_min", metrics)
     hit = ComboHit(
         members,
@@ -312,7 +314,7 @@ def combo_hit(
         return None
     win_rate = float((returns > 0).mean())
     factor = profit_factor(returns)
-    if win_rate < min_win_rate or factor < SUCCESS_PROFIT_FACTOR_MIN:
+    if win_rate < min_win_rate or factor < TARGET_PROFIT_FACTOR:
         return None
     return ComboHit(members, orientations, threshold, win_rate, factor, len(returns), float(returns.mean()), score)
 

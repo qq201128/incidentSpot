@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.factor_duration_alignment import live_duration_entry_index
-from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, utc_now
+from app.services.factor_learning_common import utc_now
 from app.services import high_winrate_combo_goal_search as search
 
 ONLINE_RESEARCH_SOURCES = (
@@ -53,7 +53,7 @@ def target_payload(
     return {
         "targetCount": target_count,
         "minWinRate": search.TARGET_WIN_RATE,
-        "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
+        "minProfitFactor": search.TARGET_PROFIT_FACTOR,
         "minTrades": cfg.min_trades,
         "thresholds": list(cfg.signal_thresholds),
         "searchCandidateLimit": cfg.candidate_limit,

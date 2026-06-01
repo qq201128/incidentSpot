@@ -7,20 +7,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
 from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS
-from app.services.high_winrate_combo_goal_search import ComboHit, TARGET_WIN_RATE
+from app.services.high_winrate_combo_goal_search import ComboHit, TARGET_PROFIT_FACTOR, TARGET_WIN_RATE
 from app.services.trading_costs import roundtrip_cost_rate
 
 RECOMPUTED_MIN_WIN_RATE = TARGET_WIN_RATE
-OOS_MIN_WIN_RATE = 0.70
+OOS_MIN_WIN_RATE = 0.60
 MIN_OOS_TRADES = 20
 WINDOW_COUNT = 3
 OOS_RATIO = 0.20
 RECENT_ROLLING_WINDOW_SIZE = 10
 RECENT_ROLLING_WINDOW_COUNT = 3
-RECENT_ROLLING_MIN_WIN_RATE = 0.62
-RECENT_ROLLING_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
+RECENT_ROLLING_MIN_WIN_RATE = 0.56
+RECENT_ROLLING_MIN_PROFIT_FACTOR = TARGET_PROFIT_FACTOR
 TRAIN_RATIO = 0.60
 VALIDATION_RATIO = 0.20
 METRIC_DECIMALS = 4
@@ -124,8 +123,8 @@ def _scoped_reasons(scope: str, metrics: dict[str, Any], *, require_trades: bool
         reasons.append(f"{scope}: trades {metrics['trades']} < {MIN_OOS_TRADES}")
     if float(metrics["winRate"]) < _min_win_rate_for_scope(scope):
         reasons.append(f"{scope}: winRate {metrics['winRate']} < {_min_win_rate_for_scope(scope)}")
-    if float(metrics["profitFactor"]) < SUCCESS_PROFIT_FACTOR_MIN:
-        reasons.append(f"{scope}: profitFactor {metrics['profitFactor']} < {SUCCESS_PROFIT_FACTOR_MIN}")
+    if float(metrics["profitFactor"]) < TARGET_PROFIT_FACTOR:
+        reasons.append(f"{scope}: profitFactor {metrics['profitFactor']} < {TARGET_PROFIT_FACTOR}")
     if float(metrics["avgReturn"]) <= 0.0:
         reasons.append(f"{scope}: avgReturn {metrics['avgReturn']} <= 0")
     return reasons
@@ -266,7 +265,7 @@ def _threshold_payload() -> dict[str, Any]:
         "reportedMinTrades": BACKTEST_MIN_PERIODS,
         "recomputedMinWinRate": RECOMPUTED_MIN_WIN_RATE,
         "oosMinWinRate": OOS_MIN_WIN_RATE,
-        "minProfitFactor": SUCCESS_PROFIT_FACTOR_MIN,
+        "minProfitFactor": TARGET_PROFIT_FACTOR,
         "minOosTrades": MIN_OOS_TRADES,
         "windowCount": WINDOW_COUNT,
         "recentRollingWindowSize": RECENT_ROLLING_WINDOW_SIZE,

@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN
+from app.services.high_winrate_combo_goal_config import OFFLINE_CANDIDATE_MIN_PROFIT_FACTOR
 from app.services.high_winrate_combo_goal_types import ComboHit, OrientedScore
 from app.services.trading_costs import roundtrip_cost_rate
 
@@ -150,7 +150,7 @@ def _combo_hit(
         return None, _combo_rejection(context, threshold=threshold, reason="min_trades_below_min", metrics=metrics)
     if metrics["winRate"] < context.min_win_rate:
         return None, _combo_rejection(context, threshold=threshold, reason="win_rate_below_min", metrics=metrics)
-    if metrics["profitFactor"] < SUCCESS_PROFIT_FACTOR_MIN:
+    if metrics["profitFactor"] < OFFLINE_CANDIDATE_MIN_PROFIT_FACTOR:
         return None, _combo_rejection(context, threshold=threshold, reason="profit_factor_below_min", metrics=metrics)
     hit = ComboHit(
         context.members,
