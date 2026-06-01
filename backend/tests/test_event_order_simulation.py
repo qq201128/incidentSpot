@@ -8,7 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import event_quick_trade
-from app.api.events import EventCreate, OrderCreate, QuickTradeCreate, create_quick_trade, _insert_order
+from app.api.events import create_quick_trade
+from app.api.event_writes import _insert_order
+from app.api.events_models import EventCreate, OrderCreate, QuickTradeCreate
+from app.services.event_search_index import ensure_event_search_index
 
 
 def test_manual_order_insert_is_explicitly_simulated() -> None:
@@ -113,6 +116,8 @@ def _quick_trade_conn(db_uri: str) -> sqlite3.Connection:
           start_time TEXT,
           end_time TEXT,
           status TEXT,
+          result TEXT,
+          settlement_source TEXT,
           prediction_open_time INTEGER,
           ai_probability_up REAL,
           ai_predicted_direction TEXT,
@@ -141,6 +146,8 @@ def _quick_trade_conn(db_uri: str) -> sqlite3.Connection:
         )
         """
     )
+    ensure_event_search_index(conn)
+    conn.commit()
     return conn
 
 

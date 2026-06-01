@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 from app.services.event_ai_history import event_interval_where
+from app.services.event_search_index import event_search_match_query
 
 ALLOWED_VIEWS = frozenset({"events", "orders", "settlements", "failures"})
 DEFAULT_PAGE_SIZE = 8
@@ -50,6 +51,7 @@ def paginated_events(
             params,
         ).fetchone()["total"]
     )
+    unfiltered_total = _unfiltered_total(conn, safe_view, symbol, strategy_key, duration_minutes)
     page_count = max(1, math.ceil(total / safe_page_size)) if total else 1
     safe_page = min(safe_page, page_count)
     offset = (safe_page - 1) * safe_page_size
@@ -69,9 +71,32 @@ def paginated_events(
         "page": safe_page,
         "pageSize": safe_page_size,
         "total": total,
+        "unfilteredTotal": unfiltered_total,
         "pageCount": page_count,
+        "query": (query or "").strip(),
         "view": safe_view,
     }
+
+
+def _unfiltered_total(
+    conn,
+    view: str,
+    symbol: str | None,
+    strategy_key: str | None,
+    duration_minutes: int | None,
+) -> int:
+    where_sql, params = _view_where_clause(
+        view,
+        symbol,
+        strategy_key,
+        duration_minutes=duration_minutes,
+        query=None,
+    )
+    row = conn.execute(
+        f"SELECT COUNT(*) AS total FROM events {_LATEST_ORDER_JOIN} WHERE {where_sql}",
+        params,
+    ).fetchone()
+    return int(row["total"])
 
 
 def _view_where_clause(
@@ -112,24 +137,16 @@ def _search_clause(query: str | None) -> tuple[str, list]:
     q = (query or "").strip()
     if not q:
         return "", []
-    pattern = f"%{q.upper()}%"
+    match_query = event_search_match_query(q)
+    if not match_query:
+        return "", []
     return """
-    (
-        UPPER(CAST(events.id AS TEXT)) LIKE ?
-        OR UPPER(events.symbol) LIKE ?
-        OR UPPER(events.title) LIKE ?
-        OR UPPER(events.status) LIKE ?
-        OR UPPER(events.strategy_key) LIKE ?
-        OR UPPER(events.event_interval) LIKE ?
-        OR UPPER(COALESCE(events.result, '')) LIKE ?
-        OR UPPER(COALESCE(events.settlement_source, '')) LIKE ?
-        OR UPPER(COALESCE(latest_order.side, '')) LIKE ?
-        OR UPPER(COALESCE(latest_order.status, '')) LIKE ?
-        OR UPPER(COALESCE(latest_order.external_order_id, '')) LIKE ?
-        OR UPPER(COALESCE(latest_order.external_status, '')) LIKE ?
-        OR UPPER(COALESCE(latest_order.external_response, '')) LIKE ?
+    events.id IN (
+        SELECT event_id
+        FROM event_search_fts
+        WHERE event_search_fts MATCH ?
     )
-    """.strip(), [pattern] * 13
+    """.strip(), [match_query]
 
 
 def _failure_clause() -> str:

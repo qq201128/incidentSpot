@@ -354,6 +354,11 @@
   border-color: rgba(255, 104, 104, 0.28);
 }
 
+.mining-model-card.is-runtime-worker_required,
+.mining-model-card.is-runtime-failed {
+  border-color: rgba(255, 104, 104, 0.46);
+}
+
 .mining-model-card-head {
   display: flex;
   justify-content: space-between;
@@ -441,6 +446,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mining-model-runtime {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.mining-model-runtime code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffd9a8;
+}
+
+.mining-model-runtime .is-error {
+  color: #ff98ab;
 }
 
 .mining-model-search-btn {

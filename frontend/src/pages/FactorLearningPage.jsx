@@ -57,6 +57,7 @@ export default function FactorLearningPage() {
           <section className="mining-workspace">
             <MiningModelGrid
               models={overview.models}
+              runStatus={overview.runStatus}
               summary={overview.summary}
               busy={mining.busy}
               onSearchModel={(family) => void mining.searchModel(family)}

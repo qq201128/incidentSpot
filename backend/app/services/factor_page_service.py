@@ -43,7 +43,8 @@ def build_factor_list_page(
     combos = [enrich_factor_summary(row) for row in list_combo_factor_summaries()]
     overview = build_factor_overview(category)
     if kind == "combo":
-        rows = sort_combo_rows_by_score(filter_factor_rows(combos, query))
+        base_rows = sort_combo_rows_by_score(combos)
+        rows = filter_factor_rows(base_rows, query)
         paginated = paginate_rows(rows, page, page_size)
         return {
             **overview,
@@ -51,15 +52,18 @@ def build_factor_list_page(
             "factors": paginated["items"],
             "comboFactors": combos,
             "categories": list_single_factor_categories(),
-            "total": overview["singleTotal"],
+            "total": paginated["total"],
             "comboTotal": overview["comboTotal"],
             "listTotal": paginated["total"],
+            "unfilteredTotal": len(base_rows),
             "page": paginated["page"],
             "pageSize": paginated["pageSize"],
             "pageCount": paginated["pageCount"],
+            "query": (query or "").strip(),
             "sourceSummary": overview["sourceSummary"],
         }
-    rows = filter_factor_rows(singles, query)
+    base_rows = list(singles)
+    rows = filter_factor_rows(base_rows, query)
     paginated = paginate_rows(rows, page, page_size)
     return {
         **overview,
@@ -67,12 +71,14 @@ def build_factor_list_page(
         "factors": paginated["items"],
         "comboFactors": combos,
         "categories": list_single_factor_categories(),
-        "total": overview["singleTotal"],
+        "total": paginated["total"],
         "comboTotal": overview["comboTotal"],
         "listTotal": paginated["total"],
+        "unfilteredTotal": len(base_rows),
         "page": paginated["page"],
         "pageSize": paginated["pageSize"],
         "pageCount": paginated["pageCount"],
+        "query": (query or "").strip(),
         "sourceSummary": overview["sourceSummary"],
     }
 

@@ -1,7 +1,9 @@
 import { strategyLabel } from "../../utils/strategyLabels";
 import { formatPct } from "./miningFormatters";
+import { attachModelRunStatuses } from "./modelRunStatus";
 
-export default function MiningModelGrid({ models, summary, busy, onSearchModel }) {
+export default function MiningModelGrid({ models, runStatus, summary, busy, onSearchModel }) {
+  const displayModels = attachModelRunStatuses(models, runStatus);
   return (
     <section className="mining-model-section">
       <div className="mining-section-head">
@@ -14,7 +16,7 @@ export default function MiningModelGrid({ models, summary, busy, onSearchModel }
       </div>
 
       <div className="mining-model-grid">
-        {models.map((model) => (
+        {displayModels.map((model) => (
           <ModelCard
             key={model.modelFamily}
             model={model}
@@ -38,13 +40,15 @@ export default function MiningModelGrid({ models, summary, busy, onSearchModel }
 
 function ModelCard({ model, busy, onSearch }) {
   const progress = model.searchProgress || {};
+  const runtime = model.runtimeStatus || {};
+  const state = runtime.state || model.cardState;
   const pct = Math.round(Number(progress.percent || 0) * 100);
-  const active = ["queued", "running"].includes(model.searchStatus);
+  const active = ["queued", "running", "worker_required"].includes(state);
   return (
-    <article className={`mining-model-card is-${model.cardState}`}>
+    <article className={`mining-model-card is-${model.cardState} is-runtime-${state}`}>
       <div className="mining-model-card-head">
         <strong>{model.label}</strong>
-        <span className={`mining-model-state is-${model.cardState}`}>{model.cardStateLabel}</span>
+        <span className={`mining-model-state is-${model.cardState}`}>{runtime.label || model.cardStateLabel}</span>
       </div>
       <dl className="mining-model-metrics">
         <div>
@@ -53,7 +57,7 @@ function ModelCard({ model, busy, onSearch }) {
         </div>
         <div>
           <dt>预测就绪</dt>
-          <dd>{model.predictionReadyLabel}</dd>
+          <dd>{runtime.ready ? "ready" : model.predictionReadyLabel}</dd>
         </div>
         <div>
           <dt>验证胜率</dt>
@@ -78,10 +82,24 @@ function ModelCard({ model, busy, onSearch }) {
       <p className="mining-model-latest">
         最新候选: {model.latestCandidateLabel || (model.candidateLibraryTotal ? `${model.candidateLibraryTotal} 条` : "—")}
       </p>
+      <ModelRuntimeDetails runtime={runtime} model={model} />
       <button type="button" className="mining-model-search-btn" disabled={busy || active} onClick={onSearch}>
-        {busy ? "排队中" : active ? "搜索中" : "搜索候选"}
+        {busy ? "排队中" : active ? runtime.actionLabel || "处理中" : "搜索候选"}
       </button>
     </article>
+  );
+}
+
+function ModelRuntimeDetails({ runtime, model }) {
+  const failure = runtime.latestFailureReason || model.latestFailureReason;
+  const logPath = runtime.latestLogPath || model.latestLogPath;
+  return (
+    <div className="mining-model-runtime">
+      <span>候选库 {runtime.candidateLibraryTotal ?? model.candidateLibraryTotal ?? 0} 条</span>
+      {runtime.pendingWorker ? <code>需启动 worker: python backend/scripts/run_model_search_worker.py --loop</code> : null}
+      {failure ? <span className="is-error" title={failure}>失败原因 {failure}</span> : null}
+      {logPath ? <span title={logPath}>日志 {logPath}</span> : null}
+    </div>
   );
 }
 

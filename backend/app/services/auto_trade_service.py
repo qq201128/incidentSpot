@@ -20,6 +20,7 @@ from app.services.auto_trade_settings_payloads import (
     strategy_payload as _strategy_payload,
     write_settings as _write_settings,
 )
+from app.services.auto_trade_strategy_observability_payloads import with_simulation_status
 from app.services.auto_trade_settings_validation import validated_auto_trade_settings
 from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
@@ -79,7 +80,8 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
 
 
 def list_auto_trade_strategy_payloads() -> list[dict[str, Any]]:
-    return [_strategy_payload(settings) for settings in list_auto_trade_settings()]
+    payloads = [_strategy_payload(settings) for settings in list_auto_trade_settings()]
+    return with_simulation_status(payloads)
 
 
 def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, symbol: str = DEFAULT_SYMBOL) -> AutoTradeSettings:

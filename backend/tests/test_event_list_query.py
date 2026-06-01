@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.services.event_list_query import paginated_events
+from app.services.event_search_index import ensure_event_search_index
 
 
 def test_paginated_events_filters_by_strategy_key() -> None:
@@ -86,6 +87,8 @@ def test_paginated_events_searches_backend_fields() -> None:
     )
 
     assert payload["total"] == 1
+    assert payload["unfilteredTotal"] == 2
+    assert payload["query"] == "search_target"
     assert payload["items"][0]["id"] == target_id
 
 
@@ -118,6 +121,20 @@ def test_paginated_events_searches_symbol_and_order_fields() -> None:
     assert external_id_payload["items"][0]["id"] == target_id
 
 
+def test_paginated_events_search_empty_result_is_explicit() -> None:
+    conn = _memory_conn()
+    _insert_event(conn, "BTCUSDT", strategy_key="manual", status="OPEN")
+
+    payload = paginated_events(conn, symbol="BTCUSDT", page=4, page_size=10, view="events", query="missing")
+
+    assert payload["items"] == []
+    assert payload["total"] == 0
+    assert payload["unfilteredTotal"] == 1
+    assert payload["page"] == 1
+    assert payload["pageCount"] == 1
+    assert payload["query"] == "missing"
+
+
 def _memory_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -136,6 +153,7 @@ def _memory_conn() -> sqlite3.Connection:
         );
         """
     )
+    ensure_event_search_index(conn)
     return conn
 
 
@@ -159,6 +177,7 @@ def _insert_event(
         (strategy_key, symbol, event_interval, status, settlement_source),
     )
     conn.commit()
+    ensure_event_search_index(conn)
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
@@ -179,3 +198,4 @@ def _insert_order(
         (event_id, side, status, external_order_id, external_response),
     )
     conn.commit()
+    ensure_event_search_index(conn)

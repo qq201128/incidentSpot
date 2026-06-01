@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.services.factor_backtest_batch_service import run_all_factor_backtests
 from app.services.factor_backtest_service import run_factor_backtest
-from app.services.factor_cache_metadata import cache_is_usable
-from app.services.background_loop_status import record_loop_failure, record_loop_success
 from app.services.factor_catalog_summaries import (
     list_combo_factor_summaries,
     list_single_factor_summaries,
 )
 from app.services.factor_combo_metrics import combo_metrics_for_factor, combo_period_scores
-from app.services.factor_ranking_background import refresh_symbol_rankings
-from app.services.factor_ranking_cache_service import (
-    factor_ranking_precomputed_symbols,
-    get_cached_ranking,
-)
-from app.services.factor_ranking_page import DEFAULT_RANKING_PAGE_SIZE, build_ranking_page
+from app.services.factor_ranking_api_payloads import background_refresh_rankings, factor_ranking_payload
+from app.services.factor_ranking_page import DEFAULT_RANKING_PAGE_SIZE
 from app.services.factor_catalog import (
     get_factor_payload_by_name,
     list_single_factor_categories,
@@ -36,18 +28,6 @@ from app.services.factor_page_service import (
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 router = APIRouter(prefix="/api/factors", tags=["factors"])
-logger = logging.getLogger("uvicorn.error")
-BACKGROUND_REFRESH_LOOP = "factor_ranking"
-
-
-def _filter_ranking_by_category(ranking: list[dict], category: str | None) -> list[dict]:
-    if not category:
-        return ranking
-    return [row for row in ranking if row.get("category") == category]
-
-
-def _ranking_sort_key(row: dict) -> tuple[float, float]:
-    return (float(row.get("factorScore") or 0.0), abs(float(row.get("ir") or 0.0)))
 
 
 def _query_str(value: object, default: str | None = None) -> str | None:
@@ -65,7 +45,7 @@ def list_factors(
     kind: str = Query("single", pattern="^(single|combo)$"),
     q: str | None = Query(None, description="search name/formula/source"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    page_size: int = Query(20, alias="pageSize", ge=1, le=200),
 ) -> dict:
     safe_category = _query_str(category)
     query = _query_str(q)
@@ -90,7 +70,7 @@ def factor_page(
     kind: str = Query("single", pattern="^(single|combo)$"),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    page_size: int = Query(20, alias="pageSize", ge=1, le=200),
 ) -> dict:
     safe_duration = _query_str(duration, "10m") or "10m"
     safe_category = _query_str(category)
@@ -206,68 +186,16 @@ def factor_ranking(
     sym_u = symbol.upper()
     safe_category = _query_str(category)
     query = _query_str(q)
-    precomputed = factor_ranking_precomputed_symbols()
     safe_page = _query_int(page, 1)
     safe_page_size = _query_int(page_size, DEFAULT_RANKING_PAGE_SIZE)
-    cached = get_cached_ranking(sym_u, safe_duration)
-
-    if cached is None:
-        return {
-            "symbol": sym_u,
-            "duration": safe_duration,
-            "category": safe_category,
-            "updatedAt": None,
-            "source": "none",
-            "precomputedSymbols": precomputed,
-            "hint": "排名由后台定时写入缓存；当前交易对/周期尚无数据。可将该交易对加入 FACTOR_RANKING_SYMBOLS 或使用 POST /ranking/refresh 排队重算。",
-            **build_ranking_page([], query, safe_page, safe_page_size),
-        }
-    if not cache_is_usable(cached):
-        return _stale_factor_ranking(
-            symbol=sym_u,
-            duration=safe_duration,
-            category=safe_category,
-            query=query,
-            page=safe_page,
-            page_size=safe_page_size,
-            cached=cached,
-            precomputed=precomputed,
-        )
-
-    full = list(cached["ranking"])
-    filtered = _filter_ranking_by_category(full, safe_category)
-    filtered.sort(key=_ranking_sort_key, reverse=True)
-    page_payload = build_ranking_page(filtered, query, safe_page, safe_page_size)
-
-    return {
-        "symbol": sym_u,
-        "duration": safe_duration,
-        "category": safe_category,
-        "ranking": page_payload["ranking"],
-        "updatedAt": cached["updatedAt"],
-        "source": "cache",
-        "precomputedSymbols": precomputed,
-        "rankingDiagnostics": cached.get("rankingDiagnostics") or {},
-        "rankingFailures": cached.get("rankingFailures") or [],
-        **page_payload,
-    }
-
-
-def _background_refresh_rankings(symbol: str, duration: str | None) -> None:
-    try:
-        refresh_symbol_rankings(symbol, duration)
-        record_loop_success(
-            BACKGROUND_REFRESH_LOOP,
-            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
-        )
-    except Exception as exc:
-        record_loop_failure(
-            BACKGROUND_REFRESH_LOOP,
-            exc,
-            {"stage": "manual_api_refresh", "symbol": symbol, "duration": duration},
-        )
-        logger.exception("background factor ranking refresh failed: %s %s", symbol, duration)
-        raise
+    return factor_ranking_payload(
+        symbol=sym_u,
+        duration=safe_duration,
+        category=safe_category,
+        query=query,
+        page=safe_page,
+        page_size=safe_page_size,
+    )
 
 
 @router.post("/ranking/refresh")
@@ -280,38 +208,12 @@ def factor_ranking_refresh(
     if safe_duration is not None and safe_duration not in SUPPORTED_RULE_DURATIONS:
         raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
     sym_u = symbol.upper()
-    background_tasks.add_task(_background_refresh_rankings, sym_u, safe_duration)
+    background_tasks.add_task(background_refresh_rankings, sym_u, safe_duration)
     return {
         "ok": True,
         "symbol": sym_u,
         "duration": safe_duration,
         "message": "已排队后台重算并写入缓存；完成后刷新页面或稍候再加载排名。",
-    }
-
-
-def _stale_factor_ranking(
-    *,
-    symbol: str,
-    duration: str,
-    category: str | None,
-    query: str | None,
-    page: int,
-    page_size: int,
-    cached: dict,
-    precomputed: list[str],
-) -> dict:
-    stale_rows = _filter_ranking_by_category(list(cached.get("ranking") or []), category)
-    return {
-        "symbol": symbol,
-        "duration": duration,
-        "category": category,
-        "updatedAt": cached.get("updatedAt"),
-        "source": "stale_cache",
-        "staleRankingTotal": cached.get("total"),
-        "cacheStatus": cached.get("cacheStatus"),
-        "precomputedSymbols": precomputed,
-        "hint": "因子排名缓存对应的历史数据已变化或缺少数据指纹；请刷新重算后再使用。",
-        **build_ranking_page(stale_rows, query, page, page_size),
     }
 
 

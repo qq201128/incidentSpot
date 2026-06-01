@@ -1,0 +1,74 @@
+.simulation-slot-report {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 1px solid rgba(69, 88, 96, 0.72);
+  border-radius: 8px;
+  background: rgba(9, 14, 19, 0.72);
+}
+
+.simulation-slot-report-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.simulation-slot-summary,
+.simulation-slot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.simulation-slot-summary span,
+.simulation-slot-row {
+  border: 1px solid rgba(120, 167, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(120, 167, 255, 0.06);
+}
+
+.simulation-slot-summary span {
+  padding: 4px 7px;
+}
+
+.simulation-slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+}
+
+.simulation-slot-state {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.simulation-slot-state.enabled {
+  color: #83e9c9;
+  background: rgba(63, 211, 166, 0.14);
+}
+
+.simulation-slot-state.rejected {
+  color: #ff98ab;
+  background: rgba(255, 104, 104, 0.12);
+}
+
+.simulation-slot-state.idle {
+  color: #b7ceff;
+  background: rgba(120, 167, 255, 0.12);
+}
+
+.simulation-slot-reason {
+  color: #ffb4c1;
+}
+
+@media (max-width: 720px) {
+  .simulation-slot-report-head {
+    display: grid;
+  }
+}

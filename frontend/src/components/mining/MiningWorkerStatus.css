@@ -1,0 +1,34 @@
+.mining-worker-status {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.mining-worker-status strong {
+  font-size: 11px;
+  color: #c5d2dc;
+}
+
+.mining-worker-status code {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9fc6ff;
+}
+
+.mining-worker-status.is-warn strong {
+  color: #ffd9a8;
+}
+
+.mining-worker-status.is-error strong {
+  color: #ff98ab;
+}
+
+.mining-worker-status.is-running strong {
+  color: #baf7e5;
+}

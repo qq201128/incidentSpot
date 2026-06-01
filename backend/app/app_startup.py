@@ -128,6 +128,7 @@ def _load_deferred_routers() -> list[APIRouter]:
     from app.api.ensemble import router as ensemble_router
     from app.api.factor_combo_positions import router as factor_combo_positions_router
     from app.api.factor_combinations import router as factor_combinations_router
+    from app.api.factor_trace import router as factor_trace_router
     from app.api.factor_learning import router as factor_learning_router
     from app.api.factors import router as factors_router
     from app.api.mining import router as mining_router
@@ -141,6 +142,7 @@ def _load_deferred_routers() -> list[APIRouter]:
         factors_router,
         factor_combinations_router,
         factor_combo_positions_router,
+        factor_trace_router,
         factor_learning_router,
         mining_router,
         models_router,

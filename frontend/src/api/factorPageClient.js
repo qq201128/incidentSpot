@@ -31,7 +31,7 @@ export async function fetchFactorPageBundle(
   { category, kind = "single", q, page = 1, pageSize = 20 } = {},
   options = {},
 ) {
-  const params = { symbol, duration, kind, page, page_size: pageSize };
+  const params = { symbol, duration, kind, page, pageSize };
   if (category) params.category = category;
   if (q) params.q = q;
   const { data } = await axios.get(`${BASE_URL}/api/factors/page`, {

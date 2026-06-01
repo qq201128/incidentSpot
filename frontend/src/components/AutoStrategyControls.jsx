@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
+import { fetchAutoTradeStrategies, fetchSimulationSlots, updateAutoTradeStrategy } from "../api/client";
+import SimulationSlotDetails, { SimulationSlotReports } from "./SimulationSlotDetails";
 
 const LIVE_TRADING_ENABLED = false;
 
@@ -9,6 +10,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   const [loading, setLoading] = useState(true);
   const [updatingKey, setUpdatingKey] = useState("");
   const [error, setError] = useState("");
+  const [slotReports, setSlotReports] = useState([]);
   const activeSymbol = symbol.trim().toUpperCase();
   const visibleStrategies = useMemo(
     () => strategies.filter((item) => String(item.symbol || "").toUpperCase() === activeSymbol),
@@ -46,8 +48,12 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
   useEffect(() => {
     let stopped = false;
     fetchAutoTradeStrategies()
-      .then((data) => {
-        if (!stopped) setStrategies(Array.isArray(data?.strategies) ? data.strategies : []);
+      .then(async (strategiesData) => {
+        if (stopped) return;
+        const rows = Array.isArray(strategiesData?.strategies) ? strategiesData.strategies : [];
+        setStrategies(rows);
+        const reports = await _fetchSimulationReports(activeSymbol, rows);
+        if (!stopped) setSlotReports(reports);
       })
       .catch((err) => {
         if (!stopped) setError(_errorMessage(err, "读取执行配置失败"));
@@ -58,7 +64,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     return () => {
       stopped = true;
     };
-  }, [reloadKey]);
+  }, [activeSymbol, reloadKey]);
 
   /** 交易对或数量变更时同步到已开启的周期槽位；当前阶段强制仅模拟。 */
   useEffect(() => {
@@ -137,30 +143,31 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
               <span className="strategy-duration-label">预测与下单周期（可多选）</span>
               <div className="strategy-duration-chips">
                 {group.slots.map((slot) => (
-                  <button
+                  <SlotChip
                     key={slot.duration}
-                    type="button"
-                    className={`chip ${slot.enabled ? "active" : ""}`}
-                    disabled={
-                      updatingKey === `${slot.strategyKey}:${slot.symbol}:${slot.duration}` ||
-                      group.tradable === false ||
-                      updatingKey === `${group.strategyKey}:__live__`
-                    }
-                    onClick={() => void toggleSlot(slot)}
-                    title={slot.enabled ? "点击关闭该周期" : "点击开启该周期"}
-                  >
-                    {_durationChipLabel(slot.durationMinutes)}
-                  </button>
+                    slot={slot}
+                    group={group}
+                    updatingKey={updatingKey}
+                    onToggle={toggleSlot}
+                  />
                 ))}
               </div>
             </div>
+            <SimulationSlotDetails slots={group.slots} />
           </div>
         </div>
       ))}
       {!groups.length && <div className="strategy-empty">暂无可用执行项</div>}
+      <SimulationSlotReports reports={slotReports} />
       {!!error && <div className="predict-error">{error}</div>}
     </div>
   );
+}
+
+async function _fetchSimulationReports(symbol, strategies) {
+  const durations = [...new Set(strategies.map((row) => row.duration).filter(Boolean))];
+  const wanted = durations.length ? durations : ["10m"];
+  return Promise.all(wanted.map((duration) => fetchSimulationSlots(symbol, duration)));
 }
 
 function _groupStrategies(flat) {
@@ -220,6 +227,24 @@ function StrategyBacktestSummary({ summary }) {
     <span className="strategy-metric">
       回测 {summary.trades} 单 / {summary.wins} 胜 / 胜率 {winRate} / 最低单日 {minDay}
     </span>
+  );
+}
+
+function SlotChip({ slot, group, updatingKey, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={`chip ${slot.enabled ? "active" : ""}`}
+      disabled={
+        updatingKey === `${slot.strategyKey}:${slot.symbol}:${slot.duration}` ||
+        group.tradable === false ||
+        updatingKey === `${group.strategyKey}:__live__`
+      }
+      onClick={() => void onToggle(slot)}
+      title={slot.enabled ? "点击关闭该周期" : "点击开启该周期"}
+    >
+      {_durationChipLabel(slot.durationMinutes)}
+    </button>
   );
 }
 

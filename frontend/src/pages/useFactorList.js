@@ -57,7 +57,7 @@ function initialListState() {
 
 function listStateFromResponse(data, kind) {
   const total = data.total ?? 0;
-  const listTotal = data.listTotal ?? data.factors?.length ?? 0;
+  const listTotal = data.total ?? data.listTotal ?? data.factors?.length ?? 0;
   return {
     categories: Array.isArray(data.categories) ? data.categories : [],
     comboFactors: Array.isArray(data.comboFactors) ? data.comboFactors : [],
@@ -67,8 +67,8 @@ function listStateFromResponse(data, kind) {
     page: data.page ?? 1,
     pageCount: data.pageCount ?? 1,
     sourceSummary: data.sourceSummary ?? {},
-    status: listStatusText(kind, listTotal, total),
-    total,
+    status: listStatusText(kind, listTotal),
+    total: kind === "combo" ? data.singleTotal ?? 0 : data.unfilteredTotal ?? total,
   };
 }
 
@@ -79,9 +79,9 @@ function listErrorState(error) {
   };
 }
 
-function listStatusText(kind, listTotal, total) {
+function listStatusText(kind, listTotal) {
   if (kind === "combo") {
     return `已加载组合因子 ${listTotal} 条`;
   }
-  return `已加载单因子 ${total} 条`;
+  return `已加载单因子 ${listTotal} 条`;
 }

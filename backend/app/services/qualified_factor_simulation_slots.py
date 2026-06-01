@@ -10,6 +10,7 @@ from app.services.factor_combo_simulation_keys import simulation_strategy_key_fo
 from app.services.factor_learning_common import utc_now
 from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
+from app.services.simulation_slot_observability_service import simulation_slots_report
 
 
 def sync_qualified_simulation_slots(symbol: str, duration: str, *, qty: float = 5.0) -> dict[str, Any]:
@@ -18,19 +19,8 @@ def sync_qualified_simulation_slots(symbol: str, duration: str, *, qty: float = 
         raise ValueError(f"unsupported duration: {duration}")
     single_keys = _qualified_single_factor_strategy_keys(sym, duration)
     combo_keys = _qualified_combo_strategy_keys(sym, duration)
-    enabled = _enable_simulation_slots(sym, duration, [*single_keys, *combo_keys], qty=qty)
-    return {
-        "symbol": sym,
-        "duration": duration,
-        "singleFactorSlots": len(single_keys),
-        "comboFactorSlots": len(combo_keys),
-        "enabledSlots": enabled,
-        "thresholds": {
-            "minWinRate": 0.62,
-            "minProfitFactor": 1.05,
-            "minTotalPeriods": 100,
-        },
-    }
+    _enable_simulation_slots(sym, duration, [*single_keys, *combo_keys], qty=qty)
+    return simulation_slots_report(sym, duration)
 
 
 def _qualified_single_factor_strategy_keys(symbol: str, duration: str) -> list[str]:

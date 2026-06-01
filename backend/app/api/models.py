@@ -13,7 +13,7 @@ from app.services.model_family_status_service import model_family_status
 from app.services.model_family_training_service import train_model_family
 from app.services.model_search_job_store import enqueue_model_search_jobs
 from app.services.model_search_resource import ModelSearchResourceConfig, resource_payload, validated_resource_config
-from app.services.model_search_status_service import model_search_status_with_lifecycle
+from app.services.model_search_status_service import model_search_queue_status, model_search_status_with_lifecycle
 from app.services.runtime_symbols import parse_symbol_csv
 
 router = APIRouter(prefix="/api/models", tags=["models"])
@@ -120,11 +120,13 @@ def model_candidate_search(
             ),
         )
         status = model_family_status(selected, sym, selected_duration)
+        worker = _candidate_search_worker_status(sym, selected_duration, selected)
         return {
             **status,
             "modelSearchJob": queued_job["jobs"][0],
             "modelSearchQueue": queued_job,
-            "message": f"{selected}候选搜索已入队，等待 model search worker 执行。",
+            "workerStatus": worker,
+            "message": _candidate_search_message(selected, worker),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -169,3 +171,15 @@ def model_search_jobs_status(
         "statuses": (selected_status,) if selected_status else (),
     }
     return model_search_status_with_lifecycle(filters)
+
+
+def _candidate_search_message(family: str, worker: dict) -> str:
+    if worker["state"] in {"queued", "running"}:
+        return f"{family}候选搜索已入队，model search worker 正在执行队列。"
+    command = worker["workerRequiredCommand"]
+    return f"{family}候选搜索已入队，但当前未检测到运行中的 worker。请启动：{command}"
+
+
+def _candidate_search_worker_status(symbol: str, duration: str, family: str) -> dict:
+    status = model_search_queue_status({"symbols": (symbol,), "durations": (duration,), "families": (family,)})
+    return status["workerStatus"]

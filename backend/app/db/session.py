@@ -57,6 +57,7 @@ def init_db() -> None:
     _ensure_auto_trade_settings(conn)
     _ensure_auto_trade_strategies(conn)
     _ensure_ai_event_columns(conn)
+    _ensure_event_search_index(conn)
     conn.commit()
   finally:
     conn.close()
@@ -211,3 +212,9 @@ def _ensure_ai_event_columns(conn: sqlite3.Connection) -> None:
   conn.execute("DELETE FROM settlements")
   conn.execute("DELETE FROM orders")
   conn.execute("DELETE FROM events")
+
+
+def _ensure_event_search_index(conn: sqlite3.Connection) -> None:
+  from app.services.event_search_index import ensure_event_search_index
+
+  ensure_event_search_index(conn)

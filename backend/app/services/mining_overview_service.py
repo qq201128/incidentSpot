@@ -11,6 +11,7 @@ from app.services.model_family_status_service import model_family_status
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS, TARGET_WIN_RATE_EXCLUSIVE
 from app.services.model_search_resource import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
 from app.services.model_search_status_service import model_search_queue_status
+from app.services.mining_run_status_service import mining_run_status
 from app.services.llm_provider_registry import DEFAULT_LLM_PROVIDER, llm_model_metadata, llm_provider_availability
 from app.services.siliconflow_chat_client import DEFAULT_SILICONFLOW_MODEL, resolved_siliconflow_model
 from app.services.mining_agent_candidate_rows import (
@@ -45,6 +46,7 @@ def mining_overview(symbol: str, duration: str) -> dict[str, Any]:
         "symbol": sym,
         "duration": duration,
         "updatedAt": memory.get("updatedAt"),
+        "runStatus": mining_run_status(memory, models, search_queue),
         "header": _header_payload(memory, ideas, promotion, agent_rows),
         "summary": _summary_payload(memory, models, search_queue),
         "trainingRules": _training_rules_payload(search_queue),
@@ -154,21 +156,8 @@ def _search_parallel_label(search_queue: dict[str, Any], searching: int) -> str:
 
 
 def _worker_status(search_queue: dict[str, Any]) -> dict[str, Any]:
-    counts = search_queue.get("counts") or {}
-    pending = int(counts.get("pending") or 0)
-    running = int(counts.get("running") or 0)
-    if pending > 0 and running == 0:
-        state = "worker_required"
-    elif running > 0:
-        state = "running"
-    else:
-        state = "idle"
-    return {
-        "state": state,
-        "pendingJobs": pending,
-        "runningJobs": running,
-        "latestLogPath": search_queue.get("latestLogPath"),
-    }
+    return search_queue["workerStatus"]
+
 
 def _model_card(status: dict[str, Any]) -> dict[str, Any]:
     family = status.get("modelFamily") or "lstm"
@@ -196,9 +185,25 @@ def _model_card(status: dict[str, Any]) -> dict[str, Any]:
         },
         "latestCandidateLabel": _latest_candidate_label(progress),
         "candidateLibraryTotal": int(library.get("total") or 0),
+        "latestFailureReason": _latest_failure_reason(status, progress),
+        "latestLogPath": _latest_log_path(progress),
+        "updatedAt": progress.get("updatedAt") or status.get("trainedAt"),
         "blockedReason": status.get("shadowPredictionBlockedReason"),
         "status": status.get("status"),
     }
+
+def _latest_failure_reason(status: dict[str, Any], progress: dict[str, Any]) -> str | None:
+    job = progress.get("modelSearchJob") or {}
+    return (
+        progress.get("failureReason")
+        or job.get("failure_reason")
+        or job.get("rejection_reason")
+        or status.get("validationFailureReason")
+    )
+
+def _latest_log_path(progress: dict[str, Any]) -> str | None:
+    job = progress.get("modelSearchJob") or {}
+    return progress.get("logPath") or job.get("log_path")
 
 def _card_state(status: dict) -> str:
     progress = status.get("candidateSearchProgress") or {}

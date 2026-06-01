@@ -46,6 +46,13 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
             "counts": {"pending": 2, "running": 0},
             "runningJobs": [],
             "latestLogPath": None,
+            "workerStatus": {
+                "state": "worker_required",
+                "pendingJobs": 2,
+                "runningJobs": 0,
+                "latestLogPath": None,
+                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop",
+            },
         },
     )
     monkeypatch.setattr(
@@ -68,6 +75,11 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
     assert payload["trainingRules"]["xgboostProcessWorkers"] == 1
     assert "> 62%" in payload["trainingRules"]["text"]
     assert payload["trainingRules"]["workerStatus"]["state"] == "worker_required"
+    assert payload["runStatus"]["sections"]["worker"]["state"] == "worker_required"
+    assert payload["runStatus"]["sections"]["modelSearch"]["state"] == "worker_required"
+    assert payload["runStatus"]["overall"]["state"] == "worker_required"
+    assert payload["trainingRules"]["workerStatus"]["latestLogPath"] is None
+    assert "run_model_search_worker.py --loop" in payload["trainingRules"]["workerStatus"]["workerRequiredCommand"]
     assert payload["summary"]["searchPendingCount"] == 2
     assert len(payload["models"]) == 14
     assert payload["agentCandidates"][0]["factorName"]
@@ -91,3 +103,30 @@ def test_mining_overview_model_card_treats_combo_mismatch_as_ready() -> None:
 
     assert card["cardState"] == "ready"
     assert card["predictionReadyLabel"] == "就绪"
+
+
+def test_mining_run_status_reports_ready_running_and_failed_models() -> None:
+    from app.services.mining_run_status_service import _model_runtime_status
+
+    ready = _model_runtime_status(
+        {"modelFamily": "knn", "cardState": "ready", "searchStatus": "idle"},
+        {"workerStatus": {"state": "idle"}},
+    )
+    running = _model_runtime_status(
+        {"modelFamily": "lstm", "cardState": "searching", "searchStatus": "running"},
+        {"workerStatus": {"state": "running"}},
+    )
+    failed = _model_runtime_status(
+        {
+            "modelFamily": "xgboost",
+            "cardState": "blocked",
+            "searchStatus": "idle",
+            "latestFailureReason": "training crashed",
+        },
+        {"workerStatus": {"state": "failed", "latestFailureReason": "training crashed"}},
+    )
+
+    assert ready["state"] == "ready"
+    assert running["state"] == "running"
+    assert failed["state"] == "failed"
+    assert failed["latestFailureReason"] == "training crashed"

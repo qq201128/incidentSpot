@@ -39,7 +39,6 @@ export function useMiningPageData(symbol, duration) {
           error?.response?.status === 404
             ? `暂无因子学习记忆，请先执行本地复盘：${detail}`
             : `加载失败：${detail}`;
-        setOverview(null);
         setStatus(message);
         setLoading(false);
       }
@@ -154,12 +153,13 @@ export function useMiningPageData(symbol, duration) {
 }
 
 function hasActiveTasks(overview) {
-  const memory = overview?.memory;
-  if (!memory) return false;
-  const refresh = memory.refreshTask?.status;
-  const agent = memory.llmAgent?.status;
-  if (["queued", "running"].includes(refresh) || ["pending", "running"].includes(agent)) return true;
-  return (overview?.models || []).some((row) => ["queued", "running"].includes(row.searchStatus));
+  const states = [
+    overview?.runStatus?.overall?.state,
+    overview?.runStatus?.sections?.worker?.state,
+    overview?.runStatus?.sections?.modelSearch?.state,
+    ...(overview?.runStatus?.models || []).map((row) => row.state),
+  ];
+  return states.some((state) => ["queued", "running", "worker_required"].includes(state));
 }
 
 function isValidSymbol(value) {

@@ -179,6 +179,14 @@ export async function fetchAutoTradeStrategies() {
   return data;
 }
 
+export async function fetchSimulationSlots(symbol, duration = "10m") {
+  const { data } = await axios.get(`${BASE_URL}/api/auto-trade/simulation-slots`, {
+    params: { symbol, duration },
+    timeout: LOCAL_REQUEST_TIMEOUT_MS,
+  });
+  return data;
+}
+
 export async function updateAutoTradeStrategy(strategyKey, payload) {
   const { data } = await axios.put(
     `${BASE_URL}/api/auto-trade/strategies/${encodeURIComponent(strategyKey)}`,
@@ -241,7 +249,7 @@ export async function fetchFactorsList({
   page = 1,
   pageSize = 20,
 } = {}) {
-  const params = { kind, page, page_size: pageSize };
+  const params = { kind, page, pageSize };
   if (category) params.category = category;
   if (q) params.q = q;
   const { data } = await axios.get(`${BASE_URL}/api/factors/list`, { params });

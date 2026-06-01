@@ -1,4 +1,6 @@
 import { formatPct } from "./miningFormatters";
+import { miningWorkerStatusView } from "./workerStatus";
+import "./MiningWorkerStatus.css";
 
 export default function MiningKpiCards({
   summary,
@@ -11,6 +13,7 @@ export default function MiningKpiCards({
   const accuracy = formatPct(summary?.overallAccuracy, 0);
   const accuracyRatio = Number(summary?.overallAccuracy);
   const meterWidth = Number.isFinite(accuracyRatio) ? `${Math.round(accuracyRatio * 100)}%` : "0%";
+  const worker = miningWorkerStatusView(trainingRules?.workerStatus);
 
   return (
     <section className="mining-kpi-row">
@@ -51,7 +54,7 @@ export default function MiningKpiCards({
         <div className="mining-kpi-rules-text">
           <span className="mining-kpi-label">训练规则</span>
           <p>{trainingRules?.text || "—"}</p>
-          <small>{workerStatusLabel(trainingRules?.workerStatus)}</small>
+          <WorkerStatusSummary worker={worker} />
         </div>
         <div className="mining-kpi-actions">
           <button type="button" disabled={busy === "local"} onClick={onRefreshLocal}>
@@ -69,9 +72,14 @@ export default function MiningKpiCards({
   );
 }
 
-function workerStatusLabel(status) {
-  if (!status) return "worker: unknown";
-  if (status.state === "worker_required") return `worker: 需启动（pending ${status.pendingJobs}）`;
-  if (status.state === "running") return `worker: 运行中（running ${status.runningJobs}）`;
-  return "worker: idle";
+function WorkerStatusSummary({ worker }) {
+  return (
+    <div className={`mining-worker-status is-${worker.tone}`}>
+      <strong>{worker.label}</strong>
+      <span>{worker.detail}</span>
+      {worker.state === "worker_required" ? <code>{worker.command}</code> : null}
+      {worker.latestLogPath ? <span title={worker.latestLogPath}>日志 {worker.latestLogPath}</span> : null}
+      {worker.failureReason ? <span title={worker.failureReason}>失败原因 {worker.failureReason}</span> : null}
+    </div>
+  );
 }

@@ -10,6 +10,7 @@ from app.services.auto_trade_service import (
     update_auto_trade_settings,
 )
 from app.services.auto_trade_status import get_auto_trade_status
+from app.services.simulation_slot_observability_service import simulation_slots_report
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY
 
 router = APIRouter(prefix="/api/auto-trade", tags=["auto-trade"])
@@ -38,6 +39,14 @@ def read_status() -> dict:
 @router.get("/strategies")
 def read_strategies() -> dict:
     return {"strategies": list_auto_trade_strategy_payloads()}
+
+
+@router.get("/simulation-slots")
+def read_simulation_slots(symbol: str = "BTCUSDT", duration: str = "10m") -> dict:
+    try:
+        return simulation_slots_report(symbol, duration)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/settings")

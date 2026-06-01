@@ -6,6 +6,7 @@ from typing import Any
 
 from app.db.session import get_conn
 from app.services.binance_service import fetch_premium_index
+from app.services.event_search_index import refresh_event_search_row
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 
 LIVE_SETTLEMENT_SOURCE = "premiumIndex.rest.current"
@@ -50,6 +51,7 @@ def settle_event(event_id: int) -> dict:
             """,
             (result, quote.price, quote.quote_time_ms, quote.source, ai_correct, event_id),
         )
+        refresh_event_search_row(conn, event_id)
         conn.commit()
     finally:
         conn.close()

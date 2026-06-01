@@ -13,6 +13,7 @@ from app.services.binance_event_contract import (
 )
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 from app.services.position_guard import has_open_position
+from app.services.event_search_index import refresh_event_search_row
 from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
 
 
@@ -58,6 +59,7 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
             conn=conn,
             order=OrderInsertContext(ctx, event_id, now, external_order),
         )
+        refresh_event_search_row(conn, event_id)
         conn.commit()
     except Exception:
         conn.rollback()

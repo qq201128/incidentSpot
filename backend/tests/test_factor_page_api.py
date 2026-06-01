@@ -4,6 +4,7 @@ import pytest
 
 from app.api import factors as factors_api
 from app.services import factor_page_service
+from app.services import factor_ranking_api_payloads
 from app.services.factor_ranking_page import build_ranking_page
 from app.services.factor_metric_enrichment import factor_score
 
@@ -52,8 +53,30 @@ def test_build_factor_list_page_pagination(monkeypatch) -> None:
         category=None, kind="single", query=None, page=1, page_size=2
     )
     assert len(page1["factors"]) == 2
-    assert page1["listTotal"] == 5
+    assert page1["total"] == 5
+    assert page1["unfilteredTotal"] == 5
     assert page1["pageCount"] == 3
+    assert page1["query"] == ""
+
+
+def test_build_factor_list_page_search_and_clamps_last_page(monkeypatch) -> None:
+    rows = [
+        {"name": "ret_1", "description": "return", "sourceFile": "kline_features.py"},
+        {"name": "risk_1", "description": "drawdown risk", "sourceFile": "kline_features.py"},
+    ]
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: rows)
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+
+    page = factor_page_service.build_factor_list_page(
+        category=None, kind="single", query="risk", page=99, page_size=1
+    )
+
+    assert page["factors"][0]["name"] == "risk_1"
+    assert page["total"] == 1
+    assert page["unfilteredTotal"] == 2
+    assert page["page"] == 1
+    assert page["query"] == "risk"
 
 
 def test_combo_factor_list_page_sorts_by_score(monkeypatch) -> None:
@@ -267,6 +290,18 @@ def test_factor_ranking_page_filters_and_paginates() -> None:
     assert page["query"] == "risk"
 
 
+def test_factor_ranking_page_empty_search_clamps_page() -> None:
+    rows = [{"factorName": "ret_1", "category": "momentum"}]
+
+    page = build_ranking_page(rows, "missing", page=5, page_size=1)
+
+    assert page["ranking"] == []
+    assert page["total"] == 0
+    assert page["unfilteredTotal"] == 1
+    assert page["page"] == 1
+    assert page["pageCount"] == 1
+
+
 def test_factor_ranking_api_returns_backend_page(monkeypatch: pytest.MonkeyPatch) -> None:
     cached = {
         "ranking": [
@@ -278,9 +313,9 @@ def test_factor_ranking_api_returns_backend_page(monkeypatch: pytest.MonkeyPatch
         "rankingDiagnostics": {},
         "rankingFailures": [],
     }
-    monkeypatch.setattr(factors_api, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
-    monkeypatch.setattr(factors_api, "get_cached_ranking", lambda *_args: cached)
-    monkeypatch.setattr(factors_api, "cache_is_usable", lambda _cached: True)
+    monkeypatch.setattr(factor_ranking_api_payloads, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
+    monkeypatch.setattr(factor_ranking_api_payloads, "get_cached_ranking", lambda *_args: cached)
+    monkeypatch.setattr(factor_ranking_api_payloads, "cache_is_usable", lambda _cached: True)
 
     payload = factors_api.factor_ranking(
         symbol="btcusdt",
@@ -307,9 +342,9 @@ def test_factor_ranking_api_normalizes_query_default(monkeypatch: pytest.MonkeyP
         ],
         "updatedAt": "2026-05-21T00:00:00+00:00",
     }
-    monkeypatch.setattr(factors_api, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
-    monkeypatch.setattr(factors_api, "get_cached_ranking", lambda *_args: cached)
-    monkeypatch.setattr(factors_api, "cache_is_usable", lambda _cached: True)
+    monkeypatch.setattr(factor_ranking_api_payloads, "factor_ranking_precomputed_symbols", lambda: ["BTCUSDT"])
+    monkeypatch.setattr(factor_ranking_api_payloads, "get_cached_ranking", lambda *_args: cached)
+    monkeypatch.setattr(factor_ranking_api_payloads, "cache_is_usable", lambda _cached: True)
 
     payload = factors_api.factor_ranking(symbol="btcusdt", duration="10m", page=1, page_size=1)
 

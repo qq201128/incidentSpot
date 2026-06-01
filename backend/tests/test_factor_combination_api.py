@@ -3,13 +3,13 @@ from __future__ import annotations
 from fastapi import BackgroundTasks
 
 from app.api import factor_combinations
-from app.api.factor_combinations import _combination_config
-from app.api.factor_combinations import _paginated_ranking_payload
 from app.api.factor_combinations import _stale_combination_ranking
+from app.services.combination_ranking_page import build_combination_ranking_page
+from app.services.factor_combination_refresh_api import combination_config
 
 
 def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
-    config = _combination_config(
+    config = combination_config(
         profile="full",
         base_factor_limit=25,
         combo_sizes="2,3",
@@ -68,7 +68,7 @@ def test_combination_ranking_pagination_filters_by_member_name() -> None:
         },
     ]
 
-    payload = _paginated_ranking_payload(rows, "carry", page=1, page_size=1)
+    payload = build_combination_ranking_page(rows, "carry", page=1, page_size=1)
 
     assert payload["total"] == 1
     assert payload["unfilteredTotal"] == 3
@@ -88,12 +88,25 @@ def test_combination_ranking_search_clamps_page_after_filter() -> None:
         },
     ]
 
-    payload = _paginated_ranking_payload(rows, "carry", page=3, page_size=1)
+    payload = build_combination_ranking_page(rows, "carry", page=3, page_size=1)
 
     assert payload["page"] == 1
     assert payload["pageCount"] == 1
     assert payload["total"] == 1
     assert payload["ranking"][0]["factorName"] == "combo__carry__basis"
+
+
+def test_combination_ranking_empty_search_is_explicit() -> None:
+    rows = [{"factorName": "combo__trend__volume", "members": [{"name": "trend"}]}]
+
+    payload = build_combination_ranking_page(rows, "missing", page=8, page_size=1)
+
+    assert payload["ranking"] == []
+    assert payload["total"] == 0
+    assert payload["unfilteredTotal"] == 1
+    assert payload["page"] == 1
+    assert payload["pageCount"] == 1
+    assert payload["query"] == "missing"
 
 
 def test_combination_ranking_api_does_not_return_full_regular_ranking(monkeypatch) -> None:
@@ -160,7 +173,7 @@ def test_combination_refresh_route_normalizes_optional_query_defaults(monkeypatc
     tasks = BackgroundTasks()
     monkeypatch.setattr(
         factor_combinations,
-        "_background_refresh_combo_rankings",
+        "background_refresh_combo_rankings",
         lambda *_args: None,
     )
 

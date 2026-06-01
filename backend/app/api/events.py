@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
 
 from app.api.event_ai_validation import validate_ai_trade_probability
 from app.api.event_quick_trade import (
@@ -13,13 +9,14 @@ from app.api.event_quick_trade import (
     quick_trade_strategy_key,
 )
 from app.api.event_response import event_response
+from app.api.event_writes import delete_event_records, insert_event_record, insert_order_record
+from app.api.events_models import EventCreate, OrderCreate, QuickTradeCreate
 from app.db.session import get_conn
 from app.services.event_list_query import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     paginated_events,
 )
-from app.services.binance_service import fetch_premium_index
 from app.services.settlement_service import settle_event
 from app.services.strategy_registry import (
     MANUAL_STRATEGY_KEY,
@@ -27,40 +24,6 @@ from app.services.strategy_registry import (
 )
 
 router = APIRouter(prefix="/api/events", tags=["events"])
-
-class EventCreate(BaseModel):
-    strategyKey: str | None = None
-    symbol: str = Field(min_length=6)
-    title: str
-    eventInterval: str = "30m"
-    ruleType: str = "ABOVE"
-    strikeValue: float
-    upperBound: float | None = None
-    endTime: str
-    aiProbabilityUp: float | None = None
-    aiPredictedDirection: str | None = None
-    aiQualityScore: float | None = None
-    aiQualityPassed: bool | None = None
-    aiHighWinrateGate: str | None = None
-    aiHighWinrateRule: str | None = None
-    aiHighWinratePassed: bool | None = None
-    aiHighWinrateValue: float | None = None
-
-class OrderCreate(BaseModel):
-    side: str
-    qty: float = Field(gt=0)
-    price: float = Field(ge=0)
-
-class QuickTradeCreate(BaseModel):
-    event: EventCreate
-    order: OrderCreate
-    liveTradingEnabled: bool = False
-def _fetch_latest_entry_price(symbol: str) -> float:
-    row = fetch_premium_index(symbol)
-    p = float(row.get("indexPrice") or 0)
-    if p <= 0:
-        raise ValueError("latest index price unavailable")
-    return p
 
 def _entry_price_from_payload(payload: EventCreate) -> float:
     p = float(payload.strikeValue)
@@ -128,29 +91,7 @@ def list_events(
 @router.delete("")
 def delete_events(strategyKey: str | None = Query(None)) -> dict:
     """删除事件；不传 strategyKey 时清空全部；传入时仅删除该 strategy_key 对应事件及关联订单、结算。"""
-    conn = get_conn()
-    try:
-        if strategyKey is None or not strategyKey.strip():
-            conn.execute("DELETE FROM settlements")
-            conn.execute("DELETE FROM orders")
-            conn.execute("DELETE FROM events")
-            conn.commit()
-            return {"ok": True}
-        key = strategyKey.strip()
-        conn.execute(
-            "DELETE FROM settlements WHERE event_id IN (SELECT id FROM events WHERE strategy_key = ?)",
-            (key,),
-        )
-        conn.execute(
-            "DELETE FROM orders WHERE event_id IN (SELECT id FROM events WHERE strategy_key = ?)",
-            (key,),
-        )
-        cursor = conn.execute("DELETE FROM events WHERE strategy_key = ?", (key,))
-        deleted = int(cursor.rowcount or 0)
-        conn.commit()
-        return {"ok": True, "deleted": deleted, "strategyKey": key}
-    finally:
-        conn.close()
+    return delete_event_records(strategyKey)
 
 @router.post("")
 def create_event(payload: EventCreate) -> dict:
@@ -166,42 +107,7 @@ def create_event(payload: EventCreate) -> dict:
         payload.aiHighWinratePassed,
         strategy_key=strategy_key,
     )
-    conn = get_conn()
-    start_time = datetime.now(timezone.utc).isoformat()
-    cursor = conn.execute(
-        """
-        INSERT INTO events(
-          strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
-          start_time, end_time, status,
-          ai_probability_up, ai_predicted_direction, ai_quality_score, ai_quality_passed,
-          ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value
-        )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            strategy_key,
-            payload.symbol.upper(),
-            payload.title,
-            event_interval,
-            rule_type,
-            payload.strikeValue,
-            payload.upperBound,
-            start_time,
-            payload.endTime,
-            payload.aiProbabilityUp,
-            predicted,
-            payload.aiQualityScore,
-            int(bool(payload.aiQualityPassed)) if payload.aiQualityPassed is not None else None,
-            payload.aiHighWinrateGate,
-            payload.aiHighWinrateRule,
-            int(bool(payload.aiHighWinratePassed)) if payload.aiHighWinratePassed is not None else None,
-            payload.aiHighWinrateValue,
-        ),
-    )
-    conn.commit()
-    event_id = cursor.lastrowid
-    conn.close()
-    return {"id": event_id}
+    return insert_event_record(payload, rule_type, predicted, strategy_key)
 
 @router.post("/quick-trade")
 def create_quick_trade(payload: QuickTradeCreate) -> dict:
@@ -250,76 +156,7 @@ def create_order(event_id: int, payload: OrderCreate) -> dict:
     if side not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="side must be BUY or SELL")
 
-    conn = get_conn()
-    try:
-        event = _load_event_for_order(conn, event_id)
-        _validate_event_ai(event)
-        entry_price = _entry_price_for_event(event)
-        _update_event_strike(conn, event_id, entry_price)
-        order_id = _insert_order(conn, event_id, side, payload)
-        conn.commit()
-        return {"id": order_id}
-    finally:
-        conn.close()
-
-
-def _load_event_for_order(conn, event_id: int):
-    event = conn.execute(
-        """
-        SELECT id, symbol, event_interval, strategy_key, ai_probability_up, ai_quality_score, ai_quality_passed,
-          ai_high_winrate_passed
-        FROM events WHERE id = ?
-        """,
-        (event_id,),
-    ).fetchone()
-    if event is None:
-        raise HTTPException(status_code=404, detail="event not found")
-    return event
-
-
-def _validate_event_ai(event) -> None:
-    validate_ai_trade_probability(
-        event["ai_probability_up"],
-        event["event_interval"],
-        event["ai_quality_score"],
-        event["ai_quality_passed"],
-        event["ai_high_winrate_passed"],
-        strategy_key=event["strategy_key"],
-    )
-
-
-def _entry_price_for_event(event) -> float:
-    try:
-        return _fetch_latest_entry_price(event["symbol"])
-    except Exception as exc:
-        detail = f"failed to fetch latest entry price: {exc}"
-        raise HTTPException(status_code=502, detail=detail) from exc
-
-
-def _update_event_strike(conn, event_id: int, entry_price: float) -> None:
-    conn.execute(
-        "UPDATE events SET strike_value = ? WHERE id = ?",
-        (entry_price, event_id),
-    )
-
-
-def _insert_order(conn, event_id: int, side: str, payload: OrderCreate) -> int:
-    now = datetime.now(timezone.utc).isoformat()
-    cursor = conn.execute(
-        """
-        INSERT INTO orders(event_id, side, price, qty, status, created_at, external_status, external_response)
-        VALUES(?, ?, ?, ?, 'OPEN', ?, 'SIMULATED', ?)
-        """,
-        (event_id, side, payload.price, payload.qty, now, _simulated_order_response()),
-    )
-    return int(cursor.lastrowid)
-
-
-def _simulated_order_response() -> str:
-    return json.dumps(
-        {"simulation": True, "message": "模拟订单：未调用 Binance 下单接口"},
-        ensure_ascii=False,
-    )
+    return insert_order_record(event_id, side, payload)
 
 
 @router.post("/{event_id}/settle")
