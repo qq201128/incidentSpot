@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   fetchPaperLiveCandidates,
   runPaperLiveDailyLoop,
@@ -23,10 +24,12 @@ import {
 import "./ResearchDashboardPage.css";
 import "./ResearchDashboardMatrix.css";
 import "./ResearchDashboardSidePanel.css";
+import "./ResearchDashboardPage.responsive.css";
 
 export default function ResearchDashboardPage() {
-  const [symbol, setSymbol] = useState("BTCUSDT");
-  const [duration, setDuration] = useState("10m");
+  const [searchParams] = useSearchParams();
+  const [symbol, setSymbol] = useState(searchParams.get("symbol") || "BTCUSDT");
+  const [duration, setDuration] = useState(searchParams.get("duration") || "10m");
   const { loadError, loading, report, runDailyLoop, status } = useResearchReport(symbol, duration);
   const rows = useMemo(() => settledRows(report), [report]);
   const summary = useMemo(() => researchSummary(report, rows), [report, rows]);
@@ -45,10 +48,12 @@ export default function ResearchDashboardPage() {
       <SummaryStrip summary={summary} />
       <section className="research-main-grid">
         <SettledSampleMatrix
+          duration={duration}
           loadError={loadError}
           loading={loading}
           reportLoaded={summary.reportLoaded}
           rows={rows}
+          symbol={symbol}
         />
         <ResearchSidePanel report={report} rows={rows} summary={summary} />
       </section>
@@ -66,24 +71,7 @@ function useResearchReport(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
 
   const load = useCallback(async (signal) => {
-    if (!normalizedSymbol || !duration) {
-      setState({ loadError: "交易对或周期无效", loading: false, report: null, status: "交易对或周期无效" });
-      return;
-    }
-    setState((current) => ({ ...current, loadError: null, loading: true, status: "读取结算样本…" }));
-    try {
-      const [report, models] = await Promise.all([
-        fetchPaperLiveCandidates(normalizedSymbol, duration, { signal }),
-        fetchModelFamilyCandidates(normalizedSymbol, duration, signal),
-      ]);
-      if (signal?.aborted) return;
-      const merged = mergeModelFamilyStatusRows(report, models);
-      setState({ loadError: null, loading: false, report: merged, status: reportStatus(merged) });
-    } catch (error) {
-      if (signal?.aborted) return;
-      const message = errorMessage(error);
-      setState((current) => ({ ...current, loadError: message, loading: false, status: `读取失败：${message}` }));
-    }
+    await loadResearchReport({ duration, setState, signal, symbol: normalizedSymbol });
   }, [duration, normalizedSymbol]);
 
   useEffect(() => {
@@ -93,25 +81,68 @@ function useResearchReport(symbol, duration) {
   }, [load]);
 
   const runDailyLoop = useCallback(async () => {
-    setState((current) => ({ ...current, loadError: null, loading: true, status: "执行 paper-live 日闭环…" }));
-    try {
-      const result = await runPaperLiveDailyLoop(normalizedSymbol, duration);
-      const first = Array.isArray(result.results) ? result.results[0] : null;
-      const models = await fetchModelFamilyCandidates(normalizedSymbol, duration);
-      const merged = first?.candidatePool ? mergeModelFamilyStatusRows(first.candidatePool, models) : null;
-      setState({
-        loadError: null,
-        loading: false,
-        report: merged,
-        status: `日闭环 ${result.status || first?.status || "unknown"}`,
-      });
-    } catch (error) {
-      const message = errorMessage(error);
-      setState((current) => ({ ...current, loadError: message, loading: false, status: `日闭环失败：${message}` }));
-    }
+    await runDailyLoopReport({ duration, setState, symbol: normalizedSymbol });
   }, [duration, normalizedSymbol]);
 
   return { ...state, runDailyLoop };
+}
+
+async function loadResearchReport({ duration, setState, signal, symbol }) {
+  if (!symbol || !duration) {
+    setState({ loadError: "交易对或周期无效", loading: false, report: null, status: "交易对或周期无效" });
+    return;
+  }
+  setState((current) => ({ ...current, loadError: null, loading: true, status: "读取结算样本…" }));
+  try {
+    const report = await fetchPaperLiveCandidates(symbol, duration, { signal });
+    if (signal?.aborted) return;
+    publishReport(setState, report, `${reportStatus(report)} · 模型族状态后台合并中…`);
+    void mergeModelFamilyRows({ duration, report, setState, signal, symbol });
+  } catch (error) {
+    if (signal?.aborted) return;
+    publishLoadError(setState, "读取失败", error);
+  }
+}
+
+async function runDailyLoopReport({ duration, setState, symbol }) {
+  setState((current) => ({ ...current, loadError: null, loading: true, status: "执行 paper-live 日闭环…" }));
+  try {
+    const result = await runPaperLiveDailyLoop(symbol, duration);
+    const first = Array.isArray(result.results) ? result.results[0] : null;
+    const report = first?.candidatePool || null;
+    const status = `日闭环 ${result.status || first?.status || "unknown"}`;
+    publishReport(setState, report, report ? `${status} · 模型族状态后台合并中…` : `${status} · 未返回 candidatePool`);
+    if (!report) return;
+    void mergeModelFamilyRows({ duration, report, setState, symbol });
+  } catch (error) {
+    publishLoadError(setState, "日闭环失败", error);
+  }
+}
+
+function publishLoadError(setState, prefix, error) {
+  const message = errorMessage(error);
+  setState((current) => ({ ...current, loadError: message, loading: false, status: `${prefix}：${message}` }));
+}
+
+function publishReport(setState, report, status) {
+  const loadError = report ? null : "candidatePool_missing";
+  setState({ loadError, loading: false, report, status });
+}
+
+async function mergeModelFamilyRows({ duration, report, setState, signal, symbol }) {
+  try {
+    const models = await fetchModelFamilyCandidates(symbol, duration, signal);
+    if (signal?.aborted) return;
+    const merged = mergeModelFamilyStatusRows(report, models);
+    setState({ loadError: null, loading: false, report: merged, status: reportStatus(merged) });
+  } catch (error) {
+    if (signal?.aborted) return;
+    setState((current) => ({
+      ...current,
+      loading: false,
+      status: `${reportStatus(current.report || report)} · 模型族状态合并失败：${errorMessage(error)}`,
+    }));
+  }
 }
 
 async function fetchModelFamilyCandidates(symbol, duration, signal) {
@@ -120,12 +151,14 @@ async function fetchModelFamilyCandidates(symbol, duration, signal) {
   );
   return results.map((result, index) => {
     const family = MODEL_FAMILIES[index];
-    if (result.status === "fulfilled") return modelStatusCandidate(result.value, family, symbol, duration);
-    return modelStatusFailureCandidate(family, symbol, duration, errorMessage(result.reason));
+    if (result.status === "fulfilled") {
+      return modelStatusCandidate({ duration, family, status: result.value, symbol });
+    }
+    return modelStatusFailureCandidate({ duration, family, reason: errorMessage(result.reason), symbol });
   });
 }
 
-function modelStatusCandidate(status, family, symbol, duration) {
+function modelStatusCandidate({ duration, family, status, symbol }) {
   const admission = status?.paperLiveAdmission || {};
   return {
     candidateKey: status?.modelVersion || `${family}:${symbol}:${duration}`,
@@ -146,7 +179,7 @@ function modelStatusCandidate(status, family, symbol, duration) {
   };
 }
 
-function modelStatusFailureCandidate(family, symbol, duration, reason) {
+function modelStatusFailureCandidate({ duration, family, reason, symbol }) {
   return {
     candidateKey: `${family}:${symbol}:${duration}:status_failed`,
     candidateType: "model",

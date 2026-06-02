@@ -83,7 +83,10 @@ def run_one_model_search_job(config: ModelSearchWorkerConfig | None = None) -> d
     )
     if job is None:
         return {"status": "idle", "reason": "no_pending_job", "queue": model_search_queue_status()}
-    resource = apply_model_search_resource_config(resource_config_from_job(selected.resource, job))
+    resource = apply_model_search_resource_config(
+        resource_config_from_job(selected.resource, job),
+        max_running_jobs=selected.max_running_jobs,
+    )
     return _run_claimed_job(job, selected, resource)
 
 

@@ -18,6 +18,7 @@ from app.services import (
 )
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
+from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 
 def test_sync_report_exposes_single_combo_rejections_runtime_and_failures(monkeypatch, tmp_path: Path) -> None:
@@ -77,6 +78,23 @@ def test_strategy_payloads_include_simulation_status(monkeypatch, tmp_path: Path
     slot = next(row for row in payload["strategies"] if row["strategyKey"] == factor_candidate_signal_key("ret_good"))
     assert slot["simulationStatus"]["gateStatus"] == "enabled"
     assert slot["simulationStatus"]["candidateType"] == "single_factor"
+
+
+def test_strategy_payloads_include_static_slot_latest_failure(monkeypatch, tmp_path: Path) -> None:
+    db_path = _db_path(tmp_path)
+    _init_db(db_path, monkeypatch)
+    _seed_prediction_failure(db_path, FACTOR_COMBO_STRATEGY_KEY)
+
+    payload = auto_trade_api.read_strategies()
+
+    slot = next(
+        row for row in payload["strategies"]
+        if row["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
+        and row["symbol"] == "BTCUSDT"
+        and row["duration"] == "10m"
+    )
+    assert slot["simulationStatus"]["source"] == "auto_trade_strategies"
+    assert slot["simulationStatus"]["latestFailure"]["reason"] == "factor candidate signal missing column"
 
 
 def _db_path(tmp_path: Path) -> Path:

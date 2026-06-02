@@ -97,7 +97,7 @@ STRATEGIES = (
     StrategyDefinition(
         key=ENSEMBLE_RANKER_STRATEGY_KEY,
         name="综合裁判模拟",
-        description="按候选信号裁判层建议权重综合投票；后端强制仅允许模拟下单。",
+        description="按候选信号裁判层建议权重综合投票；需在实盘配置页显式开启真实下单。",
         requires_vegas_confirmation=False,
         signal_source="ensemble_judge",
         rule_names=(ENSEMBLE_RANKER_RULE_NAME,),
@@ -192,7 +192,7 @@ def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
     return StrategyDefinition(
         key=strategy_key,
         name=f"LSTM模拟执行·{duration}",
-        description="LSTM 候选算法可开启模拟执行，真实下单仍由后端禁止。",
+        description="LSTM 候选算法可开启模拟执行；需在实盘配置页显式开启真实下单。",
         requires_vegas_confirmation=False,
         signal_source="factor_lstm_shadow",
         rule_names=(LSTM_RULE_NAME,),
@@ -212,7 +212,7 @@ def _model_family_shadow_strategy_definition(strategy_key: str) -> StrategyDefin
     return StrategyDefinition(
         key=strategy_key,
         name=f"{label}模拟执行·{duration}",
-        description=f"{label} 候选算法可开启模拟执行，每个算法族独立训练、预测和缓存。",
+        description=f"{label} 候选算法可开启模拟执行，每个算法族独立训练、预测和缓存；真实下单需显式开启。",
         requires_vegas_confirmation=False,
         signal_source=f"factor_{family}_shadow",
         rule_names=(model_family_rule_name(family),),

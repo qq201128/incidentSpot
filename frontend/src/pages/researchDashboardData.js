@@ -5,7 +5,7 @@ export const TOP_ROW_LIMIT = 18;
 export const MODEL_ROW_RESERVE = 14;
 export const EVIDENCE_TARGETS = Object.freeze({
   backtestGapWarn: 0.1,
-  lossStreakLimit: 5,
+  lossStreakLimit: 4,
   profitFactorMin: 1.05,
   recentWinRateMin: 0.58,
   rollingWinRateMin: 0.5,
@@ -54,11 +54,16 @@ export function mergeModelFamilyStatusRows(report, models) {
 }
 
 export function visibleSettledRows(rows, limit = TOP_ROW_LIMIT) {
-  const modelRows = rows.filter((row) => row.type === "model").slice(0, MODEL_ROW_RESERVE);
-  const reserved = new Set(modelRows.map((row) => row.rowKey));
-  const slots = Math.max(limit - modelRows.length, 0);
-  const primary = rows.filter((row) => !reserved.has(row.rowKey)).slice(0, slots);
-  return [...primary, ...modelRows].sort(sampleSort);
+  const stableRows = rows.filter((row) => STATUS_KEYS.stable.has(row.status)).slice(0, limit);
+  const reserved = new Set(stableRows.map((row) => row.rowKey));
+  const slotsAfterStable = Math.max(limit - stableRows.length, 0);
+  const modelRows = rows
+    .filter((row) => row.type === "model" && !reserved.has(row.rowKey))
+    .slice(0, Math.min(MODEL_ROW_RESERVE, slotsAfterStable));
+  for (const row of modelRows) reserved.add(row.rowKey);
+  const slotsAfterModels = Math.max(slotsAfterStable - modelRows.length, 0);
+  const primary = rows.filter((row) => !reserved.has(row.rowKey)).slice(0, slotsAfterModels);
+  return [...stableRows, ...primary, ...modelRows].sort(sampleSort);
 }
 
 export function researchSummary(report, rows) {
@@ -182,6 +187,7 @@ function rowPayload(row) {
   return {
     rowKey: rowKey(row, name),
     candidateKey: row.candidateKey,
+    strategyKey: row.strategyKey,
     name,
     modelVersion: row.modelVersion,
     type,

@@ -67,6 +67,7 @@ def _model_runtime_status(model: dict[str, Any], search_queue: dict[str, Any]) -
         "ready": model.get("cardState") == "ready",
         "searchStatus": model.get("searchStatus"),
         "pendingWorker": state == "worker_required",
+        "workerRequiredCommand": worker.get("workerRequiredCommand"),
         "latestFailureReason": model.get("latestFailureReason") or worker.get("latestFailureReason"),
         "latestLogPath": model.get("latestLogPath") or worker.get("latestLogPath"),
         "candidateLibraryTotal": model.get("candidateLibraryTotal"),

@@ -35,7 +35,8 @@ def _progress_has_runtime_state(progress: dict[str, Any]) -> bool:
 
 def _progress_from_library(family: str, symbol: str, duration: str, records: list[dict[str, Any]]) -> dict[str, Any]:
     completed = len(records)
-    total = max(model_search_space_size(family), completed)
+    search_space_total = model_search_space_size(family)
+    total = max(search_space_total, completed)
     latest = records[-1]
     return {
         "status": _library_status(records),
@@ -46,7 +47,7 @@ def _progress_from_library(family: str, symbol: str, duration: str, records: lis
         "updatedAt": latest.get("recordedAt"),
         "total": total,
         "completed": completed,
-        "searchSpaceTotal": total,
+        "searchSpaceTotal": search_space_total,
         "percent": round(min(completed / total, 1.0), 4) if total else 0.0,
         "counts": _counts_from_records(records),
         "latestCompleted": _progress_record(latest),

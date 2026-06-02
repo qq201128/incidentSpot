@@ -3,6 +3,7 @@ import {
   simulationAmount,
   simulationCandidateTypeLabel,
   simulationLatestEventLabel,
+  simulationLatestFailureLabel,
   simulationLatestPnlLabel,
   simulationPnlClass,
   simulationRejectionReasonLabel,
@@ -30,7 +31,11 @@ assert.equal(simulationSourceLabel("factor_combo_ranking_cache"), "组合缓存"
 assert.equal(simulationRejectionReasonLabel("win_rate_below_min"), "胜率不足");
 assert.equal(
   simulationRejectionReasonLabel("cache_unavailable:factor_ranking_cache"),
-  "缓存不可用：cache_unavailable:factor_ranking_cache",
+  "缓存不可用：排名缓存",
+);
+assert.equal(
+  simulationLatestFailureLabel({ reason: "factor candidate signal missing column: ret_good" }),
+  "预测失败：候选因子信号缺少字段",
 );
 assert.equal(
   simulationThresholdLabel({ minWinRate: 0.62, minProfitFactor: 1.2, minTotalPeriods: 30 }),

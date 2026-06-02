@@ -8,7 +8,7 @@ from app.services.factor_candidate_signal_keys import is_factor_candidate_signal
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 from app.services.simulation_slot_candidates import simulation_candidate_rows
-from app.services.simulation_slot_runtime import attach_slot_and_runtime_state
+from app.services.simulation_slot_runtime import attach_slot_and_runtime_state, runtime_statuses_for_slots
 
 
 def simulation_slots_report(symbol: str, duration: str) -> dict[str, Any]:
@@ -35,7 +35,9 @@ def simulation_statuses_for_slots(slots: list[dict[str, Any]]) -> dict[tuple[str
         simulation_slots_report(symbol, duration)
         for _key, symbol, duration in _dynamic_slot_keys(slots)
     ]
-    return _status_map([item for report in reports for item in report.get("items", [])])
+    runtime = runtime_statuses_for_slots(slots)
+    candidates = _status_map([item for report in reports for item in report.get("items", [])])
+    return {**runtime, **candidates}
 
 
 def _dynamic_slot_keys(slots: list[dict[str, Any]]) -> set[tuple[str, str, str]]:

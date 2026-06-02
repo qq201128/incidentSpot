@@ -1,0 +1,91 @@
+@media (max-width: 1120px) {
+  .terminal-layout {
+    height: auto;
+    min-height: calc(100vh - 50px);
+    overflow: visible;
+  }
+
+  .terminal-grid {
+    min-height: 0;
+  }
+
+  .trade-column,
+  .records-column,
+  .records-side {
+    overflow: visible;
+  }
+
+  .trade-column > .panel {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .terminal-layout {
+    min-height: calc(100vh - 82px);
+    gap: 10px;
+    padding: 8px;
+  }
+
+  .topbar {
+    min-height: 0;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  .status-pill {
+    width: 100%;
+  }
+
+  .status-pill button {
+    width: 100%;
+  }
+
+  .status-detail-popover {
+    position: static;
+    margin-top: 8px;
+  }
+
+  .market {
+    min-height: 560px;
+  }
+
+  .chart-stage {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .chart-toolrail {
+    padding: 8px 4px;
+  }
+
+  .chart-container {
+    min-height: 300px;
+  }
+
+  .chart-periods {
+    gap: 8px;
+  }
+
+  .chart-periods span {
+    flex: 1 0 100%;
+    margin-left: 0;
+  }
+
+  .market-orderbook {
+    gap: 10px;
+  }
+
+  .workbench-statusbar {
+    justify-content: flex-start;
+  }
+
+  .workbench-statusbar div:first-child {
+    margin-right: 0;
+  }
+}

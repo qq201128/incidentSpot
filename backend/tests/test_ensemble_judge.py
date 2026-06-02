@@ -224,7 +224,10 @@ def test_ensemble_prediction_fails_when_candidates_are_insufficient(monkeypatch,
         ensemble_ranker_prediction_service.predict_ensemble_ranker_prediction("BTCUSDT", "10m", entry_open_time=123)
 
 
-def test_ensemble_live_trading_is_rejected() -> None:
+def test_ensemble_live_trading_setting_is_saved(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "ensemble-live.db"
+    _init_db(db_path)
+    monkeypatch.setattr(auto_trade_service, "get_conn", lambda: _connect(db_path))
     settings = AutoTradeSettings(
         strategy_key=ENSEMBLE_RANKER_STRATEGY_KEY,
         enabled=True,
@@ -235,8 +238,9 @@ def test_ensemble_live_trading_is_rejected() -> None:
         live_trading_enabled=True,
     )
 
-    with pytest.raises(ValueError, match="simulation only"):
-        auto_trade_service.update_auto_trade_settings(settings)
+    updated = auto_trade_service.update_auto_trade_settings(settings)
+
+    assert updated.live_trading_enabled is True
 
 
 def test_forward_validation_settles_ensemble_predictions(monkeypatch, tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-const REQUIRED_COMMAND_FALLBACK = "python backend/scripts/run_model_search_worker.py --loop";
+export const REQUIRED_COMMAND_FALLBACK = "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism";
 
 const LABELS = Object.freeze({
   queued: "已入队，worker 正在处理队列",

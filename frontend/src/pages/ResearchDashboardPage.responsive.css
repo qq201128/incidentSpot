@@ -1,0 +1,31 @@
+@media (max-width: 1160px) {
+  .research-page {
+    height: auto;
+    overflow: visible;
+  }
+
+  .research-main-grid,
+  .research-matrix,
+  .research-side-panel {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .research-page {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .research-topbar {
+    padding: 12px;
+  }
+
+  .research-summary-area {
+    gap: 8px;
+  }
+
+  .research-table {
+    min-width: 980px;
+  }
+}

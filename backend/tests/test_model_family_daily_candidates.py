@@ -23,6 +23,8 @@ def test_daily_model_candidates_merge_settled_paper_live_lifecycle() -> None:
     assert xgboost["paperLiveWinRate"] == pytest.approx(0.5)
     assert xgboost["paperLiveSampleCount"] == 30
     assert xgboost["paperLiveReason"] == "paper_live_win_rate_below_target"
+    assert xgboost["candidateLibrary"]["bestValidationCandidate"]["modelVersion"] == "xgboost_best_val"
+    assert xgboost["candidateLibrary"]["bestTestCandidate"]["modelVersion"] == "xgboost_best_test"
     assert knn["paperLiveStatus"] == "paper_collecting"
     assert knn["paperLiveSampleCount"] == 0
 
@@ -50,6 +52,10 @@ def _status(family: str, _symbol: str, _duration: str) -> dict:
         "selectedConfidenceThreshold": 0.65,
         "validationWinRate": 0.64,
         "activeModelStatus": "trade_active",
+        "candidateLibrary": {
+            "bestValidationCandidate": {"modelVersion": f"{family}_best_val"},
+            "bestTestCandidate": {"modelVersion": f"{family}_best_test"},
+        },
         "paperLiveAdmission": {
             "allowed": True,
             "status": "paper_collecting",

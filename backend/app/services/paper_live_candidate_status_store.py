@@ -59,7 +59,6 @@ def write_candidate_status(conn: Any, symbol: str, duration: str, *, candidate: 
 
 
 def recent_status_changes(conn: Any, symbol: str, duration: str, *, limit: int = 50) -> list[dict[str, Any]]:
-    ensure_candidate_status_tables(conn)
     rows = conn.execute(
         """
         SELECT candidate_key, symbol, duration, old_status, new_status,

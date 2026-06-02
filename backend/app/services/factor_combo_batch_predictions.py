@@ -1,17 +1,32 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.factor_backtest_gate import meets_backtest_gate
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
+from app.services.factor_combo_candidate_ranking import (
+    OFFLINE_PREFILTER_POLICY,
+    OFFLINE_RANKING_POLICY,
+    offline_candidate_rank_key,
+)
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combo_strategy import predict_factor_combo_row_direction
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
+from app.services.factor_combo_frame_materialization import materialize_factor_combo_frame_for_row
 from app.services.factor_frame_service import load_factor_frame
-from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.factor_mined_library import mined_factor_rows_for_duration
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.paper_live_candidate_service import OBSERVATION_POOL_LIMIT
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+
+
+@dataclass(frozen=True)
+class _ScreenContext:
+    frame: Any
+    symbol: str
+    duration: str
+    source_rows: list[dict[str, Any]]
 
 
 def eligible_factor_combo_rows(symbol: str, duration: str) -> list[dict[str, Any]]:
@@ -49,12 +64,13 @@ def offline_candidate_screening_report(symbol: str, duration: str) -> dict[str, 
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
     rows, rejected = _screen_offline_candidates(sym, duration)
-    rows.sort(key=_offline_candidate_rank_key, reverse=True)
+    rows.sort(key=offline_candidate_rank_key, reverse=True)
     overflow = [_rejected_row(row, "outside_observation_pool_limit") for row in rows[OBSERVATION_POOL_LIMIT:]]
     rejected.extend(overflow)
     focused = rows[:OBSERVATION_POOL_LIMIT]
     return {
-        "policy": "offline_oos_walk_forward_recent_rolling_prefilter_only",
+        "policy": OFFLINE_PREFILTER_POLICY,
+        "rankingPolicy": list(OFFLINE_RANKING_POLICY),
         "observationPoolLimit": OBSERVATION_POOL_LIMIT,
         "focusedCount": len(focused),
         "candidateCount": len(rows),
@@ -132,33 +148,43 @@ def _screen_offline_candidates(symbol: str, duration: str) -> tuple[list[dict[st
     if not caches:
         rejected.append({"symbol": symbol, "duration": duration, "reason": "no_usable_offline_candidate_cache"})
         return rows, rejected
-    frame = materialize_mined_factor_frame(load_factor_frame(symbol, duration), symbol=symbol, duration=duration).frame
+    context = _ScreenContext(
+        frame=load_factor_frame(symbol, duration),
+        symbol=symbol,
+        duration=duration,
+        source_rows=mined_factor_rows_for_duration(symbol, duration),
+    )
     for cache in caches:
-        accepted, cache_rejected = _screen_cache_rows(frame, symbol, duration, cache)
+        accepted, cache_rejected = _screen_cache_rows(context, cache)
         rows.extend(accepted)
         rejected.extend(cache_rejected)
     return rows, rejected
 
 
 def _screen_cache_rows(
-    frame: Any,
-    symbol: str,
-    duration: str,
+    context: _ScreenContext,
     cache: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     ranking = cache.get("ranking")
     if not isinstance(ranking, list) or not ranking:
-        return [], [{"symbol": symbol, "duration": duration, "reason": "offline_ranking_empty"}]
+        return [], [{"symbol": context.symbol, "duration": context.duration, "reason": "offline_ranking_empty"}]
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for rank, row in enumerate(ranking, start=1):
         ranked = {**dict(row), "comboRank": rank}
         try:
+            frame = materialize_factor_combo_frame_for_row(
+                context.frame,
+                symbol=context.symbol,
+                duration=context.duration,
+                row=ranked,
+                source_rows=context.source_rows,
+            )
             signal = build_live_signal_from_ranking(
                 frame,
                 ranked,
-                symbol=symbol,
-                duration=duration,
+                symbol=context.symbol,
+                duration=context.duration,
                 apply_quality_gate=False,
             )
         except ValueError as exc:
@@ -169,21 +195,6 @@ def _screen_cache_rows(
         else:
             rejected.append(_rejected_row(ranked, str(signal.get("qualityGateReason") or "quality_gate_failed")))
     return accepted, rejected
-
-
-def _offline_candidate_rank_key(row: dict[str, Any]) -> tuple[float, float, float, float, float]:
-    walk_forward = row.get("walkForward") if isinstance(row.get("walkForward"), dict) else {}
-    return (
-        _num(walk_forward.get("stabilityScore")),
-        1.0 if row.get("walkForwardPassed") else 0.0,
-        _num(walk_forward.get("oosWinRate")),
-        _num(row.get("factorScore")),
-        _num(row.get("profitFactor")),
-    )
-
-
-def _num(value: Any) -> float:
-    return float(value) if value is not None else float("-inf")
 
 
 def _rejected_row(row: dict[str, Any], reason: str) -> dict[str, Any]:

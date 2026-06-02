@@ -3,6 +3,7 @@ import {
   simulationAmount,
   simulationCandidateTypeLabel,
   simulationLatestEventLabel,
+  simulationLatestFailureLabel,
   simulationLatestPnlLabel,
   simulationPnlClass,
   simulationRejectionReasonLabel,
@@ -79,7 +80,7 @@ function SimulationStatusRow({ status, slot = {} }) {
       ) : null}
       {status.latestFailure ? (
         <span className="simulation-slot-reason">
-          预测失败：{status.latestFailure.reason}
+          {simulationLatestFailureLabel(status.latestFailure)}
         </span>
       ) : null}
     </div>

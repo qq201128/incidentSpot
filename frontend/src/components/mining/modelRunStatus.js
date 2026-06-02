@@ -17,6 +17,7 @@ export function modelRunStatusView(model, runtime) {
     label: STATE_LABELS[state] || state,
     ready: runtime?.ready ?? model?.cardState === "ready",
     pendingWorker: state === "worker_required" || runtime?.pendingWorker === true,
+    command: runtime?.workerRequiredCommand || runtime?.command || null,
     latestFailureReason: runtime?.latestFailureReason || model?.latestFailureReason || null,
     latestLogPath: runtime?.latestLogPath || model?.latestLogPath || null,
     candidateLibraryTotal: runtime?.candidateLibraryTotal ?? model?.candidateLibraryTotal ?? 0,

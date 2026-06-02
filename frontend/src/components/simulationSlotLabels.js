@@ -1,21 +1,11 @@
+import { failureReasonLabel } from "../utils/failureReasonLabels.js";
+
 const SOURCE_LABELS = Object.freeze({
   factor_ranking_cache: "排名缓存",
   agent_mined_factor_library: "Agent因子库",
   factor_combo_ranking_cache: "组合缓存",
   high_winrate_combo_ranking_cache: "高胜率组合缓存",
   auto_trade_strategies: "执行槽位",
-});
-
-const REJECTION_LABELS = Object.freeze({
-  win_rate_missing: "胜率缺失",
-  win_rate_below_min: "胜率不足",
-  profit_factor_missing: "profit factor 缺失",
-  profit_factor_below_min: "profit factor 不足",
-  sample_count_below_min: "样本数不足",
-  cache_unavailable: "缓存不可用",
-  cache_table_missing: "缓存表不存在",
-  offline_ranking_empty: "离线候选为空",
-  candidate_cache_unavailable: "候选缓存不可用",
 });
 
 export function simulationSlotState(status) {
@@ -35,8 +25,12 @@ export function simulationSourceLabel(source) {
 }
 
 export function simulationRejectionReasonLabel(reason) {
-  if (String(reason).startsWith("cache_unavailable")) return `缓存不可用：${reason}`;
-  return REJECTION_LABELS[reason] || reason;
+  return failureReasonLabel(reason);
+}
+
+export function simulationLatestFailureLabel(failure) {
+  if (!failure) return "";
+  return `预测失败：${failureReasonLabel(failure.reason)}`;
 }
 
 export function simulationThresholdLabel(thresholds) {

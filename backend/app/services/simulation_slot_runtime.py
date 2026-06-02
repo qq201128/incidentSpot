@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from app.db.session import get_conn
@@ -8,10 +9,29 @@ from app.services.factor_candidate_signal_keys import is_factor_candidate_signal
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 
 
+@dataclass(frozen=True)
+class RuntimeAvailability:
+    conn: Any
+    events_available: bool
+    failures_available: bool
+
+
 def attach_slot_and_runtime_state(candidates: list[dict[str, Any]], symbol: str, duration: str) -> None:
     slots = _slot_rows(symbol, duration)
     _attach_slot_state(candidates, slots, symbol, duration)
     _attach_runtime_state(candidates, symbol, duration)
+
+
+def runtime_statuses_for_slots(slots: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    conn = get_conn()
+    try:
+        events_available = _runtime_tables_available(conn)
+        failures_available = table_exists(conn, "paper_live_prediction_failures")
+        availability = RuntimeAvailability(conn, events_available, failures_available)
+        statuses = [_runtime_status(slot, availability) for slot in slots]
+        return {_status_key(status): status for status in statuses if _has_runtime_state(status)}
+    finally:
+        conn.close()
 
 
 def _attach_slot_state(
@@ -39,6 +59,34 @@ def _attach_runtime_state(candidates: list[dict[str, Any]], symbol: str, duratio
             item["latestFailure"] = _latest_failure(conn, key, symbol, duration) if failures_available and key else None
     finally:
         conn.close()
+
+
+def _runtime_status(
+    slot: dict[str, Any],
+    availability: RuntimeAvailability,
+) -> dict[str, Any]:
+    strategy_key = str(slot["strategyKey"])
+    symbol = str(slot["symbol"]).upper()
+    duration = str(slot["duration"])
+    latest_event = _latest_event(availability.conn, strategy_key, symbol, duration) if availability.events_available else None
+    latest_failure = _latest_failure(
+        availability.conn, strategy_key, symbol, duration,
+    ) if availability.failures_available else None
+    return {
+        "strategyKey": strategy_key,
+        "candidateType": _candidate_type_from_key(strategy_key),
+        "factorName": None,
+        "symbol": symbol,
+        "duration": duration,
+        "source": "auto_trade_strategies",
+        "gatePassed": None,
+        "gateStatus": "enabled" if bool(slot.get("enabled")) else "not_enabled",
+        "rejectionReason": None,
+        "metrics": {},
+        "slot": _payload_slot(slot),
+        "latestEvent": latest_event,
+        "latestFailure": latest_failure,
+    }
 
 
 def _slot_rows(symbol: str, duration: str) -> dict[str, Any]:
@@ -109,6 +157,14 @@ def _slot_payload(slot: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"enabled": bool(slot["enabled"]), "qty": float(slot["qty"]), "updatedAt": slot["updated_at"]}
 
 
+def _payload_slot(slot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": bool(slot.get("enabled")),
+        "qty": float(slot.get("qty") or 0),
+        "updatedAt": slot.get("updatedAt"),
+    }
+
+
 def _orphan_slots(
     candidates: list[dict[str, Any]],
     slots: dict[str, Any],
@@ -137,6 +193,14 @@ def _orphan_slot_payload(row: dict[str, Any], symbol: str, duration: str) -> dic
 
 def _runtime_tables_available(conn: Any) -> bool:
     return all(table_exists(conn, name) for name in ("events", "orders", "settlements"))
+
+
+def _has_runtime_state(status: dict[str, Any]) -> bool:
+    return status["latestEvent"] is not None or status["latestFailure"] is not None
+
+
+def _status_key(status: dict[str, Any]) -> tuple[str, str, str]:
+    return (str(status["strategyKey"]), str(status["symbol"]).upper(), str(status["duration"]))
 
 
 def _is_dynamic_key(strategy_key: str) -> bool:

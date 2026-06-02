@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAutoTradeStrategies, fetchSimulationSlots, updateAutoTradeStrategy } from "../api/client";
 import SimulationSlotDetails, { SimulationSlotReports } from "./SimulationSlotDetails";
 
-const LIVE_TRADING_ENABLED = false;
-
 export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) {
   const [strategies, setStrategies] = useState([]);
   const strategiesRef = useRef([]);
@@ -33,7 +31,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     return updateAutoTradeStrategy(slot.strategyKey, {
       strategyKey: slot.strategyKey,
       enabled,
-      liveTradingEnabled: LIVE_TRADING_ENABLED,
+      liveTradingEnabled: Boolean(slot.liveTradingEnabled),
       symbol,
       duration: slot.duration,
       durationMinutes: slot.durationMinutes,
@@ -66,7 +64,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
     };
   }, [activeSymbol, reloadKey]);
 
-  /** 交易对或数量变更时同步到已开启的周期槽位；当前阶段强制仅模拟。 */
+  /** 交易对或数量变更时同步到已开启的周期槽位，保留实盘开关状态。 */
   useEffect(() => {
     if (!enabledKeys) return;
     const enabled = strategiesRef.current.filter(
@@ -123,8 +121,7 @@ export default function AutoStrategyControls({ symbol, amount, reloadKey = 0 }) 
                 aria-pressed={false}
                 disabled={
                   updatingKey === `${group.strategyKey}:__live__` ||
-                  group.tradable === false ||
-                  _simulationOnlyGroup(group)
+                  group.tradable === false
                 }
                 title={_liveButtonTitle(group)}
               >
@@ -207,16 +204,15 @@ function _mergeStrategyRows(setStrategies, rows) {
   );
 }
 
-function _liveButtonLabel() {
-  return "仅模拟";
+function _liveButtonLabel(group) {
+  return group.slots.some((slot) => slot.liveTradingEnabled) ? "含实盘" : "仅模拟";
 }
 
-function _liveButtonTitle() {
-  return "当前阶段后端强制仅模拟。";
-}
-
-function _simulationOnlyGroup(group) {
-  return true;
+function _liveButtonTitle(group) {
+  if (group.slots.some((slot) => slot.liveTradingEnabled)) {
+    return "该执行项存在已开启实盘的周期槽位；请在实盘配置页管理。";
+  }
+  return "实盘开关请在研究驾驶舱进入的实盘配置页管理。";
 }
 
 function StrategyBacktestSummary({ summary }) {

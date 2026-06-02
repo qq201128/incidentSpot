@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -26,7 +25,7 @@ from app.services.paper_live_candidate_status_store import (
     write_candidate_status,
 )
 from app.services.paper_live_json_fields import parse_json_field
-from app.services.paper_live_stage_log import recent_stage_logs
+from app.services.paper_live_stage_log import ensure_stage_log_table, recent_stage_logs
 
 STATUS_COLLECTING = "paper_collecting"
 STATUS_STABLE = "paper_stable"
@@ -59,32 +58,10 @@ def paper_live_candidate_report(symbol: str, duration: str) -> dict[str, Any]:
     return report
 
 
-def ensure_paper_live_status_table(conn: Any) -> None:
-    _ensure_prediction_metadata_columns(conn)
-    ensure_candidate_status_tables(conn)
-
-
-def _ensure_prediction_metadata_columns(conn: Any) -> None:
-    for sql in (
-        "ALTER TABLE predictions ADD COLUMN model_family TEXT",
-        "ALTER TABLE predictions ADD COLUMN validation_win_rate REAL",
-        "ALTER TABLE predictions ADD COLUMN oos_win_rate REAL",
-        "ALTER TABLE predictions ADD COLUMN walk_forward_result TEXT",
-        "ALTER TABLE predictions ADD COLUMN recent_rolling_result TEXT",
-        "ALTER TABLE predictions ADD COLUMN data_freshness_status TEXT",
-        "ALTER TABLE predictions ADD COLUMN missing_feature_status TEXT",
-    ):
-        try:
-            conn.execute(sql)
-        except sqlite3.OperationalError as exc:
-            if "duplicate column" not in str(exc).lower():
-                raise
-    ensure_prediction_failure_table(conn)
-
-
 def _refresh_states(symbol: str, duration: str) -> dict[str, Any]:
     conn = get_conn()
     try:
+        _ensure_report_write_tables(conn)
         report = _report_from_conn(conn, symbol, duration)
         for candidate in report["allCandidates"]:
             write_candidate_status(conn, symbol, duration, candidate=candidate)
@@ -95,10 +72,16 @@ def _refresh_states(symbol: str, duration: str) -> dict[str, Any]:
         conn.close()
 
 
+def _ensure_report_write_tables(conn: Any) -> None:
+    ensure_prediction_failure_table(conn)
+    ensure_candidate_status_tables(conn)
+    ensure_stage_log_table(conn)
+
+
 def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
-    ensure_paper_live_status_table(conn)
     rows = _candidate_rows(conn, symbol, duration)
-    candidates = [_candidate_payload(item, _settled_rows(conn, item)) for item in rows]
+    settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
+    candidates = [_candidate_payload(item, settled_by_identity.get(_candidate_identity_key(item), [])) for item in rows]
     failures = recent_prediction_failures(conn, symbol, duration)
     stage_logs = recent_stage_logs(conn, symbol, duration)
     status_changes = recent_status_changes(conn, symbol, duration)
@@ -124,21 +107,25 @@ def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any
     return [dict(row) for row in rows]
 
 
-def _settled_rows(conn: Any, candidate: dict[str, Any]) -> list[dict[str, Any]]:
-    identity = _identity_value(candidate)
+def _settled_rows_by_identity(conn: Any, symbol: str, duration: str) -> dict[tuple[str, str], list[dict[str, Any]]]:
     rows = conn.execute(
         """
-        SELECT open_time, direction, entry_price, exit_price, actual_return,
+        SELECT signal_key, COALESCE(high_winrate_rule, model_version, signal_key) AS lifecycle_identity,
+               open_time, direction, entry_price, exit_price, actual_return,
                prediction_correct, high_winrate_rule, data_freshness_status,
                missing_feature_status, settled_at
         FROM predictions
-        WHERE signal_key = ? AND COALESCE(high_winrate_rule, model_version, signal_key) = ?
-          AND settled_at IS NOT NULL
+        WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
         ORDER BY open_time DESC
         """,
-        (candidate["signal_key"], identity),
+        (symbol.strip().upper(), duration),
     ).fetchall()
-    return [dict(row) for row in rows]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        item = dict(row)
+        key = (str(item.pop("signal_key")), str(item.pop("lifecycle_identity")))
+        grouped.setdefault(key, []).append(item)
+    return grouped
 
 
 def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -252,6 +239,10 @@ def _identity_value(candidate: dict[str, Any]) -> str:
         or candidate.get("model_version")
         or candidate["signal_key"]
     )
+
+
+def _candidate_identity_key(candidate: dict[str, Any]) -> tuple[str, str]:
+    return str(candidate["signal_key"]), _identity_value(candidate)
 
 
 def _candidate_key(candidate: dict[str, Any]) -> str:

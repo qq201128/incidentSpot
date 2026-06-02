@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY, STAGE_ENSEMBLE_READY
+from app.services.ensemble_judge_constants import STAGE_ENSEMBLE_READY
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.runtime_symbols import DEFAULT_RUNTIME_SYMBOLS
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, strategy_definition
@@ -46,7 +46,7 @@ def settings_from_row(row: Any) -> AutoTradeSettings:
         duration=str(row["duration"]),
         duration_minutes=int(row["duration_minutes"]),
         qty=float(row["qty"]),
-        live_trading_enabled=LIVE_TRADING_ENABLED,
+        live_trading_enabled=row_live_enabled(row),
     )
 
 
@@ -130,3 +130,7 @@ def table_exists(conn: Any, name: str) -> bool:
 
 def row_strategy_key(row: Any) -> str:
     return str(row["strategy_key"] or DEFAULT_STRATEGY_KEY)
+
+
+def row_live_enabled(row: Any) -> bool:
+    return bool(row["live_trading_enabled"])

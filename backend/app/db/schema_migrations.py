@@ -189,6 +189,19 @@ SCHEMA_MIGRATIONS = (
   )
   """,
   """
+  CREATE TABLE IF NOT EXISTS paper_live_candidate_status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+  )
+  """,
+  """
   CREATE TABLE IF NOT EXISTS paper_live_prediction_failures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_key TEXT NOT NULL,
@@ -197,6 +210,21 @@ SCHEMA_MIGRATIONS = (
     duration TEXT NOT NULL,
     stage TEXT NOT NULL,
     reason TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS paper_live_prediction_stage_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_key TEXT NOT NULL,
+    strategy_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    duration TEXT NOT NULL,
+    open_time INTEGER,
+    stage TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT,
     details_json TEXT NOT NULL,
     created_at TEXT NOT NULL
   )
@@ -236,6 +264,12 @@ SCHEMA_MIGRATIONS = (
   "CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time)",
   "CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at)",
   "CREATE INDEX IF NOT EXISTS idx_predictions_candidate_settled ON predictions(signal_key, COALESCE(high_winrate_rule, model_version, signal_key), settled_at, open_time DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_predictions_research_candidates ON predictions(symbol, duration, signal_key, strategy_key, COALESCE(high_winrate_rule, model_version, signal_key))",
+  "CREATE INDEX IF NOT EXISTS idx_predictions_research_settled_open ON predictions(symbol, duration, settled_at, open_time DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_lookup ON paper_live_prediction_stage_log(symbol, duration, signal_key, open_time, stage)",
+  "CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_recent ON paper_live_prediction_stage_log(symbol, duration, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_paper_live_failures_recent ON paper_live_prediction_failures(symbol, duration, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_paper_live_status_history_recent ON paper_live_candidate_status_history(symbol, duration, id DESC)",
   "CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time)",
   "CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status)",
   "CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id)",

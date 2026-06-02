@@ -15,7 +15,7 @@ def default_model_search_worker_status(monkeypatch: pytest.MonkeyPatch, request:
         lambda _filters: {
             "workerStatus": {
                 "state": "worker_required",
-                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop",
+                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
             }
         },
     )

@@ -421,11 +421,12 @@ def test_rule_signal_routes_lstm_shadow_prediction(monkeypatch) -> None:
     assert captured["entry_open_time"] == ENTRY_OPEN_TIME
 
 
-def test_lstm_shadow_live_trading_is_rejected() -> None:
+def test_lstm_shadow_live_trading_setting_is_saved() -> None:
     settings = _settings(lstm_shadow_strategy_key("10m"), live_trading_enabled=True)
 
-    with pytest.raises(ValueError, match="simulation only"):
-        auto_trade_service._validated_settings(settings)
+    validated = auto_trade_service._validated_settings(settings)
+
+    assert validated.live_trading_enabled is True
 
 
 class _FakeBackend:

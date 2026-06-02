@@ -50,14 +50,22 @@ def _queued_progress_from_job(
     base_progress: dict[str, Any],
 ) -> dict[str, Any]:
     status = "running" if job.get("status") == "running" else "queued"
-    total = _search_space_total(family, base_progress)
+    search_total = _search_space_total(family, job, base_progress)
+    stage_completed = int(base_progress.get("completed") or 0)
+    stage_total = int(base_progress.get("total") or 0)
+    completed = _completed_count(base_progress, search_total)
+    total = max(search_total, completed)
     return {
         **base_progress,
         "status": status,
         "profile": job.get("profile"),
         "updatedAt": job.get("started_at") or job.get("created_at"),
-        "searchSpaceTotal": total,
+        "searchSpaceTotal": search_total,
+        "completed": completed,
         "total": total,
+        "percent": _percent(completed, total),
+        "stageEvaluationCompleted": stage_completed,
+        "stageEvaluationTotal": stage_total,
         "parallelWorkers": job.get("parallel_workers"),
         "internalThreads": job.get("internal_threads"),
         "xgboostProcessWorkers": job.get("xgboost_process_workers"),
@@ -65,11 +73,31 @@ def _queued_progress_from_job(
     }
 
 
-def _search_space_total(family: str, progress: dict[str, Any]) -> int:
+def _search_space_total(family: str, job: dict[str, Any], progress: dict[str, Any]) -> int:
+    job_total = _job_search_space_total(job)
+    if job_total > 0:
+        return job_total
     total = int(progress.get("searchSpaceTotal") or progress.get("total") or 0)
     if total > 0:
         return total
     return int(model_family_training_rules(family)["searchSpaceTotal"])
+
+
+def _job_search_space_total(job: dict[str, Any]) -> int:
+    params = job.get("params") if isinstance(job.get("params"), dict) else {}
+    rules = params.get("trainingRules") if isinstance(params.get("trainingRules"), dict) else {}
+    return int(rules.get("searchSpaceTotal") or 0)
+
+
+def _completed_count(progress: dict[str, Any], search_total: int) -> int:
+    completed = int(progress.get("completed") or 0)
+    if search_total <= 0:
+        return completed
+    return min(completed, search_total)
+
+
+def _percent(completed: int, total: int) -> float:
+    return 0.0 if total <= 0 else round(min(completed / total, 1.0), 4)
 
 
 def _inactive_progress(progress: dict[str, Any]) -> dict[str, Any]:

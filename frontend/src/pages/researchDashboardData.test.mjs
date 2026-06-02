@@ -245,3 +245,23 @@ const allModelsVisible = visibleSettledRows([
   })),
 ], 18);
 assert.equal(allModelsVisible.filter((row) => row.type === "model").length, 14);
+
+const stableRowsTakePriority = visibleSettledRows([
+  ...Array.from({ length: 9 }, (_, index) => ({
+    rowKey: `stable-${index}`,
+    type: "factor_combo",
+    sampleCount: 100 - index,
+    winRate: 0.64,
+    status: "paper_stable",
+  })),
+  ...manyFactorRows,
+  ...Array.from({ length: 14 }, (_, index) => ({
+    rowKey: `stable-priority-model-${index}`,
+    type: "model",
+    sampleCount: 0,
+    winRate: 0.5,
+    status: "paper_collecting",
+  })),
+], 18);
+assert.equal(stableRowsTakePriority.length, 18);
+assert.equal(stableRowsTakePriority.filter((row) => row.status === "paper_stable").length, 9);

@@ -1,6 +1,8 @@
 @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap");
 @import "/src/components/TradingWorkbench.css";
+@import "/src/components/TradingWorkbench.responsive.css";
 @import "/src/components/EventRecordsTable.css";
+@import "/src/components/EventRecordsTable.responsive.css";
 @import "/src/components/EnsembleRankingTable.css";
 
 :root {
@@ -25,7 +27,7 @@
 
 body {
   margin: 0;
-  min-width: 360px;
+  min-width: 0;
   min-height: 100vh;
   font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
   background:
@@ -33,10 +35,12 @@ body {
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 92px),
     var(--bg);
   color: var(--text);
+  overflow-x: hidden;
 }
 
 #app {
   min-height: 100vh;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -77,6 +81,8 @@ select {
 
 .app-shell-header {
   height: 50px;
+  width: 100%;
+  min-width: 0;
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
@@ -90,6 +96,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 9px;
+  min-width: 0;
   padding: 0 16px;
   color: var(--text);
   text-decoration: none;
@@ -118,9 +125,14 @@ select {
   display: flex;
   align-items: stretch;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .app-nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 92px;
   min-height: 50px;
   padding: 0 18px;
@@ -130,6 +142,8 @@ select {
   background: transparent;
   color: #c2ccd5;
   font-size: 16px;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
 .app-nav-link-active {
@@ -185,6 +199,35 @@ select {
 @media (max-width: 760px) {
   .app-shell-header {
     height: auto;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .brand-lockup {
+    min-height: 42px;
+    padding: 0 14px;
+  }
+
+  .brand-lockup strong {
+    font-size: 20px;
+  }
+
+  .app-nav {
+    width: 100%;
+    max-width: 100vw;
+    gap: 4px;
+    padding: 0 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-top: 1px solid rgba(79, 116, 139, 0.18);
+    scrollbar-width: thin;
+  }
+
+  .app-nav-link {
+    flex: 0 0 auto;
+    min-width: auto;
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
   }
 }

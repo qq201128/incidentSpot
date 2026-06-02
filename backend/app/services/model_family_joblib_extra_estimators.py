@@ -4,6 +4,7 @@ import inspect
 from typing import Any
 
 LIGHTGBM_FORCE_COL_WISE = True
+LIGHTGBM_VALIDATION_HOOKS = ("_LGBMCheckXY", "_LGBMCheckArray")
 LOGISTIC_ALPHA_MIN = 1e-6
 LOGISTIC_REGULARIZATION_SCALE = 10_000
 LOGISTIC_MAX_ITERATIONS = 100
@@ -47,8 +48,11 @@ def lightgbm_estimator(params: dict[str, Any], seed: int):
 def _patch_lightgbm_sklearn_validation_compat() -> None:
     import lightgbm.sklearn as lgb_sklearn
 
-    lgb_sklearn._LGBMCheckXY = _sklearn_finite_arg_adapter(lgb_sklearn._LGBMCheckXY)
-    lgb_sklearn._LGBMCheckArray = _sklearn_finite_arg_adapter(lgb_sklearn._LGBMCheckArray)
+    for hook_name in LIGHTGBM_VALIDATION_HOOKS:
+        hook = getattr(lgb_sklearn, hook_name, None)
+        if hook is None:
+            continue
+        setattr(lgb_sklearn, hook_name, _sklearn_finite_arg_adapter(hook))
 
 
 def _sklearn_finite_arg_adapter(func):

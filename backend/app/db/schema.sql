@@ -389,7 +389,14 @@ CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(s
 CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at);
 CREATE INDEX IF NOT EXISTS idx_predictions_candidate_settled
 ON predictions(signal_key, COALESCE(high_winrate_rule, model_version, signal_key), settled_at, open_time DESC);
+CREATE INDEX IF NOT EXISTS idx_predictions_research_candidates
+ON predictions(symbol, duration, signal_key, strategy_key, COALESCE(high_winrate_rule, model_version, signal_key));
+CREATE INDEX IF NOT EXISTS idx_predictions_research_settled_open
+ON predictions(symbol, duration, settled_at, open_time DESC);
 CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_lookup ON paper_live_prediction_stage_log(symbol, duration, signal_key, open_time, stage);
+CREATE INDEX IF NOT EXISTS idx_paper_live_stage_log_recent ON paper_live_prediction_stage_log(symbol, duration, id DESC);
+CREATE INDEX IF NOT EXISTS idx_paper_live_failures_recent ON paper_live_prediction_failures(symbol, duration, id DESC);
+CREATE INDEX IF NOT EXISTS idx_paper_live_status_history_recent ON paper_live_candidate_status_history(symbol, duration, id DESC);
 CREATE INDEX IF NOT EXISTS idx_events_shadow_pairing ON events(symbol, event_interval, status, prediction_open_time);
 CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_interval, strategy_key, status);
 CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id);

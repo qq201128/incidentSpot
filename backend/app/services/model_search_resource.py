@@ -30,13 +30,19 @@ class ModelSearchResourceConfig:
     torch_jobs: int = DEFAULT_TORCH_JOBS
 
 
-def apply_model_search_resource_config(config: ModelSearchResourceConfig) -> dict[str, Any]:
+def apply_model_search_resource_config(
+    config: ModelSearchResourceConfig,
+    *,
+    max_running_jobs: int = 1,
+) -> dict[str, Any]:
+    if max_running_jobs <= 0:
+        raise ValueError("max_running_jobs must be positive")
     selected = validated_resource_config(config)
     for key in THREAD_ENV_VARS:
         os.environ[key] = str(selected.internal_threads)
     os.environ[XGBOOST_PROCESS_WORKERS_ENV] = str(selected.xgboost_process_workers)
     os.environ[TORCH_JOBS_ENV] = str(selected.torch_jobs)
-    return resource_payload(selected)
+    return resource_payload(selected, max_running_jobs=max_running_jobs)
 
 
 def resource_config_from_job(
@@ -81,10 +87,12 @@ def _int_resource_value(job: dict[str, Any], key: str, default: int) -> int:
     return int(default if value is None else value)
 
 
-def resource_payload(config: ModelSearchResourceConfig) -> dict[str, Any]:
+def resource_payload(config: ModelSearchResourceConfig, *, max_running_jobs: int = 1) -> dict[str, Any]:
+    if max_running_jobs <= 0:
+        raise ValueError("max_running_jobs must be positive")
     return {
         "resourceProfile": config.resource_profile,
-        "maxRunningJobs": 1,
+        "maxRunningJobs": int(max_running_jobs),
         "internalThreads": config.internal_threads,
         "parallelWorkers": config.parallel_workers,
         "xgboostProcessWorkers": config.xgboost_process_workers,

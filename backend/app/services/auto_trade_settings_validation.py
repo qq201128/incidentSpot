@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.ensemble_judge_constants import ENSEMBLE_RANKER_STRATEGY_KEY
-from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
-from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
-from app.services.model_family_config import is_model_family_shadow_strategy
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import strategy_definition, strategy_supports_duration
 
@@ -30,24 +26,6 @@ def validated_auto_trade_settings(settings: AutoTradeSettings) -> AutoTradeSetti
 def _validate_strategy_constraints(settings: AutoTradeSettings, strategy) -> None:
     if settings.enabled and not strategy.tradable:
         raise ValueError(strategy.disabled_reason or f"strategy is not tradable: {strategy.key}")
-    _validate_live_trading_disabled(settings, strategy)
-
-
-def _validate_live_trading_disabled(settings: AutoTradeSettings, strategy) -> None:
-    if not settings.live_trading_enabled:
-        return
-    if _simulation_only_strategy(strategy.key):
-        raise ValueError(f"{strategy.key} supports simulation only; live trading must stay disabled")
-    raise ValueError("real trading is disabled in the current paper-live preparation phase")
-
-
-def _simulation_only_strategy(strategy_key: str) -> bool:
-    return (
-        is_model_family_shadow_strategy(strategy_key)
-        or is_batch_combo_simulation_strategy(strategy_key)
-        or is_factor_candidate_signal_key(strategy_key)
-        or strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY
-    )
 
 
 def _normalized_symbol(symbol: str) -> str:

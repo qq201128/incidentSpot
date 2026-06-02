@@ -8,6 +8,7 @@ import FactorRankingTable from "../components/FactorRankingTable";
 import { durationLabel, formatUpdatedTime, sourcePillClass } from "../components/factorDisplayUtils";
 import { toolbarCategoryOptions } from "../utils/factorCatalogLabels";
 import "./FactorsPage.css";
+import "./FactorsPage.responsive.css";
 import "../components/FactorDetailPanel.css";
 import { useFactorPageAnimations } from "./useFactorPageAnimations";
 import { useFactorsPageData } from "./useFactorsPageData";

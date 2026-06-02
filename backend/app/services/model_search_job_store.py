@@ -87,14 +87,7 @@ def claim_next_model_search_job(
         try:
             ensure_model_search_jobs_table(conn)
             _mark_stale_running_jobs(conn, stale_after_seconds)
-            if _running_count(conn) >= max_running_jobs:
-                conn.commit()
-                return None
-            row = _next_pending_row(conn)
-            if row is None:
-                conn.commit()
-                return None
-            job = _claim_row(conn, row["job_id"])
+            job = _claim_available_row(conn, max_running_jobs)
             conn.commit()
             return job
         finally:
@@ -281,16 +274,29 @@ def _running_count(conn: Any) -> int:
     return int(row["c"])
 
 
+def _claim_available_row(conn: Any, max_running_jobs: int) -> dict[str, Any] | None:
+    while _running_count(conn) < max_running_jobs:
+        row = _next_pending_row(conn)
+        if row is None:
+            return None
+        job = _claim_row(conn, row["job_id"])
+        if job is not None:
+            return job
+    return None
+
+
 def _next_pending_row(conn: Any) -> Any | None:
     return conn.execute(pending_select_sql(), (JOB_STATUS_PENDING,)).fetchone()
 
 
-def _claim_row(conn: Any, job_id: str) -> dict[str, Any]:
+def _claim_row(conn: Any, job_id: str) -> dict[str, Any] | None:
     now = utc_now()
-    conn.execute(
+    cursor = conn.execute(
         claim_sql(),
         (JOB_STATUS_RUNNING, JOB_STAGE_COARSE, now, now, job_id, JOB_STATUS_PENDING),
     )
+    if int(cursor.rowcount or 0) != 1:
+        return None
     return decode_job(_required_job(conn, job_id))
 
 

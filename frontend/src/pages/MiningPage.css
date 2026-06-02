@@ -377,6 +377,17 @@
   white-space: nowrap;
 }
 
+.mining-model-context {
+  margin: -1px 0 1px;
+  color: #9fc6ff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mining-model-state {
   font-size: 9px;
   font-weight: 800;

@@ -6,6 +6,7 @@ import MiningPageHeader from "../components/mining/MiningPageHeader";
 import MiningSidebar from "../components/mining/MiningSidebar";
 import { useMiningPageData } from "./useMiningPageData";
 import "./MiningPage.css";
+import "./MiningPage.responsive.css";
 
 const DURATIONS = [
   { value: "10m", label: "10分钟" },
@@ -36,11 +37,7 @@ export default function FactorLearningPage() {
         reloading={mining.busy !== "" || mining.loading}
       />
 
-      {initialLoading ? (
-        <div className="mining-loading" role="status">
-          正在加载自动挖掘数据…（汇总 10 个模型族状态，首次可能需数秒）
-        </div>
-      ) : null}
+      {initialLoading ? <MiningInitialState /> : null}
 
       {mining.status ? <div className="mining-banner">{mining.status}</div> : null}
 
@@ -60,6 +57,8 @@ export default function FactorLearningPage() {
               runStatus={overview.runStatus}
               summary={overview.summary}
               busy={mining.busy}
+              symbol={overview?.symbol || symbol}
+              duration={overview?.duration || duration}
               onSearchModel={(family) => void mining.searchModel(family)}
             />
             <MiningSidebar
@@ -74,5 +73,22 @@ export default function FactorLearningPage() {
         <div className="mining-loading">暂无数据</div>
       ) : null}
     </main>
+  );
+}
+
+function MiningInitialState() {
+  return (
+    <section className="mining-loading-panel" role="status" aria-live="polite">
+      <div>
+        <span className="mining-loading-kicker">REAL API REQUEST</span>
+        <h2>正在读取自动挖掘数据</h2>
+        <p>汇总模型族运行态、候选库、Agent 入库和 Worker 日志，首次请求可能需要数秒。</p>
+      </div>
+      <div className="mining-loading-steps" aria-label="读取中的数据源">
+        <span>模型族状态</span>
+        <span>候选记录</span>
+        <span>Worker 运行态</span>
+      </div>
+    </section>
   );
 }

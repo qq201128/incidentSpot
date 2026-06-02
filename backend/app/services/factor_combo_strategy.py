@@ -14,7 +14,7 @@ from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.kline_timing import MS_PER_MINUTE, current_rule_entry_open_time_for_duration
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
-from app.services.factor_mined_candidates import materialize_mined_factor_frame
+from app.services.factor_combo_frame_materialization import materialize_factor_combo_frame_for_row
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_strategy_demotion import high_winrate_active_rank
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
@@ -83,11 +83,12 @@ def predict_factor_combo_rank_direction(
     if require_high_winrate_goal:
         _assert_high_winrate_combo(top, combo_rank, symbol, duration)
     _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
-    frame = materialize_mined_factor_frame(
+    frame = materialize_factor_combo_frame_for_row(
         load_factor_frame(symbol, duration),
         symbol=symbol,
         duration=duration,
-    ).frame
+        row=top,
+    )
     signal = build_live_signal_from_ranking(
         frame,
         top,
@@ -121,11 +122,12 @@ def predict_factor_combo_row_direction(
         raise ValueError(f"no cached combination ranking for {symbol.upper()} {duration}")
     assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
     _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
-    frame = materialize_mined_factor_frame(
+    frame = materialize_factor_combo_frame_for_row(
         load_factor_frame(symbol, duration),
         symbol=symbol,
         duration=duration,
-    ).frame
+        row=row,
+    )
     signal = build_live_signal_from_ranking(
         frame,
         row,

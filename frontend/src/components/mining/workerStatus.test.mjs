@@ -5,6 +5,7 @@ const required = miningWorkerStatusView({ state: "worker_required", pendingJobs:
 assert.equal(required.label, "已入队，需启动 worker");
 assert.equal(required.tone, "warn");
 assert.match(required.command, /run_model_search_worker\.py --loop/);
+assert.match(required.command, /--adaptive-parallelism/);
 assert.equal(required.detail, "pending 2，未检测到 running worker");
 
 const queued = miningWorkerStatusView({ state: "queued", pendingJobs: 3, runningJobs: 1 });

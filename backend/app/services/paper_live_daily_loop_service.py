@@ -124,6 +124,7 @@ def _candidate_summary(report: dict[str, Any]) -> dict[str, Any]:
 def _offline_screening_summary(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "policy": report.get("policy"),
+        "rankingPolicy": report.get("rankingPolicy") or [],
         "observationPoolLimit": report.get("observationPoolLimit"),
         "focusedCount": report.get("focusedCount"),
         "candidateCount": report.get("candidateCount"),

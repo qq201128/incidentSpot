@@ -34,6 +34,8 @@ def test_daily_closed_loop_reports_all_required_steps() -> None:
     assert result["candidatePool"]["avoidNextSearch"][0]["reason"] == "paper_live_win_rate_below_target"
     assert result["realTimePredictionExecutor"]["realTradingEnabled"] is False
     offline = result["stages"][0]["payload"]["offlineScreening"]
+    assert offline["policy"] == "offline_cross_period_stability_sample_size_profit_factor_prefilter_only"
+    assert offline["rankingPolicy"] == ["cross_period_stability", "sample_count", "profit_factor"]
     assert offline["rejectedReasons"][0]["reason"] == "outside_observation_pool_limit"
     models = result["stages"][0]["payload"]["modelCandidates"]
     assert models["paperLiveReadyCount"] == 1
@@ -131,7 +133,8 @@ def _candidate_report(symbol: str, duration: str) -> dict:
 
 def _offline_screening(symbol: str, duration: str) -> dict:
     return {
-        "policy": "offline_oos_walk_forward_recent_rolling_prefilter_only",
+        "policy": "offline_cross_period_stability_sample_size_profit_factor_prefilter_only",
+        "rankingPolicy": ["cross_period_stability", "sample_count", "profit_factor"],
         "observationPoolLimit": 10,
         "focusedCount": 1,
         "candidateCount": 2,

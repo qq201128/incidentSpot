@@ -59,7 +59,7 @@ def test_db_seed_keeps_model_family_simulation_slots() -> None:
 
     assert _strategy_count(conn, HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY) == 0
     assert _strategy_count(conn, model_key) == 2
-    assert _strategy_live_enabled(conn, model_key, "BTCUSDT") == 0
+    assert _strategy_live_enabled(conn, model_key, "BTCUSDT") == 1
 
 
 def test_strategy_payloads_expose_factor_combo_and_model_family_simulation_items() -> None:
@@ -178,31 +178,37 @@ def test_list_auto_trade_settings_includes_dynamic_simulation_slots(monkeypatch,
 
     assert by_key[(factor_key, "BTCUSDT", "10m")].enabled is True
     assert by_key[(combo_key, "BTCUSDT", "30m")].enabled is True
-    assert by_key[(factor_key, "BTCUSDT", "10m")].live_trading_enabled is False
-    assert by_key[(combo_key, "BTCUSDT", "30m")].live_trading_enabled is False
+    assert by_key[(factor_key, "BTCUSDT", "10m")].live_trading_enabled is True
+    assert by_key[(combo_key, "BTCUSDT", "30m")].live_trading_enabled is True
 
 
-def test_factor_candidate_signal_settings_are_simulation_only() -> None:
+def test_factor_candidate_signal_live_trading_setting_is_saved(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "slots.db"
+    _auto_trade_conn(db_path).close()
+    monkeypatch.setattr(auto_trade_service, "get_conn", lambda: _connect(db_path))
     factor_key = factor_candidate_signal_key("agent__alpha")
     settings = AutoTradeSettings(factor_key, True, "BTCUSDT", "10m", 10, 5.0, True)
 
-    try:
-        auto_trade_service.update_auto_trade_settings(settings)
-    except ValueError as exc:
-        assert "simulation only" in str(exc)
-    else:
-        raise AssertionError("factor candidate live trading must be rejected")
+    updated = auto_trade_service.update_auto_trade_settings(settings)
+
+    assert updated.live_trading_enabled is True
+    persisted = auto_trade_service.list_auto_trade_settings()
+    by_key = {(item.strategy_key, item.symbol, item.duration): item for item in persisted}
+    assert by_key[(factor_key, "BTCUSDT", "10m")].live_trading_enabled is True
 
 
-def test_live_trading_is_rejected_for_all_auto_trade_strategies() -> None:
+def test_factor_combo_live_trading_setting_is_saved(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "slots.db"
+    _auto_trade_conn(db_path).close()
+    monkeypatch.setattr(auto_trade_service, "get_conn", lambda: _connect(db_path))
     settings = AutoTradeSettings(FACTOR_COMBO_STRATEGY_KEY, True, "BTCUSDT", "10m", 10, 5.0, True)
 
-    try:
-        auto_trade_service.update_auto_trade_settings(settings)
-    except ValueError as exc:
-        assert "real trading is disabled" in str(exc)
-    else:
-        raise AssertionError("live trading must be rejected globally")
+    updated = auto_trade_service.update_auto_trade_settings(settings)
+
+    assert updated.live_trading_enabled is True
+    persisted = auto_trade_service.list_auto_trade_settings()
+    by_key = {(item.strategy_key, item.symbol, item.duration): item for item in persisted}
+    assert by_key[(FACTOR_COMBO_STRATEGY_KEY, "BTCUSDT", "10m")].live_trading_enabled is True
 
 
 def test_current_bucket_prediction_is_treated_as_fresh(monkeypatch) -> None:

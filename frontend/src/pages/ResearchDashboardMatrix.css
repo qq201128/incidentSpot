@@ -34,7 +34,7 @@
 
 .research-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1240px;
   border-collapse: separate;
   border-spacing: 0 6px;
 }
@@ -139,6 +139,27 @@
 .research-table .is-warn {
   color: #f8ca74;
   font-weight: 900;
+}
+
+.research-live-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(243, 155, 49, 0.5);
+  border-radius: 4px;
+  background: rgba(243, 155, 49, 0.12);
+  color: #ffd9a8;
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.research-live-empty {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 @media (max-width: 720px) {

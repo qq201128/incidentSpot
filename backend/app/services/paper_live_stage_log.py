@@ -155,7 +155,6 @@ def log_settlement_pending(
 
 
 def recent_stage_logs(conn: Any, symbol: str, duration: str, *, limit: int = 50) -> list[dict[str, Any]]:
-    ensure_stage_log_table(conn)
     rows = conn.execute(
         """
         SELECT signal_key, strategy_key, symbol, duration, open_time, stage,

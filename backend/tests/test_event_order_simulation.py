@@ -60,17 +60,57 @@ def test_quick_trade_is_simulated_and_does_not_call_binance(monkeypatch: pytest.
     assert "未调用 Binance" in external["response"]["message"]
 
 
-def test_quick_trade_rejects_live_trading_without_writing_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_quick_trade_live_trading_calls_binance_and_writes_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     db_uri = _quick_trade_db_uri()
     keeper = _quick_trade_conn(db_uri)
+    placed = []
     monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
     monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
 
-    with pytest.raises(HTTPException) as exc:
+    def place_order(**kwargs):
+        placed.append(kwargs)
+        return {"externalOrderId": "live-1", "externalStatus": "PLACED", "response": {"success": True}}
+
+    monkeypatch.setattr(event_quick_trade, "place_event_contract_order", place_order)
+
+    result = create_quick_trade(_quick_trade_payload(live=True))
+
+    order = keeper.execute("SELECT * FROM orders WHERE id = ?", (result["orderId"],)).fetchone()
+    external = json.loads(order["external_response"])
+    assert placed == [
+        {
+            "symbol": "BTCUSDT",
+            "event_interval": "10m",
+            "side": "BUY",
+            "amount": 1.0,
+            "payout_ratio": 0.8,
+        }
+    ]
+    assert result["simulated"] is False
+    assert result["binanceCalled"] is True
+    assert result["externalStatus"] == "PLACED"
+    assert result["externalOrderId"] == "live-1"
+    assert order["external_status"] == "PLACED"
+    assert external["externalOrderId"] == "live-1"
+
+
+def test_quick_trade_live_failure_does_not_write_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    failures = []
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(event_quick_trade, "log_live_order_failure", lambda ctx, exc: failures.append((ctx, exc)))
+
+    def place_order(**_kwargs):
+        raise RuntimeError("binance order rejected")
+
+    monkeypatch.setattr(event_quick_trade, "place_event_contract_order", place_order)
+
+    with pytest.raises(RuntimeError, match="binance order rejected"):
         create_quick_trade(_quick_trade_payload(live=True))
 
-    assert exc.value.status_code == 400
-    assert "real trading is disabled" in str(exc.value.detail)
+    assert len(failures) == 1
     assert _row_count(keeper, "events") == 0
     assert _row_count(keeper, "orders") == 0
 

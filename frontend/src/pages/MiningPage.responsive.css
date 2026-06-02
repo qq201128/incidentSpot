@@ -1,0 +1,150 @@
+.mining-loading-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
+  gap: 12px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid rgba(69, 88, 96, 0.5);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(47, 140, 255, 0.12), transparent 58%),
+    rgba(13, 18, 23, 0.88);
+}
+
+.mining-loading-panel h2,
+.mining-loading-panel p {
+  margin: 0;
+}
+
+.mining-loading-panel h2 {
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.mining-loading-panel p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mining-loading-kicker {
+  color: #9fc6ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.mining-loading-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.mining-loading-steps span {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid rgba(120, 167, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(120, 167, 255, 0.08);
+  color: #c9d9ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 1200px) {
+  .mining-page.layout {
+    height: auto;
+    overflow: visible;
+  }
+
+  .mining-page-body,
+  .mining-workspace,
+  .mining-model-section,
+  .mining-agent-section {
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .mining-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .mining-page.layout {
+    padding: 8px;
+  }
+
+  .mining-topbar-controls,
+  .mining-kpi-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .mining-kpi-card {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .mining-kpi-card small,
+  .mining-kpi-rules-text p {
+    overflow-wrap: anywhere;
+  }
+
+  .mining-topbar-controls label,
+  .mining-topbar-controls select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mining-kpi-card--rules {
+    grid-column: auto;
+  }
+
+  .mining-model-grid,
+  .mining-insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mining-model-section,
+  .mining-insights-grid,
+  .mining-side-card,
+  .mining-agent-section,
+  .mining-agent-table-wrap {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .mining-loading-panel {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .mining-agent-table {
+    min-width: 880px;
+  }
+}
+
+@media (max-width: 520px) {
+  .mining-topbar {
+    padding: 12px;
+  }
+
+  .mining-status-chip,
+  .mining-refresh-time {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mining-kpi-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}

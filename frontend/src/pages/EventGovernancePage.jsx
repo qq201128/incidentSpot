@@ -5,6 +5,7 @@ import {
   SimulationObservationSection,
 } from "./EventGovernanceTables";
 import "./EventGovernancePage.css";
+import "./EventGovernancePage.responsive.css";
 
 const DURATIONS = [
   { value: "10m", label: "10分钟" },

@@ -1,0 +1,52 @@
+@media (max-width: 760px) {
+  .event-governance-page.layout {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .event-gov-topbar {
+    padding: 12px;
+  }
+
+  .event-gov-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .event-gov-controls label,
+  .event-gov-controls select,
+  .event-gov-controls button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .event-gov-latency {
+    align-self: end;
+  }
+
+  .event-gov-panel {
+    padding: 10px;
+  }
+
+  .event-gov-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .event-gov-table-wrap {
+    border: 1px solid rgba(69, 88, 96, 0.35);
+    border-radius: 6px;
+  }
+
+  .event-gov-table {
+    min-width: 980px;
+  }
+}
+
+@media (max-width: 420px) {
+  .event-gov-controls {
+    grid-template-columns: 1fr;
+  }
+}

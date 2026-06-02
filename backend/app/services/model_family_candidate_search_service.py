@@ -88,6 +88,7 @@ def _run_candidate_batch(
         duration=cfg.duration,
         profile=cfg.profile,
         total=len(candidates),
+        search_space_total=model_search_space_size(cfg.family),
         parallel_workers=cfg.parallel_workers,
     )
     dataset_cache = CandidateDatasetCache()

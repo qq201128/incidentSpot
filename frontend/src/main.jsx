@@ -12,6 +12,7 @@ function Root() {
         <Route path="/rule-hit-rate" element={<App />} />
         <Route path="/event-governance" element={<App />} />
         <Route path="/research-dashboard" element={<App />} />
+        <Route path="/live-trading" element={<App />} />
         <Route path="/factors" element={<App />} />
         <Route path="/learning" element={<App />} />
       </Routes>

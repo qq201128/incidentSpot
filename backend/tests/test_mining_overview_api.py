@@ -51,7 +51,7 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
                 "pendingJobs": 2,
                 "runningJobs": 0,
                 "latestLogPath": None,
-                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop",
+                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
             },
         },
     )
@@ -79,7 +79,7 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
     assert payload["runStatus"]["sections"]["modelSearch"]["state"] == "worker_required"
     assert payload["runStatus"]["overall"]["state"] == "worker_required"
     assert payload["trainingRules"]["workerStatus"]["latestLogPath"] is None
-    assert "run_model_search_worker.py --loop" in payload["trainingRules"]["workerStatus"]["workerRequiredCommand"]
+    assert "--adaptive-parallelism" in payload["trainingRules"]["workerStatus"]["workerRequiredCommand"]
     assert payload["summary"]["searchPendingCount"] == 2
     assert len(payload["models"]) == 14
     assert payload["agentCandidates"][0]["factorName"]
@@ -150,3 +150,19 @@ def test_mining_run_status_reports_ready_running_and_failed_models() -> None:
     assert running["state"] == "running"
     assert failed["state"] == "failed"
     assert failed["latestFailureReason"] == "training crashed"
+
+
+def test_mining_run_status_exposes_worker_command_for_pending_models() -> None:
+    from app.services.mining_run_status_service import _model_runtime_status
+
+    runtime = _model_runtime_status(
+        {"modelFamily": "knn", "cardState": "pending_train", "searchStatus": "idle"},
+        {
+            "workerStatus": {
+                "state": "worker_required",
+                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
+            }
+        },
+    )
+
+    assert runtime["workerRequiredCommand"].endswith("--adaptive-parallelism")

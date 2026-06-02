@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.factor_extended_indicator_extensions import EXTENDED_INDICATOR_FACTORS
 from app.services.factor_technical_extensions import TECHNICAL_INDICATOR_FACTORS
+from app.services.factor_web_extensions import WEB_FACTORS
 
 ADDITIONAL_FACTORS: tuple[dict[str, Any], ...] = (
     {
@@ -231,4 +233,9 @@ ADDITIONAL_FACTORS: tuple[dict[str, Any], ...] = (
     },
 )
 
-ADDITIONAL_FACTORS = (*ADDITIONAL_FACTORS, *TECHNICAL_INDICATOR_FACTORS)
+ADDITIONAL_FACTORS = (
+    *ADDITIONAL_FACTORS,
+    *TECHNICAL_INDICATOR_FACTORS,
+    *EXTENDED_INDICATOR_FACTORS,
+    *WEB_FACTORS,
+)

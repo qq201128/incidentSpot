@@ -10,8 +10,10 @@ from fastapi import HTTPException
 from app.db.session import get_conn
 from app.services.binance_event_contract import (
     build_event_contract_order_payload,
+    place_event_contract_order,
 )
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_failure_log import log_live_order_failure
 from app.services.position_guard import has_open_position
 from app.services.event_search_index import refresh_event_search_row
 from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
@@ -72,7 +74,17 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
 def _place_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
     if not ctx.live_trading_enabled:
         return _simulated_external_order(ctx)
-    raise HTTPException(status_code=400, detail="real trading is disabled in the current paper-live preparation phase")
+    try:
+        return place_event_contract_order(
+            symbol=ctx.symbol,
+            event_interval=ctx.event_interval,
+            side=ctx.side,
+            amount=ctx.payload.order.qty,
+            payout_ratio=FIXED_PAYOUT_RATIO,
+        )
+    except Exception as exc:
+        log_live_order_failure(ctx, exc)
+        raise
 
 
 def _simulated_external_order(ctx: QuickTradeContext) -> dict[str, Any]:

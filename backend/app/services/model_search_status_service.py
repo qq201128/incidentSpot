@@ -8,7 +8,7 @@ from app.services.model_family_status_service import model_family_status
 from app.services.model_search_job_store import list_model_search_jobs
 from app.services.model_search_job_types import JOB_STATUS_RUNNING
 
-MODEL_SEARCH_WORKER_COMMAND = "python backend/scripts/run_model_search_worker.py --loop"
+MODEL_SEARCH_WORKER_COMMAND = "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism"
 
 
 def model_search_queue_status(

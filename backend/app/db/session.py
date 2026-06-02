@@ -148,7 +148,6 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
   from app.services.strategy_registry import strategy_payloads
   from app.services.auto_trade_default_slots import (
     default_slot_flags,
-    disable_simulation_only_live_trading,
     enable_default_simulation_strategy_slots,
   )
 
@@ -170,7 +169,6 @@ def _ensure_auto_trade_strategies(conn: sqlite3.Connection) -> None:
           (key, symbol, dur, enabled, live, dm, ts),
         )
   enable_default_simulation_strategy_slots(conn, _AUTO_TRADE_SLOT_DURATIONS, _DURATION_MINUTES, ts)
-  disable_simulation_only_live_trading(conn, _AUTO_TRADE_SLOT_DURATIONS)
 
 
 def _delete_retired_auto_trade_strategies(conn: sqlite3.Connection) -> None:

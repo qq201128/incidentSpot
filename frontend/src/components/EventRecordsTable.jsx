@@ -3,6 +3,7 @@ import { fetchEventsPage } from "../api/client";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { factorLabel } from "../utils/factorLearningLabels";
+import { eventFailureReasonLabel } from "../utils/failureReasonLabels";
 import { eventBacktestWinRatePercent } from "../utils/eventAiMetrics";
 import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 import EnsembleRankingTable from "./EnsembleRankingTable";
@@ -412,7 +413,7 @@ function backtestWinRateCell(event) {
 }
 
 function failureReason(event) {
-  return event.externalResponse || event.settlementSource || event.title || "—";
+  return eventFailureReasonLabel(event);
 }
 
 function eventCode(id) {

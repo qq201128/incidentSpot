@@ -7,6 +7,7 @@ from typing import Any
 
 from app.services.lstm_artifacts import artifact_paths, read_json, update_json, write_json
 from app.services.model_family_config import ModelFamilyTrainingConfig, normalize_model_family
+from app.services.model_family_candidate_summary import model_candidate_summary
 from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_search_grid,
@@ -56,12 +57,7 @@ def record_model_candidate(config: ModelFamilyTrainingConfig, profile: str, repo
 
 def model_candidate_library_summary(family: str, symbol: str, duration: str, *, artifact_root=None) -> dict:
     records = list(read_model_candidate_library(family, symbol, duration, artifact_root=artifact_root)["records"])
-    return {
-        "total": len(records),
-        "latest": records[-1] if records else None,
-        "bestTradeCandidate": _best_record(records, "trade_active"),
-        "bestShadowCandidate": _best_record(records, "shadow_active"),
-    }
+    return model_candidate_summary(records)
 
 def read_model_candidate_progress(family: str, symbol: str, duration: str, *, artifact_root=None) -> dict:
     path = candidate_progress_path(family, symbol, duration, artifact_root=artifact_root)
@@ -74,10 +70,18 @@ def queue_model_candidate_progress(
     duration: str,
     profile: str,
     total: int,
+    search_space_total: int | None = None,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
 ) -> dict:
     payload = _progress_payload(
-        family, symbol, duration, profile=profile, status="queued", total=total, parallel_workers=parallel_workers
+        family,
+        symbol,
+        duration,
+        profile=profile,
+        status="queued",
+        total=total,
+        search_space_total=search_space_total,
+        parallel_workers=parallel_workers,
     )
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
@@ -89,10 +93,18 @@ def start_model_candidate_progress(
     duration: str,
     profile: str,
     total: int,
+    search_space_total: int | None = None,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
 ) -> dict:
     payload = _progress_payload(
-        family, symbol, duration, profile=profile, status="running", total=total, parallel_workers=parallel_workers
+        family,
+        symbol,
+        duration,
+        profile=profile,
+        status="running",
+        total=total,
+        search_space_total=search_space_total,
+        parallel_workers=parallel_workers,
     )
     write_json(candidate_progress_path(family, symbol, duration), payload)
     return payload
@@ -139,7 +151,8 @@ def finish_model_candidate_progress_from_library(family: str, *, symbol: str, du
     selected = normalize_model_family(family)
     path = candidate_progress_path(selected, symbol, duration)
     records = list(read_model_candidate_library(selected, symbol, duration)["records"])
-    total = max(model_search_space_size(selected), len(records))
+    search_space_total = model_search_space_size(selected)
+    total = max(search_space_total, len(records))
 
     def _updater(payload: dict[str, Any] | None) -> dict[str, Any]:
         current = payload or _empty_progress(selected, symbol, duration)
@@ -149,7 +162,7 @@ def finish_model_candidate_progress_from_library(family: str, *, symbol: str, du
         return {
             **current,
             "status": status, "profile": profile, "updatedAt": now, "finishedAt": now,
-            "completed": completed, "total": total, "searchSpaceTotal": total,
+            "completed": completed, "total": total, "searchSpaceTotal": search_space_total,
             "percent": _percent(completed, total), "parallelWorkers": int(parallel_workers),
             "counts": _counts_from_records(records),
             "latestCompleted": _progress_record(records[-1]) if records else None,
@@ -217,23 +230,19 @@ def _metric_summary(metrics: dict) -> dict:
         "sampleCount": metrics.get("sampleCount"),
     }
 
-def _best_record(records: list[dict], status: str) -> dict | None:
-    selected = [row for row in records if row.get("status") == status]
-    return max(selected, key=_candidate_score) if selected else None
-
-def _candidate_score(record: dict) -> tuple[float, float, int]:
-    validation = record.get("validation") or {}
-    test = record.get("test") or {}
-    return (
-        min(float(validation.get("winRate") or 0.0), float(test.get("winRate") or 0.0)),
-        min(float(validation.get("profitFactor") or 0.0), float(test.get("profitFactor") or 0.0)),
-        int(test.get("sampleCount") or 0),
-    )
-
 def _progress_payload(
-    family: str, symbol: str, duration: str, *, profile: str, status: str, total: int, parallel_workers: int
+    family: str,
+    symbol: str,
+    duration: str,
+    *,
+    profile: str,
+    status: str,
+    total: int,
+    search_space_total: int | None,
+    parallel_workers: int,
 ) -> dict:
     now = _utc_now()
+    search_total = int(search_space_total) if search_space_total is not None else int(total)
     return {
         **_empty_progress(family, symbol, duration),
         "status": status,
@@ -241,7 +250,7 @@ def _progress_payload(
         "startedAt": now if status == "running" else None,
         "updatedAt": now,
         "total": int(total),
-        "searchSpaceTotal": int(total),
+        "searchSpaceTotal": search_total,
         "parallelWorkers": int(parallel_workers),
     }
 

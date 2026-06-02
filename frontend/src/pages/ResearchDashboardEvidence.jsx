@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import {
   EVIDENCE_TARGETS,
   EMPTY,
@@ -16,7 +17,7 @@ import {
 } from "./researchDashboardData";
 import { reasonLabel, statusClass, statusLabel } from "./researchDashboardLabels";
 
-export function SettledSampleMatrix({ loadError, loading, reportLoaded, rows }) {
+export function SettledSampleMatrix({ duration, loadError, loading, reportLoaded, rows, symbol }) {
   const candidateCountText = matrixStatusText({
     loadError,
     loading,
@@ -50,10 +51,13 @@ export function SettledSampleMatrix({ loadError, loading, reportLoaded, rows }) 
                 <th>连续亏损</th>
                 <th>数据/特征</th>
                 <th>原因</th>
+                <th>实盘</th>
               </tr>
             </thead>
             <tbody>
-              {visibleSettledRows(rows, TOP_ROW_LIMIT).map((row) => <SettledRow key={row.rowKey} row={row} />)}
+              {visibleSettledRows(rows, TOP_ROW_LIMIT).map((row) => (
+                <SettledRow key={row.rowKey} duration={duration} row={row} symbol={symbol} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -84,7 +88,7 @@ export function ResearchSidePanel({ report, rows, summary }) {
   );
 }
 
-function SettledRow({ row }) {
+function SettledRow({ duration, row, symbol }) {
   const gapRisk = row.backtestGap != null && row.backtestGap >= EVIDENCE_TARGETS.backtestGapWarn;
   return (
     <tr>
@@ -111,7 +115,22 @@ function SettledRow({ row }) {
         </span>
       </td>
       <td><span className="research-reason">{reasonLabel(row.reason)}</span></td>
+      <td><LiveTradingLink duration={duration} row={row} symbol={symbol} /></td>
     </tr>
+  );
+}
+
+function LiveTradingLink({ duration, row, symbol }) {
+  if (row.status !== "paper_stable" || !row.strategyKey) return <span className="research-live-empty">{EMPTY}</span>;
+  const params = new URLSearchParams({
+    duration,
+    strategyKey: row.strategyKey,
+    symbol,
+  });
+  return (
+    <Link className="research-live-link" to={`/live-trading?${params.toString()}`}>
+      配置
+    </Link>
   );
 }
 

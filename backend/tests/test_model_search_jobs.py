@@ -154,6 +154,24 @@ def test_claim_marks_pending_job_running(monkeypatch: pytest.MonkeyPatch) -> Non
     assert store.claim_next_model_search_job(max_running_jobs=1) is None
 
 
+def test_claim_allows_multiple_running_jobs_when_capacity_allows(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("claim-multiple")
+    _patch_store_db(monkeypatch, db_path)
+    _enqueue_one(symbol="BTCUSDT")
+    _enqueue_one(symbol="ETHUSDT")
+
+    first = store.claim_next_model_search_job(max_running_jobs=2)
+    second = store.claim_next_model_search_job(max_running_jobs=2)
+    blocked = store.claim_next_model_search_job(max_running_jobs=2)
+
+    assert first is not None
+    assert second is not None
+    assert {first["symbol"], second["symbol"]} == {"BTCUSDT", "ETHUSDT"}
+    assert first["status"] == JOB_STATUS_RUNNING
+    assert second["status"] == JOB_STATUS_RUNNING
+    assert blocked is None
+
+
 def test_finish_success_and_rejection_are_written(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _db_path("finish")
     _patch_store_db(monkeypatch, db_path)

@@ -23,7 +23,7 @@ def test_pending_job_without_worker_requires_command(monkeypatch: pytest.MonkeyP
     assert report["workerStatus"]["state"] == "worker_required"
     assert report["workerStatus"]["pendingJobs"] == 1
     assert report["workerStatus"]["runningJobs"] == 0
-    assert "run_model_search_worker.py --loop" in report["workerStatus"]["workerRequiredCommand"]
+    assert "--adaptive-parallelism" in report["workerStatus"]["workerRequiredCommand"]
 
 
 def test_running_job_marks_worker_running(monkeypatch: pytest.MonkeyPatch) -> None:

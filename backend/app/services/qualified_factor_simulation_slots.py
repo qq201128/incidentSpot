@@ -85,10 +85,15 @@ def _enable_simulation_slots(
         for strategy_key in strategy_keys:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO auto_trade_strategies(
+                INSERT INTO auto_trade_strategies(
                   strategy_key, symbol, duration, enabled, live_trading_enabled, duration_minutes, qty, updated_at
                 )
                 VALUES(?, ?, ?, 1, 0, ?, ?, ?)
+                ON CONFLICT(strategy_key, symbol, duration) DO UPDATE SET
+                  enabled = 1,
+                  duration_minutes = excluded.duration_minutes,
+                  qty = excluded.qty,
+                  updated_at = excluded.updated_at
                 """,
                 (
                     strategy_key,

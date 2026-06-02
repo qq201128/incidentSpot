@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.kline_web_factor_specs import WEB_FACTOR_COLUMNS
+
 BASE_WINDOWS = (3, 5, 10, 20, 60, 120, 240)
 VOLUME_WINDOWS = (20, 60, 120, 240)
 VOLUME_MEDIAN_WINDOWS = (10, 20, 60)
@@ -66,7 +68,25 @@ PERFORMANCE_FEATURE_COLUMNS = (
 TECHNICAL_INDICATOR_FEATURE_COLUMNS = (
     "aroon_up_25", "aroon_down_25", "aroon_osc_25", "dmi_spread_14",
     "keltner_width_20", "keltner_pos_20", "trix_15", "tsi_25_13",
-    "ultimate_osc_7_14_28",
+    "ultimate_osc_7_14_28", "vortex_pos_14", "vortex_neg_14",
+    "vortex_spread_14", "mass_index_25", "ulcer_index_14", "cmo_14",
+    "coppock_10_14_11", "kst_10_15_20_30", "kst_signal_9", "kst_diff",
+    "force_index_13", "emv_14", "chaikin_osc_3_10", "adl_slope_20",
+    "pvt_slope_20", "pvo_12_26", "vwma_ratio_20", "bop_14",
+    "bb_percent_b_20", "bb_percent_b_z_20", "dpo_20", "pmo_35_20",
+    "pmo_signal_10", "pmo_diff", "stoch_rsi_14", "stoch_rsi_signal_3",
+    "rsi_14_sma_5", "rsi_14_slope_3", "awesome_osc_5_34",
+    "accelerator_osc", "fisher_10", "fisher_signal_1", "ichimoku_tenkan_9",
+    "ichimoku_kijun_26", "ichimoku_tenkan_kijun_spread",
+    "ichimoku_cloud_pos", "ichimoku_cloud_width", "ichimoku_chikou_mom_26",
+    "donchian_width_20", "donchian_breakout_20", "donchian_breakdown_20",
+    "donchian_width_55", "qstick_10", "qstick_20", "qstick_spread_10_20",
+    "elder_bull_power_13", "elder_bear_power_13", "elder_ray_spread_13",
+    "sma_50_200_spread", "close_sma_50_ratio", "nvi_slope_20",
+    "pvi_slope_20", "nvi_pvi_spread_20", "klinger_osc_34_55",
+    "klinger_signal_13", "klinger_diff", "relative_vigor_10",
+    "relative_vigor_signal_4", "force_index_z_20", "emv_z_20", "mfi_7",
+    "mfi_21", "mfi_spread_7_21",
 )
 
 FEATURE_COLUMNS = [
@@ -80,4 +100,5 @@ FEATURE_COLUMNS = [
     *STATISTIC_FEATURE_COLUMNS,
     *PERFORMANCE_FEATURE_COLUMNS,
     *TECHNICAL_INDICATOR_FEATURE_COLUMNS,
+    *WEB_FACTOR_COLUMNS,
 ]

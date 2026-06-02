@@ -42,6 +42,17 @@ def test_positive_paper_live_status_requires_positive_event_pnl() -> None:
     assert decision["status"] == "paper_stable"
 
 
+def test_four_current_losses_block_paper_live_stable_status() -> None:
+    rows = _pnl_rows([-1.0] * 4 + [1.0] * 26)
+
+    metrics = high_winrate_metrics(rows)
+    decision = high_winrate_decision(metrics)
+
+    assert metrics["currentConsecutiveLosses"] == 4
+    assert metrics["winRate"] > 0.58
+    assert decision == {"status": "paper_failed", "reason": "consecutive_losses"}
+
+
 def test_non_positive_event_pnl_blocks_paper_live_stable_status() -> None:
     rows = _return_and_pnl_rows(([0.8] * 6 + [-1.0] * 4) * 3, ([0.1] * 6 + [-1.0] * 4) * 3)
 

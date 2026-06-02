@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 from app.services import factor_combo_strategy
@@ -21,8 +20,8 @@ def test_prediction_uses_usable_combo_cache(monkeypatch) -> None:
     monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
     monkeypatch.setattr(
         factor_combo_strategy,
-        "materialize_mined_factor_frame",
-        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+        "materialize_factor_combo_frame_for_row",
+        lambda frame, **_kwargs: frame,
     )
     monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
     monkeypatch.setattr(factor_combo_strategy, "_refresh_factor_combo_source_klines", lambda *_args: None)
@@ -80,8 +79,8 @@ def test_prediction_allows_append_only_combo_cache(monkeypatch) -> None:
     monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
     monkeypatch.setattr(
         factor_combo_strategy,
-        "materialize_mined_factor_frame",
-        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+        "materialize_factor_combo_frame_for_row",
+        lambda frame, **_kwargs: frame,
     )
     monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
     monkeypatch.setattr(factor_combo_strategy, "_refresh_factor_combo_source_klines", lambda *_args: None)
@@ -107,8 +106,8 @@ def test_high_winrate_strategy_accepts_goal_combo(monkeypatch) -> None:
     monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
     monkeypatch.setattr(
         factor_combo_strategy,
-        "materialize_mined_factor_frame",
-        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+        "materialize_factor_combo_frame_for_row",
+        lambda frame, **_kwargs: frame,
     )
     monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
     monkeypatch.setattr(factor_combo_strategy, "_refresh_factor_combo_source_klines", lambda *_args: None)
@@ -131,8 +130,8 @@ def test_high_winrate_strategy_uses_active_rotation_rank(monkeypatch) -> None:
     monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
     monkeypatch.setattr(
         factor_combo_strategy,
-        "materialize_mined_factor_frame",
-        lambda frame, **_kwargs: SimpleNamespace(frame=frame),
+        "materialize_factor_combo_frame_for_row",
+        lambda frame, **_kwargs: frame,
     )
     monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
     monkeypatch.setattr(factor_combo_strategy, "_refresh_factor_combo_source_klines", lambda *_args: None)
@@ -141,6 +140,34 @@ def test_high_winrate_strategy_uses_active_rotation_rank(monkeypatch) -> None:
 
     assert result["high_winrate_rule"] == "goal_combo__top2"
     assert "combo_rank=2" in result["rule_reasons"]
+
+
+def test_prediction_materializes_selected_combo_row(monkeypatch) -> None:
+    cache = {
+        "ranking": [_ranking_row("combo__top1"), _ranking_row("combo__top2")],
+        "cacheStatus": {"usable": True, "reason": "usable"},
+    }
+    materialized = []
+
+    def _materialize(frame: object, **kwargs) -> object:
+        materialized.append(kwargs["row"]["factorName"])
+        return frame
+
+    monkeypatch.setattr(factor_combo_strategy, "get_cached_combination_ranking", lambda *_args: cache)
+    monkeypatch.setattr(factor_combo_strategy, "load_factor_frame", lambda _symbol, _duration: object())
+    monkeypatch.setattr(factor_combo_strategy, "materialize_factor_combo_frame_for_row", _materialize)
+    monkeypatch.setattr(factor_combo_strategy, "build_live_signal_from_ranking", _signal_from_row)
+    monkeypatch.setattr(factor_combo_strategy, "_refresh_factor_combo_source_klines", lambda *_args: None)
+
+    result = factor_combo_strategy.predict_factor_combo_rank_direction(
+        "btcusdt",
+        "10m",
+        combo_rank=2,
+        result_strategy_key="factor_combo_ranker_v1",
+    )
+
+    assert result["high_winrate_rule"] == "combo__top2"
+    assert materialized == ["combo__top2"]
 
 
 def test_high_winrate_strategy_rejects_regular_combo(monkeypatch) -> None:

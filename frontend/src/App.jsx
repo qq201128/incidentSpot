@@ -18,6 +18,7 @@ const EVENTS_POLL_MS = 5000;
 const EventGovernancePage = lazy(() => import("./pages/EventGovernancePage"));
 const FactorLearningPage = lazy(() => import("./pages/FactorLearningPage"));
 const FactorsPage = lazy(() => import("./pages/FactorsPage"));
+const LiveTradingPage = lazy(() => import("./pages/LiveTradingPage"));
 const ResearchDashboardPage = lazy(() => import("./pages/ResearchDashboardPage"));
 const RuleHitRatePage = lazy(() => import("./pages/RuleHitRatePage"));
 const VIEW_BY_PATH = Object.freeze({
@@ -25,6 +26,7 @@ const VIEW_BY_PATH = Object.freeze({
   "/rule-hit-rate": "hit-rate",
   "/event-governance": "governance",
   "/research-dashboard": "research",
+  "/live-trading": "live-trading",
   "/factors": "factors",
   "/learning": "learning",
 });
@@ -47,6 +49,7 @@ function pageForView(appView, tradeProps) {
   if (appView === "hit-rate") return lazyPage(<RuleHitRatePage />);
   if (appView === "factors") return lazyPage(<FactorsPage />);
   if (appView === "governance") return lazyPage(<EventGovernancePage />);
+  if (appView === "live-trading") return lazyPage(<LiveTradingPage />);
   if (appView === "research") return lazyPage(<ResearchDashboardPage />);
   if (appView === "learning") return lazyPage(<FactorLearningPage />);
   return <TradingView {...tradeProps} />;

@@ -70,9 +70,9 @@ export default function MiningPageHeader({
   );
 }
 
-function StatusChip({ tone = "info", dot = false, children }) {
+function StatusChip({ tone = "info", dot = false, title, children }) {
   return (
-    <span className={`mining-status-chip is-${tone}`}>
+    <span className={`mining-status-chip is-${tone}`} title={title}>
       {dot ? <i className="mining-status-dot" aria-hidden /> : null}
       {children}
     </span>

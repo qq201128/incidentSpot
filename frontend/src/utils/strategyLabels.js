@@ -136,6 +136,10 @@ export function isModelShadowStrategyKey(key) {
   return Boolean(modelShadowLabel(String(key || "").trim()));
 }
 
+export function strategyDurationLabel(duration) {
+  return durationLabel(duration);
+}
+
 /** 训练工件版本号，如 gru_BTCUSDT_10m_w24_m8_e16_s... */
 export function modelVersionLabel(version) {
   const raw = String(version || "").trim();

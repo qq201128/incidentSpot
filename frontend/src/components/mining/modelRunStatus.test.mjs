@@ -6,10 +6,16 @@ assert.equal(modelRunStatusView({ cardState: "ready" }).ready, true);
 
 const required = modelRunStatusView(
   { cardState: "searching", candidateLibraryTotal: 2 },
-  { state: "worker_required", pendingWorker: true, latestLogPath: "runtime/job.log" },
+  {
+    state: "worker_required",
+    pendingWorker: true,
+    latestLogPath: "runtime/job.log",
+    workerRequiredCommand: "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
+  },
 );
 assert.equal(required.label, "等待 worker");
 assert.equal(required.pendingWorker, true);
+assert.match(required.command, /--adaptive-parallelism/);
 assert.equal(required.latestLogPath, "runtime/job.log");
 assert.equal(required.actionLabel, "等待 worker");
 

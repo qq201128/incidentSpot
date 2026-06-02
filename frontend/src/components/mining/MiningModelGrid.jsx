@@ -1,8 +1,9 @@
-import { strategyLabel } from "../../utils/strategyLabels";
+import { strategyDurationLabel, strategyLabel } from "../../utils/strategyLabels";
 import { formatPct } from "./miningFormatters";
 import { attachModelRunStatuses } from "./modelRunStatus";
+import { REQUIRED_COMMAND_FALLBACK } from "./workerStatus";
 
-export default function MiningModelGrid({ models, runStatus, summary, busy, onSearchModel }) {
+export default function MiningModelGrid({ busy, duration, models, onSearchModel, runStatus, summary, symbol }) {
   const displayModels = attachModelRunStatuses(models, runStatus);
   return (
     <section className="mining-model-section">
@@ -21,6 +22,7 @@ export default function MiningModelGrid({ models, runStatus, summary, busy, onSe
             key={model.modelFamily}
             model={model}
             busy={busy === `search-${model.modelFamily}`}
+            context={modelContext(symbol, duration)}
             onSearch={() => onSearchModel(model.modelFamily)}
           />
         ))}
@@ -38,7 +40,7 @@ export default function MiningModelGrid({ models, runStatus, summary, busy, onSe
   );
 }
 
-function ModelCard({ model, busy, onSearch }) {
+function ModelCard({ model, busy, context, onSearch }) {
   const progress = model.searchProgress || {};
   const runtime = model.runtimeStatus || {};
   const state = runtime.state || model.cardState;
@@ -50,6 +52,7 @@ function ModelCard({ model, busy, onSearch }) {
         <strong>{model.label}</strong>
         <span className={`mining-model-state is-${model.cardState}`}>{runtime.label || model.cardStateLabel}</span>
       </div>
+      <p className="mining-model-context">{context}</p>
       <dl className="mining-model-metrics">
         <div>
           <dt>执行项</dt>
@@ -90,13 +93,18 @@ function ModelCard({ model, busy, onSearch }) {
   );
 }
 
+function modelContext(symbol, duration) {
+  return `${String(symbol || "—").toUpperCase()} · ${strategyDurationLabel(duration)}`;
+}
+
 function ModelRuntimeDetails({ runtime, model }) {
   const failure = runtime.latestFailureReason || model.latestFailureReason;
   const logPath = runtime.latestLogPath || model.latestLogPath;
+  const command = runtime.command || REQUIRED_COMMAND_FALLBACK;
   return (
     <div className="mining-model-runtime">
       <span>候选库 {runtime.candidateLibraryTotal ?? model.candidateLibraryTotal ?? 0} 条</span>
-      {runtime.pendingWorker ? <code>需启动 worker: python backend/scripts/run_model_search_worker.py --loop</code> : null}
+      {runtime.pendingWorker ? <code>需启动 worker: {command}</code> : null}
       {failure ? <span className="is-error" title={failure}>失败原因 {failure}</span> : null}
       {logPath ? <span title={logPath}>日志 {logPath}</span> : null}
     </div>

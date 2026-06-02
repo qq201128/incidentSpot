@@ -19,7 +19,7 @@ def test_candidate_search_api_returns_worker_required_command(monkeypatch: pytes
         lambda _filters: {
             "workerStatus": {
                 "state": "worker_required",
-                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop",
+                "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
             }
         },
     )
@@ -46,4 +46,4 @@ def test_candidate_search_api_returns_worker_required_command(monkeypatch: pytes
 
     assert response["modelSearchJob"]["job_id"] == "job-1"
     assert response["workerStatus"]["state"] == "worker_required"
-    assert "run_model_search_worker.py --loop" in response["message"]
+    assert "--adaptive-parallelism" in response["message"]

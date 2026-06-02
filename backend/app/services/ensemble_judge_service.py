@@ -260,7 +260,7 @@ def _ensure_ensemble_strategy_slots(conn: Any, symbol: str, confirmed_duration: 
             conn.execute(
                 """
                 UPDATE auto_trade_strategies
-                SET enabled = 1, live_trading_enabled = 0, updated_at = ?
+                SET enabled = 1, updated_at = ?
                 WHERE strategy_key = ? AND symbol = ? AND duration = ?
                 """,
                 (now, ENSEMBLE_RANKER_STRATEGY_KEY, symbol, duration),

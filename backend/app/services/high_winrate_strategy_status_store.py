@@ -180,7 +180,7 @@ def sync_strategy_slot_for_status(conn: Any, symbol: str, duration: str, status:
     if status == STATUS_PAUSED:
         set_strategy_slot(conn, symbol, duration, enabled=False, live_trading_enabled=False)
         return
-    set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=False)
+    set_strategy_slot(conn, symbol, duration, enabled=True, live_trading_enabled=None)
 
 
 def strategy_slot(conn: Any, symbol: str, duration: str) -> Any | None:
