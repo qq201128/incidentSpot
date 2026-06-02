@@ -12,7 +12,7 @@ def test_candidate_search_api_returns_worker_required_command(monkeypatch: pytes
         "created": 1,
         "existing": 0,
     }
-    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **_kwargs: queued)
+    monkeypatch.setattr(models_api, "enqueue_untrained_model_search_jobs", lambda **_kwargs: queued)
     monkeypatch.setattr(
         models_api,
         "model_search_queue_status",

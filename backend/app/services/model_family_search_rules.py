@@ -6,7 +6,7 @@ from typing import Any
 from app.services.model_family_config import normalize_model_family
 from app.services.model_search_resource_defaults import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
 
-DEFAULT_PARALLEL_WORKERS = 10
+DEFAULT_PARALLEL_WORKERS = 1
 TARGET_WIN_RATE_EXCLUSIVE = 0.62
 SUCCESSIVE_HALVING_SURVIVAL_RATE = 0.50
 COMMON_FEATURE_WINDOWS = (24, 32, 48, 64, 96)

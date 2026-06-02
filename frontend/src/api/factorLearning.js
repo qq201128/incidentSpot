@@ -4,8 +4,8 @@ import { API_BASE_URL } from "./client";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_QUEUE_TIMEOUT_MS = 15_000;
 export const DEFAULT_MODEL_SEARCH_RESOURCE = Object.freeze({
-  internalThreads: 4,
-  parallelWorkers: 10,
+  internalThreads: 1,
+  parallelWorkers: 1,
   xgboostProcessWorkers: 1,
 });
 

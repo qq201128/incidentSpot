@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,12 +15,15 @@ from app.services.model_family_candidate_search_service import (
     ModelCandidateSearchConfig,
     run_model_candidate_search,
 )
+from app.services.model_family_status_service import model_family_status
 from app.services.model_search_job_store import (
     claim_next_model_search_job,
     fail_model_search_job,
     finish_model_search_job,
     heartbeat_model_search_job,
+    retry_failed_model_search_job,
 )
+from app.services.model_search_untrained_enqueue import is_trained_model_status
 from app.services.model_search_resource import (
     ModelSearchResourceConfig,
     apply_model_search_resource_config,
@@ -28,8 +32,9 @@ from app.services.model_search_resource import (
 from app.services.model_search_status_service import model_search_queue_status
 from app.services.model_search_job_types import DEFAULT_STALE_AFTER_SECONDS
 
-DEFAULT_LOG_DIR = Path("runtime") / "model-search-jobs"
+DEFAULT_LOG_DIR = Path(tempfile.gettempdir()) / "incidentSpot-model-search-jobs"
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
+DEFAULT_CANDIDATES_PER_JOB = 1
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,7 @@ class ModelSearchWorkerConfig:
     log_dir: Path = DEFAULT_LOG_DIR
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS
     heartbeat_interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+    candidates_per_job: int = DEFAULT_CANDIDATES_PER_JOB
 
 
 class ModelSearchHeartbeat:
@@ -88,16 +94,31 @@ def _run_claimed_job(
 ) -> dict[str, Any]:
     log_path = _job_log_path(config.log_dir, job)
     try:
+        trained = _already_trained_result(job)
+        if trained is not None:
+            _append_skip_log(log_path, job, trained)
+            stored = finish_model_search_job(
+                job["job_id"],
+                result=trained,
+                resource=resource,
+                artifact_path=None,
+                log_path=str(log_path),
+            )
+            return {"status": stored["status"], "job": stored, "result": trained}
         with ModelSearchHeartbeat(job["job_id"], config.heartbeat_interval_seconds):
-            result = _run_search_with_log(job, resource, log_path)
+            result = _run_search_with_log(job, resource, log_path, config)
         artifact_path = str(artifact_paths(job["symbol"], job["duration"], family=job["model_family"]).root)
+        has_more = _has_more_candidates(result)
         stored = finish_model_search_job(
             job["job_id"],
-            result=result,
+            result=_continuation_result(result) if has_more else result,
             resource=resource,
             artifact_path=artifact_path,
             log_path=str(log_path),
         )
+        if has_more:
+            continued = retry_failed_model_search_job(stored["job_id"])
+            return {"status": "partial", "job": continued, "result": result}
         return {"status": stored["status"], "job": stored, "result": result}
     except Exception as exc:
         failure = _failure_payload(job, resource, exc)
@@ -113,17 +134,26 @@ def _run_claimed_job(
         raise RuntimeError(json.dumps({"status": "failed", "job": stored}, ensure_ascii=False)) from exc
 
 
-def _run_search_with_log(job: dict[str, Any], resource: dict[str, Any], log_path: Path) -> dict[str, Any]:
+def _run_search_with_log(
+    job: dict[str, Any],
+    resource: dict[str, Any],
+    log_path: Path,
+    config: ModelSearchWorkerConfig,
+) -> dict[str, Any]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as handle:
         with redirect_stdout(handle), redirect_stderr(handle):
             _write_log_event(handle, "start", job, resource)
-            result = run_model_candidate_search(_search_config(job, resource))
+            result = run_model_candidate_search(_search_config(job, resource, config))
             _write_log_event(handle, "finish", job, {"result": result})
             return result
 
 
-def _search_config(job: dict[str, Any], resource: dict[str, Any]) -> ModelCandidateSearchConfig:
+def _search_config(
+    job: dict[str, Any],
+    resource: dict[str, Any],
+    config: ModelSearchWorkerConfig,
+) -> ModelCandidateSearchConfig:
     return ModelCandidateSearchConfig(
         family=job["model_family"],
         symbol=job["symbol"],
@@ -131,7 +161,29 @@ def _search_config(job: dict[str, Any], resource: dict[str, Any]) -> ModelCandid
         profile=job["profile"],
         parallel_workers=int(resource["parallelWorkers"]),
         reset_history=bool(job.get("resetHistory")),
+        candidates_per_job=config.candidates_per_job,
     )
+
+
+def _has_more_candidates(result: dict[str, Any]) -> bool:
+    batch = result.get("jobBatch") or {}
+    return bool(batch.get("hasMoreCandidates"))
+
+
+def _continuation_result(result: dict[str, Any]) -> dict[str, Any]:
+    return {**result, "status": "partial_batch", "batchStatus": result.get("status")}
+
+
+def _already_trained_result(job: dict[str, Any]) -> dict[str, Any] | None:
+    status = model_family_status(job["model_family"], job["symbol"], job["duration"])
+    if not is_trained_model_status(status):
+        return None
+    return {
+        "status": "skipped",
+        "reason": "already_trained_skipped",
+        "modelStatus": status.get("status"),
+        "shadowPredictionReady": status.get("shadowPredictionReady"),
+    }
 
 
 def _failure_payload(job: dict[str, Any], resource: dict[str, Any], exc: Exception) -> dict[str, Any]:
@@ -163,3 +215,9 @@ def _append_failure_log(log_path: Path, job: dict[str, Any], failure: dict[str, 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as handle:
         _write_log_event(handle, "failure", job, failure)
+
+
+def _append_skip_log(log_path: Path, job: dict[str, Any], result: dict[str, Any]) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        _write_log_event(handle, "skipped", job, result)

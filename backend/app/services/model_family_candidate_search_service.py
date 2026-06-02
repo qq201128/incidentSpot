@@ -10,9 +10,11 @@ from app.services.model_family_candidate_executor import (
     CandidateTrainingResult,
     train_candidate_reports,
 )
+from app.services.model_family_candidate_batches import candidate_job_batch, job_batch_payload
 from app.services.model_family_candidate_halving import (
     close_halving_stage,
     coarse_candidate_config,
+    walk_forward_stage_payload,
 )
 from app.services.model_family_candidates import (
     attempted_model_search_keys,
@@ -43,16 +45,18 @@ class ModelCandidateSearchConfig:
     profile: str
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS
     reset_history: bool = False
+    candidates_per_job: int | None = None
 
 
 def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, Any]:
     cfg = _validated(config)
     base = model_training_config_for_profile(cfg.family, cfg.symbol, cfg.duration, profile=cfg.profile)
     attempted = frozenset() if cfg.reset_history else attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
-    candidates = next_model_candidate_configs(base, cfg.profile, attempted)
-    if not candidates:
+    available = next_model_candidate_configs(base, cfg.profile, attempted)
+    if not available:
         return _exhausted_search_result(cfg)
-    return _run_candidate_batch(cfg, candidates)
+    candidates = candidate_job_batch(available, cfg.candidates_per_job)
+    return _run_candidate_batch(cfg, candidates, available_count=len(available))
 
 
 def _exhausted_search_result(cfg: ModelCandidateSearchConfig) -> dict[str, Any]:
@@ -75,6 +79,8 @@ def _exhausted_search_result(cfg: ModelCandidateSearchConfig) -> dict[str, Any]:
 def _run_candidate_batch(
     cfg: ModelCandidateSearchConfig,
     candidates: list[ModelFamilyTrainingConfig],
+    *,
+    available_count: int,
 ) -> dict[str, Any]:
     start_model_candidate_progress(
         cfg.family,
@@ -100,6 +106,7 @@ def _run_candidate_batch(
             "reports": reports,
             "trainingRules": model_family_training_rules(cfg.family),
             "successiveHalvingStages": evaluation["stages"],
+            "jobBatch": job_batch_payload(candidates, available_count),
         }
     except Exception as exc:
         finish_model_candidate_progress(
@@ -184,7 +191,10 @@ def _run_successive_halving(candidates, cfg: ModelCandidateSearchConfig, dataset
     _record_stage_reports(full_closed.reports, cfg.profile)
     reports.extend(full_closed.reports)
     stages.append(full_closed.payload)
-    walk_forward_survivors, walk_forward_payload = run_walk_forward_stage(full_closed.survivors, dataset_builder)
+    if full_closed.survivors:
+        walk_forward_survivors, walk_forward_payload = run_walk_forward_stage(full_closed.survivors, dataset_builder)
+    else:
+        walk_forward_survivors, walk_forward_payload = [], walk_forward_stage_payload([])
     _record_stage_reports(walk_forward_survivors, cfg.profile)
     reports.extend(walk_forward_survivors)
     stages.append(walk_forward_payload)
@@ -239,6 +249,8 @@ def _configs(results: list[CandidateTrainingResult]) -> list[ModelFamilyTraining
 def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig:
     if config.parallel_workers <= 0:
         raise ValueError("parallel_workers must be positive")
+    if config.candidates_per_job is not None and config.candidates_per_job <= 0:
+        raise ValueError("candidates_per_job must be positive")
     return ModelCandidateSearchConfig(
         family=normalize_model_family(config.family),
         symbol=config.symbol.strip().upper(),
@@ -246,6 +258,7 @@ def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig
         profile=normalize_experiment_profile(config.profile),
         parallel_workers=int(config.parallel_workers),
         reset_history=bool(config.reset_history),
+        candidates_per_job=None if config.candidates_per_job is None else int(config.candidates_per_job),
     )
 
 

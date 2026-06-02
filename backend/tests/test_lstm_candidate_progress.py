@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,7 @@ def test_lstm_candidate_progress_tracks_queue_state() -> None:
         profile="full",
         total=225,
         search_space_total=225,
-        parallel_workers=10,
+        parallel_workers=1,
         artifact_root=artifact_root,
     )
     status = read_lstm_candidate_progress("BTCUSDT", "10m", artifact_root=artifact_root)
@@ -87,7 +88,7 @@ def test_lstm_candidate_progress_tracks_queue_state() -> None:
     assert queued["startedAt"] is None
     assert status["status"] == "queued"
     assert status["total"] == 225
-    assert status["parallelWorkers"] == 10
+    assert status["parallelWorkers"] == 1
 
 
 def _report(status: str) -> dict:
@@ -101,6 +102,6 @@ def _report(status: str) -> dict:
 
 
 def _runtime_path(name: str) -> Path:
-    path = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / f"{name}-{uuid.uuid4().hex}"
+    path = Path(tempfile.gettempdir()) / "incidentSpot-pytest-temp" / f"{name}-{uuid.uuid4().hex}"
     path.mkdir(parents=True, exist_ok=True)
     return path

@@ -11,6 +11,7 @@ import pytest
 
 from app.services import model_search_job_runner as runner
 from app.services import model_search_job_store as store
+from app.services import model_search_untrained_enqueue as untrained_enqueue
 from app.services import model_search_resource as resource
 from app.services import model_search_status_service as status_service
 from app.api import models as models_api
@@ -169,7 +170,7 @@ def test_finish_success_and_rejection_are_written(monkeypatch: pytest.MonkeyPatc
 
     assert stored["status"] == JOB_STATUS_SUCCEEDED
     assert stored["artifact_path"] == "artifacts/knn"
-    assert stored["metrics"]["resource"]["internalThreads"] == 4
+    assert stored["metrics"]["resource"]["internalThreads"] == 1
 
     _enqueue_one(symbol="ETHUSDT")
     rejected = store.claim_next_model_search_job(max_running_jobs=1)
@@ -254,8 +255,39 @@ def test_worker_runs_one_job_and_persists_resource(monkeypatch: pytest.MonkeyPat
     assert report["status"] == JOB_STATUS_SUCCEEDED
     assert calls[0].family == "knn"
     assert calls[0].parallel_workers == 1
+    assert calls[0].candidates_per_job == 1
     assert report["job"]["internal_threads"] == 2
     assert Path(report["job"]["log_path"]).exists()
+
+
+def test_worker_requeues_partial_candidate_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("worker-partial")
+    log_dir = _runtime_path("worker-partial-logs")
+    _patch_store_db(monkeypatch, db_path)
+    _enqueue_one()
+    calls = []
+
+    def fake_search(config):
+        calls.append(config)
+        return {
+            "status": "validation_failed",
+            "jobBatch": {
+                "selectedCandidates": 1,
+                "availableCandidatesBeforeJob": 3,
+                "remainingCandidatesAfterJob": 2,
+                "hasMoreCandidates": True,
+            },
+        }
+
+    monkeypatch.setattr(runner, "run_model_candidate_search", fake_search)
+
+    report = runner.run_one_model_search_job(runner.ModelSearchWorkerConfig(log_dir=log_dir))
+    jobs = store.list_model_search_jobs()
+
+    assert report["status"] == "partial"
+    assert calls[0].candidates_per_job == 1
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == JOB_STATUS_PENDING
 
 
 def test_worker_uses_resource_config_stored_on_job(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -376,7 +408,7 @@ def test_candidate_search_api_only_enqueues_job(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(
         models_api,
-        "enqueue_model_search_jobs",
+        "enqueue_untrained_model_search_jobs",
         lambda **kwargs: calls.append(kwargs) or queued,
     )
     monkeypatch.setattr(
@@ -410,7 +442,7 @@ def test_candidate_search_api_only_enqueues_job(monkeypatch: pytest.MonkeyPatch)
 def test_candidate_search_api_passes_reset_history_to_queue(monkeypatch: pytest.MonkeyPatch) -> None:
     queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
     calls = []
-    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(models_api, "enqueue_untrained_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
     monkeypatch.setattr(
         models_api,
         "model_family_status",
@@ -437,14 +469,14 @@ def test_candidate_search_api_default_resource_matches_training_rules(
 ) -> None:
     queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
     calls = []
-    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(models_api, "enqueue_untrained_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
     monkeypatch.setattr(
         models_api,
         "model_family_status",
         lambda family, symbol, duration: {"modelFamily": family, "symbol": symbol, "duration": duration},
     )
     route_default = signature(models_api.model_candidate_search).parameters["parallel_workers"].default
-    assert route_default.default == 10
+    assert route_default.default == 1
     assert route_default.alias == "parallelWorkers"
 
     models_api.model_candidate_search(
@@ -452,20 +484,20 @@ def test_candidate_search_api_default_resource_matches_training_rules(
         symbol="btcusdt",
         duration="10m",
         profile="fast",
-        parallel_workers=10,
-        internal_threads=4,
+        parallel_workers=1,
+        internal_threads=1,
         xgboost_process_workers=1,
     )
 
-    assert calls[0]["resource"]["internalThreads"] == 4
-    assert calls[0]["resource"]["parallelWorkers"] == 10
+    assert calls[0]["resource"]["internalThreads"] == 1
+    assert calls[0]["resource"]["parallelWorkers"] == 1
     assert calls[0]["resource"]["xgboostProcessWorkers"] == 1
 
 
 def test_candidate_search_api_normalizes_query_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     queued = {"jobs": [{"job_id": "job-1", "status": JOB_STATUS_PENDING}], "created": 1}
     calls = []
-    monkeypatch.setattr(models_api, "enqueue_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
+    monkeypatch.setattr(models_api, "enqueue_untrained_model_search_jobs", lambda **kwargs: calls.append(kwargs) or queued)
     monkeypatch.setattr(
         models_api,
         "model_family_status",
@@ -478,9 +510,45 @@ def test_candidate_search_api_normalizes_query_defaults(monkeypatch: pytest.Monk
     assert calls[0]["durations"] == ("10m",)
     assert calls[0]["profile"] == "full"
     assert calls[0]["reset_history"] is False
-    assert calls[0]["resource"]["internalThreads"] == 4
-    assert calls[0]["resource"]["parallelWorkers"] == 10
+    assert calls[0]["resource"]["internalThreads"] == 1
+    assert calls[0]["resource"]["parallelWorkers"] == 1
     assert calls[0]["resource"]["xgboostProcessWorkers"] == 1
+
+
+def test_untrained_enqueue_skips_trained_targets_without_cross_product(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def fake_status(family: str, symbol: str, duration: str) -> dict:
+        trained = family == "knn" and symbol == "BTCUSDT" and duration == "10m"
+        return {"status": "shadow_active", "shadowPredictionReady": True} if trained else {"status": "untrained"}
+
+    def fake_enqueue(**kwargs):
+        calls.append(kwargs)
+        family = kwargs["families"][0]
+        symbol = kwargs["symbols"][0]
+        duration = kwargs["durations"][0]
+        return {
+            "created": 1,
+            "existing": 0,
+            "reset": 0,
+            "jobs": [{"job_id": f"{symbol}-{duration}-{family}", "status": JOB_STATUS_PENDING}],
+        }
+
+    monkeypatch.setattr(untrained_enqueue, "model_family_status", fake_status)
+    monkeypatch.setattr(untrained_enqueue, "enqueue_model_search_jobs", fake_enqueue)
+
+    payload = untrained_enqueue.enqueue_untrained_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m", "60m"),
+        families=("knn", "svm"),
+        profile="fast",
+    )
+
+    assert payload["trainedSkippedCount"] == 1
+    assert len(payload["jobs"]) == 3
+    assert {call["families"][0] for call in calls} == {"knn", "svm"}
+    assert all(call["symbols"] == ("BTCUSDT",) for call in calls)
+    assert ("knn", "10m") not in {(call["families"][0], call["durations"][0]) for call in calls}
 
 
 def _enqueue_one(symbol: str = "BTCUSDT") -> None:
@@ -496,6 +564,11 @@ def _patch_store_db(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
     monkeypatch.setattr(store, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(status_service, "list_model_search_jobs", store.list_model_search_jobs)
     monkeypatch.setattr(runner, "model_search_queue_status", status_service.model_search_queue_status)
+    monkeypatch.setattr(
+        runner,
+        "model_family_status",
+        lambda *_args: {"status": "untrained", "shadowPredictionReady": False},
+    )
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -518,7 +591,7 @@ def _runtime_path(name: str) -> Path:
 def _resource_payload() -> dict:
     return {
         "resourceProfile": "local_safe",
-        "internalThreads": 4,
+        "internalThreads": 1,
         "parallelWorkers": 1,
         "xgboostProcessWorkers": 1,
     }

@@ -12,10 +12,10 @@ from app.services.background_loop_status import (
     record_loop_success,
 )
 from app.services.experiment_profiles import normalize_experiment_profile
-from app.services.lstm_candidate_search_notification import notify_lstm_candidate_search_finished
 from app.services.lstm_candidate_search import LstmCandidateSearchConfig
-from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm_candidate_retry
-from app.services.lstm_torch_backend import is_torch_available
+from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, validated_lstm_candidate_retry_config
+from app.services.model_search_resource import ModelSearchResourceConfig, resource_payload, validated_resource_config
+from app.services.model_search_untrained_enqueue import enqueue_untrained_model_search_jobs
 
 logger = logging.getLogger("uvicorn.error")
 LOOP_NAME = "lstm_candidate_retry"
@@ -28,7 +28,7 @@ DEFAULT_MIN_MOVE_BPS = "8,10,12,15,20"
 DEFAULT_EPOCHS = "8,12,16"
 DEFAULT_SEEDS = "20260513,20260519,20260601"
 DEFAULT_CANDIDATES_PER_DURATION = "all"
-DEFAULT_PARALLEL_WORKERS = 10
+DEFAULT_PARALLEL_WORKERS = 1
 
 
 @dataclass(frozen=True)
@@ -146,10 +146,9 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
         raise
     logger.info(
         "lstm candidate retry scheduled: intervalSeconds=%s firstRunDelaySeconds=%s "
-        "torch_installed=%s profile=%s durations=%s search=%s",
+        "profile=%s durations=%s search=%s",
         interval_seconds,
         interval_seconds,
-        is_torch_available(),
         config.profile,
         list(config.durations),
         config.search,
@@ -167,16 +166,27 @@ async def lstm_candidate_retry_loop(stop_event: asyncio.Event) -> None:
 
 
 async def _run_retry_once(config: LstmCandidateRetryConfig) -> None:
-    if not is_torch_available():
-        logger.warning("lstm candidate retry skipped: PyTorch not available")
-        record_loop_success("lstm_candidate_retry", {"status": "skipped", "reason": "torch_unavailable"})
-        return
     try:
-        report = await asyncio.to_thread(run_lstm_candidate_retry, config)
-        notification = await asyncio.to_thread(notify_lstm_candidate_search_finished, report)
-        logger.info("lstm candidate retry finished status=%s results=%s", report.get("status"), report.get("results"))
-        logger.info("lstm candidate retry notification: %s", notification)
-        record_loop_success(LOOP_NAME, {"status": report.get("status"), "resultCount": len(report.get("results") or [])})
+        queued = await asyncio.to_thread(_enqueue_lstm_candidate_jobs, config)
+        logger.info("lstm candidate retry enqueued jobs: %s", queued)
+        record_loop_success(LOOP_NAME, {"status": "queued", "jobCount": queued.get("total")})
     except Exception as exc:
         record_loop_failure(LOOP_NAME, exc, {"stage": "retry"})
         logger.exception("lstm candidate retry failed")
+
+
+def _enqueue_lstm_candidate_jobs(config: LstmCandidateRetryConfig) -> dict:
+    cfg = validated_lstm_candidate_retry_config(config)
+    return enqueue_untrained_model_search_jobs(
+        symbols=cfg.symbols,
+        durations=cfg.durations,
+        families=("lstm",),
+        profile=cfg.profile,
+        reset_existing=False,
+        reset_history=False,
+        resource=resource_payload(
+            validated_resource_config(
+                ModelSearchResourceConfig(parallel_workers=cfg.search.parallel_workers)
+            )
+        ),
+    )

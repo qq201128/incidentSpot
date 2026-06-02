@@ -28,6 +28,7 @@ from app.services.model_family_training_payloads import backend_options
 from app.services.model_family_prediction_service import _prediction_payload, _signal_payload
 from app.services import model_family_candidate_search_service as search_service
 from app.services import model_family_candidate_executor as candidate_executor
+from app.services import model_family_candidate_halving as candidate_halving
 from app.services import model_family_candidate_publisher as candidate_publisher
 from app.services import model_family_walk_forward
 from app.services.model_family_joblib_backend import JoblibModelOptions, XGBOOST_TREE_METHOD, _xgboost
@@ -96,24 +97,21 @@ def test_models_route_is_family_scoped_and_lstm_alias_is_removed(monkeypatch) ->
     assert "/api/lstm/status" not in app_paths
 
 
-def test_model_train_route_normalizes_query_defaults(monkeypatch) -> None:
-    captured = {}
-
-    def fake_train(config, *, publish_initial_baseline):
-        captured["config"] = config
-        captured["publish_initial_baseline"] = publish_initial_baseline
-        return {"status": "trained", "duration": config.duration}
-
-    monkeypatch.setattr(models_api, "train_model_family", fake_train)
+def test_model_train_route_enqueues_instead_of_training(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        models_api,
+        "model_candidate_search",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or {"status": "queued", "duration": kwargs["duration"]},
+    )
 
     response = models_api.model_train("knn", symbol="btcusdt")
 
-    config = captured["config"]
+    assert response["status"] == "queued"
     assert response["duration"] == "10m"
-    assert config.family == "knn"
-    assert config.symbol == "BTCUSDT"
-    assert config.duration == "10m"
-    assert captured["publish_initial_baseline"] is True
+    assert calls[0][0] == ("knn",)
+    assert calls[0][1]["symbol"] == "btcusdt"
+    assert calls[0][1]["reset_history"] is False
 
 
 def test_validation_gate_requires_win_rate_above_62() -> None:
@@ -334,8 +332,8 @@ def test_each_model_family_has_successive_halving_training_rules() -> None:
     assert all([stage["stage"] for stage in rule["successiveHalving"]] == ["coarse", "full", "walk_forward"] for rule in rules)
     assert all(rule["targetWinRateExclusive"] == 0.62 for rule in rules)
     assert all(rule["searchSpaceTotal"] > 0 for rule in rules)
-    assert all(rule["internalThreads"] == 4 for rule in rules)
-    assert all(rule["parallelWorkers"] == 10 for rule in rules)
+    assert all(rule["internalThreads"] == 1 for rule in rules)
+    assert all(rule["parallelWorkers"] == 1 for rule in rules)
     assert all(rule["xgboostProcessWorkers"] == 1 for rule in rules)
     lstm_rules = model_family_training_rules("lstm")
     transformer_rules = model_family_training_rules("transformer")
@@ -440,6 +438,19 @@ def test_candidate_search_publishes_best_trade_candidate(monkeypatch) -> None:
     assert training_calls[-1][0] == configs[1]
     assert training_calls[-1][1] == {}
     assert [stage["stage"] for stage in result["successiveHalvingStages"]] == ["coarse", "full", "walk_forward"]
+
+
+def test_validation_failed_candidate_stops_after_full_stage() -> None:
+    config = ModelFamilyTrainingConfig(family="catboost", symbol="BTCUSDT", duration="30m")
+    coarse = candidate_executor.CandidateTrainingResult(config, _report("validation_failed", 0.52, 1))
+    coarse_closed = candidate_halving.close_halving_stage([coarse], "coarse")
+    full = candidate_executor.CandidateTrainingResult(config, _report("validation_failed", 0.52, 1))
+    full_closed = candidate_halving.close_halving_stage([full], "full")
+
+    assert coarse_closed.survivors == [coarse]
+    assert full_closed.survivors == []
+    assert full_closed.reports[0].report["advancedToNextStage"] is False
+    assert full_closed.reports[0].report["eliminationReason"] == "full_training_failed"
 
 
 def test_candidate_search_publishes_initial_baseline_when_untrained(monkeypatch) -> None:
@@ -734,7 +745,7 @@ def test_model_candidate_search_records_failure_details(monkeypatch) -> None:
     monkeypatch.setattr(
         search_service,
         "train_candidate_reports",
-        _candidate_report_iterator([base], [_report("validation_failed", 0.52, 1)]),
+        _candidate_report_iterator([base], [_report("shadow_active", 0.62, 1)]),
     )
     monkeypatch.setattr(search_service, "run_walk_forward_stage", _raise_walk_forward_failure)
 
@@ -818,8 +829,9 @@ def test_extra_trees_model_family_uses_extra_trees_classifier() -> None:
 def test_logistic_elasticnet_model_family_uses_elasticnet_penalty() -> None:
     model = logistic_elasticnet_estimator({}, 20260513)
 
+    assert model.__class__.__name__ == "SGDClassifier"
+    assert model.get_params()["loss"] == "log_loss"
     assert model.get_params()["penalty"] == "elasticnet"
-    assert model.get_params()["solver"] == "saga"
 
 
 def test_catboost_model_family_uses_catboost_classifier() -> None:

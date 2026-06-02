@@ -4,46 +4,41 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.experiment_profiles import normalize_experiment_profile
-from app.services.lstm_candidate_search_notification import notify_lstm_candidate_search_finished
-from app.services.lstm_candidate_retry import LstmCandidateRetryConfig, run_lstm_candidate_retry
-from app.services.lstm_candidate_search import LstmCandidateSearchConfig
-from app.services.runtime_symbols import configured_runtime_symbols
+from app.services.experiment_profiles import normalize_experiment_profile  # noqa: E402
+from app.services.model_search_resource import (  # noqa: E402
+    ModelSearchResourceConfig,
+    resource_payload,
+    validated_resource_config,
+)
+from app.services.model_search_status_service import MODEL_SEARCH_WORKER_COMMAND  # noqa: E402
+from app.services.model_search_untrained_enqueue import enqueue_untrained_model_search_jobs  # noqa: E402
+from app.services.runtime_symbols import configured_runtime_symbols, parse_symbol_csv  # noqa: E402
 
 
-def main() -> None:
+def main() -> int:
     args = _parse_args()
-    config = LstmCandidateRetryConfig(
+    _reject_inline_search_grid_args(args)
+    payload = enqueue_untrained_model_search_jobs(
         symbols=_symbols(args.symbols),
         durations=_csv_strings(args.durations),
+        families=("lstm",),
         profile=normalize_experiment_profile(args.profile),
-        search=_search_config(args),
+        reset_existing=args.reset_existing,
+        reset_history=args.reset_history,
+        resource=_resource(args),
     )
-    report = run_lstm_candidate_retry(config)
-    notification = notify_lstm_candidate_search_finished(report)
-    report["notification"] = notification
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-
-
-def _search_config(args: argparse.Namespace) -> LstmCandidateSearchConfig:
-    defaults = LstmCandidateSearchConfig()
-    return LstmCandidateSearchConfig(
-        feature_windows=_csv_ints(args.feature_windows) or defaults.feature_windows,
-        min_move_bps_values=_csv_floats(args.min_move_bps) or defaults.min_move_bps_values,
-        epoch_values=_csv_ints(args.epochs) or defaults.epoch_values,
-        seeds=_csv_ints(args.seeds) or defaults.seeds,
-        candidates_per_duration=args.candidates_per_duration or defaults.candidates_per_duration,
-        parallel_workers=args.parallel_workers or defaults.parallel_workers,
-    )
+    print(json.dumps(_response(payload), ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run LSTM candidate search and record every candidate.")
+    parser = argparse.ArgumentParser(description="Enqueue LSTM candidate-search jobs without training inline.")
     parser.add_argument("--symbols", default=None)
     parser.add_argument("--durations", default="10m,30m,60m")
     parser.add_argument("--profile", default="full", choices=("fast", "full"))
@@ -52,8 +47,25 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", default=None)
     parser.add_argument("--seeds", default=None)
     parser.add_argument("--candidates-per-duration", type=int, default=None)
-    parser.add_argument("--parallel-workers", type=int, default=None)
+    parser.add_argument("--internal-threads", type=int, default=1)
+    parser.add_argument("--parallel-workers", type=int, default=1)
+    parser.add_argument("--xgboost-process-workers", type=int, default=1)
+    parser.add_argument("--resource-profile", default="local_safe")
+    parser.add_argument("--reset-existing", action="store_true")
+    parser.add_argument("--reset-history", action="store_true")
     return parser.parse_args()
+
+
+def _reject_inline_search_grid_args(args: argparse.Namespace) -> None:
+    rejected = (
+        args.feature_windows,
+        args.min_move_bps,
+        args.epochs,
+        args.seeds,
+        args.candidates_per_duration,
+    )
+    if any(value is not None for value in rejected):
+        raise ValueError("custom LSTM inline search-grid arguments are disabled; enqueue model-search jobs instead")
 
 
 def _csv_strings(raw: str) -> tuple[str, ...]:
@@ -64,20 +76,28 @@ def _csv_strings(raw: str) -> tuple[str, ...]:
 
 
 def _symbols(raw: str | None) -> tuple[str, ...]:
-    return _csv_strings(raw) if raw is not None else configured_runtime_symbols()
+    return parse_symbol_csv(raw) if raw is not None else configured_runtime_symbols()
 
 
-def _csv_ints(raw: str | None) -> tuple[int, ...] | None:
-    if raw is None:
-        return None
-    return tuple(int(part) for part in _csv_strings(raw))
+def _resource(args: argparse.Namespace) -> dict[str, Any]:
+    config = ModelSearchResourceConfig(
+        resource_profile=args.resource_profile,
+        internal_threads=args.internal_threads,
+        parallel_workers=args.parallel_workers,
+        xgboost_process_workers=args.xgboost_process_workers,
+    )
+    return resource_payload(validated_resource_config(config))
 
 
-def _csv_floats(raw: str | None) -> tuple[float, ...] | None:
-    if raw is None:
-        return None
-    return tuple(float(part) for part in _csv_strings(raw))
+def _response(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "executionMode": "queued_lstm_model_search_jobs",
+        "trainingRunsInBackendProcess": False,
+        "workerCommand": MODEL_SEARCH_WORKER_COMMAND,
+        "message": "LSTM候选搜索已入队；训练由独立 worker 单次认领执行。",
+    }
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -126,7 +127,7 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def _db_path(name: str) -> Path:
-    path = Path(__file__).resolve().parents[1] / "runtime" / "pytest-temp" / f"worker-status-{name}-{uuid.uuid4().hex}"
+    path = Path(tempfile.gettempdir()) / "incidentSpot-pytest-temp" / f"worker-status-{name}-{uuid.uuid4().hex}"
     path.mkdir(parents=True, exist_ok=True)
     return path / "model-search.db"
 
@@ -134,7 +135,7 @@ def _db_path(name: str) -> Path:
 def _resource_payload() -> dict:
     return {
         "resourceProfile": "local_safe",
-        "internalThreads": 4,
+        "internalThreads": 1,
         "parallelWorkers": 1,
         "xgboostProcessWorkers": 1,
     }

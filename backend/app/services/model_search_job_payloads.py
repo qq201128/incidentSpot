@@ -11,10 +11,12 @@ from app.services.model_search_job_types import (
     JOB_ID_NAMESPACE,
     JOB_STAGE_PAPER_LIVE,
     JOB_STAGE_QUEUED,
+    JOB_STAGE_SKIPPED,
     JOB_STAGE_WALK_FORWARD,
     JOB_STATUS_PENDING,
     JOB_STATUS_FAILED,
     JOB_STATUS_REJECTED,
+    JOB_STATUS_SKIPPED,
     JOB_STATUS_SUCCEEDED,
     json_dumps,
     json_loads,
@@ -83,6 +85,9 @@ def enqueue_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def classified_result(result: dict[str, Any]) -> dict[str, str | None]:
     status = str(result.get("status") or "")
+    if status == "skipped":
+        reason = str(result.get("reason") or "skipped")
+        return {"status": JOB_STATUS_SKIPPED, "stage": JOB_STAGE_SKIPPED, "rejection": reason}
     if status in {"trade_active", "shadow_active", "initial_baseline", "trained"}:
         return {"status": JOB_STATUS_SUCCEEDED, "stage": JOB_STAGE_PAPER_LIVE, "rejection": None}
     reason = str(result.get("reason") or result.get("validationFailureReason") or f"offline_gate_rejected:{status}")

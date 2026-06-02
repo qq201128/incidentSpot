@@ -54,7 +54,7 @@ def test_lstm_candidate_retry_background_accepts_limited_search_env(monkeypatch)
     assert config.parallel_workers == 3
 
 
-def test_lstm_candidate_retry_background_defaults_to_10m_and_60m_with_parallel_10(monkeypatch) -> None:
+def test_lstm_candidate_retry_background_defaults_to_10m_and_60m_with_parallel_1(monkeypatch) -> None:
     monkeypatch.delenv("LSTM_CANDIDATE_FEATURE_WINDOWS", raising=False)
     monkeypatch.delenv("LSTM_CANDIDATE_MIN_MOVE_BPS", raising=False)
     monkeypatch.delenv("LSTM_CANDIDATE_EPOCHS", raising=False)
@@ -65,7 +65,7 @@ def test_lstm_candidate_retry_background_defaults_to_10m_and_60m_with_parallel_1
     config = retry_bg._retry_config()
 
     assert config.durations == ("10m", "60m")
-    assert config.search.parallel_workers == 10
+    assert config.search.parallel_workers == 1
 
 
 def test_lstm_candidate_retry_loop_waits_before_first_retry(monkeypatch) -> None:
@@ -106,19 +106,35 @@ def test_lstm_candidate_retry_startup_failure_is_recorded(monkeypatch) -> None:
 def test_lstm_candidate_retry_failure_is_recorded(monkeypatch) -> None:
     reset_background_loop_statuses()
 
-    monkeypatch.setattr(retry_bg, "is_torch_available", lambda: True)
     monkeypatch.setattr(
         retry_bg,
-        "run_lstm_candidate_retry",
-        lambda _config: (_ for _ in ()).throw(RuntimeError("retry failed")),
+        "enqueue_untrained_model_search_jobs",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("enqueue failed")),
     )
 
     asyncio.run(retry_bg._run_retry_once(retry_bg._retry_config()))
 
     status = background_loop_statuses()["lstm_candidate_retry"]
     assert status["status"] == "failed"
-    assert status["lastError"] == "retry failed"
+    assert status["lastError"] == "enqueue failed"
     assert status["lastFailureDetails"]["stage"] == "retry"
+
+
+def test_lstm_candidate_retry_once_enqueues_jobs(monkeypatch) -> None:
+    reset_background_loop_statuses()
+    calls = []
+    monkeypatch.setattr(
+        retry_bg,
+        "enqueue_untrained_model_search_jobs",
+        lambda **kwargs: calls.append(kwargs) or {"total": 2, "jobs": []},
+    )
+
+    asyncio.run(retry_bg._run_retry_once(retry_bg._retry_config()))
+
+    assert calls[0]["families"] == ("lstm",)
+    assert calls[0]["durations"] == ("10m", "60m")
+    assert calls[0]["resource"]["parallelWorkers"] == 1
+    assert background_loop_statuses()["lstm_candidate_retry"]["status"] == "passed"
 
 
 def test_lstm_daily_review_invalid_time_is_recorded(monkeypatch) -> None:

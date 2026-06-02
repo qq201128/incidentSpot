@@ -70,8 +70,8 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
     payload = mining_api.get_mining_overview(symbol="BTCUSDT", duration="10m", fresh=True)
     assert payload["summary"]["overallAccuracy"] == 0.64
     assert payload["trainingRules"]["targetWinRateExclusive"] == 0.62
-    assert payload["trainingRules"]["internalThreads"] == 4
-    assert payload["trainingRules"]["parallelWorkers"] == 10
+    assert payload["trainingRules"]["internalThreads"] == 1
+    assert payload["trainingRules"]["parallelWorkers"] == 1
     assert payload["trainingRules"]["xgboostProcessWorkers"] == 1
     assert "> 62%" in payload["trainingRules"]["text"]
     assert payload["trainingRules"]["workerStatus"]["state"] == "worker_required"

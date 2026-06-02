@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -73,6 +74,7 @@ def train_candidate(
     record_config: ModelFamilyTrainingConfig,
 ) -> dict[str, Any]:
     try:
+        _candidate_event("candidate_start", train_config, stage)
         report = train_model_family(
             train_config,
             dataset_builder=dataset_builder,
@@ -82,7 +84,9 @@ def train_candidate(
             persist_artifacts=False,
             evaluate_test=False,
         )
+        _candidate_event("candidate_finish", train_config, stage, status=str(report.get("status") or "unknown"))
     except Exception as exc:
+        _candidate_event("candidate_failed", train_config, stage, status=type(exc).__name__)
         report = _failed_report(record_config, profile, exc)
     report = _stage_report(record_config, profile, report, stage)
     record_model_candidate(record_config, profile, report)
@@ -174,6 +178,20 @@ def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Excepti
             "error": str(exc),
         },
     }
+
+
+def _candidate_event(event: str, config: ModelFamilyTrainingConfig, stage: str, *, status: str | None = None) -> None:
+    payload = {
+        "event": event,
+        "family": config.family,
+        "symbol": config.symbol,
+        "duration": config.duration,
+        "stage": stage,
+        "featureWindow": config.feature_window,
+        "minMoveBps": config.min_move_bps,
+        "params": config.params,
+    }
+    print(json.dumps(payload if status is None else {**payload, "status": status}, ensure_ascii=False), flush=True)
 
 
 def _dataset_cache_key(config: ModelFamilyTrainingConfig) -> tuple:

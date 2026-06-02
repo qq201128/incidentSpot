@@ -10,6 +10,7 @@ from app.services.model_family_search_rules import SUCCESSIVE_HALVING_SURVIVAL_R
 COARSE_EPOCH_RATIO = 0.5
 MIN_COARSE_EPOCHS = 1
 NON_ADVANCING_STATUSES = frozenset({"failed", "insufficient_samples"})
+FULL_STAGE_NON_ADVANCING_STATUSES = NON_ADVANCING_STATUSES | frozenset({"validation_failed"})
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ def coarse_candidate_config(config: ModelFamilyTrainingConfig) -> ModelFamilyTra
 
 
 def close_halving_stage(results: list[Any], stage: str) -> StageClosure:
-    survivors = _survivors(results)
+    survivors = _survivors(results, stage)
     survivor_keys = {str(item.report.get("searchKey")) for item in survivors}
     reports = [_annotated_result(item, stage, str(item.report.get("searchKey")) in survivor_keys) for item in results]
     return StageClosure(
@@ -58,8 +59,8 @@ def candidate_score(report: dict[str, Any]) -> tuple[float, float, int]:
     )
 
 
-def _survivors(results: list[Any]) -> list[Any]:
-    eligible = [item for item in results if _can_advance(item.report)]
+def _survivors(results: list[Any], stage: str) -> list[Any]:
+    eligible = [item for item in results if _can_advance(item.report, stage)]
     limit = ceil(len(results) * SUCCESSIVE_HALVING_SURVIVAL_RATE)
     selected = sorted(eligible, key=lambda item: candidate_score(item.report), reverse=True)
     return selected[:limit]
@@ -71,12 +72,13 @@ def _annotated_result(item: Any, stage: str, advanced: bool) -> Any:
     return type(item)(item.config, report)
 
 
-def _can_advance(report: dict[str, Any]) -> bool:
-    return str(report.get("status") or "failed") not in NON_ADVANCING_STATUSES
+def _can_advance(report: dict[str, Any], stage: str) -> bool:
+    blocked = FULL_STAGE_NON_ADVANCING_STATUSES if stage == "full" else NON_ADVANCING_STATUSES
+    return str(report.get("status") or "failed") not in blocked
 
 
 def _elimination_reason(stage: str, report: dict[str, Any]) -> str:
-    if not _can_advance(report):
+    if not _can_advance(report, stage):
         return f"{stage}_training_failed"
     return f"{stage}_rank_below_survival_cutoff"
 
