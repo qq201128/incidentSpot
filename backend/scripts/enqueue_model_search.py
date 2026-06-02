@@ -40,6 +40,7 @@ def main() -> int:
         profile=args.profile,
         priority=args.priority,
         reset_existing=args.reset,
+        reset_history=args.reset_history,
         resource=resource,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -58,6 +59,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--xgboost-process-workers", type=int, default=1)
     parser.add_argument("--resource-profile", default="local_safe")
     parser.add_argument("--reset", action="store_true", help="Reset existing matching jobs to pending.")
+    parser.add_argument(
+        "--reset-history",
+        action="store_true",
+        help="Clear attempted-candidate history; use with --reset to retrain existing matching jobs.",
+    )
     parser.add_argument("--update-pending-resources", action="store_true")
     return parser.parse_args()
 

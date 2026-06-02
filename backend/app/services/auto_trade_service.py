@@ -42,6 +42,10 @@ MS_PER_SECOND = 1000
 LOOP_NAME = "auto_trade"
 
 
+class AutoTradeStrategyNotFound(ValueError):
+    pass
+
+
 async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> None:
     logger.info("auto trade loop: running every %ss", poll_seconds)
     record_loop_start(LOOP_NAME, {"pollSeconds": poll_seconds})
@@ -82,6 +86,21 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
 def list_auto_trade_strategy_payloads() -> list[dict[str, Any]]:
     payloads = [_strategy_payload(settings) for settings in list_auto_trade_settings()]
     return with_simulation_status(payloads)
+
+
+def get_auto_trade_strategy_payload(
+    strategy_key: str,
+    symbol: str = DEFAULT_SYMBOL,
+    duration: str = DEFAULT_DURATION,
+) -> dict[str, Any]:
+    key = str(strategy_key or "").strip()
+    sym = str(symbol or "").strip().upper()
+    dur = str(duration or "").strip()
+    _validate_slot_request(key, sym, dur)
+    settings = _find_auto_trade_settings(key, sym, dur)
+    if settings is None:
+        raise AutoTradeStrategyNotFound(f"auto trade slot not found: {sym} {dur} {key}")
+    return with_simulation_status([_strategy_payload(settings)])[0]
 
 
 def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, symbol: str = DEFAULT_SYMBOL) -> AutoTradeSettings:
@@ -271,6 +290,23 @@ def _dynamic_simulation_slot_key(row: Any) -> tuple[str, str, str]:
 
 def _is_dynamic_simulation_strategy(strategy_key: str) -> bool:
     return is_batch_combo_simulation_strategy(strategy_key) or is_factor_candidate_signal_key(strategy_key)
+
+
+def _find_auto_trade_settings(key: str, symbol: str, duration: str) -> AutoTradeSettings | None:
+    for settings in list_auto_trade_settings():
+        if settings.strategy_key == key and settings.symbol == symbol and settings.duration == duration:
+            return settings
+    return None
+
+
+def _validate_slot_request(strategy_key: str, symbol: str, duration: str) -> None:
+    if not strategy_key:
+        raise ValueError("strategyKey is required")
+    if not symbol:
+        raise ValueError("symbol is required")
+    if duration not in AUTO_TRADE_SLOT_DURATIONS:
+        supported = ", ".join(AUTO_TRADE_SLOT_DURATIONS)
+        raise ValueError(f"duration must be one of: {supported}")
 
 
 def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:

@@ -50,6 +50,7 @@ export default function FactorLearningPage() {
             onRefreshLocal={() => void mining.refreshLocal()}
             onRefreshAgent={() => void mining.refreshAgent()}
             onSearchAll={() => void mining.searchAllModels()}
+            onRetrainAll={() => void mining.retrainAllModels()}
           />
           <section className="mining-workspace">
             <MiningModelGrid

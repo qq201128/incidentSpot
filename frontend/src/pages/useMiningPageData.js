@@ -4,6 +4,7 @@ import {
   DEFAULT_MODEL_SEARCH_RESOURCE,
   requestFactorLearningRefresh,
   requestModelCandidateSearch,
+  requestModelRetrainAll,
 } from "../api/factorLearning";
 import { MODEL_FAMILIES } from "../utils/modelFamilies";
 
@@ -116,6 +117,26 @@ export function useMiningPageData(symbol, duration) {
     }
   }, [duration, load, normalizedSymbol]);
 
+  const retrainAllModels = useCallback(async () => {
+    if (!isValidSymbol(normalizedSymbol)) return;
+    setBusy("retrain-all");
+    try {
+      const data = await requestModelRetrainAll({
+        ...DEFAULT_MODEL_SEARCH_RESOURCE,
+        symbols: normalizedSymbol,
+        durations: duration,
+        families: MODEL_FAMILIES.join(","),
+        resetHistory: true,
+      });
+      setStatus(data?.message || "当前模型族重训任务已入队");
+      await load(undefined, { fresh: true });
+    } catch (error) {
+      setStatus(`全部重训失败：${errorMessage(error)}`);
+    } finally {
+      setBusy("");
+    }
+  }, [duration, load, normalizedSymbol]);
+
   const searchModel = useCallback(
     async (family) => {
       if (!isValidSymbol(normalizedSymbol)) return;
@@ -147,6 +168,7 @@ export function useMiningPageData(symbol, duration) {
     refreshLocal,
     refreshAgent,
     searchAllModels,
+    retrainAllModels,
     searchModel,
     reload,
   };

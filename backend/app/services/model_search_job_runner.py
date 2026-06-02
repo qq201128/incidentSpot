@@ -178,6 +178,8 @@ def _continuation_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _already_trained_result(job: dict[str, Any]) -> dict[str, Any] | None:
+    if bool(job.get("resetHistory")):
+        return None
     status = model_family_status(job["model_family"], job["symbol"], job["duration"])
     if not is_trained_model_status(status):
         return None

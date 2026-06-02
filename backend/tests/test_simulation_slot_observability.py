@@ -4,6 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from app.api import auto_trade as auto_trade_api
 from app.db import session
 from app.services import (
@@ -19,6 +21,28 @@ from app.services import (
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
+
+
+def test_runtime_statuses_batch_query_slots(monkeypatch, tmp_path: Path) -> None:
+    db_path = _db_path(tmp_path)
+    _init_db(db_path, monkeypatch)
+    first_key = FACTOR_COMBO_STRATEGY_KEY
+    second_key = simulation_strategy_key_for_factor_name("combo__good__carry")
+    _seed_settled_event(db_path, first_key)
+    _seed_prediction_failure(db_path, second_key)
+    queries: list[str] = []
+    monkeypatch.setattr(simulation_slot_runtime, "get_conn", lambda: _connect_with_trace(db_path, queries))
+
+    payload = simulation_slot_runtime.runtime_statuses_for_slots([
+        _slot_payload(first_key),
+        _slot_payload(second_key),
+        _slot_payload("model_family:lstm:10m"),
+    ])
+
+    assert payload[(first_key, "BTCUSDT", "10m")]["latestEvent"]["externalStatus"] == "SIMULATED"
+    assert payload[(second_key, "BTCUSDT", "10m")]["latestFailure"]["reason"] == "factor candidate signal missing column"
+    assert sum("JOIN events e" in query for query in queries) == 1
+    assert sum("JOIN paper_live_prediction_failures f" in query for query in queries) == 1
 
 
 def test_sync_report_exposes_single_combo_rejections_runtime_and_failures(monkeypatch, tmp_path: Path) -> None:
@@ -97,6 +121,32 @@ def test_strategy_payloads_include_static_slot_latest_failure(monkeypatch, tmp_p
     assert slot["simulationStatus"]["latestFailure"]["reason"] == "factor candidate signal missing column"
 
 
+def test_strategy_detail_returns_one_slot_with_runtime(monkeypatch, tmp_path: Path) -> None:
+    db_path = _db_path(tmp_path)
+    _init_db(db_path, monkeypatch)
+    _seed_prediction_failure(db_path, FACTOR_COMBO_STRATEGY_KEY)
+
+    payload = auto_trade_api.read_strategy(FACTOR_COMBO_STRATEGY_KEY, symbol="btcusdt", duration="10m")
+
+    assert payload["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
+    assert payload["symbol"] == "BTCUSDT"
+    assert payload["duration"] == "10m"
+    assert payload["simulationStatus"]["latestFailure"]["reason"] == "factor candidate signal missing column"
+
+
+def test_strategy_detail_returns_404_for_unknown_slot(monkeypatch, tmp_path: Path) -> None:
+    db_path = _db_path(tmp_path)
+    _init_db(db_path, monkeypatch)
+
+    try:
+        auto_trade_api.read_strategy("missing_strategy", symbol="BTCUSDT", duration="10m")
+    except HTTPException as exc:
+        assert exc.status_code == 404
+        assert "auto trade slot not found" in str(exc.detail)
+        return
+    raise AssertionError("unknown slot must raise HTTPException")
+
+
 def _db_path(tmp_path: Path) -> Path:
     return tmp_path / "simulation_slots.db"
 
@@ -120,6 +170,22 @@ def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _connect_with_trace(path: Path, queries: list[str]) -> sqlite3.Connection:
+    conn = _connect(path)
+    conn.set_trace_callback(queries.append)
+    return conn
+
+
+def _slot_payload(strategy_key: str) -> dict:
+    return {
+        "strategyKey": strategy_key,
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "enabled": True,
+        "qty": 5,
+    }
 
 
 def _seed_klines(db_path: Path) -> None:

@@ -1,0 +1,5 @@
+.mining-kpi-actions .is-danger {
+  color: #fff;
+  background: #d85b5b;
+  border-color: rgba(255, 104, 104, 0.68);
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { fetchAutoTradeStrategies, updateAutoTradeStrategy } from "../api/client";
+import { updateAutoTradeStrategy } from "../api/client";
+import { fetchAutoTradeStrategy } from "../api/liveTradingClient";
 import { strategyDurationLabel, strategyLabel } from "../utils/strategyLabels";
 import "./LiveTradingPage.css";
 
@@ -45,10 +46,17 @@ function useLiveTradingSlot(request) {
     setLoading(true);
     setError("");
     setStatus("");
-    fetchAutoTradeStrategies()
-      .then((payload) => {
+    setSlot(null);
+    if (!request.strategyKey) {
+      setError(missingSlotMessage(request));
+      setLoading(false);
+      return () => {
+        stopped = true;
+      };
+    }
+    fetchAutoTradeStrategy(request.strategyKey, request)
+      .then((found) => {
         if (stopped) return;
-        const found = findRequestedSlot(payload?.strategies, request);
         setSlot(found);
         if (!found) setError(missingSlotMessage(request));
       })
@@ -161,15 +169,6 @@ function requestFromParams(searchParams) {
     strategyKey: String(searchParams.get("strategyKey") || ""),
     symbol: String(searchParams.get("symbol") || "BTCUSDT").trim().toUpperCase(),
   };
-}
-
-function findRequestedSlot(strategies, request) {
-  const rows = Array.isArray(strategies) ? strategies : [];
-  return rows.find((row) => (
-    row.strategyKey === request.strategyKey &&
-    String(row.symbol || "").toUpperCase() === request.symbol &&
-    row.duration === request.duration
-  )) || null;
 }
 
 function payloadFromSlot(slot) {

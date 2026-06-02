@@ -44,6 +44,37 @@ def test_worker_skips_already_trained_pending_job(monkeypatch: pytest.MonkeyPatc
     assert "skipped" in Path(report["job"]["log_path"]).read_text(encoding="utf-8")
 
 
+def test_worker_trains_reset_history_job_even_when_already_trained(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("reset-worker") / "model-search.db"
+    log_dir = _runtime_path("reset-worker-logs")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        reset_history=True,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        runner,
+        "model_family_status",
+        lambda *_args: {"status": "shadow_active", "shadowPredictionReady": True},
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_model_candidate_search",
+        lambda config: calls.append(config) or {"status": "shadow_active"},
+    )
+
+    report = runner.run_one_model_search_job(runner.ModelSearchWorkerConfig(log_dir=log_dir))
+
+    assert report["status"] == "succeeded"
+    assert calls
+    assert report["job"]["resetHistory"] is True
+
+
 def _patch_store_db(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
     monkeypatch.setattr(store, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(status_service, "list_model_search_jobs", store.list_model_search_jobs)

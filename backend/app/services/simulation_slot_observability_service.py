@@ -33,16 +33,16 @@ def simulation_slots_report(symbol: str, duration: str) -> dict[str, Any]:
 def simulation_statuses_for_slots(slots: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
     reports = [
         simulation_slots_report(symbol, duration)
-        for _key, symbol, duration in _dynamic_slot_keys(slots)
+        for symbol, duration in _dynamic_report_keys(slots)
     ]
     runtime = runtime_statuses_for_slots(slots)
     candidates = _status_map([item for report in reports for item in report.get("items", [])])
     return {**runtime, **candidates}
 
 
-def _dynamic_slot_keys(slots: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
+def _dynamic_report_keys(slots: list[dict[str, Any]]) -> set[tuple[str, str]]:
     return {
-        (slot["strategyKey"], str(slot["symbol"]).upper(), str(slot["duration"]))
+        (str(slot["symbol"]).upper(), str(slot["duration"]))
         for slot in slots
         if _is_dynamic_key(str(slot.get("strategyKey") or ""))
     }

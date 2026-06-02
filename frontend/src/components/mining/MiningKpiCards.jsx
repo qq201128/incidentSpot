@@ -1,5 +1,6 @@
 import { formatPct } from "./miningFormatters";
 import { miningWorkerStatusView } from "./workerStatus";
+import "./MiningKpiCards.css";
 import "./MiningWorkerStatus.css";
 
 export default function MiningKpiCards({
@@ -9,6 +10,7 @@ export default function MiningKpiCards({
   onRefreshLocal,
   onRefreshAgent,
   onSearchAll,
+  onRetrainAll,
 }) {
   const accuracy = formatPct(summary?.overallAccuracy, 0);
   const accuracyRatio = Number(summary?.overallAccuracy);
@@ -65,6 +67,9 @@ export default function MiningKpiCards({
           </button>
           <button type="button" className="is-primary" disabled={busy === "search-all"} onClick={onSearchAll}>
             {busy === "search-all" ? "全部排队中" : "全量搜索全部算法"}
+          </button>
+          <button type="button" className="is-danger" disabled={busy === "retrain-all"} onClick={onRetrainAll}>
+            {busy === "retrain-all" ? "重训排队中" : "重训当前全部"}
           </button>
         </div>
       </article>

@@ -3,6 +3,7 @@ import { API_BASE_URL } from "./client";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_QUEUE_TIMEOUT_MS = 15_000;
+const RETRAIN_QUEUE_TIMEOUT_MS = 45_000;
 export const DEFAULT_MODEL_SEARCH_RESOURCE = Object.freeze({
   internalThreads: 1,
   parallelWorkers: 1,
@@ -64,6 +65,22 @@ export async function requestModelCandidateSearch(
       ...resource,
     },
     timeout: REFRESH_QUEUE_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function requestModelRetrainAll(options = {}) {
+  const resource = modelSearchResourceParams(options);
+  const { data } = await axios.post(`${API_BASE_URL}/api/models/search/retrain-all`, null, {
+    params: {
+      symbols: options.symbols,
+      durations: options.durations,
+      families: options.families,
+      profile: options.profile || "full",
+      resetHistory: options.resetHistory !== false,
+      ...resource,
+    },
+    timeout: RETRAIN_QUEUE_TIMEOUT_MS,
   });
   return data;
 }

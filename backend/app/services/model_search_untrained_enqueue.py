@@ -26,7 +26,22 @@ def enqueue_untrained_model_search_jobs(
     reset_history: bool = False,
     resource: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    split = split_untrained_targets(symbols=symbols, durations=durations, families=families)
+    if reset_history:
+        queued = enqueue_model_search_jobs(
+            symbols=symbols,
+            durations=durations,
+            families=families,
+            profile=profile,
+            reset_existing=reset_existing,
+            reset_history=True,
+            resource=resource,
+        )
+        return {**queued, "trainedSkipped": [], "trainedSkippedCount": 0, "statusErrors": []}
+    split = split_untrained_targets(
+        symbols=symbols,
+        durations=durations,
+        families=families,
+    )
     if not split["untrainedTargets"]:
         return _empty_enqueue_payload(split)
     queued = _enqueue_targets(

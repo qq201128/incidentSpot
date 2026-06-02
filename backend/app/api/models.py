@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.params import Param
 
 from app.services.experiment_profiles import normalize_experiment_profile
-from app.services.model_family_config import normalize_model_family
+from app.services.model_family_config import MODEL_FAMILIES, normalize_model_family
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS
 from app.services.model_family_prediction_service import predict_model_family_signal
 from app.services.model_family_status_service import model_family_status
@@ -12,9 +12,10 @@ from app.services.model_search_resource import ModelSearchResourceConfig, resour
 from app.services.model_search_resource_defaults import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
 from app.services.model_search_status_service import model_search_queue_status, model_search_status_with_lifecycle
 from app.services.model_search_untrained_enqueue import enqueue_untrained_model_search_jobs
-from app.services.runtime_symbols import parse_symbol_csv
+from app.services.runtime_symbols import configured_runtime_symbols, parse_symbol_csv
 
 router = APIRouter(prefix="/api/models", tags=["models"])
+DEFAULT_MODEL_SEARCH_DURATIONS = ("10m", "30m", "60m", "1d")
 
 
 def _query_str(value: object, default: str | None = None) -> str | None:
@@ -136,6 +137,45 @@ def model_candidate_search(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/search/retrain-all")
+def model_search_retrain_all(
+    *,
+    symbols: str | None = Query(None),
+    durations: str | None = Query(None),
+    families: str | None = Query(None),
+    profile: str = Query("full"),
+    reset_history: bool = Query(True, alias="resetHistory"),
+    internal_threads: int = Query(DEFAULT_INTERNAL_THREADS, alias="internalThreads", ge=1),
+    parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
+    xgboost_process_workers: int = Query(DEFAULT_XGBOOST_PROCESS_WORKERS, alias="xgboostProcessWorkers", ge=1),
+) -> dict:
+    try:
+        selected = _batch_search_targets(symbols=symbols, durations=durations, families=families)
+        selected_profile = normalize_experiment_profile(_query_str(profile, "full") or "full")
+        resource = _resource_from_query(
+            internal_threads=internal_threads,
+            parallel_workers=parallel_workers,
+            xgboost_process_workers=xgboost_process_workers,
+        )
+        queued = enqueue_untrained_model_search_jobs(
+            **selected,
+            profile=selected_profile,
+            reset_existing=True,
+            reset_history=_query_bool(reset_history, True),
+            resource=resource,
+        )
+        worker = model_search_queue_status(selected, include_symbol_details=False)["workerStatus"]
+        return {
+            "version": "model_search_retrain_all_v1",
+            "targets": {key: list(value) for key, value in selected.items()},
+            "modelSearchQueue": queued,
+            "workerStatus": worker,
+            "message": _batch_search_message(queued, worker),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/{family}/predict")
 def model_predict(
     family: str,
@@ -189,3 +229,60 @@ def _candidate_search_message(family: str, worker: dict, queued: dict) -> str:
 def _candidate_search_worker_status(symbol: str, duration: str, family: str) -> dict:
     status = model_search_queue_status({"symbols": (symbol,), "durations": (duration,), "families": (family,)})
     return status["workerStatus"]
+
+
+def _batch_search_targets(
+    *,
+    symbols: str | None,
+    durations: str | None,
+    families: str | None,
+) -> dict[str, tuple[str, ...]]:
+    selected_symbols = _query_str(symbols)
+    selected_durations = _query_str(durations)
+    selected_families = _query_str(families)
+    return {
+        "symbols": parse_symbol_csv(selected_symbols) if selected_symbols else configured_runtime_symbols(),
+        "durations": _csv_values(selected_durations) if selected_durations else DEFAULT_MODEL_SEARCH_DURATIONS,
+        "families": _selected_families(selected_families),
+    }
+
+
+def _selected_families(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return MODEL_FAMILIES
+    return tuple(normalize_model_family(value) for value in _csv_values(raw))
+
+
+def _csv_values(raw: str) -> tuple[str, ...]:
+    values = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if not values:
+        raise ValueError("CSV argument must include at least one value")
+    return values
+
+
+def _resource_from_query(
+    *,
+    internal_threads: int,
+    parallel_workers: int,
+    xgboost_process_workers: int,
+) -> dict:
+    return resource_payload(
+        validated_resource_config(
+            ModelSearchResourceConfig(
+                internal_threads=_query_int(internal_threads, DEFAULT_INTERNAL_THREADS) or DEFAULT_INTERNAL_THREADS,
+                parallel_workers=_query_int(parallel_workers, DEFAULT_PARALLEL_WORKERS) or DEFAULT_PARALLEL_WORKERS,
+                xgboost_process_workers=_query_int(
+                    xgboost_process_workers,
+                    DEFAULT_XGBOOST_PROCESS_WORKERS,
+                ) or DEFAULT_XGBOOST_PROCESS_WORKERS,
+            )
+        )
+    )
+
+
+def _batch_search_message(queued: dict, worker: dict) -> str:
+    if queued.get("jobs") and worker["state"] in {"queued", "running"}:
+        return "全部模型族重训任务已入队，model search worker 正在执行队列。"
+    if queued.get("jobs"):
+        return f"全部模型族重训任务已入队；请启动：{worker['workerRequiredCommand']}"
+    return "没有可入队的模型族重训任务。"

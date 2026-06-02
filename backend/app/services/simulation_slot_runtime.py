@@ -8,12 +8,13 @@ from app.services.auto_trade_settings_payloads import table_exists
 from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 
+SlotKey = tuple[str, str, str]
+
 
 @dataclass(frozen=True)
-class RuntimeAvailability:
-    conn: Any
-    events_available: bool
-    failures_available: bool
+class RuntimeLookups:
+    events: dict[SlotKey, dict[str, Any]]
+    failures: dict[SlotKey, dict[str, Any]]
 
 
 def attach_slot_and_runtime_state(candidates: list[dict[str, Any]], symbol: str, duration: str) -> None:
@@ -23,12 +24,11 @@ def attach_slot_and_runtime_state(candidates: list[dict[str, Any]], symbol: str,
 
 
 def runtime_statuses_for_slots(slots: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    slot_keys = _slot_keys(slots)
     conn = get_conn()
     try:
-        events_available = _runtime_tables_available(conn)
-        failures_available = table_exists(conn, "paper_live_prediction_failures")
-        availability = RuntimeAvailability(conn, events_available, failures_available)
-        statuses = [_runtime_status(slot, availability) for slot in slots]
+        lookups = _runtime_lookups(conn, slot_keys)
+        statuses = [_runtime_status(slot, lookups) for slot in slots]
         return {_status_key(status): status for status in statuses if _has_runtime_state(status)}
     finally:
         conn.close()
@@ -49,29 +49,27 @@ def _attach_slot_state(
 
 
 def _attach_runtime_state(candidates: list[dict[str, Any]], symbol: str, duration: str) -> None:
+    slot_keys = _candidate_slot_keys(candidates, symbol, duration)
     conn = get_conn()
     try:
-        events_available = _runtime_tables_available(conn)
-        failures_available = table_exists(conn, "paper_live_prediction_failures")
+        lookups = _runtime_lookups(conn, slot_keys)
         for item in candidates:
             key = item.get("strategyKey")
-            item["latestEvent"] = _latest_event(conn, key, symbol, duration) if events_available and key else None
-            item["latestFailure"] = _latest_failure(conn, key, symbol, duration) if failures_available and key else None
+            slot_key = (str(key), symbol, duration) if key else None
+            item["latestEvent"] = lookups.events.get(slot_key) if slot_key else None
+            item["latestFailure"] = lookups.failures.get(slot_key) if slot_key else None
     finally:
         conn.close()
 
 
 def _runtime_status(
     slot: dict[str, Any],
-    availability: RuntimeAvailability,
+    lookups: RuntimeLookups,
 ) -> dict[str, Any]:
     strategy_key = str(slot["strategyKey"])
     symbol = str(slot["symbol"]).upper()
     duration = str(slot["duration"])
-    latest_event = _latest_event(availability.conn, strategy_key, symbol, duration) if availability.events_available else None
-    latest_failure = _latest_failure(
-        availability.conn, strategy_key, symbol, duration,
-    ) if availability.failures_available else None
+    slot_key = (strategy_key, symbol, duration)
     return {
         "strategyKey": strategy_key,
         "candidateType": _candidate_type_from_key(strategy_key),
@@ -84,8 +82,8 @@ def _runtime_status(
         "rejectionReason": None,
         "metrics": {},
         "slot": _payload_slot(slot),
-        "latestEvent": latest_event,
-        "latestFailure": latest_failure,
+        "latestEvent": lookups.events.get(slot_key),
+        "latestFailure": lookups.failures.get(slot_key),
     }
 
 
@@ -101,36 +99,114 @@ def _slot_rows(symbol: str, duration: str) -> dict[str, Any]:
         conn.close()
 
 
-def _latest_event(conn: Any, strategy_key: str, symbol: str, duration: str) -> dict[str, Any] | None:
-    row = conn.execute(
-        """
-        SELECT e.id, e.status, e.result, e.start_time, e.end_time, e.ai_high_winrate_rule,
-               o.id AS order_id, o.status AS order_status, o.external_status, o.qty,
-               s.id AS settlement_id, s.pnl, s.settled_at
-        FROM events e
-        LEFT JOIN orders o ON o.event_id = e.id
-        LEFT JOIN settlements s ON s.event_id = e.id
-        WHERE e.strategy_key = ? AND e.symbol = ? AND e.event_interval = ?
-        ORDER BY e.id DESC
-        LIMIT 1
-        """,
-        (strategy_key, symbol, duration),
-    ).fetchone()
-    return None if row is None else _event_payload(row)
+def _runtime_lookups(conn: Any, slot_keys: tuple[SlotKey, ...]) -> RuntimeLookups:
+    if not slot_keys:
+        return RuntimeLookups(events={}, failures={})
+    events = _latest_events(conn, slot_keys) if _runtime_tables_available(conn) else {}
+    failures = _latest_failures(conn, slot_keys) if table_exists(conn, "paper_live_prediction_failures") else {}
+    return RuntimeLookups(events=events, failures=failures)
 
 
-def _latest_failure(conn: Any, strategy_key: str, symbol: str, duration: str) -> dict[str, Any] | None:
-    row = conn.execute(
+def _latest_events(conn: Any, slot_keys: tuple[SlotKey, ...]) -> dict[SlotKey, dict[str, Any]]:
+    rows = conn.execute(
         """
-        SELECT stage, reason, created_at
-        FROM paper_live_prediction_failures
-        WHERE strategy_key = ? AND symbol = ? AND duration = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (strategy_key, symbol, duration),
-    ).fetchone()
-    return None if row is None else {"stage": row["stage"], "reason": row["reason"], "createdAt": row["created_at"]}
+        WITH requested(strategy_key, symbol, duration) AS (
+          VALUES {values}
+        ),
+        ranked AS (
+          SELECT r.strategy_key AS request_strategy_key,
+                 r.symbol AS request_symbol,
+                 r.duration AS request_duration,
+                 e.id, e.status, e.result, e.start_time, e.end_time, e.ai_high_winrate_rule,
+                 o.id AS order_id, o.status AS order_status, o.external_status, o.qty,
+                 s.id AS settlement_id, s.pnl, s.settled_at,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY r.strategy_key, r.symbol, r.duration
+                   ORDER BY e.id DESC
+                 ) AS row_rank
+          FROM requested r
+          JOIN events e
+            ON e.strategy_key = r.strategy_key
+           AND e.symbol = r.symbol
+           AND e.event_interval = r.duration
+          LEFT JOIN orders o ON o.event_id = e.id
+          LEFT JOIN settlements s ON s.event_id = e.id
+        )
+        SELECT *
+        FROM ranked
+        WHERE row_rank = 1
+        """.format(values=_value_placeholders(slot_keys)),
+        _flatten_slot_keys(slot_keys),
+    ).fetchall()
+    return {_runtime_row_key(row): _event_payload(row) for row in rows}
+
+
+def _latest_failures(conn: Any, slot_keys: tuple[SlotKey, ...]) -> dict[SlotKey, dict[str, Any]]:
+    rows = conn.execute(
+        """
+        WITH requested(strategy_key, symbol, duration) AS (
+          VALUES {values}
+        ),
+        ranked AS (
+          SELECT r.strategy_key AS request_strategy_key,
+                 r.symbol AS request_symbol,
+                 r.duration AS request_duration,
+                 f.stage, f.reason, f.created_at,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY r.strategy_key, r.symbol, r.duration
+                   ORDER BY f.id DESC
+                 ) AS row_rank
+          FROM requested r
+          JOIN paper_live_prediction_failures f
+            ON f.strategy_key = r.strategy_key
+           AND f.symbol = r.symbol
+           AND f.duration = r.duration
+        )
+        SELECT *
+        FROM ranked
+        WHERE row_rank = 1
+        """.format(values=_value_placeholders(slot_keys)),
+        _flatten_slot_keys(slot_keys),
+    ).fetchall()
+    return {
+        _runtime_row_key(row): {
+            "stage": row["stage"],
+            "reason": row["reason"],
+            "createdAt": row["created_at"],
+        }
+        for row in rows
+    }
+
+
+def _value_placeholders(slot_keys: tuple[SlotKey, ...]) -> str:
+    return ", ".join("(?, ?, ?)" for _slot_key in slot_keys)
+
+
+def _flatten_slot_keys(slot_keys: tuple[SlotKey, ...]) -> tuple[str, ...]:
+    return tuple(value for slot_key in slot_keys for value in slot_key)
+
+
+def _slot_keys(slots: list[dict[str, Any]]) -> tuple[SlotKey, ...]:
+    return tuple(sorted(
+        (str(slot["strategyKey"]), str(slot["symbol"]).upper(), str(slot["duration"]))
+        for slot in slots
+    ))
+
+
+def _candidate_slot_keys(candidates: list[dict[str, Any]], symbol: str, duration: str) -> tuple[SlotKey, ...]:
+    return tuple(sorted(
+        (str(item["strategyKey"]), symbol, duration)
+        for item in candidates
+        if item.get("strategyKey")
+    ))
+
+
+def _runtime_row_key(row: Any) -> SlotKey:
+    return (
+        str(row["request_strategy_key"]),
+        str(row["request_symbol"]).upper(),
+        str(row["request_duration"]),
+    )
 
 
 def _event_payload(row: Any) -> dict[str, Any]:
