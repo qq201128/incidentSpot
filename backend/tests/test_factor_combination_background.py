@@ -76,8 +76,7 @@ def test_daily_refresh_updates_all_combo_durations(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
-    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
+    monkeypatch.setattr(combo_background, "refresh_factor_combination_data_dependencies", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)
     monkeypatch.setattr(combo_background, "refresh_factor_learning_memory", fake_learning)
@@ -147,8 +146,7 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
         "run_factor_combination_ranking",
         lambda symbol, duration, _config: {"symbol": symbol, "duration": duration, "ranking": []},
     )
-    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
+    monkeypatch.setattr(combo_background, "refresh_factor_combination_data_dependencies", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", lambda _report: None)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", _promotion_report)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", _fail_sync)
@@ -162,12 +160,12 @@ def test_combo_refresh_surfaces_lstm_sync_failure(monkeypatch: pytest.MonkeyPatc
 
 def test_combo_refresh_writes_duration_klines_before_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
-    rows = [_kline_row(0)]
 
-    monkeypatch.setattr(combo_background, "ingest_market_context_data", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(combo_background, "fetch_klines", lambda symbol, duration, limit: rows)
-    monkeypatch.setattr(combo_background, "upsert_klines_rows", lambda symbol, interval, rows: calls.append(("klines", symbol, interval, len(rows))))
-    monkeypatch.setattr(combo_background, "_backfill_duration_klines", lambda *_args: None)
+    def fake_dependencies(symbol: str, duration: str, **kwargs) -> None:
+        assert kwargs["refresh_duration_klines"] == combo_background._refresh_duration_klines
+        calls.append(("dependencies", symbol, duration, None))
+
+    monkeypatch.setattr(combo_background, "refresh_factor_combination_data_dependencies", fake_dependencies)
     monkeypatch.setattr(
         combo_background,
         "run_factor_combination_ranking",
@@ -181,7 +179,7 @@ def test_combo_refresh_writes_duration_klines_before_ranking(monkeypatch: pytest
 
     combo_background.refresh_combination_ranking_for_symbol_duration("btcusdt", "10m")
 
-    assert calls[:2] == [("klines", "BTCUSDT", "10m", 1), ("rank", "BTCUSDT", "10m", None)]
+    assert calls[:2] == [("dependencies", "BTCUSDT", "10m", None), ("rank", "BTCUSDT", "10m", None)]
 
 
 def test_duration_kline_refresh_backfills_until_min_rows(monkeypatch: pytest.MonkeyPatch) -> None:

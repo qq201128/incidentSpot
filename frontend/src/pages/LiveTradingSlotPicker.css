@@ -1,0 +1,132 @@
+.live-trading-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.live-trading-picker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.live-trading-picker-head h2 {
+  margin: 3px 0 0;
+  font-size: 18px;
+}
+
+.live-trading-picker-head strong,
+.live-trading-picker-head small {
+  justify-self: end;
+}
+
+.live-trading-picker-head strong {
+  padding: 4px 9px;
+  border: 1px solid rgba(126, 215, 191, 0.35);
+  border-radius: 999px;
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.1);
+  font-size: 12px;
+}
+
+.live-trading-picker-head small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.live-trading-slot-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.live-trading-slot-card {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid rgba(81, 100, 108, 0.45);
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.live-trading-slot-card:hover {
+  border-color: rgba(47, 140, 255, 0.55);
+  background: rgba(47, 140, 255, 0.08);
+}
+
+.live-trading-slot-card span:first-child,
+.live-trading-slot-card code,
+.live-trading-slot-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.live-trading-slot-card strong,
+.live-trading-slot-card code,
+.live-trading-slot-card em {
+  overflow-wrap: anywhere;
+}
+
+.live-trading-slot-card code {
+  grid-column: 2;
+}
+
+.live-trading-slot-card em {
+  grid-column: 2 / -1;
+  font-style: normal;
+  color: #ffc2bd;
+}
+
+.live-trading-slot-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.live-trading-slot-badges b {
+  min-width: 58px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #91a5af;
+  text-align: center;
+  background: rgba(145, 165, 175, 0.12);
+  font-size: 11px;
+}
+
+.live-trading-slot-badges b.is-on {
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.14);
+}
+
+.live-trading-slot-badges b.is-live {
+  color: #ffd9a8;
+  background: rgba(243, 155, 49, 0.15);
+}
+
+@media (max-width: 720px) {
+  .live-trading-picker-head,
+  .live-trading-slot-card {
+    grid-template-columns: 1fr;
+  }
+
+  .live-trading-picker-head strong,
+  .live-trading-picker-head small,
+  .live-trading-slot-badges {
+    justify-self: start;
+    justify-content: flex-start;
+  }
+
+  .live-trading-slot-card code,
+  .live-trading-slot-card em {
+    grid-column: auto;
+  }
+}

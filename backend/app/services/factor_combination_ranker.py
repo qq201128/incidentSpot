@@ -56,14 +56,26 @@ def combination_result(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     factor_def = combination_definition(members, context.duration)
     try:
-        combo_frame = combo_backtest_frame(context.frame, members, factor_def.name, context.duration)
+        combo_frame, member_rows = _combo_backtest_payload(
+            context.frame,
+            members,
+            factor_def.name,
+            context.duration,
+        )
         result = run_factor_backtest_on_frame(
             factor_def,
             combo_frame,
             symbol=context.symbol,
             duration=context.duration,
         )
-        return enriched_combo_result(result, members, context.frame, factor_def), None
+        return enriched_combo_result(
+            result,
+            members,
+            context.frame,
+            factor_def,
+            combo_frame=combo_frame,
+            member_rows=member_rows,
+        ), None
     except Exception as exc:
         failure = {"factorName": factor_def.name, "stage": "combination", "error": str(exc)}
         return None, failure
@@ -93,11 +105,22 @@ def combo_backtest_frame(
     combo_name: str,
     duration: str = "10m",
 ) -> pd.DataFrame:
+    combo_frame, _member_rows = _combo_backtest_payload(frame, members, combo_name, duration)
+    return combo_frame
+
+
+def _combo_backtest_payload(
+    frame: pd.DataFrame,
+    members: tuple[Any, ...],
+    combo_name: str,
+    duration: str,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    member_rows = _learned_payloads(frame, members, duration)
     out = frame[["close"]].copy()
     if "open_time" in frame.columns:
         out["open_time"] = frame["open_time"]
-    out[combo_name] = combination_score(frame, _learned_payloads(frame, members, duration))
-    return out
+    out[combo_name] = combination_score(frame, member_rows)
+    return out, member_rows
 
 
 def enriched_combo_result(
@@ -105,11 +128,15 @@ def enriched_combo_result(
     members: tuple[Any, ...],
     source_frame: pd.DataFrame,
     factor_def: FactorDefinition,
+    *,
+    combo_frame: pd.DataFrame | None = None,
+    member_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    member_rows = _learned_payloads(source_frame, members, factor_def.timeframes[0])
-    combo_frame = combo_backtest_frame(source_frame, members, factor_def.name, factor_def.timeframes[0])
-    walk_forward = walk_forward_validation(combo_frame, factor_def, factor_def.timeframes[0])
-    payload = _combo_payload(result, members, member_rows, walk_forward)
+    duration = factor_def.timeframes[0]
+    rows = member_rows if member_rows is not None else _learned_payloads(source_frame, members, duration)
+    frame = combo_frame if combo_frame is not None else combo_backtest_frame(source_frame, members, factor_def.name, duration)
+    walk_forward = walk_forward_validation(frame, factor_def, duration)
+    payload = _combo_payload(result, members, rows, walk_forward)
     pairwise = pairwise_diversity_payload(source_frame, members)
     payload.update(pairwise)
     payload["prefilterScore"] = round(prefilter_score(members, pairwise), 6)

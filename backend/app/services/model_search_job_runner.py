@@ -47,6 +47,21 @@ class ModelSearchWorkerConfig:
     candidates_per_job: int = DEFAULT_CANDIDATES_PER_JOB
 
 
+@dataclass(frozen=True)
+class SearchRunContext:
+    job: dict[str, Any]
+    resource: dict[str, Any]
+    log_path: Path
+    config: ModelSearchWorkerConfig
+
+
+@dataclass(frozen=True)
+class JobLogEvent:
+    event: str
+    job: dict[str, Any]
+    payload: dict[str, Any]
+
+
 class ModelSearchHeartbeat:
     def __init__(self, job_id: str, interval_seconds: int) -> None:
         self.job_id = job_id
@@ -109,7 +124,7 @@ def _run_claimed_job(
             )
             return {"status": stored["status"], "job": stored, "result": trained}
         with ModelSearchHeartbeat(job["job_id"], config.heartbeat_interval_seconds):
-            result = _run_search_with_log(job, resource, log_path, config)
+            result = _run_search_with_log(SearchRunContext(job, resource, log_path, config))
         artifact_path = str(artifact_paths(job["symbol"], job["duration"], family=job["model_family"]).root)
         has_more = _has_more_candidates(result)
         stored = finish_model_search_job(
@@ -120,7 +135,7 @@ def _run_claimed_job(
             log_path=str(log_path),
         )
         if has_more:
-            continued = retry_failed_model_search_job(stored["job_id"])
+            continued = retry_failed_model_search_job(stored["job_id"], clear_reset_history=True)
             return {"status": "partial", "job": continued, "result": result}
         return {"status": stored["status"], "job": stored, "result": result}
     except Exception as exc:
@@ -137,18 +152,13 @@ def _run_claimed_job(
         raise RuntimeError(json.dumps({"status": "failed", "job": stored}, ensure_ascii=False)) from exc
 
 
-def _run_search_with_log(
-    job: dict[str, Any],
-    resource: dict[str, Any],
-    log_path: Path,
-    config: ModelSearchWorkerConfig,
-) -> dict[str, Any]:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
+def _run_search_with_log(context: SearchRunContext) -> dict[str, Any]:
+    context.log_path.parent.mkdir(parents=True, exist_ok=True)
+    with context.log_path.open("a", encoding="utf-8") as handle:
         with redirect_stdout(handle), redirect_stderr(handle):
-            _write_log_event(handle, "start", job, resource)
-            result = run_model_candidate_search(_search_config(job, resource, config))
-            _write_log_event(handle, "finish", job, {"result": result})
+            _write_log_event(handle, JobLogEvent("start", context.job, context.resource))
+            result = run_model_candidate_search(_search_config(context.job, context.resource, context.config))
+            _write_log_event(handle, JobLogEvent("finish", context.job, {"result": result}))
             return result
 
 
@@ -178,6 +188,8 @@ def _continuation_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _already_trained_result(job: dict[str, Any]) -> dict[str, Any] | None:
+    if _is_partial_continuation(job):
+        return None
     if bool(job.get("resetHistory")):
         return None
     status = model_family_status(job["model_family"], job["symbol"], job["duration"])
@@ -189,6 +201,16 @@ def _already_trained_result(job: dict[str, Any]) -> dict[str, Any] | None:
         "modelStatus": status.get("status"),
         "shadowPredictionReady": status.get("shadowPredictionReady"),
     }
+
+
+def _is_partial_continuation(job: dict[str, Any]) -> bool:
+    report = job.get("trainingReport")
+    if not isinstance(report, dict):
+        return False
+    if report.get("status") == "partial_batch":
+        return True
+    batch = report.get("jobBatch") if isinstance(report.get("jobBatch"), dict) else {}
+    return bool(batch.get("hasMoreCandidates"))
 
 
 def _failure_payload(job: dict[str, Any], resource: dict[str, Any], exc: Exception) -> dict[str, Any]:
@@ -211,18 +233,19 @@ def _job_log_path(log_dir: Path, job: dict[str, Any]) -> Path:
     return log_dir / name
 
 
-def _write_log_event(handle: Any, event: str, job: dict[str, Any], payload: dict[str, Any]) -> None:
-    handle.write(json.dumps({"event": event, "jobId": job["job_id"], "payload": payload}, ensure_ascii=False) + "\n")
+def _write_log_event(handle: Any, event: JobLogEvent) -> None:
+    payload = {"event": event.event, "jobId": event.job["job_id"], "payload": event.payload}
+    handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     handle.flush()
 
 
 def _append_failure_log(log_path: Path, job: dict[str, Any], failure: dict[str, Any]) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as handle:
-        _write_log_event(handle, "failure", job, failure)
+        _write_log_event(handle, JobLogEvent("failure", job, failure))
 
 
 def _append_skip_log(log_path: Path, job: dict[str, Any], result: dict[str, Any]) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as handle:
-        _write_log_event(handle, "skipped", job, result)
+        _write_log_event(handle, JobLogEvent("skipped", job, result))

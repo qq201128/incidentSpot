@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.services.model_family_candidates import read_model_candidate_library
 from app.services.model_family_candidate_progress_view import read_model_candidate_progress_view
 from app.services.model_family_search_rules import model_family_training_rules
 from app.services.model_search_job_store import list_model_search_jobs
@@ -53,7 +54,8 @@ def _queued_progress_from_job(
     search_total = _search_space_total(family, job, base_progress)
     stage_completed = int(base_progress.get("completed") or 0)
     stage_total = int(base_progress.get("total") or 0)
-    completed = _completed_count(base_progress, search_total)
+    library_completed = _candidate_library_count(family, job)
+    completed = max(library_completed, _completed_count(base_progress, search_total))
     total = max(search_total, completed)
     return {
         **base_progress,
@@ -94,6 +96,15 @@ def _completed_count(progress: dict[str, Any], search_total: int) -> int:
     if search_total <= 0:
         return completed
     return min(completed, search_total)
+
+
+def _candidate_library_count(family: str, job: dict[str, Any]) -> int:
+    records = read_model_candidate_library(
+        family,
+        str(job.get("symbol") or ""),
+        str(job.get("duration") or ""),
+    )["records"]
+    return len(records)
 
 
 def _percent(completed: int, total: int) -> float:

@@ -32,6 +32,8 @@ def high_winrate_factor_combo_simulation_strategy_key(rank: int) -> str:
 
 
 def simulation_strategy_key_for_combo(factor_name: str, rank: int) -> str:
+    if is_high_winrate_combo_name(factor_name) and rank in FACTOR_COMBO_TOP_SIMULATION_RANKS:
+        return high_winrate_factor_combo_simulation_strategy_key(rank)
     if rank in FACTOR_COMBO_TOP_SIMULATION_RANKS:
         return factor_combo_simulation_strategy_key(rank)
     return simulation_strategy_key_for_factor_name(factor_name)

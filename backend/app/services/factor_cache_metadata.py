@@ -11,6 +11,7 @@ CACHE_STATUS_LEGACY = "legacy_without_fingerprint"
 CACHE_STATUS_MARKET_CHANGED = "market_data_changed"
 CACHE_STATUS_MARKET_APPENDED = "market_data_appended"
 CACHE_STATUS_NO_MARKET_DATA = "market_data_missing"
+BAR_ALIGNED_FEATURE_TABLES = ("funding_features", "orderbook_features")
 
 
 def ranking_cache_metadata(symbol: str, duration: str) -> dict[str, Any]:
@@ -19,6 +20,7 @@ def ranking_cache_metadata(symbol: str, duration: str) -> dict[str, Any]:
         "symbol": symbol.strip().upper(),
         "duration": duration,
         "marketData": market_data_fingerprint(symbol, duration),
+        "barAlignedFeatures": bar_aligned_feature_fingerprint(symbol, duration),
     }
 
 
@@ -39,6 +41,63 @@ def market_data_fingerprint(symbol: str, duration: str) -> dict[str, int | None]
         "rowCount": int(row["row_count"] if row else 0),
         "maxOpenTime": None if row is None or row["max_open_time"] is None else int(row["max_open_time"]),
     }
+
+
+def bar_aligned_feature_fingerprint(symbol: str, duration: str) -> dict[str, dict[str, int | None]]:
+    sym = symbol.strip().upper()
+    conn = get_conn()
+    try:
+        return {
+            table: _feature_table_fingerprint(conn, table=table, symbol=sym, duration=duration)
+            for table in BAR_ALIGNED_FEATURE_TABLES
+            if _table_exists(conn, table)
+        }
+    finally:
+        conn.close()
+
+
+def bar_aligned_features_match(cache_meta: dict[str, Any] | None, symbol: str, duration: str) -> bool:
+    if not isinstance(cache_meta, dict):
+        return False
+    cached = cache_meta.get("barAlignedFeatures")
+    if not isinstance(cached, dict):
+        return False
+    return cached == bar_aligned_feature_fingerprint(symbol, duration)
+
+
+def _feature_table_fingerprint(
+    conn: Any,
+    *,
+    table: str,
+    symbol: str,
+    duration: str,
+) -> dict[str, int | None]:
+    row = conn.execute(
+        f"""
+        SELECT COUNT(DISTINCT k.open_time) AS expected_count,
+               COUNT(DISTINCT f.open_time) AS matched_count,
+               MIN(f.open_time) AS min_open_time,
+               MAX(f.open_time) AS max_open_time
+        FROM klines k
+        LEFT JOIN {table} f ON f.symbol = k.symbol AND f.open_time = k.open_time
+        WHERE k.symbol = ? AND k.interval = ?
+        """,
+        (symbol, duration),
+    ).fetchone()
+    return {
+        "expectedCount": int(row["expected_count"] if row else 0),
+        "matchedCount": int(row["matched_count"] if row else 0),
+        "minOpenTime": None if row is None or row["min_open_time"] is None else int(row["min_open_time"]),
+        "maxOpenTime": None if row is None or row["max_open_time"] is None else int(row["max_open_time"]),
+    }
+
+
+def _table_exists(conn: Any, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
 
 
 def cache_status(cache_meta: dict[str, Any] | None, symbol: str) -> dict[str, Any]:

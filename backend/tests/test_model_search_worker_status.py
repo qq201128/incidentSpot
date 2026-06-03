@@ -51,6 +51,38 @@ def test_pending_filtered_job_is_queued_when_any_worker_runs(monkeypatch: pytest
     assert report["workerStatus"]["runningJobs"] == 1
 
 
+def test_pending_job_is_queued_when_api_worker_is_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_store_db(monkeypatch, _db_path("api-worker-running"))
+    _enqueue_one()
+    monkeypatch.setattr(
+        status_service,
+        "api_model_search_worker_status",
+        lambda: {"running": True, "managedByApi": True, "logPath": "runtime/model-search-api-worker/run.log"},
+    )
+
+    report = status_service.model_search_queue_status()
+
+    assert report["workerStatus"]["state"] == "queued"
+    assert report["workerStatus"]["managedByApi"] is True
+    assert report["workerStatus"]["latestLogPath"] == "runtime/model-search-api-worker/run.log"
+
+
+def test_pending_job_exposes_api_worker_startup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_store_db(monkeypatch, _db_path("api-worker-failed"))
+    _enqueue_one()
+    monkeypatch.setattr(
+        status_service,
+        "api_model_search_worker_status",
+        lambda: {"running": False, "lastFailureReason": "worker spawn failed", "logPath": "runtime/api/fail.log"},
+    )
+
+    report = status_service.model_search_queue_status()
+
+    assert report["workerStatus"]["state"] == JOB_STATUS_FAILED
+    assert report["workerStatus"]["latestFailureReason"] == "worker spawn failed"
+    assert report["workerStatus"]["latestLogPath"] == "runtime/api/fail.log"
+
+
 def test_failed_job_exposes_reason_and_log_path(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_store_db(monkeypatch, _db_path("failed"))
     _enqueue_one()

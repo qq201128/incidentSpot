@@ -40,21 +40,24 @@ def test_retrain_enqueue_includes_trained_targets_when_reset_history(
 
 def test_retrain_all_api_queues_selected_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
+    worker_calls = []
     monkeypatch.setattr(
         models_api,
         "enqueue_untrained_model_search_jobs",
         lambda **kwargs: calls.append(kwargs) or _queued_payload("job-1"),
     )
+
     def fake_queue_status(filters: dict, **_kwargs: object) -> dict:
         return {
             "workerStatus": {
-                "state": "worker_required",
+                "state": "queued",
                 "workerRequiredCommand": "python backend/scripts/run_model_search_worker.py --loop --adaptive-parallelism",
                 "filters": filters,
             }
         }
 
     monkeypatch.setattr(models_api, "model_search_queue_status", fake_queue_status)
+    monkeypatch.setattr(models_api, "ensure_api_model_search_worker", lambda resource: worker_calls.append(resource))
 
     response = models_api.model_search_retrain_all(
         symbols="btcusdt",
@@ -75,7 +78,8 @@ def test_retrain_all_api_queues_selected_batch(monkeypatch: pytest.MonkeyPatch) 
     assert calls[0]["reset_existing"] is True
     assert calls[0]["reset_history"] is True
     assert calls[0]["resource"]["internalThreads"] == 2
-    assert "请启动" in response["message"]
+    assert worker_calls[0]["internalThreads"] == 2
+    assert "正在执行队列" in response["message"]
 
 
 def _queued_payload(job_id: str) -> dict:

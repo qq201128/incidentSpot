@@ -9,6 +9,7 @@ import pandas as pd
 from app.services.agent_mined_factor_library import AGENT_FACTOR_SOURCE_FILE
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_candidate_selection import select_base_candidates
+from app.services.factor_combination_base_metric_cache import cached_factor_metrics_by_name
 from app.services.factor_combination_ranker import (
     COMBINATION_METHOD,
     combo_backtest_frame,
@@ -31,7 +32,7 @@ from app.services.factor_learning_controls import (
     learning_weight,
     load_factor_learning_memory_for,
 )
-from app.services.factor_mined_candidates import build_mined_candidates
+from app.services.factor_combination_mined_inputs import build_mined_candidates
 from app.services.factor_registry import FactorDefinition, FactorDirection, list_factors
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
@@ -82,11 +83,13 @@ def run_factor_combination_ranking(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
     frame = load_factor_frame(symbol, duration)
+    base_metric_cache = cached_factor_metrics_by_name(symbol, duration)
     return run_factor_combination_ranking_on_frame(
         frame,
         symbol=symbol,
         duration=duration,
         config=cfg,
+        base_metric_cache=base_metric_cache,
     )
 
 def run_factor_combination_ranking_on_frame(
@@ -95,6 +98,7 @@ def run_factor_combination_ranking_on_frame(
     symbol: str,
     duration: str,
     config: CombinationSearchConfig,
+    base_metric_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     cfg = _validated_config(config)
     if duration not in SUPPORTED_RULE_DURATIONS:
@@ -106,13 +110,15 @@ def run_factor_combination_ranking_on_frame(
         search_frame,
         symbol=symbol.upper(),
         duration=duration,
+        agent_factor_limit=cfg.agent_factor_limit,
         excluded_factor_names=blocked_names,
     )
-    base, base_failures = _base_candidates(mined.frame, symbol.upper(), duration)
-    base.extend(_mined_base_candidates(mined.candidates))
-    base = _enriched_base_candidates(base, mined.frame, learning_memory)
-    selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
     context = _CombinationContext(mined.frame, symbol.upper(), duration)
+    base, base_failures = _base_candidates(context, metric_cache=base_metric_cache)
+    base.extend(_mined_base_candidates(mined.candidates))
+    base = _scored_base_candidates(base, learning_memory)
+    selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
+    selected = _enriched_base_candidates(selected, mined.frame, learning_memory)
     rank_result = _rank_combinations_with_diagnostics(context, selected, cfg)
     failures = [*base_failures, *mined.failures, *rank_result.failures]
     return build_combination_ranking_report(
@@ -131,22 +137,34 @@ def run_factor_combination_ranking_on_frame(
 
 
 def _base_candidates(
-    frame: pd.DataFrame,
-    symbol: str,
-    duration: str,
+    context: _CombinationContext,
+    *,
+    metric_cache: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[_BaseCandidate], list[dict[str, Any]]]:
     candidates: list[_BaseCandidate] = []
     failures: list[dict[str, Any]] = []
+    cached_metrics = metric_cache or {}
     for factor in list_factors():
-        if factor.name not in frame.columns:
+        if factor.name not in context.frame.columns:
             continue
         try:
-            metrics = run_factor_backtest_on_frame(factor, frame, symbol=symbol, duration=duration)
+            metrics = _factor_metrics(factor, context, cached_metrics)
             if _usable_base_metrics(metrics):
                 candidates.append(_BaseCandidate(factor, metrics, _factor_orientation(factor, metrics)))
         except Exception as exc:
             failures.append({"factorName": factor.name, "stage": "single_factor", "error": str(exc)})
     return candidates, failures
+
+
+def _factor_metrics(
+    factor: FactorDefinition,
+    context: _CombinationContext,
+    metric_cache: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    cached = metric_cache.get(factor.name)
+    if cached is not None and _usable_base_metrics(cached):
+        return dict(cached)
+    return run_factor_backtest_on_frame(factor, context.frame, symbol=context.symbol, duration=context.duration)
 
 
 def _rank_combinations(
@@ -178,6 +196,21 @@ def _mined_base_candidates(candidates: tuple[Any, ...]) -> list[_BaseCandidate]:
         for item in candidates
         if item.factor.source_file == AGENT_FACTOR_SOURCE_FILE
     ]
+
+
+def _scored_base_candidates(
+    candidates: list[_BaseCandidate],
+    learning_memory: dict[str, Any] | None,
+) -> list[_BaseCandidate]:
+    scored = []
+    for candidate in candidates:
+        metrics = dict(candidate.metrics)
+        metrics["factorScore"] = factor_score(metrics)
+        weight = learning_weight(learning_memory, candidate.factor.name)
+        metrics["learningWeight"] = round(weight, 6)
+        metrics["learningScore"] = round(metrics["factorScore"] + weight, 6)
+        scored.append(_BaseCandidate(candidate.factor, metrics, candidate.orientation))
+    return scored
 
 
 def _enriched_base_candidates(

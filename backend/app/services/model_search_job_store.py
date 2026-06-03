@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
@@ -10,35 +9,31 @@ from app.services.model_search_job_payloads import (
     enqueue_payload,
     failure_values,
     finish_values,
-    insert_sql,
-    insert_values,
     job_spec,
     select_sql,
 )
+from app.services.model_search_job_store_helpers import (
+    EnqueueJobOptions,
+    claim_available_row as _claim_available_row,
+    enqueue_one as _enqueue_one,
+    mark_stale_running_jobs as _mark_stale_running_jobs,
+    required_job as _required_job,
+    update_pending_resource as _update_pending_resource,
+)
 from app.services.model_search_job_schema import ensure_model_search_jobs_table
 from app.services.model_search_job_sql import (
-    claim_sql,
-    existing_select_sql,
     failure_sql,
     finish_sql,
-    pending_resource_update_sql,
-    pending_select_sql,
-    reset_sql,
     retry_sql,
-    stale_select_sql,
-    stale_update_sql,
 )
 from app.services.model_search_job_types import (
     DEFAULT_MAX_RUNNING_JOBS,
     DEFAULT_MODEL_SEARCH_PRIORITY,
     DEFAULT_STALE_AFTER_SECONDS,
-    JOB_STAGE_COARSE,
     JOB_STAGE_QUEUED,
     JOB_STATUS_FAILED,
     JOB_STATUS_PENDING,
     JOB_STATUS_REJECTED,
-    JOB_STATUS_RUNNING,
-    json_dumps,
     utc_now,
 )
 
@@ -65,7 +60,8 @@ def enqueue_model_search_jobs(
         conn = get_conn()
         try:
             ensure_model_search_jobs_table(conn)
-            rows = [_enqueue_one(conn, spec, reset_existing, reset_history, resource) for spec in specs]
+            options = EnqueueJobOptions(reset_existing, reset_history, resource)
+            rows = [_enqueue_one(conn, spec, options) for spec in specs]
             conn.commit()
             return enqueue_payload(rows)
         finally:
@@ -164,7 +160,7 @@ def fail_model_search_job(
     return run_db_write_with_retry(_operation)
 
 
-def retry_failed_model_search_job(job_id: str) -> dict[str, Any]:
+def retry_failed_model_search_job(job_id: str, *, clear_reset_history: bool = False) -> dict[str, Any]:
     def _operation() -> dict[str, Any]:
         conn = get_conn()
         try:
@@ -172,7 +168,8 @@ def retry_failed_model_search_job(job_id: str) -> dict[str, Any]:
             current = _required_job(conn, job_id)
             if current["status"] not in {JOB_STATUS_FAILED, JOB_STATUS_REJECTED}:
                 raise ValueError(f"job {job_id} is not failed/rejected")
-            conn.execute(retry_sql(), (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, job_id))
+            sql = retry_sql(clear_reset_history=clear_reset_history)
+            conn.execute(sql, (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, job_id))
             row = _required_job(conn, job_id)
             conn.commit()
             return decode_job(row)
@@ -220,117 +217,3 @@ def list_model_search_jobs(filters: dict[str, Any] | None = None) -> list[dict[s
         return [decode_job(row) for row in rows]
     finally:
         conn.close()
-
-
-def _update_pending_resource(conn: Any, spec: dict[str, Any], resource: dict[str, Any]) -> bool:
-    selected = resource or {}
-    cursor = conn.execute(
-        pending_resource_update_sql(),
-        (
-            selected.get("resourceProfile"),
-            selected.get("internalThreads"),
-            selected.get("parallelWorkers"),
-            selected.get("xgboostProcessWorkers"),
-            JOB_STATUS_PENDING,
-            spec["symbol"],
-            spec["duration"],
-            spec["model_family"],
-            spec["profile"],
-        ),
-    )
-    return int(cursor.rowcount or 0) > 0
-
-
-def _enqueue_one(
-    conn: Any,
-    spec: dict[str, Any],
-    reset_existing: bool,
-    reset_history: bool,
-    resource: dict[str, Any] | None,
-) -> dict[str, Any]:
-    existing = _find_existing(conn, spec)
-    if existing is None:
-        conn.execute(insert_sql(), insert_values(spec, resource, reset_history))
-        return {**decode_job(_required_job(conn, spec["job_id"])), "enqueueAction": "created"}
-    if reset_existing:
-        _reset_existing_job(conn, existing["job_id"], reset_history, resource)
-        return {**decode_job(_required_job(conn, existing["job_id"])), "enqueueAction": "reset"}
-    return {**decode_job(existing), "enqueueAction": "existing"}
-
-
-def _mark_stale_running_jobs(conn: Any, stale_after_seconds: int) -> None:
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(stale_after_seconds, 1))).isoformat()
-    rows = conn.execute(stale_select_sql(), (JOB_STATUS_RUNNING, cutoff)).fetchall()
-    for row in rows:
-        context = {"stage": row["stage"], "heartbeatAt": row["heartbeat_at"], "startedAt": row["started_at"]}
-        conn.execute(stale_update_sql(), (
-            JOB_STATUS_FAILED, utc_now(), "running_timeout",
-            "running job heartbeat timed out", json_dumps(context), row["job_id"],
-        ))
-
-
-def _running_count(conn: Any) -> int:
-    row = conn.execute("SELECT COUNT(*) AS c FROM model_search_jobs WHERE status = ?", (JOB_STATUS_RUNNING,)).fetchone()
-    return int(row["c"])
-
-
-def _claim_available_row(conn: Any, max_running_jobs: int) -> dict[str, Any] | None:
-    while _running_count(conn) < max_running_jobs:
-        row = _next_pending_row(conn)
-        if row is None:
-            return None
-        job = _claim_row(conn, row["job_id"])
-        if job is not None:
-            return job
-    return None
-
-
-def _next_pending_row(conn: Any) -> Any | None:
-    return conn.execute(pending_select_sql(), (JOB_STATUS_PENDING,)).fetchone()
-
-
-def _claim_row(conn: Any, job_id: str) -> dict[str, Any] | None:
-    now = utc_now()
-    cursor = conn.execute(
-        claim_sql(),
-        (JOB_STATUS_RUNNING, JOB_STAGE_COARSE, now, now, job_id, JOB_STATUS_PENDING),
-    )
-    if int(cursor.rowcount or 0) != 1:
-        return None
-    return decode_job(_required_job(conn, job_id))
-
-
-def _find_existing(conn: Any, spec: dict[str, Any]) -> Any | None:
-    return conn.execute(
-        existing_select_sql(),
-        (spec["symbol"], spec["duration"], spec["model_family"], spec["profile"], spec["params_hash"]),
-    ).fetchone()
-
-
-def _required_job(conn: Any, job_id: str) -> Any:
-    row = conn.execute("SELECT * FROM model_search_jobs WHERE job_id = ?", (job_id,)).fetchone()
-    if row is None:
-        raise ValueError(f"model search job not found: {job_id}")
-    return row
-
-
-def _reset_existing_job(
-    conn: Any,
-    job_id: str,
-    reset_history: bool,
-    resource: dict[str, Any] | None,
-) -> None:
-    selected = resource or {}
-    conn.execute(
-        reset_sql(),
-        (
-            JOB_STATUS_PENDING,
-            JOB_STAGE_QUEUED,
-            selected.get("resourceProfile"),
-            selected.get("internalThreads"),
-            selected.get("parallelWorkers"),
-            selected.get("xgboostProcessWorkers"),
-            1 if reset_history else 0,
-            job_id,
-        ),
-    )

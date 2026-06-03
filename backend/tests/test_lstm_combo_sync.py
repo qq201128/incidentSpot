@@ -341,7 +341,7 @@ def test_factor_combo_refresh_syncs_lstm_before_learning(monkeypatch) -> None:
         calls.append(("learn", symbol, duration, ranking_report["ranking"][0]["factorName"]))
 
     monkeypatch.setattr(combo_background, "run_factor_combination_ranking", fake_run)
-    monkeypatch.setattr(combo_background, "_refresh_duration_klines", lambda *_args: None)
+    monkeypatch.setattr(combo_background, "refresh_factor_combination_data_dependencies", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(combo_background, "save_cached_combination_ranking", fake_save)
     monkeypatch.setattr(combo_background, "upsert_good_combinations", fake_upsert)
     monkeypatch.setattr(combo_background, "sync_lstm_model_to_combo_ranking", fake_sync)

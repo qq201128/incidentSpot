@@ -8,6 +8,7 @@ from app.services.model_family_config import MODEL_FAMILIES, normalize_model_fam
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS
 from app.services.model_family_prediction_service import predict_model_family_signal
 from app.services.model_family_status_service import model_family_status
+from app.services.model_search_api_worker import ensure_api_model_search_worker
 from app.services.model_search_resource import ModelSearchResourceConfig, resource_payload, validated_resource_config
 from app.services.model_search_resource_defaults import DEFAULT_INTERNAL_THREADS, DEFAULT_XGBOOST_PROCESS_WORKERS
 from app.services.model_search_status_service import model_search_queue_status, model_search_status_with_lifecycle
@@ -101,12 +102,11 @@ def model_candidate_search(
         selected = normalize_model_family(family)
         sym = symbol.upper()
         reset_requested = _query_bool(reset_history)
-        internal = _query_int(internal_threads, DEFAULT_INTERNAL_THREADS) or DEFAULT_INTERNAL_THREADS
-        parallel = _query_int(parallel_workers, DEFAULT_PARALLEL_WORKERS) or DEFAULT_PARALLEL_WORKERS
-        xgb_workers = _query_int(
-            xgboost_process_workers,
-            DEFAULT_XGBOOST_PROCESS_WORKERS,
-        ) or DEFAULT_XGBOOST_PROCESS_WORKERS
+        resource = _resource_from_query(
+            internal_threads=internal_threads,
+            parallel_workers=parallel_workers,
+            xgboost_process_workers=xgboost_process_workers,
+        )
         queued = enqueue_untrained_model_search_jobs(
             symbols=(sym,),
             durations=(selected_duration,),
@@ -114,16 +114,9 @@ def model_candidate_search(
             profile=selected_profile,
             reset_existing=reset_requested,
             reset_history=reset_requested,
-            resource=resource_payload(
-                validated_resource_config(
-                    ModelSearchResourceConfig(
-                        internal_threads=internal,
-                        parallel_workers=parallel,
-                        xgboost_process_workers=xgb_workers,
-                    )
-                )
-            ),
+            resource=resource,
         )
+        _ensure_worker_for_jobs(queued, resource)
         status = model_family_status(selected, sym, selected_duration)
         worker = _candidate_search_worker_status(sym, selected_duration, selected)
         return {
@@ -164,6 +157,7 @@ def model_search_retrain_all(
             reset_history=_query_bool(reset_history, True),
             resource=resource,
         )
+        _ensure_worker_for_jobs(queued, resource)
         worker = model_search_queue_status(selected, include_symbol_details=False)["workerStatus"]
         return {
             "version": "model_search_retrain_all_v1",
@@ -229,6 +223,12 @@ def _candidate_search_message(family: str, worker: dict, queued: dict) -> str:
 def _candidate_search_worker_status(symbol: str, duration: str, family: str) -> dict:
     status = model_search_queue_status({"symbols": (symbol,), "durations": (duration,), "families": (family,)})
     return status["workerStatus"]
+
+
+def _ensure_worker_for_jobs(queued: dict, resource: dict) -> None:
+    if not queued.get("jobs"):
+        return
+    ensure_api_model_search_worker(resource)
 
 
 def _batch_search_targets(

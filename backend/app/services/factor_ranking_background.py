@@ -17,7 +17,7 @@ from app.services.factor_ranking_cache_service import (
     factor_ranking_precomputed_symbols,
     save_cached_ranking,
 )
-from app.services.market_context_ingest_service import ingest_market_context_data
+from app.services.factor_combination_data_dependencies import refresh_factor_combination_data_dependencies
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger("uvicorn.error")
@@ -35,7 +35,7 @@ def _initial_delay_seconds() -> float:
 def refresh_ranking_for_symbol_duration(symbol: str, duration: str) -> None:
     """Synchronous: compute full ranking (all categories) and persist."""
     sym = symbol.strip().upper()
-    ingest_market_context_data(sym, durations=(duration,))
+    refresh_factor_combination_data_dependencies(sym, duration)
     report = run_factor_ranking_report(sym, duration, None)
     save_cached_ranking(
         sym,
@@ -54,20 +54,8 @@ def refresh_symbol_rankings(symbol: str, duration: str | None = None) -> None:
             raise ValueError(f"unsupported duration: {duration}")
         refresh_ranking_for_symbol_duration(sym, duration)
         return
-    ingest_market_context_data(sym)
     for dur in sorted(SUPPORTED_RULE_DURATIONS):
-        _save_ranking_report(sym, dur)
-
-
-def _save_ranking_report(symbol: str, duration: str) -> None:
-    report = run_factor_ranking_report(symbol, duration, None)
-    save_cached_ranking(
-        symbol,
-        duration,
-        report["ranking"],
-        diagnostics=report["rankingDiagnostics"],
-        failures=report["rankingFailures"],
-    )
+        refresh_ranking_for_symbol_duration(sym, dur)
 
 
 def refresh_all_configured_rankings() -> None:

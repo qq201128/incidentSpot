@@ -3,13 +3,16 @@ import { Link, useSearchParams } from "react-router-dom";
 import { updateAutoTradeStrategy } from "../api/client";
 import { fetchAutoTradeStrategy } from "../api/liveTradingClient";
 import { strategyDurationLabel, strategyLabel } from "../utils/strategyLabels";
+import LiveTradingSlotPicker from "./LiveTradingSlotPicker";
+import { requestFromParams } from "./liveTradingRoutes";
 import "./LiveTradingPage.css";
 
 const DEFAULT_QTY = 5;
 
 export default function LiveTradingPage() {
   const [searchParams] = useSearchParams();
-  const request = useMemo(() => requestFromParams(searchParams), [searchParams]);
+  const searchParamKey = searchParams.toString();
+  const request = useMemo(() => requestFromParams(searchParams), [searchParamKey]);
   const { error, loading, save, saving, status, slot, updateDraft } = useLiveTradingSlot(request);
 
   return (
@@ -25,10 +28,16 @@ export default function LiveTradingPage() {
       </header>
 
       <section className="live-trading-card">
-        <SlotHeader request={request} slot={slot} loading={loading} />
-        {error ? <p className="live-trading-alert is-error" role="alert">{error}</p> : null}
-        {status ? <p className="live-trading-alert is-ok" role="status">{status}</p> : null}
-        {slot ? <SlotForm slot={slot} saving={saving} onChange={updateDraft} onSave={save} /> : null}
+        {request.hasSlotRequest ? (
+          <>
+            <SlotHeader request={request} slot={slot} loading={loading} />
+            {error ? <p className="live-trading-alert is-error" role="alert">{error}</p> : null}
+            {status ? <p className="live-trading-alert is-ok" role="status">{status}</p> : null}
+            {slot ? <SlotForm slot={slot} saving={saving} onChange={updateDraft} onSave={save} /> : null}
+          </>
+        ) : (
+          <LiveTradingSlotPicker request={request} />
+        )}
       </section>
     </main>
   );
@@ -48,7 +57,6 @@ function useLiveTradingSlot(request) {
     setStatus("");
     setSlot(null);
     if (!request.strategyKey) {
-      setError(missingSlotMessage(request));
       setLoading(false);
       return () => {
         stopped = true;
@@ -161,14 +169,6 @@ function ToggleRow({ checked, label, onChange }) {
 function handleSubmit(event, onSave) {
   event.preventDefault();
   void onSave();
-}
-
-function requestFromParams(searchParams) {
-  return {
-    duration: String(searchParams.get("duration") || "10m"),
-    strategyKey: String(searchParams.get("strategyKey") || ""),
-    symbol: String(searchParams.get("symbol") || "BTCUSDT").trim().toUpperCase(),
-  };
 }
 
 function payloadFromSlot(slot) {

@@ -106,18 +106,34 @@ def materialize_agent_factor_frame(
     duration: str,
     excluded_factor_names: set[str] | None = None,
 ) -> AgentFactorFrameResult:
-    excluded = excluded_factor_names or set()
     rows = _ingested_agent_rows(agent_factor_rows_for_duration(symbol, duration))
+    return materialize_agent_factor_frame_for_rows(
+        frame,
+        rows=rows,
+        source_count=len(rows),
+        excluded_factor_names=excluded_factor_names,
+    )
+
+def materialize_agent_factor_frame_for_rows(
+    frame: pd.DataFrame,
+    *,
+    rows: list[dict[str, Any]],
+    source_count: int | None = None,
+    excluded_factor_names: set[str] | None = None,
+) -> AgentFactorFrameResult:
+    excluded = excluded_factor_names or set()
+    selected = _ingested_agent_rows(rows)
     failures: list[dict[str, Any]] = []
     working = frame
-    for row in rows:
+    for row in selected:
         try:
             if str(row.get("factorName")) in excluded:
                 continue
             working = _with_agent_column(working, row)
         except Exception as exc:
             failures.append(_failure(row, "materialize_agent_factor", exc))
-    return AgentFactorFrameResult(working, len(rows), tuple(failures))
+    count = len(selected) if source_count is None else source_count
+    return AgentFactorFrameResult(working, count, tuple(failures))
 
 def build_agent_mined_candidates_from_frame(
     frame: pd.DataFrame,
@@ -126,9 +142,26 @@ def build_agent_mined_candidates_from_frame(
     duration: str,
     excluded_factor_names: set[str] | None = None,
 ) -> tuple[AgentMinedCandidate, ...]:
+    rows = _ingested_agent_rows(agent_factor_rows_for_duration(symbol, duration))
+    return build_agent_mined_candidates_from_rows(
+        frame,
+        symbol=symbol,
+        duration=duration,
+        rows=rows,
+        excluded_factor_names=excluded_factor_names,
+    )
+
+def build_agent_mined_candidates_from_rows(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+    rows: list[dict[str, Any]],
+    excluded_factor_names: set[str] | None = None,
+) -> tuple[AgentMinedCandidate, ...]:
     excluded = excluded_factor_names or set()
     candidates = []
-    for row in _ingested_agent_rows(agent_factor_rows_for_duration(symbol, duration)):
+    for row in _ingested_agent_rows(rows):
         factor_name = str(row.get("factorName"))
         if factor_name in excluded or factor_name not in frame.columns:
             continue
@@ -212,15 +245,16 @@ def _library_row(record: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(metrics, dict):
         return None
     now = utc_now()
+    quality_passed = _simulation_eligible(metrics)
     return {
         **_library_identity(record),
         "metrics": metrics,
         "score": factor_score(metrics),
         "candidateStatus": str(record.get("status") or "unknown"),
-        "qualityPassed": _simulation_eligible(metrics),
+        "qualityPassed": quality_passed,
         "firstSeenAt": now,
         "lastSeenAt": now,
-        "promotionCount": 1 if record.get("status") == "promoted" else 0,
+        "promotionCount": 1 if quality_passed and record.get("status") == "promoted" else 0,
     }
 
 def _library_identity(row: dict[str, Any]) -> dict[str, Any]:

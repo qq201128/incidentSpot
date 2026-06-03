@@ -5,6 +5,7 @@ from typing import Any
 
 from app.services.model_family_daily_candidates import model_family_daily_candidate_report
 from app.services.model_family_status_service import model_family_status
+from app.services.model_search_api_worker import api_model_search_worker_status
 from app.services.model_search_job_store import list_model_search_jobs
 from app.services.model_search_job_types import JOB_STATUS_RUNNING
 
@@ -47,36 +48,89 @@ def model_search_worker_status(
     jobs: list[dict[str, Any]],
     active_jobs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    counts = Counter(str(job["status"]) for job in jobs)
-    active_counts = Counter(str(job["status"]) for job in active_jobs or jobs)
-    pending = int(counts.get("pending") or 0)
-    running = int(active_counts.get("running") or 0)
+    counts = _status_counts(jobs, active_jobs)
     failed = _latest_relevant_failed_job(jobs)
-    state = _worker_state(pending, running, failed)
+    api_worker = api_model_search_worker_status()
     return {
-        "state": state,
-        "pendingJobs": pending,
-        "runningJobs": running,
-        "failedJobs": int(counts.get("failed") or 0),
-        "latestLogPath": _latest_log_path(jobs),
-        "latestFailureReason": _failure_reason(failed),
+        "state": _worker_state(counts, {"failed": failed, "apiWorker": api_worker}),
+        "pendingJobs": counts["pending"],
+        "runningJobs": counts["running"],
+        "failedJobs": counts["failed"],
+        "latestLogPath": _worker_log_path(jobs, api_worker),
+        "latestFailureReason": _worker_failure_reason(failed, api_worker),
         "latestFailureType": failed.get("failure_type") if failed else None,
         "latestFailedJobId": failed.get("job_id") if failed else None,
         "workerRequiredCommand": MODEL_SEARCH_WORKER_COMMAND,
-        "managedByApi": False,
+        "managedByApi": bool(api_worker.get("managedByApi")),
+        "apiWorker": api_worker,
     }
 
 
-def _worker_state(pending: int, running: int, failed: dict[str, Any] | None) -> str:
-    if pending > 0 and running > 0:
-        return "queued"
+def _worker_state(
+    counts: dict[str, int],
+    context: dict[str, Any],
+) -> str:
+    pending = counts["pending"]
+    running = counts["running"]
     if running > 0:
-        return "running"
+        return _running_worker_state(pending)
+    if pending <= 0:
+        return _idle_worker_state(context.get("failed"))
+    return _pending_worker_state(context.get("apiWorker") or {})
+
+
+def _status_counts(jobs: list[dict[str, Any]], active_jobs: list[dict[str, Any]] | None) -> dict[str, int]:
+    counts = Counter(str(job["status"]) for job in jobs)
+    active_counts = _active_status_counts(jobs, active_jobs)
+    return {
+        "pending": _count_status(counts, "pending"),
+        "running": _count_status(active_counts, "running"),
+        "failed": _count_status(counts, "failed"),
+    }
+
+
+def _active_status_counts(jobs: list[dict[str, Any]], active_jobs: list[dict[str, Any]] | None) -> Counter:
+    if active_jobs is None:
+        return Counter(str(job["status"]) for job in jobs)
+    return Counter(str(job["status"]) for job in active_jobs)
+
+
+def _running_worker_state(pending: int) -> str:
     if pending > 0:
-        return "worker_required"
+        return "queued"
+    return "running"
+
+
+def _pending_worker_state(api_worker: dict[str, Any]) -> str:
+    if api_worker.get("running"):
+        return "queued"
+    if api_worker.get("lastFailureReason"):
+        return "failed"
+    return "worker_required"
+
+
+def _idle_worker_state(failed: dict[str, Any] | None) -> str:
     if failed is not None:
         return "failed"
     return "idle"
+
+
+def _worker_log_path(jobs: list[dict[str, Any]], api_worker: dict[str, Any]) -> str | None:
+    job_log_path = _latest_log_path(jobs)
+    if job_log_path is not None:
+        return job_log_path
+    return api_worker.get("logPath")
+
+
+def _worker_failure_reason(failed: dict[str, Any] | None, api_worker: dict[str, Any]) -> str | None:
+    job_failure_reason = _failure_reason(failed)
+    if job_failure_reason is not None:
+        return job_failure_reason
+    return api_worker.get("lastFailureReason")
+
+
+def _count_status(counts: Counter, status: str) -> int:
+    return int(counts.get(status) or 0)
 
 
 def _active_worker_jobs(filters: dict[str, Any] | None, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:

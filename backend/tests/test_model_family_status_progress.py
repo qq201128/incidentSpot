@@ -21,6 +21,7 @@ def test_queued_progress_caps_completed_and_preserves_stage_counts(monkeypatch) 
         "list_model_search_jobs",
         lambda _filters: [_pending_job(search_space_total=432)],
     )
+    monkeypatch.setattr(progress, "read_model_candidate_library", lambda *_args, **_kwargs: {"records": []})
 
     payload = progress.candidate_search_progress("random_forest", "BTCUSDT", "10m", artifact_root=None)
 
@@ -30,6 +31,35 @@ def test_queued_progress_caps_completed_and_preserves_stage_counts(monkeypatch) 
     assert payload["total"] == 432
     assert payload["percent"] == 1.0
     assert payload["stageEvaluationCompleted"] == 648
+    assert payload["stageEvaluationTotal"] == 1
+
+
+def test_queued_progress_uses_candidate_library_count(monkeypatch) -> None:
+    records = [{"status": "validation_failed"} for _ in range(42)]
+    monkeypatch.setattr(
+        progress,
+        "read_model_candidate_progress_view",
+        lambda *_args, **_kwargs: {
+            "status": "running",
+            "completed": 1,
+            "total": 1,
+            "searchSpaceTotal": 1,
+            "percent": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        progress,
+        "list_model_search_jobs",
+        lambda _filters: [_pending_job(search_space_total=900)],
+    )
+    monkeypatch.setattr(progress, "read_model_candidate_library", lambda *_args, **_kwargs: {"records": records})
+
+    payload = progress.candidate_search_progress("random_forest", "BTCUSDT", "10m", artifact_root=None)
+
+    assert payload["completed"] == 42
+    assert payload["total"] == 900
+    assert payload["percent"] == 0.0467
+    assert payload["stageEvaluationCompleted"] == 1
     assert payload["stageEvaluationTotal"] == 1
 
 
@@ -60,6 +90,8 @@ def test_finish_progress_from_library_keeps_search_space_total_uninflated(monkey
 def _pending_job(search_space_total: int) -> dict:
     return {
         "status": "pending",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
         "profile": "full",
         "created_at": "2026-06-02T03:09:50+00:00",
         "parallel_workers": 1,

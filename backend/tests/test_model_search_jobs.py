@@ -226,6 +226,32 @@ def test_failed_job_can_be_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     assert retried["failure_reason"] is None
 
 
+def test_failed_reset_job_retry_preserves_reset_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("retry-reset-history")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        reset_history=True,
+    )
+    job = store.claim_next_model_search_job(max_running_jobs=1)
+    failed = store.fail_model_search_job(
+        job["job_id"],
+        failure_type="RuntimeError",
+        failure_reason="training crashed",
+        failure_context={"stage": "full"},
+        resource=_resource_payload(),
+        log_path="runtime/fail.log",
+    )
+
+    retried = store.retry_failed_model_search_job(failed["job_id"])
+
+    assert retried["status"] == JOB_STATUS_PENDING
+    assert retried["resetHistory"] is True
+
+
 def test_stale_running_job_is_marked_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _db_path("stale")
     _patch_store_db(monkeypatch, db_path)
@@ -306,6 +332,40 @@ def test_worker_requeues_partial_candidate_batch(monkeypatch: pytest.MonkeyPatch
     assert calls[0].candidates_per_job == 1
     assert len(jobs) == 1
     assert jobs[0]["status"] == JOB_STATUS_PENDING
+
+
+def test_worker_partial_continuation_clears_reset_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("worker-partial-reset-history")
+    log_dir = _runtime_path("worker-partial-reset-history-logs")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+        reset_history=True,
+    )
+    calls = []
+    responses = iter([
+        _batch_result("validation_failed", has_more=True),
+        _batch_result("shadow_active", has_more=False),
+    ])
+
+    def fake_search(config):
+        calls.append(config)
+        return next(responses)
+
+    monkeypatch.setattr(runner, "run_model_candidate_search", fake_search)
+
+    partial = runner.run_one_model_search_job(runner.ModelSearchWorkerConfig(log_dir=log_dir))
+    requeued = store.list_model_search_jobs()[0]
+    finished = runner.run_one_model_search_job(runner.ModelSearchWorkerConfig(log_dir=log_dir))
+
+    assert partial["status"] == "partial"
+    assert calls[0].reset_history is True
+    assert requeued["resetHistory"] is False
+    assert calls[1].reset_history is False
+    assert finished["status"] == JOB_STATUS_SUCCEEDED
 
 
 def test_worker_uses_resource_config_stored_on_job(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -612,4 +672,16 @@ def _resource_payload() -> dict:
         "internalThreads": 1,
         "parallelWorkers": 1,
         "xgboostProcessWorkers": 1,
+    }
+
+
+def _batch_result(status: str, *, has_more: bool) -> dict:
+    return {
+        "status": status,
+        "jobBatch": {
+            "selectedCandidates": 1,
+            "availableCandidatesBeforeJob": 3,
+            "remainingCandidatesAfterJob": 2 if has_more else 0,
+            "hasMoreCandidates": has_more,
+        },
     }

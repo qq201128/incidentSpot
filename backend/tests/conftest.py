@@ -3,6 +3,23 @@ from __future__ import annotations
 import pytest
 
 from app.api import models as models_api
+from app.services import model_search_api_worker
+
+
+@pytest.fixture(autouse=True)
+def reset_model_search_api_worker_state() -> None:
+    model_search_api_worker.reset_api_model_search_worker_state()
+    yield
+    model_search_api_worker.reset_api_model_search_worker_state()
+
+
+@pytest.fixture(autouse=True)
+def default_api_model_search_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        models_api,
+        "ensure_api_model_search_worker",
+        lambda _resource: {"running": True, "managedByApi": True, "started": False},
+    )
 
 
 @pytest.fixture(autouse=True)

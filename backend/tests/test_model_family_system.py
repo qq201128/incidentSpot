@@ -678,8 +678,10 @@ def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> N
     config = search_service.ModelCandidateSearchConfig("knn", "BTCUSDT", "10m", "fast", parallel_workers=1, reset_history=True)
     base = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
     requested = []
+    reset_calls = []
 
     monkeypatch.setattr(search_service, "model_training_config_for_profile", lambda *_args, **_kwargs: base)
+    monkeypatch.setattr(search_service, "reset_model_candidate_history", lambda *args: reset_calls.append(args) or {})
     monkeypatch.setattr(search_service, "attempted_model_search_keys", lambda *_args: frozenset({"already_tried"}))
     monkeypatch.setattr(search_service, "next_model_candidate_configs", lambda _base, _profile, attempted: requested.append(attempted) or [base])
     monkeypatch.setattr(search_service, "start_model_candidate_progress", lambda *_args, **_kwargs: {})
@@ -697,6 +699,7 @@ def test_candidate_search_reset_history_ignores_attempted_keys(monkeypatch) -> N
     result = search_service.run_model_candidate_search(config)
 
     assert result["status"] == "validation_failed"
+    assert reset_calls == [("knn", "BTCUSDT", "10m")]
     assert requested[0] == frozenset()
 
 

@@ -30,7 +30,7 @@ from app.services.factor_mined_library import upsert_good_combinations
 from app.services.factor_ranking_cache_service import factor_ranking_precomputed_symbols
 from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.lstm_combo_sync_service import sync_lstm_model_to_combo_ranking
-from app.services.market_context_ingest_service import ingest_market_context_data
+from app.services.factor_combination_data_dependencies import refresh_factor_combination_data_dependencies
 from app.services.paper_live_daily_loop_status import daily_loop_failure_details
 from app.services.qualified_factor_simulation_slots import sync_qualified_simulation_slots
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
@@ -62,8 +62,7 @@ def refresh_combination_ranking_for_symbol_duration(
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
     sym = symbol.strip().upper()
-    ingest_market_context_data(sym, durations=(duration,))
-    _refresh_duration_klines(sym, duration)
+    refresh_factor_combination_data_dependencies(sym, duration, refresh_duration_klines=_refresh_duration_klines)
     report = run_factor_combination_ranking(sym, duration, config)
     save_cached_combination_ranking(report)
     promotion = upsert_good_combinations(report)

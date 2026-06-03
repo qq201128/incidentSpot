@@ -10,6 +10,8 @@ from app.services.model_family_candidate_executor import (
     CandidateTrainingResult,
     train_candidate_reports,
 )
+from app.services.model_family_candidate_attempts import recorded_model_search_keys
+from app.services.model_family_candidate_reset import reset_model_candidate_history
 from app.services.model_family_candidate_batches import candidate_job_batch, job_batch_payload
 from app.services.model_family_candidate_halving import (
     close_halving_stage,
@@ -30,6 +32,7 @@ from app.services.model_family_candidates import (
 )
 from app.services.model_family_candidate_publisher import publish_best_model_candidate
 from app.services.model_family_config import ModelFamilyTrainingConfig, normalize_model_family
+from app.services.model_family_default_params import family_default_params
 from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_training_rules,
@@ -51,12 +54,22 @@ class ModelCandidateSearchConfig:
 def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, Any]:
     cfg = _validated(config)
     base = model_training_config_for_profile(cfg.family, cfg.symbol, cfg.duration, profile=cfg.profile)
-    attempted = frozenset() if cfg.reset_history else attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
+    if cfg.reset_history:
+        reset_model_candidate_history(cfg.family, cfg.symbol, cfg.duration)
+    attempted = _attempted_search_keys(cfg)
     available = next_model_candidate_configs(base, cfg.profile, attempted)
     if not available:
         return _exhausted_search_result(cfg)
     candidates = candidate_job_batch(available, cfg.candidates_per_job)
     return _run_candidate_batch(cfg, candidates, available_count=len(available))
+
+
+def _attempted_search_keys(cfg: ModelCandidateSearchConfig) -> frozenset[str]:
+    if cfg.reset_history:
+        return frozenset()
+    if cfg.candidates_per_job is not None:
+        return recorded_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
+    return attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
 
 
 def _exhausted_search_result(cfg: ModelCandidateSearchConfig) -> dict[str, Any]:
@@ -130,7 +143,7 @@ def model_training_config_for_profile(
 ) -> ModelFamilyTrainingConfig:
     selected = normalize_model_family(family)
     base = lstm_training_config_for_profile(symbol, duration, normalize_experiment_profile(profile), **overrides)
-    params = _family_default_params(selected)
+    params = family_default_params(selected)
     return ModelFamilyTrainingConfig(
         family=selected,
         symbol=base.symbol,
@@ -282,18 +295,3 @@ def _preserve_exhausted_progress(progress: dict[str, Any]) -> bool:
     status = str(progress.get("status") or "")
     completed = int(progress.get("completed") or 0)
     return completed > 0 and status not in {"failed", "idle", "queued", "running"}
-
-
-def _family_default_params(family: str) -> dict[str, Any]:
-    return {
-        "random_forest": {"n_estimators": 120, "max_depth": None, "min_samples_leaf": 2},
-        "extra_trees": {"n_estimators": 120, "max_depth": None, "min_samples_leaf": 2},
-        "xgboost": {"n_estimators": 80, "max_depth": 3, "learning_rate": 0.08},
-        "lightgbm": {"n_estimators": 100, "num_leaves": 31, "learning_rate": 0.08},
-        "catboost": {"iterations": 100, "depth": 4, "learning_rate": 0.08, "l2_leaf_reg": 3.0},
-        "logistic_elasticnet": {"C": 1.0, "l1_ratio": 0.5},
-        "svm": {"C": 1.0, "gamma": "scale", "kernel": "rbf"},
-        "bayesian": {"var_smoothing": 1e-9},
-        "knn": {"n_neighbors": 7, "weights": "distance"},
-        "rl_strategy": {"state_bins": 5, "alpha": 0.2, "gamma": 0.8, "epsilon": 0.1, "episodes": 20},
-    }.get(family, {})

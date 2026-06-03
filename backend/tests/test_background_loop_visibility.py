@@ -27,6 +27,42 @@ def test_factor_ranking_symbol_failure_is_recorded(monkeypatch) -> None:
     assert status["lastFailureDetails"]["failedSymbols"] == ["BTCUSDT"]
 
 
+def test_factor_ranking_refresh_backfills_dependencies_before_ranking(monkeypatch) -> None:
+    calls = []
+
+    def fake_dependencies(symbol: str, duration: str) -> None:
+        calls.append(("dependencies", symbol, duration))
+
+    def fake_report(symbol: str, duration: str, category: str | None) -> dict:
+        calls.append(("rank", symbol, duration, category))
+        return {
+            "ranking": [{"factorName": "factor_a"}],
+            "rankingDiagnostics": {"rankedFactorCount": 1},
+            "rankingFailures": [],
+        }
+
+    def fake_save(symbol: str, duration: str, ranking: list[dict], **kwargs) -> None:
+        calls.append(("save", symbol, duration, ranking, kwargs))
+
+    monkeypatch.setattr(factor_ranking_background, "refresh_factor_combination_data_dependencies", fake_dependencies)
+    monkeypatch.setattr(factor_ranking_background, "run_factor_ranking_report", fake_report)
+    monkeypatch.setattr(factor_ranking_background, "save_cached_ranking", fake_save)
+
+    factor_ranking_background.refresh_ranking_for_symbol_duration("ethusdt", "10m")
+
+    assert calls == [
+        ("dependencies", "ETHUSDT", "10m"),
+        ("rank", "ETHUSDT", "10m", None),
+        (
+            "save",
+            "ETHUSDT",
+            "10m",
+            [{"factorName": "factor_a"}],
+            {"diagnostics": {"rankedFactorCount": 1}, "failures": []},
+        ),
+    ]
+
+
 def test_auto_settlement_event_failure_is_recorded(monkeypatch) -> None:
     reset_background_loop_statuses()
     monkeypatch.setattr(
