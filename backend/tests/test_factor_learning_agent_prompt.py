@@ -54,6 +54,8 @@ def test_compact_agent_prompt_stays_small() -> None:
 
     assert len(prompt) < 30_000
     assert len(json.dumps(_compact_memory(memory), ensure_ascii=False)) < 12_000
+    assert "agentFactorCategoryBudget" in _compact_memory(memory)
+    assert "factorCategory" in prompt
 
 
 def test_agent_prompt_does_not_grow_with_large_libraries(monkeypatch) -> None:

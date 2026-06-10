@@ -24,13 +24,14 @@ def failure_sql() -> str:
     """
 
 
-def retry_sql(*, clear_reset_history: bool = False) -> str:
+def retry_sql(*, clear_reset_history: bool = False, move_to_back: bool = False) -> str:
     reset_clause = ", reset_history = 0" if clear_reset_history else ""
+    queue_clause = ", created_at = ?" if move_to_back else ""
     return f"""
     UPDATE model_search_jobs
     SET status = ?, stage = ?, started_at = NULL, finished_at = NULL,
         heartbeat_at = NULL, failure_type = NULL, failure_reason = NULL,
-        rejection_reason = NULL, failure_context_json = NULL{reset_clause}
+        rejection_reason = NULL, failure_context_json = NULL{reset_clause}{queue_clause}
     WHERE job_id = ?
     """
 

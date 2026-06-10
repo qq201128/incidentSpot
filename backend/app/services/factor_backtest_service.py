@@ -19,10 +19,11 @@ import pandas as pd
 
 from app.services.factor_duration_alignment import backtest_duration_frame
 from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_regime_analysis import factor_regime_report
 from app.services.factor_metric_enrichment import backtest_validity, enrich_factor_results
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_out_of_sample import factor_out_of_sample_report
-from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics
+from app.services.factor_performance_metrics import BACKTEST_MIN_PERIODS, compute_signal_metrics, signal_returns
 from app.services.factor_research_metrics import (
     IC_ROLLING_WINDOW,
     QUINTILE_COUNT,
@@ -61,6 +62,7 @@ class FactorBacktestResult:
     max_drawdown: float | None
     profit_factor: float | None
     out_of_sample: dict[str, Any]
+    regime: dict[str, Any]
 
 
 def run_factor_backtest(
@@ -138,6 +140,7 @@ def _compute_factor_metrics(
     quintile_returns = research["quintile_returns"]
     long_short = quintile_returns[-1] - quintile_returns[0] if len(quintile_returns) == QUINTILE_COUNT else None
     sharpe, win_rate, max_drawdown, profit_factor = compute_signal_metrics(df, factor_def, horizon)
+    returns = signal_returns(df, factor_def)
 
     return FactorBacktestResult(
         factor_name=factor_name,
@@ -158,6 +161,7 @@ def _compute_factor_metrics(
         max_drawdown=max_drawdown,
         profit_factor=profit_factor,
         out_of_sample=_out_of_sample_report(df, factor_def),
+        regime=factor_regime_report(df, returns, duration),
     )
 
 
@@ -186,6 +190,7 @@ def _empty_factor_result(
         max_drawdown=None,
         profit_factor=None,
         out_of_sample={},
+        regime={},
     )
 
 
@@ -254,6 +259,7 @@ def _result_to_dict(result: FactorBacktestResult, factor_def: FactorDefinition) 
         "maxDrawdown": _round_or_none(result.max_drawdown, 6),
         "profitFactor": _round_or_none(result.profit_factor, 4),
         "outOfSample": result.out_of_sample,
+        "regime": result.regime,
         "backtestValid": validity["valid"],
         "backtestInvalidReason": None if validity["valid"] else validity["reason"],
         "backtestMinPeriods": validity["minPeriods"],

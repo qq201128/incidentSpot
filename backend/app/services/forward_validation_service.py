@@ -5,6 +5,7 @@ from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.paper_live_stage_log import log_settlement_pending, log_settlement_success
+from app.services.event_final_decision_service import settle_due_final_decisions
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 DAY_MS = 86_400_000
@@ -21,8 +22,14 @@ def settle_due_predictions(symbol: str, duration: str) -> dict[str, int]:
         try:
             rows = _due_prediction_rows(conn, symbol, duration)
             settled = sum(1 for row in rows if _settle_prediction(conn, row, duration))
+            decision_settled = settle_due_final_decisions(conn, symbol, duration, _max_open_time(conn, symbol))
             conn.commit()
-            return {"checked": len(rows), "settled": settled, "pendingData": len(rows) - settled}
+            return {
+                "checked": len(rows),
+                "settled": settled,
+                "pendingData": len(rows) - settled,
+                "finalDecisionsSettled": decision_settled,
+            }
         finally:
             conn.close()
 
@@ -48,13 +55,10 @@ def forward_validation_summary(symbol: str, duration: str, meta: dict[str, Any])
 
 
 def _due_prediction_rows(conn, symbol: str, duration: str) -> list[dict[str, Any]]:
-    latest = conn.execute(
-        "SELECT MAX(open_time) AS value FROM klines WHERE symbol = ? AND interval = '1m'",
-        (symbol.upper(),),
-    ).fetchone()
-    if latest is None or latest["value"] is None:
+    latest = _max_open_time(conn, symbol)
+    if latest is None:
         return []
-    max_open_time = int(latest["value"]) - _duration_ms(duration)
+    max_open_time = int(latest) - _duration_ms(duration)
     rows = conn.execute(
         """
         SELECT id, signal_key, strategy_key, symbol, duration, open_time, direction, entry_price
@@ -65,6 +69,14 @@ def _due_prediction_rows(conn, symbol: str, duration: str) -> list[dict[str, Any
         (symbol.upper(), duration, max_open_time),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _max_open_time(conn, symbol: str) -> int | None:
+    latest = conn.execute(
+        "SELECT MAX(open_time) AS value FROM klines WHERE symbol = ? AND interval = '1m'",
+        (symbol.upper(),),
+    ).fetchone()
+    return None if latest is None or latest["value"] is None else int(latest["value"])
 
 
 def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:

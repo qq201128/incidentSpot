@@ -116,6 +116,9 @@ def _system_prompt() -> str:
         "不要再次提出 doNotSuggestFactorNames 中已经入库的单因子，"
         "也不要再次提出 doNotSuggestFormulas 中已经出现过的 formulaHint（含未达标、已存在、物化失败的历史公式）。"
         "必须优先使用 memory.retrieval 中整理好的成功模式、禁区、亏损模式和权重。"
+        "但不得被单一成功类别绑架：每轮 candidateFactorIdeas 必须尽量覆盖至少 3 个不同 factorCategory。"
+        "当 derivatives/资金费率/持仓/多空/主动买卖量已在 categoryShare 中超过预算时，"
+        "该类候选最多 1 个，其余必须探索 price_action、volume_price、microstructure、risk_shape 或 onchain_sentiment。"
         "重点学习 FactorMiner 思路：成功模式、禁区、亏损模式、多重过滤、自动权重。"
         "候选必须能落到现有算子库和现有特征列，不可物化的想法直接拒绝。"
         "formulaHint 必须遵守 formula_constraints；尤其禁止生成 PctChange(x, 1)。"
@@ -146,6 +149,7 @@ def _required_schema() -> dict[str, Any]:
                     "nameHint": "string",
                     "displayNameZh": "string",
                     "formulaHint": "string",
+                    "factorCategory": "string",
                     "operatorTrace": ["string"],
                     "rationale": "string",
                     "rationaleZh": "string",

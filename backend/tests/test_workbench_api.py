@@ -36,8 +36,8 @@ def test_list_events_returns_paginated_symbol_rows(monkeypatch) -> None:
 
     monkeypatch.setattr(events, "get_conn", make_conn)
 
-    page_one = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="events")
-    page_two = events.list_events(symbol="BTCUSDT", page=2, pageSize=8, view="events")
+    page_one = events.list_events(symbol="BTCUSDT", page=1, pageSize=8)
+    page_two = events.list_events(symbol="BTCUSDT", page=2, pageSize=8)
 
     assert page_one["total"] == 12
     assert page_one["pageCount"] == 2
@@ -46,24 +46,12 @@ def test_list_events_returns_paginated_symbol_rows(monkeypatch) -> None:
     assert all(item["symbol"] == "BTCUSDT" for item in page_one["items"])
 
 
-def test_list_events_orders_view_filters_to_rows_with_orders(monkeypatch) -> None:
-    conn = _memory_conn()
-    _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
-    _insert_event(conn, "BTCUSDT", "OPEN", with_order=False)
-    monkeypatch.setattr(events, "get_conn", lambda: conn)
-
-    result = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="orders")
-
-    assert result["total"] == 1
-    assert result["items"][0]["orderSide"] is not None
-
-
 def test_list_events_route_normalizes_optional_query_defaults(monkeypatch) -> None:
     conn = _memory_conn()
     _insert_event(conn, "BTCUSDT", "OPEN", with_order=True)
     monkeypatch.setattr(events, "get_conn", lambda: conn)
 
-    result = events.list_events(symbol="BTCUSDT", page=1, pageSize=8, view="events")
+    result = events.list_events(symbol="BTCUSDT", page=1, pageSize=8)
 
     assert result["total"] == 1
     assert result["items"][0]["symbol"] == "BTCUSDT"
@@ -82,7 +70,8 @@ def _memory_conn() -> sqlite3.Connection:
           settlement_quote_time INTEGER, settlement_source TEXT, ai_probability_up REAL,
           ai_predicted_direction TEXT, ai_prediction_correct INTEGER, ai_quality_score REAL,
           ai_quality_passed INTEGER, ai_high_winrate_gate TEXT, ai_high_winrate_rule TEXT,
-          ai_high_winrate_passed INTEGER, ai_high_winrate_value REAL
+          ai_high_winrate_passed INTEGER, ai_high_winrate_value REAL,
+          market_regime_gate_passed INTEGER
         );
         CREATE TABLE orders (
           id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, side TEXT NOT NULL,
@@ -106,9 +95,10 @@ def _insert_event(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value,
-          start_time, end_time, status, ai_predicted_direction, ai_prediction_correct, result
+          start_time, end_time, status, ai_predicted_direction, ai_prediction_correct, result,
+          market_regime_gate_passed
         )
-        VALUES('manual', ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', ?, ?, 'up', 1, 'YES')
+        VALUES('manual', ?, 'test', '10m', 'ABOVE', 103215.4, '2026-05-21T14:10:00Z', ?, ?, 'up', 1, 'YES', 1)
         """,
         (symbol, "2026-05-21T14:20:00Z", status),
     )

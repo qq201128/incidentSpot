@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.services import auto_predict_input_deps as input_deps
 from app.services import auto_predict_service as service
 from app.services.auto_predict_loop_status import auto_predict_loop_status
 from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
@@ -18,6 +19,7 @@ from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
 )
+from app.services.event_final_decision_service import EVENT_FINAL_DECISION_STRATEGY_KEY
 
 ASYNC_TEST_TIMEOUT_SECONDS = 1.0
 DEFAULT_DURATION = "10m"
@@ -87,16 +89,16 @@ def test_prepare_prediction_inputs_deduplicates_shared_work(monkeypatch) -> None
         _settings(FACTOR_COMBO_STRATEGY_KEY, symbol="ETHUSDT"),
     ]
 
-    monkeypatch.setattr(service, "_refresh_1m_prediction_input", lambda *args: refresh_1m_calls.append(args))
+    monkeypatch.setattr(input_deps, "refresh_1m_prediction_input", lambda *args: refresh_1m_calls.append(args))
     monkeypatch.setattr(
-        service,
-        "_refresh_duration_prediction_input",
+        input_deps,
+        "refresh_duration_prediction_input",
         lambda *args: refresh_duration_calls.append(args),
     )
-    monkeypatch.setattr(service, "settle_due_predictions", lambda *args: settlement_calls.append(args))
-    monkeypatch.setattr(service, "refresh_paper_live_candidate_states", lambda *args: paper_live_calls.append(args))
+    monkeypatch.setattr(input_deps, "settle_due_predictions", lambda *args: settlement_calls.append(args))
+    monkeypatch.setattr(input_deps, "refresh_paper_live_candidate_states", lambda *args: paper_live_calls.append(args))
     monkeypatch.setattr(
-        service,
+        input_deps,
         "current_rule_entry_open_time_for_duration",
         lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
     )
@@ -119,17 +121,17 @@ def test_refresh_prediction_inputs_request_required_completed_klines(monkeypatch
     calls = []
 
     monkeypatch.setattr(
-        service,
+        input_deps,
         "refresh_prediction_klines",
         lambda *args: calls.append(args),
     )
 
-    service._refresh_1m_prediction_input("btcusdt", ENTRY_OPEN_TIME)
-    service._refresh_duration_prediction_input("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME)
+    input_deps.refresh_1m_prediction_input("btcusdt", ENTRY_OPEN_TIME)
+    input_deps.refresh_duration_prediction_input("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME)
 
     assert calls == [
-        ("btcusdt", "1m", ENTRY_OPEN_TIME - service.MS_PER_MINUTE),
-        ("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME - service._duration_ms(DEFAULT_DURATION)),
+        ("btcusdt", "1m", ENTRY_OPEN_TIME - input_deps.MS_PER_MINUTE),
+        ("btcusdt", DEFAULT_DURATION, ENTRY_OPEN_TIME - input_deps._duration_ms(DEFAULT_DURATION)),
     ]
 
 
@@ -201,6 +203,21 @@ def test_factor_combo_shadow_due_uses_offline_focused_candidates(monkeypatch) ->
 
     assert due is True
     assert calls == [simulation_strategy_key_for_factor_name("focused_combo")]
+
+
+def test_factor_candidate_signal_slot_is_collection_only(monkeypatch) -> None:
+    candidate_key = factor_candidate_signal_key("rsi_14")
+    calls = []
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "prediction_exists", lambda **kwargs: calls.append(kwargs) or False)
+
+    assert service._should_predict_entry(_settings(candidate_key)) is False
+    assert calls == []
 
 
 def test_candidate_collection_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
@@ -442,7 +459,7 @@ def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatc
     async def backfill(settings_list: list[AutoTradeSettings]) -> None:
         calls.append(("backfill", [(item.strategy_key, item.duration) for item in settings_list]))
 
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result([]))
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: targets)
     monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
     monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
@@ -455,6 +472,42 @@ def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatc
         ("prepare", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
         ("collect", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
         ("backfill", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
+    ]
+
+
+def test_predict_due_entries_runs_final_decision_after_candidates(monkeypatch) -> None:
+    calls = []
+    primary = _settings(FACTOR_COMBO_STRATEGY_KEY)
+    final = _settings(EVENT_FINAL_DECISION_STRATEGY_KEY)
+    targets = [primary, final]
+
+    async def prepare(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("prepare", [item.strategy_key for item in settings_list]))
+
+    async def run_batch(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("run_batch", [item.strategy_key for item in settings_list]))
+
+    async def collect(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("collect", [item.strategy_key for item in settings_list]))
+
+    async def backfill(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("backfill", [item.strategy_key for item in settings_list]))
+
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result(targets))
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: [primary])
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
+    monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
+
+    asyncio.run(service._predict_due_entries(targets))
+
+    assert calls == [
+        ("prepare", [FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY]),
+        ("run_batch", [FACTOR_COMBO_STRATEGY_KEY]),
+        ("collect", [FACTOR_COMBO_STRATEGY_KEY]),
+        ("backfill", [FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY]),
+        ("run_batch", [EVENT_FINAL_DECISION_STRATEGY_KEY]),
     ]
 
 
@@ -475,7 +528,7 @@ def test_predict_due_entries_collects_candidates_when_primary_batch_fails(monkey
     async def backfill(settings_list: list[AutoTradeSettings]) -> None:
         calls.append(("backfill", [(item.strategy_key, item.duration) for item in settings_list]))
 
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: targets)
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result(targets))
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: targets)
     monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
     monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
@@ -491,10 +544,48 @@ def test_predict_due_entries_collects_candidates_when_primary_batch_fails(monkey
 
     assert calls == [
         ("prepare", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
-        ("collect", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
         ("run_batch", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
+        ("collect", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
         ("backfill", [(FACTOR_COMBO_STRATEGY_KEY, DEFAULT_DURATION)]),
     ]
+
+
+def test_predict_due_entries_continues_ready_targets_when_one_is_skipped(monkeypatch) -> None:
+    calls = []
+    ready = _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m")
+    skipped = {
+        "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+        "symbol": "BTCUSDT",
+        "duration": DEFAULT_DURATION,
+        "reason": "ranking_cache_empty",
+    }
+    targets = [_settings(FACTOR_COMBO_STRATEGY_KEY), ready]
+
+    async def prepare(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("prepare", [item.duration for item in settings_list]))
+
+    async def run_batch(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("run_batch", [item.duration for item in settings_list]))
+
+    async def backfill(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("backfill", [item.duration for item in settings_list]))
+
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result([ready], [skipped]))
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
+    monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", _noop_settings)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
+
+    summary = asyncio.run(service._predict_due_entries(targets))
+
+    assert calls == [
+        ("prepare", ["30m"]),
+        ("run_batch", ["30m"]),
+        ("backfill", ["30m"]),
+    ]
+    assert summary["readyDueCount"] == 1
+    assert summary["skippedTargets"] == [skipped]
 
 
 def test_candidate_collection_uses_factor_combo_source_for_non_combo_strategy(monkeypatch) -> None:
@@ -661,7 +752,7 @@ def test_prediction_targets_include_all_enabled_slots(monkeypatch) -> None:
     }
 
 
-def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> None:
+def test_ready_due_prediction_targets_exposes_skipped_and_keeps_ready(monkeypatch) -> None:
     mixed = [
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="10m"),
         _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m"),
@@ -680,17 +771,15 @@ def test_ready_due_prediction_targets_skip_empty_ranking_cache(monkeypatch) -> N
     )
     monkeypatch.setattr(service, "_due_prediction_targets", lambda targets: targets)
 
-    try:
-        service._ready_due_prediction_targets(mixed)
-    except service.target_helpers.PredictionTargetReadinessError as exc:
-        assert exc.details["skippedTargets"][0]["reason"] == "ranking_cache_empty"
-        assert exc.details["skippedTargets"][0]["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
-    else:
-        raise AssertionError("not-ready due target was silently skipped")
+    result = service._ready_due_prediction_targets(mixed)
+
+    assert list(result.ready) == [mixed[1]]
+    assert result.skipped[0]["reason"] == "ranking_cache_empty"
+    assert result.skipped[0]["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
     assert recovery_flags == [False, False]
 
 
-def test_auto_predict_loop_records_due_readiness_failure_details(monkeypatch) -> None:
+def test_auto_predict_loop_records_due_readiness_skips(monkeypatch) -> None:
     reset_background_loop_statuses()
     stop_event = asyncio.Event()
     skipped = {
@@ -700,23 +789,25 @@ def test_auto_predict_loop_records_due_readiness_failure_details(monkeypatch) ->
         "reason": "ranking_cache_empty",
     }
 
-    def fail_ready(_targets):
+    def skip_ready(_targets):
         stop_event.set()
-        raise service.target_helpers.PredictionTargetReadinessError([skipped])
+        return _ready_result([], [skipped])
 
     monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
     monkeypatch.setattr(service, "_prediction_targets", lambda: [_settings(FACTOR_COMBO_STRATEGY_KEY)])
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", fail_ready)
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", skip_ready)
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: [])
 
     asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
 
     status = auto_predict_loop_status()
-    assert status["status"] == "failed"
-    assert status["exceptionType"] == "PredictionTargetReadinessError"
-    assert status["failureDetails"] == {"skippedTargets": [skipped]}
+    assert status["status"] == "stopped"
+    assert status["error"] is None
+    assert status["exceptionType"] is None
+    assert status["skippedTargetCount"] == 1
+    assert status["skippedTargets"] == [skipped]
     background_status = background_loop_statuses()["auto_predict"]
-    assert background_status["lastFailureDetails"]["failureDetails"] == {"skippedTargets": [skipped]}
+    assert background_status["lastSuccessDetails"]["skippedTargets"] == [skipped]
 
 
 def test_prediction_targets_do_not_fallback_to_default_when_enabled_targets_invalid(monkeypatch) -> None:
@@ -971,7 +1062,7 @@ def test_predict_due_entries_runs_lstm_shadow_backfill_after_current_predictions
     async def collect(_settings_list: list[AutoTradeSettings]) -> None:
         return None
 
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda items: items)
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda items: _ready_result(items))
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda _items: [])
     monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
     monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
@@ -1074,7 +1165,7 @@ def test_auto_predict_loop_records_shadow_backfill_failure_details(monkeypatch) 
 
     monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
     monkeypatch.setattr(service, "_prediction_targets", lambda: [_settings(FACTOR_COMBO_STRATEGY_KEY)])
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result([]))
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda targets: targets)
     monkeypatch.setattr(service, "_prepare_prediction_inputs", _noop_settings)
     monkeypatch.setattr(service, "_run_candidate_collection_batch", _noop_settings)
@@ -1116,7 +1207,7 @@ def test_auto_predict_loop_records_candidate_collection_failure_details(monkeypa
 
     monkeypatch.setattr(service, "_predict_initial_delay_seconds", lambda: 0.0)
     monkeypatch.setattr(service, "_prediction_targets", lambda: [setting])
-    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: [])
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result([]))
     monkeypatch.setattr(service, "_candidate_collection_targets", lambda targets: targets)
     monkeypatch.setattr(service, "_prepare_prediction_inputs", _noop_settings)
     monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
@@ -1209,6 +1300,13 @@ async def _noop_broadcast(_result: dict) -> None:
 
 async def _noop_settings(_settings_list: list[AutoTradeSettings]) -> None:
     return None
+
+
+def _ready_result(
+    ready: list[AutoTradeSettings],
+    skipped: list[dict] | None = None,
+) -> service.target_helpers.ReadyPredictionTargetResult:
+    return service.target_helpers.ReadyPredictionTargetResult(tuple(ready), tuple(skipped or []))
 
 
 def _readiness(ready: bool, reason: str = "ready", **kwargs):

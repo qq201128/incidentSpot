@@ -124,6 +124,8 @@ def test_worker_script_run_until_empty_uses_adaptive_pool_by_default(
     captured = capsys.readouterr()
     assert len(calls) == 1
     assert calls[0][0].max_running_jobs == 1
+    assert calls[0][0].candidates_per_job == worker_script.DEFAULT_CANDIDATES_PER_JOB
+    assert calls[0][0].candidate_budget == worker_script.DEFAULT_CANDIDATE_BUDGET
     assert calls[0][1].max_jobs == 0
     assert calls[0][2] == 0.01
     assert calls[0][3] is True
@@ -156,6 +158,55 @@ def test_worker_script_passes_memory_budget_to_adaptive_pool(
     assert worker_script.main() == 0
     assert calls[0][1].memory_per_job_mb == 8192
     assert calls[0][1].min_available_memory_mb == 6144
+
+
+def test_worker_script_candidate_budget_zero_disables_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_model_search_worker.py", "--run-until-empty", "--candidate-budget", "0"],
+    )
+
+    def fake_pool(config, adaptive, *, poll_seconds: float, run_until_empty: bool):
+        calls.append((config, adaptive, poll_seconds, run_until_empty))
+        return iter([_idle_report()])
+
+    monkeypatch.setattr(worker_script, "run_adaptive_worker_pool", fake_pool)
+
+    assert worker_script.main() == 0
+    assert calls[0][0].candidate_budget is None
+
+
+def test_worker_script_passes_claim_filters_to_worker_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_model_search_worker.py",
+            "--run-until-empty",
+            "--symbols",
+            "btcusdt",
+            "--durations",
+            "10m",
+            "--families",
+            "knn",
+        ],
+    )
+
+    def fake_pool(config, adaptive, *, poll_seconds: float, run_until_empty: bool):
+        calls.append((config, adaptive, poll_seconds, run_until_empty))
+        return iter([_idle_report()])
+
+    monkeypatch.setattr(worker_script, "run_adaptive_worker_pool", fake_pool)
+
+    assert worker_script.main() == 0
+    assert calls[0][0].filters == {
+        "symbols": ("BTCUSDT",),
+        "durations": ("10m",),
+        "families": ("knn",),
+    }
 
 
 def _patch_worker_script(monkeypatch: pytest.MonkeyPatch, reports: list[dict], *args: str) -> list:

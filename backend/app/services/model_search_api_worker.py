@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_success
+from app.services.model_search_job_defaults import DEFAULT_CANDIDATE_BUDGET, DEFAULT_CANDIDATES_PER_JOB
 from app.services.model_search_job_types import DEFAULT_STALE_AFTER_SECONDS
 
 LOOP_NAME = "model_search_api_worker"
@@ -104,6 +105,10 @@ def _worker_command(resource: dict[str, Any]) -> tuple[str, ...]:
         str(JOB_LOG_DIR),
         "--stale-after-seconds",
         str(DEFAULT_STALE_AFTER_SECONDS),
+        "--candidates-per-job",
+        str(DEFAULT_CANDIDATES_PER_JOB),
+        "--candidate-budget",
+        str(DEFAULT_CANDIDATE_BUDGET),
         "--compact",
     )
 

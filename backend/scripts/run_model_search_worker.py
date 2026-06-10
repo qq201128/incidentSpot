@@ -23,9 +23,12 @@ from app.services.model_search_adaptive_parallelism import (  # noqa: E402
     DEFAULT_MIN_RUNNING_JOBS,
     AdaptiveParallelismConfig,
 )
+from app.services.model_search_job_defaults import DEFAULT_CANDIDATE_BUDGET, DEFAULT_CANDIDATES_PER_JOB  # noqa: E402
 from app.services.model_search_job_runner import DEFAULT_LOG_DIR, ModelSearchWorkerConfig, run_one_model_search_job  # noqa: E402
 from app.services.model_search_resource import ModelSearchResourceConfig  # noqa: E402
 from app.services.model_search_worker_pool import run_adaptive_worker_pool  # noqa: E402
+from app.services.model_family_config import normalize_model_family  # noqa: E402
+from app.services.runtime_symbols import parse_symbol_csv  # noqa: E402
 
 DEFAULT_POLL_SECONDS = 5.0
 RUN_ONCE_MAX_RUNNING_JOBS = 1
@@ -142,6 +145,8 @@ def _worker_config(args: argparse.Namespace) -> ModelSearchWorkerConfig:
         log_dir=Path(args.log_dir),
         stale_after_seconds=args.stale_after_seconds,
         candidates_per_job=args.candidates_per_job,
+        candidate_budget=_candidate_budget(args),
+        filters=_claim_filters(args),
     )
 
 
@@ -177,7 +182,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--resource-profile", default="local_safe")
     parser.add_argument("--log-dir", default=str(DEFAULT_LOG_DIR))
     parser.add_argument("--stale-after-seconds", type=int, default=3600)
-    parser.add_argument("--candidates-per-job", type=int, default=1)
+    parser.add_argument("--candidates-per-job", type=_positive_int, default=DEFAULT_CANDIDATES_PER_JOB)
+    parser.add_argument("--candidate-budget", type=_non_negative_int, default=DEFAULT_CANDIDATE_BUDGET)
+    parser.add_argument("--symbols", help="Only claim jobs for these CSV symbols.")
+    parser.add_argument("--durations", nargs="+", help="Only claim jobs for these durations.")
+    parser.add_argument("--families", nargs="+", help="Only claim jobs for these model families.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run-until-empty", action="store_true", help="Keep claiming jobs until the queue is empty.")
     mode.add_argument("--loop", action="store_true", help="Keep running in foreground and poll when no job is pending.")
@@ -196,6 +205,20 @@ def _parse_args() -> argparse.Namespace:
     if args.cpu_low_percent >= args.cpu_high_percent:
         parser.error("--cpu-low-percent must be lower than --cpu-high-percent")
     return args
+
+
+def _candidate_budget(args: argparse.Namespace) -> int | None:
+    return None if args.candidate_budget == 0 else int(args.candidate_budget)
+
+
+def _claim_filters(args: argparse.Namespace) -> dict[str, tuple[str, ...]] | None:
+    filters = {
+        "symbols": parse_symbol_csv(args.symbols) if args.symbols else (),
+        "durations": tuple(args.durations or ()),
+        "families": tuple(normalize_model_family(value) for value in (args.families or ())),
+    }
+    selected = {key: value for key, value in filters.items() if value}
+    return selected or None
 
 
 def _positive_float(value: str) -> float:

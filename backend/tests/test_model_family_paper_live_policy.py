@@ -22,6 +22,8 @@ def test_validation_gate_pass_only_allows_paper_live_collection() -> None:
     assert admission["paperLiveSampleCount"] == 0
     assert admission["realTradingEnabled"] is False
     assert admission["credibilitySource"] == "settled_paper_live_predictions"
+    assert admission["tradeCredibility"] == "unproven_until_settled_paper_live"
+    assert admission["validationGateRole"] == "prefilter_not_live_credibility"
 
 
 def test_validation_gate_failure_is_not_paper_live_stable() -> None:
@@ -31,7 +33,8 @@ def test_validation_gate_failure_is_not_paper_live_stable() -> None:
 
     assert payload["paperLiveAdmission"]["allowed"] is False
     assert payload["paperLiveStatus"] == "backtest_candidate"
-    assert payload["validationRole"] == "validation_gate_or_relative_shadow_observation"
+    assert payload["validationRole"] == "validation_or_relative_shadow_collects_paper_live_only"
+    assert payload["validationGateRole"] == "prefilter_not_live_credibility"
     assert payload["realTradingEnabled"] is False
 
 

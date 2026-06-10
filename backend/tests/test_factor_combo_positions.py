@@ -101,7 +101,8 @@ def _conn() -> sqlite3.Connection:
           status TEXT NOT NULL,
           created_at TEXT NOT NULL,
           external_order_id TEXT,
-          external_status TEXT
+          external_status TEXT,
+          external_response TEXT
         );
         CREATE TABLE settlements (event_id INTEGER NOT NULL, pnl REAL NOT NULL);
         """
@@ -131,7 +132,9 @@ def _insert_event(
     )
     conn.execute(
         """
-        INSERT INTO orders VALUES(?, ?, 'BUY', 0.8, 5.0, 'OPEN', '2026-05-13T00:00:00+00:00', NULL, 'SIMULATED')
+        INSERT INTO orders VALUES(
+          ?, ?, 'BUY', 0.8, 5.0, 'OPEN', '2026-05-13T00:00:00+00:00', NULL, 'SIMULATED', NULL
+        )
         """,
         (event_id, event_id),
     )

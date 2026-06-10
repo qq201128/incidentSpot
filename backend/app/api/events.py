@@ -58,7 +58,6 @@ def list_events(
     durationMinutes: int | None = Query(None),
     page: int = Query(1, ge=1),
     pageSize: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-    view: str = Query("events"),
     q: str | None = Query(None, description="search event id/title/status/strategy/order response"),
 ) -> dict:
     conn = get_conn()
@@ -66,7 +65,6 @@ def list_events(
         selected_symbol = symbol if isinstance(symbol, str) else None
         selected_strategy = strategyKey if isinstance(strategyKey, str) else None
         selected_duration = durationMinutes if isinstance(durationMinutes, int) else None
-        selected_view = view if isinstance(view, str) else "events"
         query = q if isinstance(q, str) else None
         try:
             payload = paginated_events(
@@ -74,7 +72,6 @@ def list_events(
                 symbol=selected_symbol,
                 page=page,
                 page_size=pageSize,
-                view=selected_view,
                 strategy_key=selected_strategy,
                 duration_minutes=selected_duration,
                 query=query,

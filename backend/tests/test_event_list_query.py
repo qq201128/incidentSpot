@@ -16,7 +16,6 @@ def test_paginated_events_filters_by_strategy_key() -> None:
         symbol="BTCUSDT",
         page=1,
         page_size=10,
-        view="events",
         strategy_key="factor_combo_ranker_v1_combo_abc",
     )
 
@@ -35,7 +34,6 @@ def test_paginated_events_filters_by_duration_minutes() -> None:
         symbol="BTCUSDT",
         page=1,
         page_size=10,
-        view="events",
         strategy_key="combo_a",
         duration_minutes=30,
     )
@@ -49,26 +47,12 @@ def test_paginated_events_clamps_page_to_last_page() -> None:
     for _ in range(3):
         _insert_event(conn, "BTCUSDT")
 
-    payload = paginated_events(conn, symbol="BTCUSDT", page=99, page_size=2, view="events")
+    payload = paginated_events(conn, symbol="BTCUSDT", page=99, page_size=2)
 
     assert payload["page"] == 2
     assert payload["pageCount"] == 2
     assert payload["total"] == 3
     assert len(payload["items"]) == 1
-
-
-def test_failure_view_includes_settlement_and_order_failure_text() -> None:
-    conn = _memory_conn()
-    event_failure_id = _insert_event(conn, "BTCUSDT", status="OPEN", settlement_source="settlement_error: timeout")
-    order_failure_id = _insert_event(conn, "BTCUSDT", status="OPEN")
-    _insert_order(conn, order_failure_id, status="OPEN", external_response="exchange reject: min notional")
-    _insert_event(conn, "BTCUSDT", status="OPEN", settlement_source="simulated")
-
-    payload = paginated_events(conn, symbol="BTCUSDT", page=1, page_size=10, view="failures")
-
-    ids = {row["id"] for row in payload["items"]}
-    assert ids == {event_failure_id, order_failure_id}
-    assert payload["total"] == 2
 
 
 def test_paginated_events_searches_backend_fields() -> None:
@@ -82,7 +66,6 @@ def test_paginated_events_searches_backend_fields() -> None:
         symbol="BTCUSDT",
         page=1,
         page_size=10,
-        view="events",
         query="search_target",
     )
 
@@ -105,16 +88,9 @@ def test_paginated_events_searches_symbol_and_order_fields() -> None:
         external_response="simulated order",
     )
 
-    symbol_payload = paginated_events(conn, symbol=None, page=1, page_size=10, view="events", query="btcusdt")
-    side_payload = paginated_events(conn, symbol="BTCUSDT", page=1, page_size=10, view="orders", query="sell")
-    external_id_payload = paginated_events(
-        conn,
-        symbol="BTCUSDT",
-        page=1,
-        page_size=10,
-        view="orders",
-        query="paper-777",
-    )
+    symbol_payload = paginated_events(conn, symbol=None, page=1, page_size=10, query="btcusdt")
+    side_payload = paginated_events(conn, symbol="BTCUSDT", page=1, page_size=10, query="sell")
+    external_id_payload = paginated_events(conn, symbol="BTCUSDT", page=1, page_size=10, query="paper-777")
 
     assert symbol_payload["items"][0]["id"] == target_id
     assert side_payload["items"][0]["id"] == target_id
@@ -125,7 +101,7 @@ def test_paginated_events_search_empty_result_is_explicit() -> None:
     conn = _memory_conn()
     _insert_event(conn, "BTCUSDT", strategy_key="manual", status="OPEN")
 
-    payload = paginated_events(conn, symbol="BTCUSDT", page=4, page_size=10, view="events", query="missing")
+    payload = paginated_events(conn, symbol="BTCUSDT", page=4, page_size=10, query="missing")
 
     assert payload["items"] == []
     assert payload["total"] == 0

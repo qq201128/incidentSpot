@@ -12,6 +12,7 @@ from app.api.events import create_quick_trade
 from app.api.event_writes import _insert_order
 from app.api.events_models import EventCreate, OrderCreate, QuickTradeCreate
 from app.services.event_search_index import ensure_event_search_index
+from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 
 def test_manual_order_insert_is_explicitly_simulated() -> None:
@@ -115,10 +116,96 @@ def test_quick_trade_live_failure_does_not_write_rows(monkeypatch: pytest.Monkey
     assert _row_count(keeper, "orders") == 0
 
 
-def _quick_trade_payload(*, live: bool) -> QuickTradeCreate:
+def test_strategy_quick_trade_requires_prediction_open_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(HTTPException) as exc:
+        event_quick_trade.create_quick_trade_record(
+            event_quick_trade.QuickTradeContext(
+                payload=_quick_trade_payload(live=False, strategy_key=FACTOR_COMBO_STRATEGY_KEY),
+                strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+                symbol="BTCUSDT",
+                side="BUY",
+                event_interval="10m",
+                rule_type="ABOVE",
+                predicted="up",
+                entry_price=100.0,
+                live_trading_enabled=False,
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert "prediction_open_time" in str(exc.value.detail)
+    assert _row_count(keeper, "events") == 0
+    assert _row_count(keeper, "orders") == 0
+
+
+def test_strategy_quick_trade_blocks_counter_regime(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(event_quick_trade, "evaluate_market_regime_trade_gate", _blocked_regime_gate)
+
+    with pytest.raises(HTTPException) as exc:
+        event_quick_trade.create_quick_trade_record(
+            event_quick_trade.QuickTradeContext(
+                payload=_quick_trade_payload(live=False, strategy_key=FACTOR_COMBO_STRATEGY_KEY),
+                strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+                symbol="BTCUSDT",
+                side="BUY",
+                event_interval="10m",
+                rule_type="ABOVE",
+                predicted="up",
+                entry_price=100.0,
+                live_trading_enabled=False,
+                prediction_open_time=1_700_000_000_000,
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["gateReason"] == "counter_trend_up_vs_down"
+    assert _row_count(keeper, "events") == 0
+    assert _row_count(keeper, "orders") == 0
+
+
+def test_strategy_quick_trade_records_market_regime_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(event_quick_trade, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+
+    result = event_quick_trade.create_quick_trade_record(
+        event_quick_trade.QuickTradeContext(
+            payload=_quick_trade_payload(live=False, strategy_key=FACTOR_COMBO_STRATEGY_KEY),
+            strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+            symbol="BTCUSDT",
+            side="BUY",
+            event_interval="10m",
+            rule_type="ABOVE",
+            predicted="up",
+            entry_price=100.0,
+            live_trading_enabled=False,
+            prediction_open_time=1_700_000_000_000,
+        )
+    )
+
+    row = keeper.execute("SELECT * FROM events WHERE id = ?", (result["eventId"],)).fetchone()
+    assert row["market_regime_gate_passed"] == 1
+    assert row["market_regime_gate_reason"] == "trend_up_aligned"
+    assert row["market_regime_gate_mode"] == "trend"
+    assert row["market_regime_label"] == "trend_up:normal_vol"
+
+
+def _quick_trade_payload(*, live: bool, strategy_key: str | None = None) -> QuickTradeCreate:
     return QuickTradeCreate(
         liveTradingEnabled=live,
         event=EventCreate(
+            strategyKey=strategy_key,
             symbol="BTCUSDT",
             title="manual quick trade",
             eventInterval="10m",
@@ -166,7 +253,12 @@ def _quick_trade_conn(db_uri: str) -> sqlite3.Connection:
           ai_high_winrate_gate TEXT,
           ai_high_winrate_rule TEXT,
           ai_high_winrate_passed INTEGER,
-          ai_high_winrate_value REAL
+          ai_high_winrate_value REAL,
+          market_regime_gate_version TEXT,
+          market_regime_gate_passed INTEGER,
+          market_regime_gate_reason TEXT,
+          market_regime_gate_mode TEXT,
+          market_regime_label TEXT
         )
         """
     )
@@ -205,3 +297,19 @@ def _row_count(conn: sqlite3.Connection, table: str) -> int:
     else:
         raise ValueError(f"unsupported table: {table}")
     return int(row["total"])
+
+
+class _RegimeDecision:
+    def __init__(self, allowed: bool, reason: str, mode: str, label: str) -> None:
+        self.allowed = allowed
+        self.reason = reason
+        self.mode = mode
+        self.regime = {"ready": True, "trendState": label.split(":")[0], "regimeLabel": label}
+
+
+def _blocked_regime_gate(**_kwargs):
+    return _RegimeDecision(False, "counter_trend_up_vs_down", "skip", "trend_down:normal_vol")
+
+
+def _allowed_regime_gate(**_kwargs):
+    return _RegimeDecision(True, "trend_up_aligned", "trend", "trend_up:normal_vol")

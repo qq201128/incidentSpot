@@ -172,6 +172,22 @@ def test_claim_allows_multiple_running_jobs_when_capacity_allows(monkeypatch: py
     assert blocked is None
 
 
+def test_claim_filters_pending_jobs_by_symbol_and_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _db_path("claim-filtered")
+    _patch_store_db(monkeypatch, db_path)
+    _enqueue_one(symbol="ETHUSDT")
+    _enqueue_one(symbol="BTCUSDT")
+
+    job = store.claim_next_model_search_job(
+        max_running_jobs=1,
+        filters={"symbols": ("BTCUSDT",), "durations": ("10m",), "families": ("knn",)},
+    )
+
+    assert job is not None
+    assert job["symbol"] == "BTCUSDT"
+    assert store.list_model_search_jobs({"symbols": ("ETHUSDT",)})[0]["status"] == JOB_STATUS_PENDING
+
+
 def test_finish_success_and_rejection_are_written(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _db_path("finish")
     _patch_store_db(monkeypatch, db_path)
@@ -299,7 +315,8 @@ def test_worker_runs_one_job_and_persists_resource(monkeypatch: pytest.MonkeyPat
     assert report["status"] == JOB_STATUS_SUCCEEDED
     assert calls[0].family == "knn"
     assert calls[0].parallel_workers == 1
-    assert calls[0].candidates_per_job == 1
+    assert calls[0].candidates_per_job == runner.DEFAULT_CANDIDATES_PER_JOB
+    assert calls[0].candidate_budget == runner.DEFAULT_CANDIDATE_BUDGET
     assert report["job"]["internal_threads"] == 2
     assert Path(report["job"]["log_path"]).exists()
 
@@ -329,7 +346,7 @@ def test_worker_requeues_partial_candidate_batch(monkeypatch: pytest.MonkeyPatch
     jobs = store.list_model_search_jobs()
 
     assert report["status"] == "partial"
-    assert calls[0].candidates_per_job == 1
+    assert calls[0].candidates_per_job == runner.DEFAULT_CANDIDATES_PER_JOB
     assert len(jobs) == 1
     assert jobs[0]["status"] == JOB_STATUS_PENDING
 
@@ -586,7 +603,8 @@ def test_candidate_search_api_normalizes_query_defaults(monkeypatch: pytest.Monk
 
     assert response["duration"] == "10m"
     assert calls[0]["durations"] == ("10m",)
-    assert calls[0]["profile"] == "full"
+    assert calls[0]["profile"] == "fast"
+    assert calls[0]["priority"] == models_api.QUICK_MODEL_SEARCH_PRIORITY
     assert calls[0]["reset_history"] is False
     assert calls[0]["resource"]["internalThreads"] == 1
     assert calls[0]["resource"]["parallelWorkers"] == 1

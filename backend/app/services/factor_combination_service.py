@@ -18,7 +18,7 @@ from app.services.factor_combination_ranker import (
     enriched_combo_result,
     rank_combinations,
 )
-from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_frame_service import load_factor_frame, lookback_days_for_bars
 from app.services.factor_metric_enrichment import (
     factor_avg_abs_correlations,
     factor_score,
@@ -34,20 +34,22 @@ from app.services.factor_learning_controls import (
 )
 from app.services.factor_combination_mined_inputs import build_mined_candidates
 from app.services.factor_registry import FactorDefinition, FactorDirection, list_factors
+from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
-DEFAULT_BASE_FACTOR_LIMIT = 48
-DEFAULT_NATIVE_FACTOR_LIMIT = 32
+DEFAULT_BASE_FACTOR_LIMIT = 120
+DEFAULT_NATIVE_FACTOR_LIMIT = 120
 DEFAULT_MINED_FACTOR_LIMIT = 12
-DEFAULT_AGENT_FACTOR_LIMIT = 4
-DEFAULT_RESULT_LIMIT = 200
-DEFAULT_PREFILTER_LIMIT = 800
-DEFAULT_BEAM_WIDTH = 800
-DEFAULT_PARALLEL_WORKERS = 4
+DEFAULT_AGENT_FACTOR_LIMIT = 12
+DEFAULT_RESULT_LIMIT = 500
+DEFAULT_PREFILTER_LIMIT = 500
+DEFAULT_BEAM_WIDTH = 500
+DEFAULT_PARALLEL_WORKERS = 1
+DEFAULT_LOOKBACK_BARS = 720
 BASE_DIRECTION_SPLIT = 0.50
 MIN_COMBO_SIZE = 2
 DEFAULT_MAX_COMBO_SIZE = 3
-DEFAULT_COMBO_SIZES = (MIN_COMBO_SIZE, DEFAULT_MAX_COMBO_SIZE)
+DEFAULT_COMBO_SIZES = (MIN_COMBO_SIZE,)
 
 @dataclass(frozen=True)
 class CombinationSearchConfig:
@@ -60,6 +62,8 @@ class CombinationSearchConfig:
     prefilter_limit: int = DEFAULT_PREFILTER_LIMIT
     beam_width: int = DEFAULT_BEAM_WIDTH
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS
+    lookback_days: int | None = None
+    lookback_bars: int | None = DEFAULT_LOOKBACK_BARS
     method: str = COMBINATION_METHOD
 
 @dataclass(frozen=True)
@@ -74,6 +78,11 @@ class _CombinationContext:
     symbol: str
     duration: str
 
+@dataclass(frozen=True)
+class _SourceSelection:
+    factor_names: set[str] | None
+    diagnostics: dict[str, Any]
+
 def run_factor_combination_ranking(
     symbol: str,
     duration: str,
@@ -82,14 +91,17 @@ def run_factor_combination_ranking(
     cfg = _validated_config(config or CombinationSearchConfig())
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
-    frame = load_factor_frame(symbol, duration)
+    frame = load_factor_frame(symbol, duration, lookback_days=_effective_lookback_days(duration, cfg))
     base_metric_cache = cached_factor_metrics_by_name(symbol, duration)
+    source_selection = _source_factor_selection(symbol, duration, cfg.native_factor_limit)
     return run_factor_combination_ranking_on_frame(
         frame,
         symbol=symbol,
         duration=duration,
         config=cfg,
         base_metric_cache=base_metric_cache,
+        source_factor_names=source_selection.factor_names,
+        source_selection_diagnostics=source_selection.diagnostics,
     )
 
 def run_factor_combination_ranking_on_frame(
@@ -99,6 +111,8 @@ def run_factor_combination_ranking_on_frame(
     duration: str,
     config: CombinationSearchConfig,
     base_metric_cache: dict[str, dict[str, Any]] | None = None,
+    source_factor_names: set[str] | None = None,
+    source_selection_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = _validated_config(config)
     if duration not in SUPPORTED_RULE_DURATIONS:
@@ -114,7 +128,11 @@ def run_factor_combination_ranking_on_frame(
         excluded_factor_names=blocked_names,
     )
     context = _CombinationContext(mined.frame, symbol.upper(), duration)
-    base, base_failures = _base_candidates(context, metric_cache=base_metric_cache)
+    base, base_failures = _base_candidates(
+        context,
+        metric_cache=base_metric_cache,
+        source_factor_names=source_factor_names,
+    )
     base.extend(_mined_base_candidates(mined.candidates))
     base = _scored_base_candidates(base, learning_memory)
     selected = select_base_candidates(base, cfg, rank_key=_base_rank_key)
@@ -128,10 +146,14 @@ def run_factor_combination_ranking_on_frame(
             config=cfg,
             selected=selected,
             ranking=rank_result.ranking,
+            evaluated_ranking=rank_result.evaluated_ranking,
             tested_count=rank_result.tested_count,
             failures=failures,
             mined_source_count=mined.source_count,
-            search_diagnostics=rank_result.diagnostics,
+            search_diagnostics={
+                **rank_result.diagnostics,
+                "sourceSelection": source_selection_diagnostics or _unfiltered_source_selection(),
+            },
         )
     )
 
@@ -140,11 +162,14 @@ def _base_candidates(
     context: _CombinationContext,
     *,
     metric_cache: dict[str, dict[str, Any]] | None = None,
+    source_factor_names: set[str] | None = None,
 ) -> tuple[list[_BaseCandidate], list[dict[str, Any]]]:
     candidates: list[_BaseCandidate] = []
     failures: list[dict[str, Any]] = []
     cached_metrics = metric_cache or {}
     for factor in list_factors():
+        if source_factor_names is not None and factor.name not in source_factor_names:
+            continue
         if factor.name not in context.frame.columns:
             continue
         try:
@@ -267,6 +292,45 @@ def _base_rank_key(candidate: _BaseCandidate) -> tuple[float, float, float, floa
     )
 
 
+def _source_factor_selection(symbol: str, duration: str, limit: int) -> _SourceSelection:
+    cached = get_cached_ranking(symbol, duration)
+    ranking = cached.get("ranking") if isinstance(cached, dict) else None
+    if not isinstance(ranking, list):
+        return _SourceSelection(None, _source_selection_payload("all_registered_factors", cached, 0, limit))
+    names = [str(row.get("factorName") or "") for row in ranking if isinstance(row, dict)]
+    selected = [name for name in names if name][: max(0, int(limit))]
+    if not selected:
+        return _SourceSelection(None, _source_selection_payload("all_registered_factors", cached, 0, limit))
+    diagnostics = _source_selection_payload("factor_ranking_cache_names", cached, len(selected), limit)
+    return _SourceSelection(set(selected), diagnostics)
+
+
+def _source_selection_payload(
+    mode: str,
+    cached: dict[str, Any] | None,
+    selected_count: int,
+    limit: int,
+) -> dict[str, Any]:
+    cache_status = cached.get("cacheStatus") if isinstance(cached, dict) else None
+    return {
+        "mode": mode,
+        "selectedNameCount": selected_count,
+        "requestedNameLimit": int(limit),
+        "cacheStatus": cache_status,
+        "note": "ranking cache names preselect candidates only; metrics are recalculated on the active factor frame",
+    }
+
+
+def _unfiltered_source_selection() -> dict[str, Any]:
+    return {
+        "mode": "all_registered_factors",
+        "selectedNameCount": None,
+        "requestedNameLimit": None,
+        "cacheStatus": None,
+        "note": "no ranking cache name preselection was applied",
+    }
+
+
 def _directional_win_rate(candidate: _BaseCandidate) -> float:
     win_rate = _finite_float(candidate.metrics.get("winRate"))
     if win_rate is None:
@@ -286,6 +350,10 @@ def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfi
         raise ValueError("factor source limits must be >= 0")
     if min(config.prefilter_limit, config.beam_width, config.parallel_workers) <= 0:
         raise ValueError("prefilter_limit, beam_width, and parallel_workers must be > 0")
+    if config.lookback_days is not None and int(config.lookback_days) <= 0:
+        raise ValueError("lookback_days must be greater than 0")
+    if config.lookback_bars is not None and int(config.lookback_bars) <= 0:
+        raise ValueError("lookback_bars must be greater than 0")
     return CombinationSearchConfig(
         base_factor_limit=int(config.base_factor_limit),
         native_factor_limit=int(config.native_factor_limit),
@@ -296,8 +364,18 @@ def _validated_config(config: CombinationSearchConfig) -> CombinationSearchConfi
         prefilter_limit=int(config.prefilter_limit),
         beam_width=int(config.beam_width),
         parallel_workers=int(config.parallel_workers),
+        lookback_days=int(config.lookback_days) if config.lookback_days is not None else None,
+        lookback_bars=int(config.lookback_bars) if config.lookback_bars is not None else None,
         method=config.method,
     )
+
+
+def _effective_lookback_days(duration: str, config: CombinationSearchConfig) -> int | None:
+    if config.lookback_days is not None:
+        return config.lookback_days
+    if config.lookback_bars is None:
+        return None
+    return lookback_days_for_bars(duration, config.lookback_bars)
 
 
 def _finite_float(value: Any) -> float | None:

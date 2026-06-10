@@ -21,6 +21,12 @@ from app.services.agent_formula_dedup import (
     normalize_agent_formula,
 )
 from app.services.agent_factor_formula import materialize_agent_formula
+from app.services.agent_factor_categories import (
+    adjusted_score as _adjusted_category_score,
+    category_share as _category_share,
+    category_saturation as _category_saturation,
+    factor_category as _factor_category,
+)
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS, run_factor_backtest_on_frame
 from app.services.factor_learning_common import SUCCESS_PROFIT_FACTOR_MIN, SUCCESS_WIN_RATE_MIN, utc_now
 from app.services.factor_learning_memory_store import FACTOR_LEARNING_DIR
@@ -96,6 +102,7 @@ def agent_mined_factor_library_summary(symbol: str, duration: str) -> dict[str, 
         "candidateTotal": len(rows),
         "rejectedTotal": len(promoted) - len(simulation_eligible),
         "thresholds": _threshold_payload(),
+        "categoryShare": _category_share(promoted),
         "factors": promoted[:SUMMARY_LIMIT],
     }
 
@@ -199,13 +206,18 @@ def _evaluate_ideas(
     duration = str(memory["duration"])
     known = set(known_agent_formulas(symbol, duration))
     records = []
+    category_context = [_row for _row in existing if _row_symbol(_row) == symbol and str(_row.get("duration")) == duration]
+    library_rows = []
     for idea in ideas:
-        record = _record_for_idea(memory, frame, idea, existing, known)
+        record = _record_for_idea(memory, frame, idea, existing, known, category_context)
         records.append(record)
         formula = normalize_agent_formula(str(record.get("formula") or ""))
         if formula:
             known.add(formula)
-    library_rows = [_library_row(record) for record in records]
+        row = _library_row(record)
+        if row is not None:
+            library_rows.append(row)
+            category_context.append(row)
     rows = _merged_rows(existing, [row for row in library_rows if row is not None])
     return rows, records
 
@@ -215,6 +227,7 @@ def _record_for_idea(
     idea: dict[str, Any],
     existing: list[dict[str, Any]],
     known: set[str],
+    category_context: list[dict[str, Any]],
 ) -> dict[str, Any]:
     base = _record_base(memory, idea)
     formula = normalize_agent_formula(str(base["formula"]))
@@ -223,7 +236,9 @@ def _record_for_idea(
     try:
         working = _with_agent_column(frame, base)
         metrics = _backtest_record(base, working)
-        return {**base, "metrics": metrics, "status": "promoted"}
+        saturation = _category_saturation(str(base["factorCategory"]), category_context)
+        status = "category_saturated" if saturation["saturated"] and _simulation_eligible(metrics) else "promoted"
+        return {**base, "metrics": metrics, "status": status, "categorySaturation": saturation}
     except Exception as exc:
         return {**base, "status": "failed", "error": str(exc)}
 
@@ -245,11 +260,16 @@ def _library_row(record: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(metrics, dict):
         return None
     now = utc_now()
-    quality_passed = _simulation_eligible(metrics)
+    category_saturated = str(record.get("status") or "") == "category_saturated"
+    quality_passed = _simulation_eligible(metrics) and not category_saturated
+    raw_score = factor_score(metrics)
     return {
         **_library_identity(record),
         "metrics": metrics,
-        "score": factor_score(metrics),
+        "score": _adjusted_category_score(raw_score, record.get("categorySaturation") or {}),
+        "rawScore": raw_score,
+        "factorCategory": record.get("factorCategory") or _factor_category(record),
+        "categorySaturation": record.get("categorySaturation") or {},
         "candidateStatus": str(record.get("status") or "unknown"),
         "qualityPassed": quality_passed,
         "firstSeenAt": now,
@@ -278,6 +298,7 @@ def _record_base(memory: dict[str, Any], idea: dict[str, Any]) -> dict[str, Any]
         "factorName": _factor_name(idea, formula),
         "displayName": str(idea.get("displayNameZh") or idea.get("nameHint") or "Agent单因子"),
         "formula": formula,
+        "factorCategory": str(idea.get("factorCategory") or _factor_category({"formula": formula, "idea": idea})),
         "idea": deepcopy(idea),
         "seenAt": utc_now(),
     }

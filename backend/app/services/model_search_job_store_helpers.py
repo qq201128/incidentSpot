@@ -73,9 +73,9 @@ def mark_stale_running_jobs(conn: Any, stale_after_seconds: int) -> None:
         ))
 
 
-def claim_available_row(conn: Any, max_running_jobs: int) -> dict[str, Any] | None:
+def claim_available_row(conn: Any, max_running_jobs: int, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
     while _running_count(conn) < max_running_jobs:
-        row = _next_pending_row(conn)
+        row = _next_pending_row(conn, filters or {})
         if row is None:
             return None
         job = _claim_row(conn, row["job_id"])
@@ -96,8 +96,26 @@ def _running_count(conn: Any) -> int:
     return int(row["c"])
 
 
-def _next_pending_row(conn: Any) -> Any | None:
-    return conn.execute(pending_select_sql(), (JOB_STATUS_PENDING,)).fetchone()
+def _next_pending_row(conn: Any, filters: dict[str, Any]) -> Any | None:
+    sql, values = _pending_select(filters)
+    return conn.execute(sql, values).fetchone()
+
+
+def _pending_select(filters: dict[str, Any]) -> tuple[str, tuple[Any, ...]]:
+    clauses = ["status = ?"]
+    values: list[Any] = [JOB_STATUS_PENDING]
+    for key, column in (("symbols", "symbol"), ("durations", "duration"), ("families", "model_family")):
+        selected = tuple(filters.get(key) or ())
+        if selected:
+            clauses.append(f"{column} IN ({','.join('?' for _ in selected)})")
+            values.extend(selected)
+    sql = f"""
+    SELECT * FROM model_search_jobs
+    WHERE {' AND '.join(clauses)}
+    ORDER BY priority ASC, created_at ASC
+    LIMIT 1
+    """
+    return sql, tuple(values)
 
 
 def _claim_row(conn: Any, job_id: str) -> dict[str, Any] | None:

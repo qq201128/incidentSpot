@@ -36,7 +36,12 @@ CREATE TABLE IF NOT EXISTS events (
   ai_high_winrate_rule TEXT,
   ai_high_winrate_passed INTEGER,
   ai_high_winrate_value REAL,
-  prediction_open_time INTEGER
+  prediction_open_time INTEGER,
+  market_regime_gate_version TEXT,
+  market_regime_gate_passed INTEGER,
+  market_regime_gate_reason TEXT,
+  market_regime_gate_mode TEXT,
+  market_regime_label TEXT
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -385,6 +390,54 @@ CREATE TABLE IF NOT EXISTS ensemble_signal_scores (
   PRIMARY KEY (symbol, duration, signal_key)
 );
 
+CREATE TABLE IF NOT EXISTS market_data_quality_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  issue_type TEXT NOT NULL,
+  start_open_time INTEGER NOT NULL,
+  end_open_time INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT,
+  repair_source TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_market_regimes (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  open_time INTEGER NOT NULL,
+  trend_state TEXT NOT NULL,
+  volatility_state TEXT NOT NULL,
+  regime_label TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  reason_codes TEXT NOT NULL,
+  metrics_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, duration, open_time)
+);
+
+CREATE TABLE IF NOT EXISTS event_final_decisions (
+  symbol TEXT NOT NULL,
+  duration TEXT NOT NULL,
+  open_time INTEGER NOT NULL,
+  decision TEXT NOT NULL,
+  direction TEXT,
+  probability_up REAL,
+  confidence REAL NOT NULL,
+  final_score REAL NOT NULL,
+  regime_label TEXT NOT NULL,
+  candidate_count INTEGER NOT NULL,
+  reason_codes TEXT NOT NULL,
+  settled_at TEXT,
+  decision_correct INTEGER,
+  actual_direction TEXT,
+  exit_price REAL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, duration, open_time)
+);
+
 CREATE INDEX IF NOT EXISTS idx_predictions_symbol_duration_open ON predictions(symbol, duration, open_time);
 CREATE INDEX IF NOT EXISTS idx_predictions_settled ON predictions(symbol, duration, settled_at);
 CREATE INDEX IF NOT EXISTS idx_predictions_candidate_settled
@@ -403,3 +456,5 @@ CREATE INDEX IF NOT EXISTS idx_events_settled_strategy ON events(symbol, event_i
 CREATE INDEX IF NOT EXISTS idx_events_strategy_recent ON events(strategy_key, symbol, event_interval, id DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id);
 CREATE INDEX IF NOT EXISTS idx_settlements_event_id ON settlements(event_id);
+CREATE INDEX IF NOT EXISTS idx_market_data_quality_reports_lookup ON market_data_quality_reports(symbol, interval, issue_type, status);
+CREATE INDEX IF NOT EXISTS idx_event_final_decisions_recent ON event_final_decisions(symbol, duration, open_time DESC);

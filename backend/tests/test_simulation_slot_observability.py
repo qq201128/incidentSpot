@@ -4,8 +4,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-from fastapi import HTTPException
-
 from app.api import auto_trade as auto_trade_api
 from app.db import session
 from app.services import (
@@ -119,32 +117,6 @@ def test_strategy_payloads_include_static_slot_latest_failure(monkeypatch, tmp_p
     )
     assert slot["simulationStatus"]["source"] == "auto_trade_strategies"
     assert slot["simulationStatus"]["latestFailure"]["reason"] == "factor candidate signal missing column"
-
-
-def test_strategy_detail_returns_one_slot_with_runtime(monkeypatch, tmp_path: Path) -> None:
-    db_path = _db_path(tmp_path)
-    _init_db(db_path, monkeypatch)
-    _seed_prediction_failure(db_path, FACTOR_COMBO_STRATEGY_KEY)
-
-    payload = auto_trade_api.read_strategy(FACTOR_COMBO_STRATEGY_KEY, symbol="btcusdt", duration="10m")
-
-    assert payload["strategyKey"] == FACTOR_COMBO_STRATEGY_KEY
-    assert payload["symbol"] == "BTCUSDT"
-    assert payload["duration"] == "10m"
-    assert payload["simulationStatus"]["latestFailure"]["reason"] == "factor candidate signal missing column"
-
-
-def test_strategy_detail_returns_404_for_unknown_slot(monkeypatch, tmp_path: Path) -> None:
-    db_path = _db_path(tmp_path)
-    _init_db(db_path, monkeypatch)
-
-    try:
-        auto_trade_api.read_strategy("missing_strategy", symbol="BTCUSDT", duration="10m")
-    except HTTPException as exc:
-        assert exc.status_code == 404
-        assert "auto trade slot not found" in str(exc.detail)
-        return
-    raise AssertionError("unknown slot must raise HTTPException")
 
 
 def _db_path(tmp_path: Path) -> Path:

@@ -171,15 +171,20 @@ def test_build_lstm_market_feature_frame_adds_regime_context() -> None:
 
 def test_load_lstm_market_frame_uses_requested_duration_klines(monkeypatch) -> None:
     loaded_intervals = []
-    frame = _training_frame(rows=320, step_ms=600_000)
+    loaded_lookbacks = []
+    frame = _training_frame(rows=2000, step_ms=600_000)
 
     monkeypatch.setattr(
         lstm_market_feature_builder,
         "load_klines",
-        lambda _symbol, interval: loaded_intervals.append(interval) or frame,
+        lambda _symbol, interval, **kwargs: (
+            loaded_intervals.append(interval),
+            loaded_lookbacks.append(kwargs.get("lookback_days")),
+            frame,
+        )[-1],
     )
-    monkeypatch.setattr(lstm_market_feature_builder, "load_orderbook_features", lambda *_args: pd.DataFrame())
-    monkeypatch.setattr(lstm_market_feature_builder, "load_funding_features", lambda *_args: pd.DataFrame())
+    monkeypatch.setattr(lstm_market_feature_builder, "load_orderbook_features", lambda *_args, **_kwargs: pd.DataFrame())
+    monkeypatch.setattr(lstm_market_feature_builder, "load_funding_features", lambda *_args, **_kwargs: pd.DataFrame())
     monkeypatch.setattr(
         lstm_market_feature_builder,
         "load_external_feature_frames",
@@ -197,6 +202,7 @@ def test_load_lstm_market_frame_uses_requested_duration_klines(monkeypatch) -> N
     out = lstm_market_feature_builder.load_lstm_market_frame("BTCUSDT", "10m", learning_memory={}, min_history=20)
 
     assert loaded_intervals == ["10m"]
+    assert loaded_lookbacks == [181]
     assert len(out) > 0
 
 

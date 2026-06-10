@@ -9,10 +9,14 @@ from app.main import app
 from app.services.lstm_artifacts import artifact_paths
 from app.services.lstm_feature_builder import LstmDataset
 from app.services.model_family_candidates import (
+    complete_model_candidate_progress,
     attempted_model_search_keys,
     candidate_library_path,
+    finish_model_candidate_progress_from_library,
     model_search_space_size,
+    read_model_candidate_progress,
     record_model_candidate,
+    start_model_candidate_progress,
 )
 from app.services.model_family_config import (
     ModelFamilyTrainingConfig,
@@ -75,6 +79,102 @@ def test_failed_candidate_records_are_retryable(tmp_path) -> None:
     record_model_candidate(config, "fast", rejected, artifact_root=tmp_path)
 
     assert len(attempted_model_search_keys("knn", "BTCUSDT", "10m", artifact_root=tmp_path)) == 1
+
+
+def test_candidate_attempted_keys_are_profile_scoped(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(family="knn", symbol="BTCUSDT", duration="10m", params={"n_neighbors": 5})
+    rejected = {"status": "validation_failed", "validation": {}, "test": {}}
+
+    record_model_candidate(config, "fast", rejected, artifact_root=tmp_path)
+
+    assert len(attempted_model_search_keys("knn", "BTCUSDT", "10m", "fast", artifact_root=tmp_path)) == 1
+    assert attempted_model_search_keys("knn", "BTCUSDT", "10m", "full", artifact_root=tmp_path) == frozenset()
+
+
+def test_model_family_candidate_progress_uses_search_space_total(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(
+        family="svm",
+        symbol="BTCUSDT",
+        duration="10m",
+        params={"C": 1.0, "kernel": "linear", "gamma": "scale"},
+    )
+    start_model_candidate_progress(
+        "svm",
+        symbol="BTCUSDT",
+        duration="10m",
+        profile="full",
+        total=4,
+        search_space_total=108,
+        parallel_workers=1,
+        artifact_root=tmp_path,
+    )
+    record_model_candidate(config, "full", _report("validation_failed", 0.55, 1), artifact_root=tmp_path)
+
+    progress = complete_model_candidate_progress(
+        config,
+        profile="full",
+        report=_report("validation_failed", 0.55, 1),
+        completed=1,
+        total=4,
+        artifact_root=tmp_path,
+    )
+    stored = read_model_candidate_progress("svm", "BTCUSDT", "10m", artifact_root=tmp_path)
+
+    assert progress["completed"] == 1
+    assert progress["total"] == 108
+    assert progress["searchSpaceTotal"] == 108
+    assert progress["percent"] == pytest.approx(1 / 108, abs=0.0001)
+    assert progress["stageEvaluationCompleted"] == 1
+    assert progress["stageEvaluationTotal"] == 4
+    assert stored["total"] == 108
+
+
+def test_candidate_progress_counts_only_current_profile(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(family="svm", symbol="BTCUSDT", duration="10m", params={"C": 1.0})
+    report = _report("validation_failed", 0.55, 1)
+
+    start_model_candidate_progress(
+        "svm",
+        symbol="BTCUSDT",
+        duration="10m",
+        profile="full",
+        total=4,
+        search_space_total=108,
+        parallel_workers=1,
+        artifact_root=tmp_path,
+    )
+    record_model_candidate(config, "fast", report, artifact_root=tmp_path)
+
+    progress = complete_model_candidate_progress(
+        config,
+        profile="full",
+        report=report,
+        completed=1,
+        total=4,
+        artifact_root=tmp_path,
+    )
+
+    assert progress["completed"] == 0
+    assert progress["percent"] == 0.0
+
+
+def test_finish_progress_from_library_counts_only_current_profile(tmp_path) -> None:
+    config = ModelFamilyTrainingConfig(family="svm", symbol="BTCUSDT", duration="10m", params={"C": 1.0})
+    report = _report("validation_failed", 0.55, 1)
+
+    record_model_candidate(config, "fast", report, artifact_root=tmp_path)
+    progress = finish_model_candidate_progress_from_library(
+        "svm",
+        symbol="BTCUSDT",
+        duration="10m",
+        profile="full",
+        parallel_workers=1,
+        status="validation_failed",
+        artifact_root=tmp_path,
+    )
+
+    assert progress["completed"] == 0
+    assert progress["recent"] == []
 
 
 def test_models_route_is_family_scoped_and_lstm_alias_is_removed(monkeypatch) -> None:
@@ -163,7 +263,7 @@ def test_model_family_train_can_publish_initial_baseline(tmp_path) -> None:
     assert status["tradePredictionReady"] is False
     assert status["paperLiveAdmission"]["allowed"] is True
     assert status["paperLiveStatus"] == "paper_collecting"
-    assert status["validationRole"] == "validation_gate_or_relative_shadow_observation"
+    assert status["validationRole"] == "validation_or_relative_shadow_collects_paper_live_only"
     assert status["realTradingEnabled"] is False
 
 
@@ -912,10 +1012,9 @@ def test_model_family_report_includes_training_input_observability(tmp_path) -> 
         publish_initial_baseline=True,
     )
 
-    assert report["featureColumns"] == ["a", "factor_combo_top1_score", "sim_feedback_win_rate"]
-    assert report["explicitFactorComboFeatures"]["included"] is True
-    assert report["explicitFactorComboFeatures"]["source"] == "historical_replay"
-    assert report["simFeedback"]["settledCount"] == 0
+    assert report["featureColumns"] == ["a", "regime_trend_up", "regime_high_vol"]
+    assert report["explicitFactorComboFeatures"]["included"] is False
+    assert report["simFeedback"]["enabled"] is False
     assert report["dataQuality"]["status"] == "passed"
     assert report["tradingCosts"]["roundtripCostRate"] >= 0.0
 
@@ -1010,15 +1109,15 @@ class _LowConfidenceBackend:
 def _fake_dataset(config: ModelFamilyTrainingConfig) -> LstmDataset:
     sample_count = 400
     y = (np.arange(sample_count) % 2 == 0).astype(np.float32)
-    x = np.zeros((sample_count, config.feature_window, 2), dtype=np.float32)
+    x = np.zeros((sample_count, config.feature_window, 3), dtype=np.float32)
     returns = np.where(y > 0, 0.01, -0.01).astype(np.float32)
     return LstmDataset(
         x=x,
         y=y,
         future_returns=returns,
         entry_open_times=np.arange(sample_count, dtype=np.int64),
-        feature_columns=["a", "b"],
-        feature_frame=pd.DataFrame({"a": np.zeros(sample_count), "b": np.zeros(sample_count)}),
+        feature_columns=["a", "b", "regime_trend_up"],
+        feature_frame=_fake_feature_frame(sample_count),
         combo_snapshot=[{"rank": 1, "key": "combo"}],
     )
 
@@ -1030,16 +1129,24 @@ def _observable_dataset(config: ModelFamilyTrainingConfig) -> LstmDataset:
         y=base.y,
         future_returns=base.future_returns,
         entry_open_times=base.entry_open_times,
-        feature_columns=["a", "factor_combo_top1_score", "sim_feedback_win_rate"],
-        feature_frame=pd.DataFrame({"a": np.zeros(len(base.y))}),
+        feature_columns=["a", "regime_trend_up", "regime_high_vol"],
+        feature_frame=_fake_feature_frame(len(base.y)),
         combo_snapshot=base.combo_snapshot,
         learning_context={},
         data_quality_report={"status": "passed", "features": {"featureColumnCount": 3}},
-        sim_feedback_metadata={"enabled": True, "settledCount": 0, "neutralFeaturesUsed": True},
-        factor_combo_metadata={
-            "enabled": True,
-            "source": "historical_replay",
-            "snapshotCount": 400,
-            "missingRate": 0.0,
-        },
+        sim_feedback_metadata={"enabled": False, "reason": "clean_event_contract_rebuild"},
+        factor_combo_metadata={"enabled": False, "reason": "clean_event_contract_rebuild"},
     )
+
+
+def _fake_feature_frame(sample_count: int) -> pd.DataFrame:
+    return pd.DataFrame({
+        "entry_open_time": np.arange(sample_count, dtype=np.int64),
+        "a": np.zeros(sample_count),
+        "b": np.zeros(sample_count),
+        "regime_trend_up": np.ones(sample_count),
+        "regime_trend_down": np.zeros(sample_count),
+        "regime_range": np.zeros(sample_count),
+        "regime_high_vol": np.zeros(sample_count),
+        "regime_low_vol": np.zeros(sample_count),
+    })

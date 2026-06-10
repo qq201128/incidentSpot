@@ -155,8 +155,10 @@ def _recover_factor_combo_ranking(symbol: str, duration: str) -> dict[str, Any]:
         )
         diagnostics["recoveryProfile"] = "library"
         return diagnostics
+    recovery_profile = "default"
     report = run_factor_combination_ranking(sym, duration)
     if not (report.get("ranking") or []):
+        recovery_profile = "fast"
         report = run_factor_combination_ranking(
             sym,
             duration,
@@ -165,11 +167,7 @@ def _recover_factor_combo_ranking(symbol: str, duration: str) -> dict[str, Any]:
     save_cached_combination_ranking(report)
     promotion = upsert_good_combinations(report)
     diagnostics = _ranking_report_diagnostics(report, promotion)
-    diagnostics["recoveryProfile"] = (
-        "default"
-        if report.get("searchConfig", {}).get("baseFactorLimit") == 16
-        else "fast"
-    )
+    diagnostics["recoveryProfile"] = recovery_profile
     return diagnostics
 
 

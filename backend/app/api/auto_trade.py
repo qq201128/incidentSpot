@@ -5,9 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.auto_trade_service import (
-    AutoTradeStrategyNotFound,
     get_auto_trade_settings,
-    get_auto_trade_strategy_payload,
     list_auto_trade_strategy_payloads,
     update_auto_trade_settings,
 )
@@ -41,16 +39,6 @@ def read_status() -> dict:
 @router.get("/strategies")
 def read_strategies() -> dict:
     return {"strategies": list_auto_trade_strategy_payloads()}
-
-
-@router.get("/strategies/{strategy_key}")
-def read_strategy(strategy_key: str, symbol: str = "BTCUSDT", duration: str = "10m") -> dict:
-    try:
-        return get_auto_trade_strategy_payload(strategy_key, symbol=symbol, duration=duration)
-    except AutoTradeStrategyNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/simulation-slots")

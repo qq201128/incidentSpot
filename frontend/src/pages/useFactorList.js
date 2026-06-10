@@ -12,7 +12,7 @@ export function useDebouncedValue(value, delayMs = LIST_DEBOUNCE_MS) {
   return debounced;
 }
 
-export function useFactorsList({ category, kind, listPage, listPageSize, query, reloadKey }) {
+export function useFactorsList({ category, duration, kind, listPage, listPageSize, query, reloadKey, symbol }) {
   const debouncedQuery = useDebouncedValue(query);
   const [state, setState] = useState(initialListState);
 
@@ -21,10 +21,12 @@ export function useFactorsList({ category, kind, listPage, listPageSize, query, 
     setState((prev) => ({ ...prev, status: "加载中…" }));
     fetchFactorsList({
       category: category || undefined,
+      duration,
       kind,
       q: debouncedQuery.trim() || undefined,
       page: listPage,
       pageSize: listPageSize,
+      symbol,
     })
       .then((data) => {
         if (!cancelled) setState(listStateFromResponse(data, kind));
@@ -35,7 +37,7 @@ export function useFactorsList({ category, kind, listPage, listPageSize, query, 
     return () => {
       cancelled = true;
     };
-  }, [category, debouncedQuery, kind, listPage, listPageSize, reloadKey]);
+  }, [category, debouncedQuery, duration, kind, listPage, listPageSize, reloadKey, symbol]);
 
   return state;
 }

@@ -46,6 +46,9 @@ def model_card(status: dict[str, Any]) -> dict[str, Any]:
         "cardState": _card_state(status),
         "cardStateLabel": _card_state_label(status),
         "predictionReadyLabel": _prediction_ready_label(status),
+        "predictionUsable": _prediction_ready(status),
+        "searchComplete": _search_complete(progress, rules),
+        "budgetLimited": _budget_limited(progress, rules),
         "validationWinRate": _validation_win_rate(status),
         "testWinRate": status.get("testWinRate"),
         "searchStatus": progress.get("status") or "idle",
@@ -68,10 +71,13 @@ def _validation_win_rate(status: dict[str, Any]) -> Any:
 
 
 def _search_progress_payload(context: _ModelCardContext) -> dict[str, Any]:
+    completed = int(context.progress.get("completed") or 0)
+    total = int(context.progress.get("total") or context.rules.get("searchSpaceTotal") or 0)
     return {
-        "completed": int(context.progress.get("completed") or 0),
-        "total": int(context.progress.get("total") or context.rules.get("searchSpaceTotal") or 0),
+        "completed": completed,
+        "total": total,
         "percent": float(context.progress.get("percent") or 0),
+        "complete": completed >= total if total > 0 else False,
     }
 
 
@@ -110,8 +116,13 @@ def _latest_log_path(progress: dict[str, Any]) -> str | None:
 
 def _card_state(status: dict[str, Any]) -> str:
     progress = status.get("candidateSearchProgress") or {}
+    rules = status.get("trainingRules") or {}
     if progress.get("status") in {"queued", "running"}:
         return "searching"
+    if _has_search_failure(progress):
+        return "blocked"
+    if _budget_limited(progress, rules):
+        return "budget_limited"
     if _prediction_ready(status):
         return "ready"
     active = status.get("activeModelStatus") or status.get("status")
@@ -123,6 +134,7 @@ def _card_state(status: dict[str, Any]) -> str:
 def _card_state_label(status: dict[str, Any]) -> str:
     mapping = {
         "ready": "可模拟下单",
+        "budget_limited": "预算完成",
         "searching": "搜索中",
         "pending_train": "待训练",
         "blocked": "已阻断",
@@ -141,6 +153,24 @@ def _prediction_ready(status: dict[str, Any]) -> bool:
         status.get("shadowPredictionReady")
         or status.get("shadowPredictionBlockedReason") == "combo_snapshot_mismatch"
     )
+
+
+def _budget_limited(progress: dict[str, Any], rules: dict[str, Any]) -> bool:
+    status = str(progress.get("status") or "")
+    if status in {"queued", "running", "idle"}:
+        return False
+    return not _search_complete(progress, rules)
+
+
+def _has_search_failure(progress: dict[str, Any]) -> bool:
+    job = progress.get("modelSearchJob") if isinstance(progress.get("modelSearchJob"), dict) else {}
+    return bool(progress.get("lastFailure") or job.get("failure_type") or job.get("failure_reason"))
+
+
+def _search_complete(progress: dict[str, Any], rules: dict[str, Any]) -> bool:
+    total = int(progress.get("total") or rules.get("searchSpaceTotal") or 0)
+    completed = int(progress.get("completed") or 0)
+    return total > 0 and completed >= total
 
 
 def _latest_candidate_label(progress: dict[str, Any]) -> str | None:

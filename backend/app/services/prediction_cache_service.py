@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn
+from app.services.event_regime_status import market_regime_status
 from app.services.paper_live_json_fields import parse_json_field
 from app.services.paper_live_stage_log import log_prediction_generation_stages
 from app.services.prediction_policy import trade_policy_payload
@@ -125,6 +126,7 @@ def prediction_response(result: dict) -> dict:
         **_model_response_fields(result, metadata),
         **_settlement_response_fields(result),
         **_source_response_fields(result),
+        "marketRegime": market_regime_status(result["symbol"], result["duration"], int(result["open_time"])),
         **trade_policy_payload(result["duration"], strategy_key=_strategy_key(result)),
     }
     if metadata.parse_errors:

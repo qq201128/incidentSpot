@@ -8,7 +8,6 @@ import axios from "axios";
  */
 const DEFAULT_API_BASE = "http://127.0.0.1:8000";
 const MARKET_REQUEST_TIMEOUT_MS = 12_000;
-const LOCAL_REQUEST_TIMEOUT_MS = 8_000;
 
 const DIRECT_IN_DEV =
   import.meta.env.VITE_DIRECT_API === "1" ||
@@ -114,88 +113,6 @@ export async function fetchAggTrades(symbol, limit = 40) {
   return data;
 }
 
-export async function createEvent(payload) {
-  const { data } = await axios.post(`${BASE_URL}/api/events`, payload);
-  return data;
-}
-
-export async function createOrder(eventId, payload) {
-  const { data } = await axios.post(`${BASE_URL}/api/events/${eventId}/orders`, payload);
-  return data;
-}
-
-export async function createQuickTrade(payload) {
-  const { data } = await axios.post(`${BASE_URL}/api/events/quick-trade`, payload);
-  return data;
-}
-
-export async function settleEvent(eventId) {
-  const { data } = await axios.post(`${BASE_URL}/api/events/${eventId}/settle`);
-  return data;
-}
-
-export async function fetchEventsPage({
-  symbol,
-  strategyKey,
-  durationMinutes,
-  page = 1,
-  pageSize = 8,
-  q,
-  view = "events",
-} = {}) {
-  const params = { page, pageSize, view };
-  if (symbol && String(symbol).trim()) params.symbol = symbol;
-  if (q) params.q = q;
-  if (strategyKey) params.strategyKey = strategyKey;
-  if (durationMinutes != null && Number.isFinite(Number(durationMinutes))) {
-    params.durationMinutes = durationMinutes;
-  }
-  const { data } = await axios.get(`${BASE_URL}/api/events`, {
-    params,
-    timeout: LOCAL_REQUEST_TIMEOUT_MS,
-  });
-  return data;
-}
-
-export async function deleteAllEvents() {
-  const { data } = await axios.delete(`${BASE_URL}/api/events`);
-  return data;
-}
-
-/** @param {string} strategyKey */
-export async function deleteEventsByStrategy(strategyKey) {
-  const { data } = await axios.delete(`${BASE_URL}/api/events`, {
-    params: { strategyKey },
-  });
-  return data;
-}
-
-export async function updateAutoTradeSettings(payload) {
-  const { data } = await axios.put(`${BASE_URL}/api/auto-trade/settings`, payload);
-  return data;
-}
-
-export async function fetchAutoTradeStrategies() {
-  const { data } = await axios.get(`${BASE_URL}/api/auto-trade/strategies`);
-  return data;
-}
-
-export async function fetchSimulationSlots(symbol, duration = "10m") {
-  const { data } = await axios.get(`${BASE_URL}/api/auto-trade/simulation-slots`, {
-    params: { symbol, duration },
-    timeout: LOCAL_REQUEST_TIMEOUT_MS,
-  });
-  return data;
-}
-
-export async function updateAutoTradeStrategy(strategyKey, payload) {
-  const { data } = await axios.put(
-    `${BASE_URL}/api/auto-trade/strategies/${encodeURIComponent(strategyKey)}`,
-    payload,
-  );
-  return data;
-}
-
 const ENSEMBLE_STATUS_TIMEOUT_MS = 30_000;
 const ENSEMBLE_WRITE_TIMEOUT_MS = 120_000;
 
@@ -246,12 +163,16 @@ export async function predictDirection(symbol, duration = "10m", limit = 2000, s
 export async function fetchFactorsList({
   category,
   kind = "single",
+  symbol,
+  duration,
   q,
   page = 1,
   pageSize = 20,
 } = {}) {
   const params = { kind, page, pageSize };
   if (category) params.category = category;
+  if (symbol) params.symbol = symbol;
+  if (duration) params.duration = duration;
   if (q) params.q = q;
   const { data } = await axios.get(`${BASE_URL}/api/factors/list`, { params });
   return data;

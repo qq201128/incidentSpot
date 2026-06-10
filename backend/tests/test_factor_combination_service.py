@@ -46,7 +46,11 @@ def synthetic_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "open_time": np.arange(ROWS) * 60_000,
+            "open": close,
+            "high": close * 1.001,
+            "low": close * 0.999,
             "close": close,
+            "volume": np.full(ROWS, 100.0),
             "factor_a": future.fillna(0.0),
             "factor_b": future.rolling(3, min_periods=1).mean().fillna(0.0),
             "factor_c": (-future).fillna(0.0),
@@ -272,6 +276,27 @@ def test_combination_ranking_learns_non_negative_member_weights(
     assert sum(weights) == pytest.approx(1.0)
 
 
+def test_combination_ranking_reports_regime_buckets(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+    synthetic_factors: list[FactorDefinition],
+) -> None:
+    monkeypatch.setattr(combo_service, "list_factors", lambda: synthetic_factors)
+
+    report = combo_service.run_factor_combination_ranking_on_frame(
+        synthetic_frame,
+        symbol="BTCUSDT",
+        duration="10m",
+        config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
+    )
+
+    regime = report["ranking"][0]["regime"]
+    assert regime["policy"] == "factor_regime_bucket_v1"
+    assert regime["byTrend"]
+    assert regime["byVolatility"]
+    assert regime["byRegime"]
+
+
 def test_neutral_base_candidate_flips_low_winrate_orientation() -> None:
     factor = _factor("inverse_alpha", "反向信号", FactorDirection.NEUTRAL)
     metrics = {"winRate": 0.18, "ir": 0.2, "totalPeriods": ROWS}
@@ -311,6 +336,29 @@ def test_rank_combinations_excludes_walk_forward_failures(
     assert tested_count == 3
     assert [row["factorName"] for row in ranking] == ["combo__factor_a__factor_b"]
     assert {item["error"] for item in failures} == {"validation_win_rate_below_min"}
+
+
+def test_rank_combinations_keeps_evaluated_rows_for_display(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    candidates = [_rank_filter_candidate(name) for name in ("factor_a", "factor_b", "factor_c")]
+
+    def fake_result(_context, members):
+        names = [member.factor.name for member in members]
+        passed = names == ["factor_a", "factor_b"]
+        return _rank_filter_row("__".join(names), passed), None
+
+    monkeypatch.setattr(combo_service, "_combination_result", fake_result)
+    result = combo_service._rank_combinations_with_diagnostics(
+        combo_service._CombinationContext(synthetic_frame, "BTCUSDT", "10m"),
+        candidates,
+        CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=5),
+    )
+
+    assert [row["factorName"] for row in result.ranking] == ["combo__factor_a__factor_b"]
+    assert len(result.evaluated_ranking) == 3
+    assert any(row["walkForwardPassed"] is False for row in result.evaluated_ranking)
 
 
 def test_rank_combinations_returns_empty_when_no_walk_forward_combo_passes(
@@ -439,6 +487,8 @@ def test_combination_ranking_report_includes_search_diagnostics(
     assert report["searchConfig"]["parallelWorkers"] == 1
     assert report["searchDiagnostics"]["evaluatedCombinationCount"] == 3
     assert "failureReasonCounts" in report["searchDiagnostics"]
+    assert report["evaluatedTotal"] == len(report["evaluatedRanking"])
+    assert report["evaluatedTotal"] >= report["total"]
 
 
 def test_pairwise_diversity_uses_member_to_member_correlation() -> None:
@@ -473,21 +523,51 @@ def test_live_signal_requires_profitable_combo_for_sim_candidate(
         duration="10m",
         config=CombinationSearchConfig(base_factor_limit=3, combo_sizes=(2,), result_limit=1),
     )
-    row = dict(report["ranking"][0], winRate=0.70, profitFactor=1.20, totalPeriods=ROWS)
+    row = dict(
+        report["ranking"][0],
+        winRate=0.70,
+        profitFactor=1.20,
+        totalPeriods=ROWS,
+        walkForward={"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
+    )
     passed = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
     blocked = build_live_signal_from_ranking(
         synthetic_frame,
-        {**row, "profitFactor": 1.0},
+        {**row, "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.0, "sampleCount": 80}}},
         symbol="BTCUSDT",
         duration="10m",
     )
 
     assert passed["qualityPassed"] is True
     assert passed["qualityGateReason"] == "passed"
+    assert passed["liveEvidenceSource"] == "oos"
     assert blocked["qualityPassed"] is False
     assert blocked["qualityGateReason"] == "profit_factor_below_min"
     assert blocked["qualityMinWinRate"] == LIVE_MIN_WIN_RATE
     assert blocked["qualityMinProfitFactor"] == LIVE_MIN_PROFIT_FACTOR
+
+
+def test_live_signal_rejects_backtest_only_win_rate(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_frame: pd.DataFrame,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    row = {
+        "factorName": "goal_combo__factor_a",
+        "factorDisplayName": "组合：factor_a",
+        "members": [{"name": "factor_a", "category": "return", "orientation": 1}],
+        "method": "test",
+        "threshold": 0.0,
+        "winRate": 0.90,
+        "profitFactor": 2.0,
+        "totalPeriods": ROWS,
+    }
+
+    signal = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["qualityPassed"] is False
+    assert signal["qualityGateReason"] == "oos_evidence_missing"
+    assert signal["liveEvidenceSource"] == "oos"
 
 
 def test_live_signal_hard_blocks_learned_loss_pattern_without_quality_gate(
@@ -546,13 +626,18 @@ def test_live_signal_requires_walk_forward_for_regular_combo(
     missing = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
     failed = build_live_signal_from_ranking(
         synthetic_frame,
-        {**row, "walkForwardPassed": False, "walkForwardFailureReason": "test_win_rate_below_min"},
+        {
+            **row,
+            "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
+            "walkForwardPassed": False,
+            "walkForwardFailureReason": "test_win_rate_below_min",
+        },
         symbol="BTCUSDT",
         duration="10m",
     )
 
     assert missing["qualityPassed"] is False
-    assert missing["qualityGateReason"] == "walk_forward_missing"
+    assert missing["qualityGateReason"] == "oos_evidence_missing"
     assert failed["qualityPassed"] is False
     assert failed["qualityGateReason"] == "test_win_rate_below_min"
 
@@ -573,6 +658,7 @@ def test_live_signal_requires_thresholded_score_for_trade_quality(
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
         "walkForwardPassed": True,
+        "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
     }
 
     signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
@@ -583,11 +669,54 @@ def test_live_signal_requires_thresholded_score_for_trade_quality(
     assert signal["signalThreshold"] == 10.0
 
 
+def test_live_signal_blocks_counter_trend_long(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _trend_frame(180, direction="down")
+    scores = pd.Series([0.0] * 179 + [1.0], index=frame.index)
+    monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
+
+    signal = build_live_signal_from_ranking(frame, _median_direction_row(), symbol="BTCUSDT", duration="10m")
+
+    assert signal["direction"] == "up"
+    assert signal["regime"]["trendState"] == "trend_down"
+    assert signal["regimePassed"] is False
+    assert signal["qualityPassed"] is False
+    assert signal["qualityGateReason"] == "regime_counter_trend_long"
+
+
+def test_live_signal_blocks_high_risk_regime_when_edge_is_not_stronger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _uncertain_high_vol_frame(260)
+    row = {
+        **_median_direction_row(),
+        "winRate": 0.64,
+        "paperLiveWinRate": 0.64,
+        "paperLiveProfitFactor": 1.2,
+        "paperLiveSampleCount": 30,
+    }
+
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert signal["regime"]["trendState"] == "uncertain"
+    assert signal["regimePassed"] is False
+    assert signal["qualityPassed"] is False
+    assert signal["qualityGateReason"] == "regime_high_risk_win_rate_below_min"
+    assert signal["regimeMinWinRate"] == pytest.approx(0.67)
+
+
 def test_live_signal_uses_row_min_trades_for_goal_combo(
     monkeypatch: pytest.MonkeyPatch,
     synthetic_frame: pd.DataFrame,
 ) -> None:
     monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _trend_frame(ROWS, direction="down").assign(
+        factor_a=synthetic_frame["factor_a"].to_numpy(),
+        factor_b=synthetic_frame["factor_b"].to_numpy(),
+    )
     row = {
         "factorName": "goal_combo__factor_a__factor_b",
         "factorDisplayName": "组合：factor_a + factor_b",
@@ -598,9 +727,10 @@ def test_live_signal_uses_row_min_trades_for_goal_combo(
         "profitFactor": 1.20,
         "totalPeriods": 64,
         "minTrades": 60,
+        "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
     }
 
-    signal = build_live_signal_from_ranking(synthetic_frame, row, symbol="BTCUSDT", duration="10m")
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
 
     assert signal["qualityPassed"] is True
     assert signal["qualityMinPeriods"] == 60
@@ -610,7 +740,7 @@ def test_live_signal_direction_uses_score_above_historical_median(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
-    frame = _median_direction_frame(130)
+    frame = _trend_frame(130, direction="down")
     scores = pd.Series([-2.0] * 129 + [-1.0], index=frame.index)
     monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
 
@@ -626,7 +756,7 @@ def test_live_signal_direction_uses_score_below_historical_median(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
-    frame = _median_direction_frame(130)
+    frame = _trend_frame(130, direction="down")
     scores = pd.Series([2.0] * 129 + [1.0], index=frame.index)
     monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
 
@@ -642,7 +772,7 @@ def test_goal_combo_live_direction_uses_threshold_sign(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
-    frame = _median_direction_frame(130)
+    frame = _trend_frame(130, direction="down")
     scores = pd.Series([-2.0] * 129 + [-1.5], index=frame.index)
     monkeypatch.setattr(combo_signal, "combination_score", lambda _frame, _members: scores)
     row = {
@@ -716,6 +846,7 @@ def test_live_signal_blocks_non_kline_close_members(
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
         "walkForwardPassed": True,
+        "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
     }
 
     signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
@@ -908,10 +1039,47 @@ def _factor(name: str, description: str, direction: FactorDirection) -> FactorDe
 
 
 def _median_direction_frame(rows: int) -> pd.DataFrame:
+    close = np.linspace(100.0, 101.0, rows)
     return pd.DataFrame(
         {
             "open_time": np.arange(rows) * 60_000,
-            "close": np.linspace(100.0, 101.0, rows),
+            "open": close,
+            "high": close * 1.001,
+            "low": close * 0.999,
+            "close": close,
+            "volume": np.full(rows, 100.0),
+            "factor_signal": np.linspace(-1.0, 1.0, rows),
+        }
+    )
+
+
+def _trend_frame(rows: int, *, direction: str) -> pd.DataFrame:
+    step = -0.2 if direction == "down" else 0.2
+    close = 1000.0 + np.arange(rows, dtype=float) * step
+    return pd.DataFrame(
+        {
+            "open_time": np.arange(rows) * 60_000,
+            "open": close,
+            "high": close * 1.002,
+            "low": close * 0.998,
+            "close": close,
+            "volume": np.full(rows, 100.0),
+            "factor_signal": np.linspace(-1.0, 1.0, rows),
+        }
+    )
+
+
+def _uncertain_high_vol_frame(rows: int) -> pd.DataFrame:
+    idx = np.arange(rows, dtype=float)
+    close = 100.0 + 8.0 * np.sin(idx * 1.7)
+    return pd.DataFrame(
+        {
+            "open_time": np.arange(rows) * 60_000,
+            "open": close,
+            "high": close + 4.0,
+            "low": close - 4.0,
+            "close": close,
+            "volume": np.full(rows, 100.0),
             "factor_signal": np.linspace(-1.0, 1.0, rows),
         }
     )
@@ -928,6 +1096,7 @@ def _median_direction_row() -> dict[str, Any]:
         "profitFactor": 1.20,
         "totalPeriods": ROWS,
         "walkForwardPassed": True,
+        "walkForward": {"test": {"winRate": 0.70, "profitFactor": 1.20, "sampleCount": 80}},
     }
 
 

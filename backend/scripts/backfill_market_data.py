@@ -29,6 +29,7 @@ def main() -> None:
     )
     parser.add_argument("--target-1m-rows", type=int, default=None)
     parser.add_argument("--market-context-limit", type=int, default=None)
+    parser.add_argument("--full-history", action="store_true")
     parser.add_argument("--skip-multi", action="store_true")
     parser.add_argument("--skip-feature-fill", action="store_true")
     args = parser.parse_args()
@@ -44,6 +45,7 @@ def main() -> None:
             market_context_limit=args.market_context_limit,
             sync_multi=not args.skip_multi,
             fill_bar_features=not args.skip_feature_fill,
+            full_history=args.full_history,
         )
         for symbol in _selected_symbols(args)
     ]

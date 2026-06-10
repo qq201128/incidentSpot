@@ -45,9 +45,8 @@ def chronological_split(
 
 
 def fit_standardizer(train_x: np.ndarray) -> dict[str, Any]:
-    flat = train_x.reshape(-1, train_x.shape[-1])
-    mean = flat.mean(axis=0)
-    std = flat.std(axis=0)
+    mean = train_x.mean(axis=(0, 1))
+    std = train_x.std(axis=(0, 1))
     std = np.where(std < EPSILON, 1.0, std)
     return {"mean": mean.astype(float).tolist(), "std": std.astype(float).tolist()}
 

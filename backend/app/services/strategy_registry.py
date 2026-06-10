@@ -20,6 +20,10 @@ from app.services.ensemble_judge_constants import (
     ENSEMBLE_RANKER_RULE_NAME,
     ENSEMBLE_RANKER_STRATEGY_KEY,
 )
+from app.services.event_final_decision_service import (
+    EVENT_FINAL_DECISION_GATE,
+    EVENT_FINAL_DECISION_STRATEGY_KEY,
+)
 from app.services.factor_candidate_signal_keys import is_factor_candidate_signal_key
 from app.services.rule_config import DURATION_TO_MINUTES, SUPPORTED_RULE_DURATIONS
 
@@ -97,10 +101,24 @@ STRATEGIES = (
     StrategyDefinition(
         key=ENSEMBLE_RANKER_STRATEGY_KEY,
         name="综合裁判模拟",
-        description="按候选信号裁判层建议权重综合投票；需在实盘配置页显式开启真实下单。",
+        description="按候选信号裁判层建议权重综合投票；真实下单须在后端显式开启。",
         requires_vegas_confirmation=False,
         signal_source="ensemble_judge",
         rule_names=(ENSEMBLE_RANKER_RULE_NAME,),
+        tradable=True,
+        requires_kline_features=False,
+        uses_trade_policy_gates=False,
+    ),
+    StrategyDefinition(
+        key=EVENT_FINAL_DECISION_STRATEGY_KEY,
+        name="事件最终裁判模拟",
+        description=(
+            "聚合当前事件窗口的模型族方向概率与市场环境标签，"
+            "只在最终判断为 UP/DOWN 时创建模拟事件；SKIP 仅记录审计。"
+        ),
+        requires_vegas_confirmation=False,
+        signal_source="event_final_decision",
+        rule_names=(EVENT_FINAL_DECISION_GATE,),
         tradable=True,
         requires_kline_features=False,
         uses_trade_policy_gates=False,
@@ -192,7 +210,7 @@ def _lstm_shadow_strategy_definition(strategy_key: str) -> StrategyDefinition:
     return StrategyDefinition(
         key=strategy_key,
         name=f"LSTM模拟执行·{duration}",
-        description="LSTM 候选算法可开启模拟执行；需在实盘配置页显式开启真实下单。",
+        description="LSTM 候选算法可开启模拟执行；真实下单须在后端显式开启。",
         requires_vegas_confirmation=False,
         signal_source="factor_lstm_shadow",
         rule_names=(LSTM_RULE_NAME,),

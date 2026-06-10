@@ -68,6 +68,9 @@ export async function requestFactorCombinationRefresh(symbol, duration, config =
 
 function _configParams(config) {
   const params = {};
+  if (config.profile) {
+    params.profile = config.profile;
+  }
   if (config.baseFactorLimit) {
     params.baseFactorLimit = config.baseFactorLimit;
   }
@@ -76,6 +79,12 @@ function _configParams(config) {
   }
   if (config.resultLimit) {
     params.resultLimit = config.resultLimit;
+  }
+  if (config.incremental) {
+    params.incremental = true;
+  }
+  if (config.batchSize) {
+    params.batchSize = config.batchSize;
   }
   return params;
 }

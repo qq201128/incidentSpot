@@ -7,6 +7,7 @@ from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.model_family_config import MODEL_FAMILIES, normalize_model_family
 from app.services.model_family_search_rules import DEFAULT_PARALLEL_WORKERS
 from app.services.model_family_prediction_service import predict_model_family_signal
+from app.services.model_family_research_bundle import model_family_research_bundle
 from app.services.model_family_status_service import model_family_status
 from app.services.model_search_api_worker import ensure_api_model_search_worker
 from app.services.model_search_resource import ModelSearchResourceConfig, resource_payload, validated_resource_config
@@ -17,6 +18,7 @@ from app.services.runtime_symbols import configured_runtime_symbols, parse_symbo
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 DEFAULT_MODEL_SEARCH_DURATIONS = ("10m", "30m", "60m", "1d")
+QUICK_MODEL_SEARCH_PRIORITY = 50
 
 
 def _query_str(value: object, default: str | None = None) -> str | None:
@@ -29,6 +31,14 @@ def _query_bool(value: object, default: bool = False) -> bool:
 
 def _query_int(value: object, default: int | None = None) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+@router.get("/research-bundle")
+def model_research_bundle(symbol: str = Query(..., min_length=6), duration: str = Query("10m")) -> dict:
+    try:
+        return model_family_research_bundle(symbol.upper(), _query_str(duration, "10m") or "10m")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{family}/status")
@@ -90,7 +100,7 @@ def model_candidate_search(
     family: str,
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
-    profile: str = Query("full"),
+    profile: str = Query("fast"),
     reset_history: bool = Query(False, alias="resetHistory"),
     parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
     internal_threads: int = Query(DEFAULT_INTERNAL_THREADS, alias="internalThreads", ge=1),
@@ -98,7 +108,7 @@ def model_candidate_search(
 ) -> dict:
     try:
         selected_duration = _query_str(duration, "10m") or "10m"
-        selected_profile = normalize_experiment_profile(_query_str(profile, "full") or "full")
+        selected_profile = normalize_experiment_profile(_query_str(profile, "fast") or "fast")
         selected = normalize_model_family(family)
         sym = symbol.upper()
         reset_requested = _query_bool(reset_history)
@@ -112,6 +122,7 @@ def model_candidate_search(
             durations=(selected_duration,),
             families=(selected,),
             profile=selected_profile,
+            priority=QUICK_MODEL_SEARCH_PRIORITY,
             reset_existing=reset_requested,
             reset_history=reset_requested,
             resource=resource,

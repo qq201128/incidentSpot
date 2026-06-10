@@ -52,10 +52,11 @@ def _queued_progress_from_job(
 ) -> dict[str, Any]:
     status = "running" if job.get("status") == "running" else "queued"
     search_total = _search_space_total(family, job, base_progress)
-    stage_completed = int(base_progress.get("completed") or 0)
-    stage_total = int(base_progress.get("total") or 0)
+    base_progress_for_job = _base_progress_for_job(job, base_progress)
+    stage_completed = int(base_progress_for_job.get("stageEvaluationCompleted") or 0)
+    stage_total = int(base_progress_for_job.get("stageEvaluationTotal") or 0)
     library_completed = _candidate_library_count(family, job)
-    completed = max(library_completed, _completed_count(base_progress, search_total))
+    completed = max(library_completed, _completed_count(base_progress_for_job, search_total))
     total = max(search_total, completed)
     return {
         **base_progress,
@@ -73,6 +74,14 @@ def _queued_progress_from_job(
         "xgboostProcessWorkers": job.get("xgboost_process_workers"),
         "modelSearchJob": job,
     }
+
+
+def _base_progress_for_job(job: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
+    progress_profile = progress.get("profile")
+    job_profile = job.get("profile")
+    if progress_profile is None or progress_profile == job_profile:
+        return progress
+    return {}
 
 
 def _search_space_total(family: str, job: dict[str, Any], progress: dict[str, Any]) -> int:
@@ -104,7 +113,8 @@ def _candidate_library_count(family: str, job: dict[str, Any]) -> int:
         str(job.get("symbol") or ""),
         str(job.get("duration") or ""),
     )["records"]
-    return len(records)
+    profile = job.get("profile")
+    return len([record for record in records if profile is None or record.get("profile") == profile])
 
 
 def _percent(completed: int, total: int) -> float:

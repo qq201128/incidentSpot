@@ -9,6 +9,7 @@ from app.services.auto_trade_types import AutoTradeSettings
 from app.services.auto_trade_service import AUTO_TRADE_SLOT_DURATIONS
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
+from app.services.event_final_decision_service import EVENT_FINAL_DECISION_STRATEGY_KEY
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_registry import (
     FACTOR_COMBO_STRATEGY_KEY,
@@ -70,7 +71,7 @@ def test_strategy_payloads_expose_factor_combo_and_model_family_simulation_items
         for duration in AUTO_TRADE_SLOT_DURATIONS
     }
 
-    assert keys == {FACTOR_COMBO_STRATEGY_KEY, *expected_model_keys}
+    assert keys == {FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY, *expected_model_keys}
 
 
 def test_default_runtime_symbols_include_btc_and_eth(monkeypatch) -> None:
@@ -144,6 +145,7 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
     monkeypatch.setattr(auto_trade_service, "list_auto_trade_settings", lambda: settings)
     monkeypatch.setattr(auto_trade_service, "_has_open_position", lambda *_args: False)
     monkeypatch.setattr(auto_trade_service, "_latest_prediction_row", lambda item: predictions[item.symbol])
+    monkeypatch.setattr(auto_trade_service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
     monkeypatch.setattr(
         auto_trade_service,
         "current_rule_entry_open_time_for_duration",
@@ -160,6 +162,31 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
 
     assert [row["symbol"] for row in results] == ["BTCUSDT", "ETHUSDT"]
     assert created == [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")]
+
+
+def test_run_auto_trade_once_skips_when_market_regime_blocks(monkeypatch) -> None:
+    current_open = 1778922000000
+    settings = [AutoTradeSettings(FACTOR_COMBO_STRATEGY_KEY, True, "BTCUSDT", "10m", 10, 5.0, False)]
+    monkeypatch.setattr(auto_trade_service, "list_auto_trade_settings", lambda: settings)
+    monkeypatch.setattr(auto_trade_service, "_has_open_position", lambda *_args: False)
+    monkeypatch.setattr(
+        auto_trade_service,
+        "_latest_prediction_row",
+        lambda _settings: _auto_trade_prediction("BTCUSDT", current_open, 0.2),
+    )
+    monkeypatch.setattr(
+        auto_trade_service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: current_open,
+    )
+    monkeypatch.setattr(auto_trade_service, "evaluate_market_regime_trade_gate", _blocked_regime_gate)
+    monkeypatch.setattr(
+        auto_trade_service,
+        "_create_trade",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("trade should be blocked")),
+    )
+
+    assert auto_trade_service.run_auto_trade_once() == []
 
 
 def test_list_auto_trade_settings_includes_dynamic_simulation_slots(monkeypatch, tmp_path) -> None:
@@ -371,3 +398,19 @@ def _auto_trade_prediction(symbol: str, open_time: int, probability_up: float) -
         "trade_quality_score": 0.8,
         "trade_quality_passed": 1,
     }
+
+
+def _allowed_regime_gate(**_kwargs):
+    return _RegimeDecision(True, "trend_up_aligned", "trend")
+
+
+def _blocked_regime_gate(**_kwargs):
+    return _RegimeDecision(False, "counter_trend_down_vs_up", "skip")
+
+
+class _RegimeDecision:
+    def __init__(self, allowed: bool, reason: str, mode: str) -> None:
+        self.allowed = allowed
+        self.reason = reason
+        self.mode = mode
+        self.regime = {"ready": True, "trendState": "trend_up"}

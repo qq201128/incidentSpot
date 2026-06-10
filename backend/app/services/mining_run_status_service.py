@@ -64,7 +64,9 @@ def _model_runtime_status(model: dict[str, Any], search_queue: dict[str, Any]) -
     return {
         "modelFamily": model["modelFamily"],
         "state": state,
-        "ready": model.get("cardState") == "ready",
+        "ready": _prediction_usable(model),
+        "searchComplete": bool(model.get("searchComplete")),
+        "budgetLimited": bool(model.get("budgetLimited")),
         "searchStatus": model.get("searchStatus"),
         "pendingWorker": state == "worker_required",
         "workerRequiredCommand": worker.get("workerRequiredCommand"),
@@ -84,6 +86,12 @@ def _model_state(model: dict[str, Any], worker: dict[str, Any]) -> str:
     if worker.get("state") == "failed" and model.get("latestFailureReason"):
         return "failed"
     return model.get("searchStatus") or model.get("cardState") or "idle"
+
+
+def _prediction_usable(model: dict[str, Any]) -> bool:
+    if "predictionUsable" in model:
+        return bool(model.get("predictionUsable"))
+    return model.get("cardState") == "ready"
 
 
 def _overall_status(sections: dict[str, dict], models: list[dict]) -> dict[str, Any]:

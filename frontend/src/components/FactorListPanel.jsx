@@ -1,6 +1,7 @@
 import { directionLabel, factorTitle, sourceLabel, sourceTagClass } from "./factorDisplayUtils";
 import { factorTableCategoryLabel, SIDEBAR_CATEGORY_CHIPS } from "../utils/factorCatalogLabels";
 import "./FactorListPanel.css";
+import "./FactorListPanel.observe.css";
 
 const PAGE_SIZE_OPTIONS = [20, 48, 96];
 const LIST_TABS = [
@@ -145,6 +146,7 @@ function FactorTable({ factors, listTab, page, pageSize, selectedName, onSelect 
             <th>分类</th>
             <th>方向</th>
             {showScore ? <th>评分</th> : null}
+            {showScore ? <th>观察状态</th> : null}
             <th>来源</th>
           </tr>
         </thead>
@@ -175,6 +177,7 @@ function renderFactorRow(factor, rankIndex, selectedName, onSelect, showScore) {
       <td className="factors-category-cell">{factorTableCategoryLabel(factor)}</td>
       <td className={`factors-direction-cell${direction === "正向" ? " is-positive" : ""}`}>{direction}</td>
       {showScore ? <td className="factors-score-cell">{formatScore(factor.factorScore)}</td> : null}
+      {showScore ? <td className="factors-observe-cell">{observeStatus(factor)}</td> : null}
       <td className="factors-source-cell">
         <span className={`factors-source-tag ${sourceTagClass(factor)}`} title={sourceLabel(factor)}>
           {sourceLabel(factor)}
@@ -187,6 +190,18 @@ function renderFactorRow(factor, rankIndex, selectedName, onSelect, showScore) {
 function formatScore(value) {
   const score = Number(value);
   return Number.isFinite(score) ? score.toFixed(1) : "-";
+}
+
+function observeStatus(factor) {
+  if (factor.walkForwardPassed === true || factor.paperLiveStatus === "backtest_passed") {
+    return <span className="factors-observe-tag is-pass">通过</span>;
+  }
+  const reason = factor.walkForwardFailureReason || "回测未通过";
+  return (
+    <span className="factors-observe-tag is-observe" title={reason}>
+      观察
+    </span>
+  );
 }
 
 function Pagination({ catalogTotal, listTotal, page, pageCount, onPageChange, onRefresh }) {

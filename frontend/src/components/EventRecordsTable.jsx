@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchEventsPage } from "../api/client";
+import { fetchEventsPage } from "../api/eventsClient";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { factorLabel } from "../utils/factorLearningLabels";
-import { eventFailureReasonLabel } from "../utils/failureReasonLabels";
 import { eventBacktestWinRatePercent } from "../utils/eventAiMetrics";
 import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
 import EnsembleRankingTable from "./EnsembleRankingTable";
@@ -14,9 +13,6 @@ const ENSEMBLE_TAB = "ensemble-ranking";
 const SEARCH_DEBOUNCE_MS = 280;
 const TABS = Object.freeze([
   { key: EVENT_TAB, label: "事件合约记录" },
-  { key: "orders", label: "订单记录" },
-  { key: "settlements", label: "结算验证" },
-  { key: "failures", label: "失败原因" },
   { key: ENSEMBLE_TAB, label: "候选信号排名" },
 ]);
 
@@ -38,7 +34,6 @@ export default function EventRecordsTable({
   const [pageCount, setPageCount] = useState(1);
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   const showEnsemble = !compact && activeTab === ENSEMBLE_TAB;
-  const viewKey = compact ? EVENT_TAB : activeTab;
   const effectiveSymbol = scope === "ALL" ? "" : scope;
 
   const loadRecords = useCallback(async () => {
@@ -49,7 +44,6 @@ export default function EventRecordsTable({
         page,
         pageSize: PAGE_SIZE,
         q: compact ? undefined : debouncedQuery.trim(),
-        view: viewKey,
       });
       const serverPage = Math.max(1, Number(data.page) || 1);
       setErrorMessage("");
@@ -64,7 +58,7 @@ export default function EventRecordsTable({
       setTotal(0);
       setPageCount(1);
     }
-  }, [compact, debouncedQuery, effectiveSymbol, onPageChange, page, showEnsemble, viewKey]);
+  }, [compact, debouncedQuery, effectiveSymbol, onPageChange, page, showEnsemble]);
 
   useEffect(() => {
     if (compact) return;
@@ -80,8 +74,8 @@ export default function EventRecordsTable({
   }, [onPageChange, page, pageCount]);
 
   const view = useMemo(
-    () => (showEnsemble ? null : buildView(items, compact ? EVENT_TAB : activeTab, compact)),
-    [activeTab, compact, items, showEnsemble],
+    () => (showEnsemble ? null : buildView(items, compact)),
+    [compact, items, showEnsemble],
   );
 
   const sectionClass = compact
@@ -193,7 +187,7 @@ function RecordTabs({
         <input
           value={query}
           onChange={(event) => onQueryChange?.(event.target.value)}
-          placeholder="搜索事件ID/策略/状态/失败原因"
+          placeholder="搜索事件ID/策略/状态"
         />
       </label>
       <span className="event-records-meta">{meta}</span>
@@ -279,19 +273,10 @@ function RecordRow({ cells, viewKey }) {
   );
 }
 
-function buildView(events, activeTab, compact) {
+function buildView(events, compact) {
   const source = Array.isArray(events) ? events : [];
   if (compact) {
     return view("compact", compactLabels(), source.map(compactRow), "暂无事件", "事件列表");
-  }
-  if (activeTab === "orders") {
-    return view("orders", orderLabels(), source.map(orderRow), "暂无订单记录", "订单记录");
-  }
-  if (activeTab === "settlements") {
-    return view("settlements", settlementLabels(), source.map(settlementRow), "暂无结算记录", "结算验证");
-  }
-  if (activeTab === "failures") {
-    return view("failures", failureLabels(), source.map(failureRow), "暂无失败记录", "失败原因");
   }
   return view("events", eventLabels(), source.map(eventRow), "暂无事件", "事件合约记录");
 }
@@ -316,45 +301,6 @@ function eventRow(event) {
     pnlCell(event),
     backtestWinRateCell(event),
     text("rule", ruleName(event)),
-  ]);
-}
-
-function orderRow(event) {
-  return row(event.id, [
-    text("id", eventCode(event.id)),
-    text("symbol", event.symbol),
-    sideCell(event.orderSide),
-    text("qty", amount(event.orderQty)),
-    text("price", payout(event.orderPrice)),
-    text("created", timeHm(event.orderCreatedAt)),
-    text("orderStatus", event.orderStatus || "—"),
-    modeCell(event.externalStatus),
-    text("externalId", event.externalOrderId || "—"),
-  ]);
-}
-
-function settlementRow(event) {
-  return row(event.id, [
-    text("id", eventCode(event.id)),
-    sideCell(event.orderSide),
-    text("strike", price(event.strikeValue)),
-    text("settlement", nullablePrice(event.settlementPrice)),
-    resultCell(event),
-    pnlCell(event),
-    text("quoteTime", quoteTime(event.settlementQuoteTime)),
-    text("source", event.settlementSource || "—"),
-  ]);
-}
-
-function failureRow(event) {
-  const reason = failureReason(event);
-  return row(event.id, [
-    text("id", eventCode(event.id)),
-    text("symbol", event.symbol),
-    statusCell(event.status),
-    text("orderStatus", event.orderStatus || "—"),
-    modeCell(event.externalStatus),
-    text("reason", reason, "", reason),
   ]);
 }
 
@@ -412,10 +358,6 @@ function backtestWinRateCell(event) {
   return text("backtestWinRate", `${pct}%`);
 }
 
-function failureReason(event) {
-  return eventFailureReasonLabel(event);
-}
-
 function eventCode(id) {
   return `EVT-${String(id).padStart(6, "0")}`;
 }
@@ -434,27 +376,11 @@ function nullablePrice(value) {
   return value == null ? "—" : price(value);
 }
 
-function amount(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(3).replace(/\.?0+$/, "") : "—";
-}
-
-function payout(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : "—";
-}
-
 function timeHm(value) {
   if (!value) return "—";
   const dt = new Date(value);
   if (!Number.isFinite(dt.getTime())) return "—";
   return dt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function quoteTime(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return "—";
-  return timeHm(n);
 }
 
 function signed(value) {
@@ -485,7 +411,4 @@ const eventLabels = () => [
   "回测胜率",
   "类型",
 ];
-const orderLabels = () => ["事件ID", "交易对", "方向", "数量", "支付率", "下单", "订单", "模式", "外部ID"];
-const settlementLabels = () => ["事件ID", "方向", "入场价", "结算价", "结果", "PnL", "报价", "来源"];
-const failureLabels = () => ["事件ID", "交易对", "事件", "订单", "模式", "原因"];
 const compactLabels = () => ["事件ID", "方向", "入场价", "周期", "状态", "模式", "结果"];

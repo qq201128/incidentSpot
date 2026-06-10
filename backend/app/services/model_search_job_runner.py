@@ -31,10 +31,10 @@ from app.services.model_search_resource import (
 )
 from app.services.model_search_status_service import model_search_queue_status
 from app.services.model_search_job_types import DEFAULT_STALE_AFTER_SECONDS
+from app.services.model_search_job_defaults import DEFAULT_CANDIDATE_BUDGET, DEFAULT_CANDIDATES_PER_JOB
 
 DEFAULT_LOG_DIR = Path(tempfile.gettempdir()) / "incidentSpot-model-search-jobs"
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
-DEFAULT_CANDIDATES_PER_JOB = 1
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,8 @@ class ModelSearchWorkerConfig:
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS
     heartbeat_interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
     candidates_per_job: int = DEFAULT_CANDIDATES_PER_JOB
+    candidate_budget: int | None = DEFAULT_CANDIDATE_BUDGET
+    filters: dict[str, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,7 @@ def run_one_model_search_job(config: ModelSearchWorkerConfig | None = None) -> d
     job = claim_next_model_search_job(
         max_running_jobs=selected.max_running_jobs,
         stale_after_seconds=selected.stale_after_seconds,
+        filters=selected.filters,
     )
     if job is None:
         return {"status": "idle", "reason": "no_pending_job", "queue": model_search_queue_status()}
@@ -112,7 +115,7 @@ def _run_claimed_job(
 ) -> dict[str, Any]:
     log_path = _job_log_path(config.log_dir, job)
     try:
-        trained = _already_trained_result(job)
+        trained = _already_trained_result(job, config)
         if trained is not None:
             _append_skip_log(log_path, job, trained)
             stored = finish_model_search_job(
@@ -135,7 +138,11 @@ def _run_claimed_job(
             log_path=str(log_path),
         )
         if has_more:
-            continued = retry_failed_model_search_job(stored["job_id"], clear_reset_history=True)
+            continued = retry_failed_model_search_job(
+                stored["job_id"],
+                clear_reset_history=True,
+                move_to_back=True,
+            )
             return {"status": "partial", "job": continued, "result": result}
         return {"status": stored["status"], "job": stored, "result": result}
     except Exception as exc:
@@ -175,6 +182,7 @@ def _search_config(
         parallel_workers=int(resource["parallelWorkers"]),
         reset_history=bool(job.get("resetHistory")),
         candidates_per_job=config.candidates_per_job,
+        candidate_budget=config.candidate_budget,
     )
 
 
@@ -187,13 +195,15 @@ def _continuation_result(result: dict[str, Any]) -> dict[str, Any]:
     return {**result, "status": "partial_batch", "batchStatus": result.get("status")}
 
 
-def _already_trained_result(job: dict[str, Any]) -> dict[str, Any] | None:
+def _already_trained_result(job: dict[str, Any], config: ModelSearchWorkerConfig) -> dict[str, Any] | None:
     if _is_partial_continuation(job):
         return None
     if bool(job.get("resetHistory")):
         return None
     status = model_family_status(job["model_family"], job["symbol"], job["duration"])
     if not is_trained_model_status(status):
+        return None
+    if _should_continue_incomplete_search(status, config):
         return None
     return {
         "status": "skipped",
@@ -211,6 +221,15 @@ def _is_partial_continuation(job: dict[str, Any]) -> bool:
         return True
     batch = report.get("jobBatch") if isinstance(report.get("jobBatch"), dict) else {}
     return bool(batch.get("hasMoreCandidates"))
+
+
+def _should_continue_incomplete_search(status: dict[str, Any], config: ModelSearchWorkerConfig) -> bool:
+    if config.candidate_budget is None:
+        return False
+    progress = status.get("candidateSearchProgress") if isinstance(status.get("candidateSearchProgress"), dict) else {}
+    total = int(progress.get("total") or progress.get("searchSpaceTotal") or 0)
+    completed = int(progress.get("completed") or 0)
+    return total > 0 and completed < total
 
 
 def _failure_payload(job: dict[str, Any], resource: dict[str, Any], exc: Exception) -> dict[str, Any]:

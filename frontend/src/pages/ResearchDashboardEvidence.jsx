@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import {
   EVIDENCE_TARGETS,
   EMPTY,
@@ -15,6 +14,7 @@ import {
   topReasons,
   visibleSettledRows,
 } from "./researchDashboardData";
+import ModelRegimeValidationPanel from "../components/ModelRegimeValidationPanel";
 import { reasonLabel, statusClass, statusLabel } from "./researchDashboardLabels";
 
 export function SettledSampleMatrix({ duration, loadError, loading, reportLoaded, rows, symbol }) {
@@ -51,12 +51,11 @@ export function SettledSampleMatrix({ duration, loadError, loading, reportLoaded
                 <th>连续亏损</th>
                 <th>数据/特征</th>
                 <th>原因</th>
-                <th>实盘</th>
               </tr>
             </thead>
             <tbody>
               {visibleSettledRows(rows, TOP_ROW_LIMIT).map((row) => (
-                <SettledRow key={row.rowKey} duration={duration} row={row} symbol={symbol} />
+                <SettledRow key={row.rowKey} row={row} />
               ))}
             </tbody>
           </table>
@@ -70,13 +69,15 @@ export function SettledSampleMatrix({ duration, loadError, loading, reportLoaded
   );
 }
 
-export function ResearchSidePanel({ report, rows, summary }) {
+export function ResearchSidePanel({ report, rows, summary, modelStatuses }) {
   const reasons = topReasons(rows, report);
   const models = rows.filter((row) => row.type === "model");
   const stages = stageLogRows(report).filter((row) => row.status !== "passed").slice(0, 5);
   const changes = statusChangeRows(report).slice(0, 5);
+  const statuses = modelStatuses?.length ? modelStatuses : report?.modelFamilyStatuses || [];
   return (
     <aside className="research-side-panel">
+      <ModelRegimeValidationPanel statuses={statuses} />
       <LifecyclePanel summary={summary} />
       <SampleQualityPanel summary={summary} />
       <ReasonPanel reasons={reasons} />
@@ -88,7 +89,7 @@ export function ResearchSidePanel({ report, rows, summary }) {
   );
 }
 
-function SettledRow({ duration, row, symbol }) {
+function SettledRow({ row }) {
   const gapRisk = row.backtestGap != null && row.backtestGap >= EVIDENCE_TARGETS.backtestGapWarn;
   return (
     <tr>
@@ -115,22 +116,7 @@ function SettledRow({ duration, row, symbol }) {
         </span>
       </td>
       <td><span className="research-reason">{reasonLabel(row.reason)}</span></td>
-      <td><LiveTradingLink duration={duration} row={row} symbol={symbol} /></td>
     </tr>
-  );
-}
-
-function LiveTradingLink({ duration, row, symbol }) {
-  if (row.status !== "paper_stable" || !row.strategyKey) return <span className="research-live-empty">{EMPTY}</span>;
-  const params = new URLSearchParams({
-    duration,
-    strategyKey: row.strategyKey,
-    symbol,
-  });
-  return (
-    <Link className="research-live-link" to={`/live-trading?${params.toString()}`}>
-      配置
-    </Link>
   );
 }
 

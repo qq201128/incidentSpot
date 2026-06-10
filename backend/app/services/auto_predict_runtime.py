@@ -71,8 +71,12 @@ async def run_prediction_batch(settings_list: list[AutoTradeSettings], run_predi
 
 async def run_candidate_collection_batch(settings_list: list[AutoTradeSettings], save_collection: Callable[..., Awaitable[None]], logger: logging.Logger) -> None:
     write_lock = asyncio.Lock()
-    results = await asyncio.gather(*(save_collection(settings, write_lock=write_lock) for settings in settings_list), return_exceptions=True)
-    failures = prediction_failures(settings_list, results)
+    failures = []
+    for settings in settings_list:
+        try:
+            await save_collection(settings, write_lock=write_lock)
+        except BaseException as exc:
+            failures.append(PredictionFailure(settings, exc))
     for failure in failures:
         settings = failure.settings
         exc = failure.exception
@@ -126,3 +130,11 @@ async def broadcast(result: dict, subscribers: dict[tuple[str, str, str], set], 
         websockets -= dead
     if failures:
         raise BroadcastDeliveryError(failures) from failures[0]
+
+
+async def sleep_for(stop_event: asyncio.Event, wait_seconds: float) -> bool:
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
+        return True
+    except TimeoutError:
+        return False

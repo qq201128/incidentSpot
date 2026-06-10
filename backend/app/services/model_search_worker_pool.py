@@ -53,6 +53,10 @@ JOB_BATCH_SUMMARY_KEYS = (
     "availableCandidatesBeforeJob",
     "remainingCandidatesAfterJob",
     "hasMoreCandidates",
+    "candidateBudget",
+    "attemptedCandidatesBeforeJob",
+    "budgetExhausted",
+    "unsearchedCandidatesAfterBudget",
 )
 QUEUE_SUMMARY_KEYS = ("version", "totalJobs", "counts")
 OMITTED_RESULT_KEYS = ("reports", "trainingRules", "successiveHalvingStages")
@@ -102,7 +106,7 @@ def run_adaptive_worker_pool(
     initial_sample = sample_host_resources(adaptive_config.cpu_sample_seconds)
     max_workers = max_adaptive_jobs(adaptive_config, initial_sample, base_config.resource)
     runtime = WorkerPoolRuntime(base_config, adaptive_config, poll_seconds, run_until_empty)
-    pending_counter = pending_job_counter or pending_model_search_job_count
+    pending_counter = pending_job_counter or _pending_counter(base_config)
     with launcher_factory(max_workers) as launcher:
         yield from _run_pool_loop(runtime=runtime, launcher=launcher, pending_job_counter=pending_counter)
 
@@ -152,8 +156,13 @@ def _run_pool_loop(
             continue
 
 
-def pending_model_search_job_count() -> int:
-    return len(list_model_search_jobs({"statuses": (JOB_STATUS_PENDING,)}))
+def pending_model_search_job_count(filters: dict[str, Any] | None = None) -> int:
+    selected = {"statuses": (JOB_STATUS_PENDING,), **(filters or {})}
+    return len(list_model_search_jobs(selected))
+
+
+def _pending_counter(config: ModelSearchWorkerConfig) -> Callable[[], int]:
+    return lambda: pending_model_search_job_count(config.filters)
 
 
 def _wait_for_capacity(

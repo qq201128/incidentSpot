@@ -8,7 +8,7 @@ from app.services.factor_catalog_summaries import (
     list_combo_factor_summaries,
     list_single_factor_summaries,
 )
-from app.services.factor_combo_metrics import combo_metrics_for_factor, combo_period_scores
+from app.services.factor_combo_metrics import cached_combo_row_for_display, combo_metrics_for_factor, combo_period_scores
 from app.services.factor_ranking_api_payloads import background_refresh_rankings, factor_ranking_payload
 from app.services.factor_ranking_page import DEFAULT_RANKING_PAGE_SIZE
 from app.services.factor_catalog import (
@@ -43,16 +43,23 @@ def list_factors(
     *,
     category: str | None = None,
     kind: str = Query("single", pattern="^(single|combo)$"),
+    symbol: str | None = Query(None, min_length=6),
+    duration: str | None = Query(None),
     q: str | None = Query(None, description="search name/formula/source"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, alias="pageSize", ge=1, le=200),
 ) -> dict:
     safe_category = _query_str(category)
+    safe_duration = _query_str(duration)
+    if safe_duration is not None and safe_duration not in SUPPORTED_RULE_DURATIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
     query = _query_str(q)
     try:
         return build_factor_list_page(
             category=safe_category,
             kind=_query_str(kind, "single") or "single",
+            symbol=_query_str(symbol),
+            duration=safe_duration,
             query=query,
             page=_query_int(page, 1),
             page_size=_query_int(page_size, 20),
@@ -135,12 +142,18 @@ def get_factor_detail(
     symbol: str | None = Query(None, min_length=6),
     duration: str | None = Query(None),
 ) -> dict:
+    safe_symbol = _query_str(symbol)
+    safe_duration = _query_str(duration)
+    if safe_symbol and safe_duration and _is_combo_factor(factor_name):
+        if safe_duration not in SUPPORTED_RULE_DURATIONS:
+            raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
+        cached_combo = cached_combo_row_for_display(safe_symbol.upper(), safe_duration, factor_name)
+        if cached_combo:
+            return enrich_factor_summary(_combo_detail_payload(cached_combo), cached_combo)
     payload = get_factor_payload_by_name(factor_name)
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Factor not found: {factor_name}")
     enriched = enrich_factor_summary(payload)
-    safe_symbol = _query_str(symbol)
-    safe_duration = _query_str(duration)
     if safe_symbol and safe_duration:
         if safe_duration not in SUPPORTED_RULE_DURATIONS:
             raise HTTPException(status_code=400, detail=f"unsupported duration: {safe_duration}")
@@ -230,3 +243,17 @@ def _metrics_for_factor(symbol: str, duration: str, factor_name: str) -> dict | 
 
 def _is_combo_factor(factor_name: str) -> bool:
     return factor_name.startswith("combo__") or factor_name.startswith("goal_combo__")
+
+
+def _combo_detail_payload(row: dict) -> dict:
+    name = str(row.get("factorName") or row.get("name") or "")
+    display = str(row.get("factorDisplayName") or row.get("displayName") or row.get("description") or name)
+    return {
+        "name": name,
+        "displayName": display,
+        "description": display,
+        "formula": str(row.get("formula") or name),
+        "sourceFile": "mined_factor_library.json",
+        "timeframes": [str(row.get("duration"))] if row.get("duration") else [],
+        "direction": "higher_better",
+    }

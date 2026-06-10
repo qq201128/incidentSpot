@@ -1,4 +1,6 @@
 
+import { formatFinalScore, regimePartLabel } from "../utils/eventFinalDecisionLabels";
+
 const FIXED_PAYOUT_PERCENT = 80;
 
 export default function TradeControls({
@@ -113,8 +115,19 @@ function PredictionResult({ prediction }) {
       {prediction.highWinrateGateEnabled && (
         <span>高胜率门控：{prediction.highWinrateGatePassed ? "通过" : "未通过"}</span>
       )}
+      <MarketRegimeLine regime={prediction.marketRegime} />
     </div>
   );
+}
+
+function MarketRegimeLine({ regime }) {
+  if (!regime) return null;
+  if (regime.ready === false) {
+    return <span>当前环境：{regime.reason || "数据不足"}</span>;
+  }
+  const trend = regimePartLabel(regime.trendState);
+  const vol = regimePartLabel(regime.volatilityState);
+  return <span>当前环境：{trend} · {vol} · 置信度 {formatFinalScore(regime.confidence)}</span>;
 }
 
 function PredictionDirection({ prediction }) {

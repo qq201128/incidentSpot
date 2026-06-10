@@ -9,9 +9,12 @@ from app.services.factor_catalog_summaries import (
     list_combo_factor_summaries,
     list_single_factor_summaries,
 )
-from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_metric_enrichment import backtest_validity
-from app.services.factor_mined_library import MINED_FACTOR_SOURCE_FILE
+from app.services.factor_page_combo_rows import (
+    combo_cache_total,
+    combo_list_rows,
+    sorted_combo_list_rows,
+)
 from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.factor_page_alerts import ALERT_ERROR, ALERT_WARNING, build_alerts as _build_alerts
 from app.services.factor_page_high_winrate import high_winrate_card as _high_winrate_card
@@ -23,7 +26,6 @@ from app.services.factor_page_list import (
     classify_factor_source,
     filter_factor_rows,
     paginate_rows,
-    sort_combo_rows_by_score,
     source_label,
 )
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
@@ -35,15 +37,19 @@ def build_factor_list_page(
     *,
     category: str | None,
     kind: str,
+    symbol: str | None = None,
+    duration: str | None = None,
     query: str | None,
     page: int,
     page_size: int,
 ) -> dict[str, Any]:
     singles = [enrich_factor_summary(row) for row in list_single_factor_summaries(category)]
-    combos = [enrich_factor_summary(row) for row in list_combo_factor_summaries()]
+    combos = [enrich_factor_summary(row) for row in combo_list_rows(symbol, duration, list_combo_factor_summaries())]
     overview = build_factor_overview(category)
+    if kind == "combo" and symbol and duration:
+        overview = {**overview, "comboTotal": len(combos)}
     if kind == "combo":
-        base_rows = sort_combo_rows_by_score(combos)
+        base_rows = sorted_combo_list_rows(combos)
         rows = filter_factor_rows(base_rows, query)
         paginated = paginate_rows(rows, page, page_size)
         return {
@@ -96,6 +102,8 @@ def build_factor_page_bundle(
     list_payload = build_factor_list_page(
         category=category,
         kind=kind,
+        symbol=sym,
+        duration=duration,
         query=query,
         page=page,
         page_size=page_size,
@@ -135,6 +143,11 @@ def build_factor_page_context(
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
     overview = build_factor_overview(category)
+    combo_total = combo_cache_total(sym, duration)
+    overview = {
+        **overview,
+        "comboTotal": combo_total if combo_total is not None else overview["comboTotal"],
+    }
     global_summary = overview["sourceSummary"]
     display_summary = _display_source_summary(sym, duration, category, global_summary)
     ranking_payload = _ranking_payload(sym, duration, category)

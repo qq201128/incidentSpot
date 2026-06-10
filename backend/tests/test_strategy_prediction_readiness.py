@@ -64,8 +64,8 @@ def test_factor_combo_recovery_uses_fast_profile_when_default_is_empty(monkeypat
     from app.services import factor_mined_library as mined_library
 
     reports = [
-        {"symbol": "BTCUSDT", "duration": "10m", "ranking": [], "searchConfig": {"baseFactorLimit": 16}},
-        {"symbol": "BTCUSDT", "duration": "10m", "ranking": [{"factorName": "combo__a__b"}], "searchConfig": {"baseFactorLimit": 8}},
+        {"symbol": "BTCUSDT", "duration": "10m", "ranking": [], "searchConfig": {"baseFactorLimit": 48}},
+        {"symbol": "BTCUSDT", "duration": "10m", "ranking": [{"factorName": "combo__a__b"}], "searchConfig": {"baseFactorLimit": 64}},
     ]
     saved = []
 
@@ -80,7 +80,7 @@ def test_factor_combo_recovery_uses_fast_profile_when_default_is_empty(monkeypat
 
     assert diagnostics["recoveryProfile"] == "fast"
     assert diagnostics["rankingTotal"] == 1
-    assert saved[0]["searchConfig"]["baseFactorLimit"] == 8
+    assert saved[0]["searchConfig"]["baseFactorLimit"] == 64
 
 
 def test_factor_combo_recovery_prefers_library_rows(monkeypatch) -> None:

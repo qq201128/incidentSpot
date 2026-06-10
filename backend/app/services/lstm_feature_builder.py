@@ -13,12 +13,6 @@ from app.services.lstm_data_quality import (
     validate_duration_source_frame,
     validate_labeled_frame,
 )
-from app.services.lstm_factor_combo_features import (
-    FACTOR_COMBO_FEATURE_PREFIX,
-    attach_live_factor_combo_features,
-    attach_training_factor_combo_features,
-    load_factor_combo_feature_snapshots,
-)
 from app.services.lstm_combo_ranking import resolve_lstm_combo_ranking
 from app.services.lstm_combo_snapshot import combo_snapshot_from_ranking
 from app.services.lstm_config import LstmTrainingConfig
@@ -35,10 +29,11 @@ from app.services.lstm_market_feature_builder import (
     load_lstm_market_frame,
     lstm_learning_context,
 )
+from app.services.event_regime_detector import add_event_regime_features
 from app.services.rule_config import horizon_minutes_for_duration
-from app.services.sim_feedback_features import SIM_FEEDBACK_PREFIX, attach_sim_feedback_features
 
 MS_PER_MINUTE = 60_000
+CLEAN_EVENT_FEATURE_METADATA = {"enabled": False, "reason": "clean_event_contract_rebuild"}
 
 def build_lstm_training_dataset(
     config: LstmTrainingConfig,
@@ -56,22 +51,7 @@ def build_lstm_training_dataset(
     source_quality = validate_duration_source_frame(frame, config.duration)
     labeled = duration_labeled_frame(frame, config.duration, _horizon_minutes(config), config.min_move_bps)
     label_quality = validate_labeled_frame(labeled, config.duration)
-    labeled, sim_metadata = _attach_sim_feedback_with_metadata(
-        labeled,
-        config.symbol,
-        config.duration,
-        model_family=model_family,
-    )
-    factor_combo_metadata = None
-    if model_family:
-        combo_result = attach_training_factor_combo_features(
-            labeled,
-            config.symbol,
-            config.duration,
-            snapshots_loader=load_factor_combo_feature_snapshots,
-        )
-        labeled = combo_result.frame
-        factor_combo_metadata = combo_result.metadata
+    labeled = add_event_regime_features(labeled, config.duration)
     columns = candidate_feature_columns(labeled, learning_memory=memory)
     quality = _data_quality_report(source_quality, label_quality, columns)
     return windowed_lstm_dataset(
@@ -82,8 +62,8 @@ def build_lstm_training_dataset(
         combo_snapshot=_legacy_combo_snapshot(config.symbol, config.duration, ranking_loader),
         learning_context=lstm_learning_context(memory),
         data_quality_report=quality,
-        sim_feedback_metadata=sim_metadata,
-        factor_combo_metadata=factor_combo_metadata,
+        sim_feedback_metadata=CLEAN_EVENT_FEATURE_METADATA,
+        factor_combo_metadata=CLEAN_EVENT_FEATURE_METADATA if model_family else None,
     )
 
 def build_live_feature_window(
@@ -100,17 +80,7 @@ def build_live_feature_window(
     memory = load_factor_learning_memory_for(sym, duration)
     frame = load_lstm_market_frame(sym, duration, learning_memory=memory)
     sampled = duration_feature_frame(frame, duration, entry_open_time)
-    factor_combo_metadata = None
-    if _needs_factor_combo_features(feature_columns):
-        combo_result = attach_live_factor_combo_features(sampled, sym, duration)
-        sampled = combo_result.frame
-        factor_combo_metadata = combo_result.metadata
-    sampled, _metadata = _attach_sim_feedback_with_metadata(
-        sampled,
-        sym,
-        duration,
-        model_family=model_family,
-    )
+    sampled = add_event_regime_features(sampled, duration)
     _assert_columns(sampled, feature_columns)
     if len(sampled) < feature_window:
         raise LstmDataError(f"insufficient LSTM feature rows: {len(sampled)} < {feature_window}")
@@ -122,8 +92,8 @@ def build_live_feature_window(
         last,
         entry_open_time,
         feature_columns,
-        factor_combo_metadata,
-        _metadata,
+        CLEAN_EVENT_FEATURE_METADATA if model_family else None,
+        CLEAN_EVENT_FEATURE_METADATA,
     )
     return window.reshape(1, feature_window, len(feature_columns)), meta
 
@@ -158,16 +128,6 @@ def duration_feature_frame(
         _assert_live_entry_row(sampled, int(entry_open_time), duration)
     return sampled
 
-def _attach_sim_feedback_with_metadata(
-    frame: pd.DataFrame,
-    symbol: str,
-    duration: str,
-    *,
-    model_family: str | None = None,
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    enriched = attach_sim_feedback_features(frame, symbol, duration, model_family=model_family)
-    return enriched, dict(enriched.attrs.get("simFeedbackMetadata") or {})
-
 def _data_quality_report(
     source_quality: dict[str, Any],
     label_quality: dict[str, Any],
@@ -179,9 +139,6 @@ def _data_quality_report(
         "labels": label_quality,
         "features": feature_column_quality(columns),
     }
-
-def _needs_factor_combo_features(feature_columns: list[str]) -> bool:
-    return any(column.startswith(FACTOR_COMBO_FEATURE_PREFIX) for column in feature_columns)
 
 def _live_feature_meta(
     last: pd.Series,
@@ -213,20 +170,8 @@ def _missing_feature_status(
     factor_combo_metadata: dict[str, Any] | None,
     sim_feedback_metadata: dict[str, Any],
 ) -> str:
-    if _factor_combo_features_missing(feature_columns, factor_combo_metadata):
-        return "missing_factor_combo_features"
-    if _needs_sim_feedback_features(feature_columns) and sim_feedback_metadata.get("neutralFeaturesUsed"):
-        return "neutral_sim_feedback_features"
+    del feature_columns, factor_combo_metadata, sim_feedback_metadata
     return "complete"
-
-def _factor_combo_features_missing(feature_columns: list[str], metadata: dict[str, Any] | None) -> bool:
-    if not _needs_factor_combo_features(feature_columns):
-        return False
-    if not isinstance(metadata, dict):
-        return True
-    return float(metadata.get("missingRate") or 0.0) > 0.0
-def _needs_sim_feedback_features(feature_columns: list[str]) -> bool:
-    return any(column.startswith(SIM_FEEDBACK_PREFIX) for column in feature_columns)
 
 def _training_feature_frame(
     config: LstmTrainingConfig,

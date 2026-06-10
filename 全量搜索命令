@@ -6,7 +6,10 @@ D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\enqueue_model_s
 
 REM 2. 再启动 worker：前台自适应跑完整个队列；根据 CPU/内存自动增加或减少并行 job，队列空了自动退出。
 REM    关闭窗口会中断当前 worker，后续可重新启动继续 pending job；训练异常会直接暴露并让命令退出。
-D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\run_model_search_worker.py --run-until-empty --max-running-jobs 0 --internal-threads 4 --parallel-workers 1 --xgboost-process-workers 1 --torch-jobs 1 --resource-profile local_safe --log-dir runtime\model-search-jobs --stale-after-seconds 3600
+D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\run_model_search_worker.py --run-until-empty --max-running-jobs 0 --internal-threads 4 --parallel-workers 1 --xgboost-process-workers 1 --torch-jobs 1 --resource-profile local_safe --log-dir runtime\model-search-jobs --stale-after-seconds 3600 --candidates-per-job 8 --candidate-budget 32
+
+REM 如需离线完整网格搜索，显式改成 --candidate-budget 0；日常更新不要使用完整网格。
+REM 日常只更新 10m 时，加上 --symbols BTCUSDT --durations 10m，避免 worker 吃完整队列。
 
 REM 3. 查看状态时单独运行这一行：
 REM D:\Desktop\incidentSpot\.venv\Scripts\python.exe backend\scripts\model_search_status.py --symbols BTCUSDT,ETHUSDT --compact --json

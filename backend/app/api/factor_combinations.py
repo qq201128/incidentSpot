@@ -12,13 +12,16 @@ from app.services.high_winrate_combo_cache_service import get_cached_high_winrat
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
 from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_report_cache import get_cached_paper_live_report
 from app.services.paper_live_daily_loop_service import run_paper_live_daily_closed_loop
 from app.services.factor_combination_refresh_api import (
     background_refresh_combo_rankings,
     combination_config,
     config_response,
 )
+from app.services.factor_combination_incremental_refresh import refresh_incremental_combination_cache
 from app.services.factor_combination_ranking_view import (
+    ranking_rows,
     ranking_visibility,
     regular_ranking_rows,
     stale_regular_rows,
@@ -39,6 +42,10 @@ def _query_str(value: object, default: str | None = None) -> str | None:
 
 def _query_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _query_bool(value: object) -> bool:
+    return value if isinstance(value, bool) else False
 
 
 @router.get("/ranking")
@@ -76,6 +83,8 @@ def factor_combination_ranking(
         **cached,
         "ranking": page_payload["ranking"],
         "total": page_payload["total"],
+        "passedRankingTotal": len(ranking_rows(cached)),
+        "evaluatedRankingTotal": visibility["evaluatedTotal"],
         "source": "cache",
         **page_payload,
         **visibility,
@@ -106,7 +115,8 @@ def paper_live_candidates(
 ) -> dict:
     safe_duration = _query_str(duration, "10m") or "10m"
     _validate_duration(safe_duration)
-    return paper_live_candidate_report(symbol.upper(), safe_duration)
+    sym = symbol.upper()
+    return get_cached_paper_live_report(sym, safe_duration, build=paper_live_candidate_report)
 
 
 @router.post("/paper-live/daily-loop")
@@ -132,15 +142,37 @@ def factor_combination_refresh(
     base_factor_limit: int | None = Query(None, alias="baseFactorLimit"),
     combo_sizes: str | None = Query(None, alias="comboSizes"),
     result_limit: int | None = Query(None, alias="resultLimit"),
+    incremental: bool = Query(False),
+    batch_size: int = Query(120, alias="batchSize", ge=1, le=1000),
+    lookback_days: int | None = Query(None, alias="lookbackDays", ge=30, le=2000),
 ) -> dict:
     safe_duration = _query_str(duration)
     _validate_optional_duration(safe_duration)
     sym_u = symbol.upper()
+    safe_incremental = _query_bool(incremental)
+    safe_batch_size = _query_int(batch_size) or 120
+    if safe_incremental:
+        report = refresh_incremental_combination_cache(
+            sym_u,
+            safe_duration or "10m",
+            batch_size=safe_batch_size,
+            lookback_days=_query_int(lookback_days) or 365,
+        )
+        return {
+            "ok": True,
+            "symbol": sym_u,
+            "duration": safe_duration or "10m",
+            "profile": "incremental",
+            "rankingTotal": len(report.get("ranking") or []),
+            "evaluatedRankingTotal": len(report.get("evaluatedRanking") or []),
+            "message": "已增量刷新普通组合展示缓存。",
+        }
     config = combination_config(
         profile=_query_str(profile, "full") or "full",
         base_factor_limit=_query_int(base_factor_limit),
         combo_sizes=_query_str(combo_sizes),
         result_limit=_query_int(result_limit),
+        lookback_days=_query_int(lookback_days),
     )
     background_tasks.add_task(background_refresh_combo_rankings, sym_u, safe_duration, config)
     return {
@@ -176,6 +208,8 @@ def _stale_combination_ranking(symbol: str, duration: str, cached: dict) -> dict
         "symbol": symbol,
         "duration": duration,
         "total": len(ranking),
+        "passedRankingTotal": len(ranking_rows(cached)),
+        "evaluatedRankingTotal": visibility["evaluatedTotal"],
         "updatedAt": cached.get("updatedAt"),
         "source": "stale_cache",
         "cacheStatus": cached.get("cacheStatus"),

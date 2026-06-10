@@ -44,7 +44,7 @@ export async function fetchModelFamilyStatus(family, symbol, duration = "10m", o
   return data;
 }
 
-export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "full", options = {}) {
+export async function requestLstmCandidateSearch(symbol, duration = "10m", profile = "fast", options = {}) {
   return requestModelCandidateSearch("lstm", symbol, duration, profile, options);
 }
 
@@ -52,7 +52,7 @@ export async function requestModelCandidateSearch(
   family,
   symbol,
   duration = "10m",
-  profile = "full",
+  profile = "fast",
   options = {},
 ) {
   const resource = modelSearchResourceParams(options);

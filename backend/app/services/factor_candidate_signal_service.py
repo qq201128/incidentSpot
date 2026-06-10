@@ -8,11 +8,14 @@ import pandas as pd
 
 from app.services.binance_service import fetch_klines
 from app.services.agent_mined_factor_library import agent_factor_rows_for_duration
-from app.services.factor_backtest_gate import meets_backtest_gate
 from app.services.factor_backtest_materialization import materialized_frame_for_factor
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
+from app.services.factor_candidate_signal_payloads import (
+    FactorSignal,
+    factor_candidate_prediction_payload,
+)
 from app.services.paper_live_candidate_service import log_prediction_failure
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_candidate_signal_utils import (
@@ -22,27 +25,22 @@ from app.services.factor_candidate_signal_utils import (
     directional_win_rate,
     factor_orientation,
     finite_float,
-    oos_win_rate,
     series_value_at,
-    signal_rule_reasons,
     usable_factor_row,
-    utc_now,
 )
 from app.services.factor_combo_scoring import oriented_zscore
 from app.services.factor_duration_alignment import (
     duration_entry_source_open_time,
     live_duration_entry_index,
 )
-from app.services.factor_frame_service import FACTOR_FRAME_MIN_HISTORY, load_factor_frame
+from app.services.factor_regime_analysis import current_factor_regime, factor_regime_gate
+from app.services.factor_frame_service import FACTOR_FRAME_MIN_HISTORY, load_factor_frame, lookback_days_for_bars
 from app.services.kline_backfill import count_klines, oldest_open_time, upsert_klines_rows
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.positioning_feature_backfill import refresh_positioning_features_for_lookback
 from app.services.factor_ranking_cache_service import get_cached_ranking
 from app.services.rule_config import MS_PER_MINUTE, SUPPORTED_RULE_DURATIONS, horizon_minutes_for_duration
 
-SIGNAL_RULE_NAME = "factor_candidate_signal_v1"
-PROBABILITY_DECIMALS = 4
-SCORE_DECIMALS = 6
 MIN_DURATION_KLINE_ROWS = 540
 DURATION_BACKFILL_LIMIT = 1000
 MAX_DURATION_BACKFILL_ROUNDS = 10
@@ -52,16 +50,6 @@ CANDIDATE_SCORE_LOOKBACK_BARS = max(
     MIN_DURATION_KLINE_ROWS,
 )
 logger = logging.getLogger("uvicorn.error")
-
-@dataclass(frozen=True)
-class _FactorSignal:
-    score: float
-    median: float
-    direction: str
-    confidence: float
-    entry_price: float
-    index: Any
-    orientation: int
 
 @dataclass(frozen=True)
 class _PredictionContext:
@@ -97,7 +85,13 @@ def predict_factor_candidate_signals(
     del entry_grace_ms
     _refresh_candidate_source_klines(symbol, duration, entry_open_time)
     rows = _ranking_rows(symbol, duration, require_usable=True)
-    working = load_factor_frame(symbol, duration, min_history=_candidate_frame_min_history())
+    min_history = _candidate_frame_min_history()
+    working = load_factor_frame(
+        symbol,
+        duration,
+        min_history=min_history,
+        lookback_days=lookback_days_for_bars(duration, min_history),
+    )
     context = _PredictionContext(symbol.strip().upper(), duration, int(entry_open_time))
     predictions = []
     failures = []
@@ -169,7 +163,7 @@ def _ranking_rows(symbol: str, duration: str, *, require_usable: bool) -> list[d
     rows = _cached_ranking_rows(cache) + _agent_ranking_rows(sym, duration)
     if require_usable and not rows and cache is None:
         raise ValueError(f"factor ranking cache missing for {sym} {duration}")
-    return [row for row in rows if meets_backtest_gate(row)]
+    return rows
 
 
 def _cached_ranking_rows(cache: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -196,12 +190,18 @@ def _prediction_for_row(
     if factor.name not in working.columns:
         raise ValueError(f"factor candidate signal missing column: {factor.name}")
     signal = _live_factor_signal(working, _SignalContext(row, factor.name, context))
-    return working, _prediction_payload(row, signal, context)
+    return working, factor_candidate_prediction_payload(
+        row,
+        signal,
+        symbol=context.symbol,
+        duration=context.duration,
+        entry_open_time=context.entry_open_time,
+    )
 
 def _live_factor_signal(
     frame: pd.DataFrame,
     context: _SignalContext,
-) -> _FactorSignal:
+) -> FactorSignal:
     orientation = factor_orientation(context.row)
     prediction = context.prediction
     index = _strict_duration_entry_index(frame, prediction.duration, prediction.entry_open_time)
@@ -215,48 +215,24 @@ def _live_factor_signal(
         raise ValueError(f"factor candidate signal has insufficient score history: {context.factor_name}")
     direction = "up" if score >= median else "down"
     confidence = directional_win_rate(context.row, orientation)
-    return _FactorSignal(score, median, direction, confidence, entry_price, index, orientation)
-
-def _prediction_payload(
-    row: dict[str, Any],
-    signal: _FactorSignal,
-    context: _PredictionContext,
-) -> dict[str, Any]:
-    signal_key = factor_candidate_signal_key(str(row["factorName"]))
-    probability_up = signal.confidence if signal.direction == "up" else 1.0 - signal.confidence
-    return {
-        "symbol": context.symbol,
-        "signal_key": signal_key,
-        "strategy_key": signal_key,
-        "duration": context.duration,
-        "open_time": int(context.entry_open_time),
-        "entry_price": signal.entry_price,
-        "direction": signal.direction,
-        "probability_up": round(probability_up, PROBABILITY_DECIMALS),
-        "confidence": round(signal.confidence, PROBABILITY_DECIMALS),
-        "certainty_label": "FACTOR_CANDIDATE_OBSERVE",
-        "trade_quality_score": round(signal.confidence, PROBABILITY_DECIMALS),
-        "trade_quality_passed": meets_backtest_gate(row),
-        "trade_quality_gate": SIGNAL_RULE_NAME,
-        "high_winrate_gate": SIGNAL_RULE_NAME,
-        "high_winrate_rule": str(row["factorName"]),
-        "high_winrate_gate_passed": True,
-        "high_winrate_gate_value": row.get("winRate"),
-        "high_winrate_gate_min": None,
-        "expected_return": None,
-        "model_version": str(row["factorName"]),
-        "model_family": "factor",
-        "model_duration": context.duration,
-        "model_trained_at": utc_now(),
-        "oos_win_rate": oos_win_rate(row),
-        "walk_forward_result": row.get("walkForward"),
-        "recent_rolling_result": row.get("recentRollingResult"),
-        "data_freshness_status": "fresh",
-        "missing_feature_status": "complete",
-        "rule_score": round(signal.score, SCORE_DECIMALS),
-        "rule_reasons": signal_rule_reasons(row, signal, rule_name=SIGNAL_RULE_NAME, decimals=SCORE_DECIMALS),
-        "signal_source": "factor_candidate_signal",
-    }
+    regime = factor_regime_gate(
+        direction,
+        confidence,
+        current_factor_regime(frame, index, prediction.duration),
+    )
+    return FactorSignal(
+        score,
+        median,
+        direction,
+        confidence,
+        entry_price,
+        index,
+        orientation,
+        regime.regime,
+        regime.passed,
+        regime.reason,
+        regime.min_win_rate,
+    )
 
 def _strict_duration_entry_index(
     frame: pd.DataFrame,

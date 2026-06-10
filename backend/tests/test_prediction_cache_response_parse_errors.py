@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.services.prediction_cache_service import prediction_response
+from app.services import prediction_cache_service
 
 
-def test_prediction_response_exposes_metadata_json_parse_errors() -> None:
-    payload = prediction_response(_prediction_row("{broken", json.dumps({"score": 0.72})))
+def test_prediction_response_exposes_metadata_json_parse_errors(monkeypatch) -> None:
+    regime = {"ready": True, "trendState": "range"}
+    monkeypatch.setattr(prediction_cache_service, "market_regime_status", lambda *_args: regime)
+
+    payload = prediction_cache_service.prediction_response(_prediction_row("{broken", json.dumps({"score": 0.72})))
 
     assert payload["walkForwardResult"] == "{broken"
     assert payload["recentRollingResult"] == {"score": 0.72}
+    assert payload["marketRegime"] == regime
     assert payload["metadataParseErrors"][0]["field"] == "walkForwardResult"
     assert payload["metadataParseErrors"][0]["exceptionType"] == "JSONDecodeError"
     assert "Expecting property name" in payload["metadataParseErrors"][0]["error"]

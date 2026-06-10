@@ -14,6 +14,8 @@ export default function FactorCombinationRankingTable({
   ranking,
   total,
   unfilteredTotal,
+  passedTotal,
+  evaluatedTotal,
 }) {
   return (
     <div className="factor-combo-ranking-stack">
@@ -33,6 +35,8 @@ export default function FactorCombinationRankingTable({
         ranking={ranking}
         total={total}
         unfilteredTotal={unfilteredTotal}
+        passedTotal={passedTotal}
+        evaluatedTotal={evaluatedTotal}
       />
     </div>
   );
@@ -89,6 +93,8 @@ function RegularRankingSection({
   ranking,
   total,
   unfilteredTotal,
+  passedTotal,
+  evaluatedTotal,
 }) {
   const safeTotal = Number(total ?? ranking.length);
   return (
@@ -98,7 +104,7 @@ function RegularRankingSection({
           <span className="section-kicker">排名列表</span>
           <h3>普通组合</h3>
         </div>
-        <span>{regularCountText(safeTotal, unfilteredTotal)}</span>
+        <span>{regularCountText(safeTotal, unfilteredTotal, passedTotal, evaluatedTotal)}</span>
       </header>
       <label className="factor-combo-rank-search">
         <span className="sr-only">搜索普通组合</span>
@@ -130,6 +136,9 @@ function renderRankingRow(row, index) {
         <strong className="factor-combo-rank-name">{row.factorDisplayName || row.factorName}</strong>
         <code className="factor-combo-rank-code">{row.factorName}</code>
         <p className="factor-combo-rank-members">{memberText(row.members)}</p>
+        <p className={`factor-combo-rank-gate ${row.walkForwardPassed ? "is-pass" : "is-fail"}`}>
+          {walkForwardText(row)}
+        </p>
       </div>
       <div className="factor-combo-rank-metrics">
         <Metric label="胜率" value={formatPct(row.winRate, 1)} strong={isGoalCombo(row)} />
@@ -190,9 +199,20 @@ function countText(count, summary) {
   return summary ? `${count} 项 · ${summary}` : `${count} 项`;
 }
 
-function regularCountText(total, unfilteredTotal) {
+function regularCountText(total, unfilteredTotal, passedTotal, evaluatedTotal) {
+  if (evaluatedTotal != null || passedTotal != null) {
+    const evaluated = Number(evaluatedTotal ?? unfilteredTotal ?? total);
+    const passed = Number(passedTotal ?? 0);
+    return `${total} 项 · 已评估 ${evaluated} · 通过 ${passed}`;
+  }
   const raw = Number(unfilteredTotal ?? total);
   return raw !== total ? `${total} / ${raw} 项` : `${total} 项`;
+}
+
+function walkForwardText(row) {
+  if (row.walkForwardPassed === true) return "walk-forward 通过，可进入交易候选";
+  const reason = row.walkForwardFailureReason || "未通过 walk-forward";
+  return `观察候选 · ${reason}`;
 }
 
 function highWinrateSummaryText(summary) {

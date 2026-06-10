@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import FactorCombinationPanel from "../components/FactorCombinationPanel";
 import FactorDetailPanel from "../components/FactorDetailPanel";
-import FactorHighWinrateCard from "../components/FactorHighWinrateCard";
 import FactorLibraryAlerts from "../components/FactorLibraryAlerts";
 import FactorListPanel from "../components/FactorListPanel";
 import FactorRankingTable from "../components/FactorRankingTable";
@@ -24,7 +23,6 @@ const SOURCE_LABELS = [
   { key: "local_definition", label: "本地定义" },
   { key: "agent_candidate", label: "Agent候选" },
   { key: "lstm_shadow", label: "LSTM影子" },
-  { key: "composite_cache", label: "组合缓存" },
 ];
 
 const WORKSPACE_TABS = [
@@ -94,7 +92,7 @@ function FactorsTopbar({ state, onRefreshRanking }) {
       <div className="factors-topbar-title">
         <span className="eyebrow">因子库 /</span>
         <h1>量化因子目录与回测</h1>
-        <p>统一管理单因子、组合因子、回测评分与排名缓存</p>
+        <p>查看因子定义与基础指标；旧组合胜率缓存仅作历史对照</p>
       </div>
       <div className="factors-topbar-meta">
         <div className="factors-topbar-metrics" aria-label="因子库概览">
@@ -125,8 +123,8 @@ function FactorsTopbar({ state, onRefreshRanking }) {
         <span className={`status-dot${rankingReady ? "" : " is-warn"}`} />
         <p>
           {rankingReady
-            ? `排名缓存已刷新 · ${sym} · ${dur}`
-            : `暂无排名缓存 · ${sym} · ${dur}`}
+            ? `因子排名已刷新 · ${sym} · ${dur}`
+            : `暂无因子排名 · ${sym} · ${dur}`}
         </p>
         <div className="factors-topbar-status-row">
           <small>更新时间: {formatUpdatedTime(updatedAt)}</small>
@@ -265,7 +263,6 @@ function FactorsWorkspacePanel({ actions, state, tab, onSelectFactor, onTabChang
                 unfilteredTotal={state.ranking.unfilteredTotal}
                 onSelectFactor={onSelectFactor}
               />
-              <FactorHighWinrateCard combo={state.highWinrateCombo} />
             </div>
             <FactorLibraryAlerts alerts={state.alerts} />
           </div>

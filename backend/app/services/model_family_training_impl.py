@@ -37,6 +37,7 @@ from app.services.model_family_config import (
 )
 from app.services.model_family_joblib_backend import JoblibModelBackend
 from app.services.model_family_paper_live_policy import paper_live_admission_payload
+from app.services.model_family_regime_reports import regime_validation_report
 from app.services.model_family_relative_promotion import relative_shadow_report
 from app.services.model_family_training_payloads import (
     attempt_payload,
@@ -141,18 +142,18 @@ def _train_with_dataset(
 ) -> dict[str, Any]:
     split = chronological_split(dataset.x, dataset.y, dataset.future_returns, cfg.train_ratio, cfg.val_ratio)
     scaler = fit_standardizer(split.train_x)
-    scaled = scaled_split(split, scaler)
+    training_split = _training_split(trainer, split, scaler)
     losses = trainer.train(
-        scaled.train_x,
-        scaled.train_y,
-        scaled.val_x,
-        scaled.val_y,
+        training_split.train_x,
+        training_split.train_y,
+        training_split.val_x,
+        training_split.val_y,
         options=backend_options(cfg, len(dataset.feature_columns)),
         model_path=staging_paths.model,
         persist_model=persist_artifacts,
-        **_torch_return_weight_kwargs(trainer, scaled),
+        **_torch_train_kwargs(trainer, training_split, scaler),
     )
-    report = _training_report(cfg, dataset, scaled, trainer, staging_paths.model, losses, version, evaluate_test)
+    report = _training_report(cfg, dataset, training_split, trainer, staging_paths.model, losses, version, evaluate_test)
     report = initial_baseline_report(report, publish_initial_baseline)
     if active_status_loader is not None:
         report = relative_shadow_report(report, active_status_loader(cfg.family, cfg.symbol, cfg.duration))
@@ -191,6 +192,7 @@ def _training_report(cfg, dataset, split, backend, model_path, losses, version, 
         "test": test_metrics,
         "rawValidation": binary_classification_metrics(split.val_y, val_prob, split.val_returns),
         "rawTest": raw_test,
+        "regimeValidation": regime_validation_report(dataset, split, calibrated_val_prob),
         "probabilityCalibration": {
             "calibrator": calibrator,
             "validation": calibration_report(split.val_y, calibrated_val_prob, split.val_returns),
@@ -243,10 +245,16 @@ def _predict_backend(backend, model_path: Path, x: np.ndarray) -> np.ndarray:
     return backend.predict(model_path, x)
 
 
-def _torch_return_weight_kwargs(trainer: Any, split) -> dict[str, Any]:
+def _training_split(trainer: Any, split, scaler: dict[str, Any]):
+    if isinstance(trainer, TorchSequenceBackend):
+        return split
+    return scaled_split(split, scaler)
+
+
+def _torch_train_kwargs(trainer: Any, split, scaler: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(trainer, TorchSequenceBackend):
         return {}
-    return {"train_returns": split.train_returns, "val_returns": split.val_returns}
+    return {"train_returns": split.train_returns, "val_returns": split.val_returns, "scaler": scaler}
 
 
 def _factor_combo_report(dataset: LstmDataset) -> dict[str, Any]:

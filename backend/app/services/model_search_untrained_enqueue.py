@@ -5,6 +5,7 @@ from typing import Any
 
 from app.services.model_family_status_service import model_family_status
 from app.services.model_search_job_store import enqueue_model_search_jobs
+from app.services.model_search_job_types import DEFAULT_MODEL_SEARCH_PRIORITY
 
 TRAINED_STATUSES = frozenset({"shadow_active", "trade_active", "initial_baseline", "trained"})
 
@@ -22,6 +23,7 @@ def enqueue_untrained_model_search_jobs(
     durations: tuple[str, ...],
     families: tuple[str, ...],
     profile: str,
+    priority: int = DEFAULT_MODEL_SEARCH_PRIORITY,
     reset_existing: bool = False,
     reset_history: bool = False,
     resource: dict[str, Any] | None = None,
@@ -32,6 +34,7 @@ def enqueue_untrained_model_search_jobs(
             durations=durations,
             families=families,
             profile=profile,
+            priority=priority,
             reset_existing=reset_existing,
             reset_history=True,
             resource=resource,
@@ -47,6 +50,7 @@ def enqueue_untrained_model_search_jobs(
     queued = _enqueue_targets(
         split["untrainedTargets"],
         profile=profile,
+        priority=priority,
         reset_existing=reset_existing,
         reset_history=reset_history,
         resource=resource,
@@ -99,6 +103,7 @@ def _enqueue_targets(
     targets: list[ModelSearchTarget],
     *,
     profile: str,
+    priority: int,
     reset_existing: bool,
     reset_history: bool,
     resource: dict[str, Any] | None,
@@ -109,6 +114,7 @@ def _enqueue_targets(
             durations=(target.duration,),
             families=(target.family,),
             profile=profile,
+            priority=priority,
             reset_existing=reset_existing,
             reset_history=reset_history,
             resource=resource,

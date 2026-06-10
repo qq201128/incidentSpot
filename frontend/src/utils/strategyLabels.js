@@ -11,6 +11,7 @@ export const STRATEGY_LABELS = {
   high_winrate_factor_combo_v1_top2: "高胜率目标组合执行·Top2",
   high_winrate_factor_combo_v1_top3: "高胜率目标组合执行·Top3",
   ensemble_ranker_v1: "综合裁判模拟",
+  event_final_decision_v1: "事件最终裁判模拟",
   optimized_rules_10m: "优化规则集（回测）",
 };
 

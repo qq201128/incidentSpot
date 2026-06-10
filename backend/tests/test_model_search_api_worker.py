@@ -38,6 +38,8 @@ def test_api_worker_starts_real_worker_command_once(monkeypatch: pytest.MonkeyPa
     assert command[command.index("--parallel-workers") + 1] == "3"
     assert command[command.index("--xgboost-process-workers") + 1] == "1"
     assert command[command.index("--torch-jobs") + 1] == "1"
+    assert command[command.index("--candidates-per-job") + 1] == "8"
+    assert command[command.index("--candidate-budget") + 1] == "32"
     assert "--compact" in command
     assert launched[0]["kwargs"]["cwd"] == str(api_worker.PROJECT_ROOT)
 

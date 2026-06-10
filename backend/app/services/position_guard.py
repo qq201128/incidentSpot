@@ -7,9 +7,16 @@ def has_open_position(
     strategy_key: str | None = None,
     *,
     event_interval: str | None = None,
+    require_market_regime_gate_passed: bool = False,
 ) -> bool:
     if strategy_key is not None:
-        return _has_open_strategy_position(conn, symbol, strategy_key, event_interval=event_interval)
+        return _has_open_strategy_position(
+            conn,
+            symbol,
+            strategy_key,
+            event_interval=event_interval,
+            require_market_regime_gate_passed=require_market_regime_gate_passed,
+        )
     row = conn.execute(
         """
         SELECT e.id
@@ -29,28 +36,38 @@ def _has_open_strategy_position(
     strategy_key: str,
     *,
     event_interval: str | None = None,
+    require_market_regime_gate_passed: bool = False,
 ) -> bool:
     # 仅用「未结算事件」判断持仓：避免仅有 events 无 orders 时误判无仓而重复开仓。
     # event_interval 与自动下单 settings.duration 一致时，同一策略可多周期并行持仓。
+    regime_gate_filter = _market_regime_gate_filter(require_market_regime_gate_passed)
     if event_interval is not None:
         row = conn.execute(
-            """
+            f"""
             SELECT e.id
             FROM events e
             WHERE e.symbol = ? AND e.strategy_key = ? AND e.event_interval = ?
               AND e.status = 'OPEN'
+              {regime_gate_filter}
             LIMIT 1
             """,
             (symbol.upper(), strategy_key, event_interval),
         ).fetchone()
         return row is not None
     row = conn.execute(
-        """
+        f"""
         SELECT e.id
         FROM events e
         WHERE e.symbol = ? AND e.strategy_key = ? AND e.status = 'OPEN'
+          {regime_gate_filter}
         LIMIT 1
         """,
         (symbol.upper(), strategy_key),
     ).fetchone()
     return row is not None
+
+
+def _market_regime_gate_filter(required: bool) -> str:
+    if not required:
+        return ""
+    return "AND e.market_regime_gate_passed = 1"

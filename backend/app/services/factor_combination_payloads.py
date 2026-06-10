@@ -21,6 +21,7 @@ class CombinationRankingReportPayload:
     config: Any
     selected: list[Any]
     ranking: list[dict[str, Any]]
+    evaluated_ranking: list[dict[str, Any]]
     tested_count: int
     failures: list[dict[str, Any]]
     mined_source_count: int
@@ -32,7 +33,9 @@ def build_combination_ranking_report(payload: CombinationRankingReportPayload) -
         "symbol": payload.symbol.upper(),
         "duration": payload.duration,
         "ranking": payload.ranking,
+        "evaluatedRanking": payload.evaluated_ranking,
         "total": len(payload.ranking),
+        "evaluatedTotal": len(payload.evaluated_ranking),
         "searchConfig": config_payload(payload.config),
         "baseFactors": [base_payload(item) for item in payload.selected],
         "baseFactorCount": len(payload.selected),
@@ -109,6 +112,8 @@ def config_payload(config: Any) -> dict[str, Any]:
         "prefilterLimit": config.prefilter_limit,
         "beamWidth": config.beam_width,
         "parallelWorkers": config.parallel_workers,
+        "lookbackDays": config.lookback_days,
+        "lookbackBars": config.lookback_bars,
         "method": config.method,
         "minPeriods": BACKTEST_MIN_PERIODS,
     }

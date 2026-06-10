@@ -51,6 +51,24 @@ def test_ai_history_success_summary_omits_factor_list() -> None:
     assert "byStrategy" not in result
 
 
+def test_ai_history_ignores_pre_regime_gate_events() -> None:
+    clear_ai_history_cache()
+    conn = _memory_conn()
+    _insert_settled_ai_event(
+        conn,
+        "BTCUSDT",
+        "legacy",
+        start="2026-05-21T14:10:00Z",
+        end="2026-05-21T14:20:00Z",
+        gate_passed=None,
+    )
+    _insert_settled_ai_event(conn, "BTCUSDT", "current", start="2026-05-21T14:10:00Z", end="2026-05-21T14:20:00Z")
+
+    result = event_ai_history.ai_history_success(conn, "BTCUSDT")
+
+    assert result["overall"]["total"] == 1
+
+
 def _memory_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -62,7 +80,8 @@ def _memory_conn() -> sqlite3.Connection:
           strike_value REAL NOT NULL, upper_bound REAL, start_time TEXT NOT NULL,
           end_time TEXT NOT NULL, status TEXT NOT NULL, result TEXT,
           ai_predicted_direction TEXT, ai_prediction_correct INTEGER,
-          ai_high_winrate_rule TEXT
+          ai_high_winrate_rule TEXT,
+          market_regime_gate_passed INTEGER
         );
         CREATE TABLE orders (
           id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, side TEXT NOT NULL,
@@ -85,16 +104,18 @@ def _insert_settled_ai_event(
     start: str,
     end: str,
     event_interval: str = "10m",
+    gate_passed: int | None = 1,
 ) -> None:
     cursor = conn.execute(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value,
-          start_time, end_time, status, ai_predicted_direction, ai_prediction_correct, result
+          start_time, end_time, status, ai_predicted_direction, ai_prediction_correct, result,
+          market_regime_gate_passed
         )
-        VALUES(?, ?, 'test', ?, 'ABOVE', 103215.4, ?, ?, 'SETTLED', 'up', 1, 'YES')
+        VALUES(?, ?, 'test', ?, 'ABOVE', 103215.4, ?, ?, 'SETTLED', 'up', 1, 'YES', ?)
         """,
-        (strategy_key, symbol, event_interval, start, end),
+        (strategy_key, symbol, event_interval, start, end, gate_passed),
     )
     event_id = cursor.lastrowid
     order_cursor = conn.execute(

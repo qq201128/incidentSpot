@@ -9,6 +9,7 @@ def recorded_model_search_keys(
     family: str,
     symbol: str,
     duration: str,
+    profile: str | None = None,
     *,
     artifact_root: Path | None = None,
 ) -> frozenset[str]:
@@ -16,5 +17,5 @@ def recorded_model_search_keys(
     return frozenset(
         str(row.get("searchKey"))
         for row in library["records"]
-        if row.get("searchKey")
+        if row.get("searchKey") and (profile is None or row.get("profile") == profile)
     )

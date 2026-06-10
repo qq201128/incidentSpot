@@ -44,6 +44,7 @@ EXACT_PAIR_SELECT = """
       AND e.event_interval = ?
       AND e.status = 'SETTLED'
       AND e.prediction_open_time IS NOT NULL
+      AND e.market_regime_gate_passed = 1
     ORDER BY p.open_time DESC
     LIMIT ?
 """
@@ -74,6 +75,8 @@ def shadow_event_deviation_report(symbol: str, duration: str, *, limit: int = 50
 
 
 def _load_paired_rows(conn: Any, sym: str, duration: str, limit: int) -> list[Any]:
+    if not _market_regime_gate_column_available(conn):
+        return []
     exact_rows = conn.execute(
         EXACT_PAIR_SELECT.format(order_join=ORDER_JOIN),
         (sym, duration, limit),
@@ -122,6 +125,7 @@ def _load_fuzzy_pairs(
           AND e.event_interval = ?
           AND e.status = 'SETTLED'
           AND e.prediction_open_time IS NULL
+          AND e.market_regime_gate_passed = 1
         ORDER BY e.start_time DESC
         LIMIT ?
         """,
@@ -221,6 +225,11 @@ def _event_start_ms(start_time: str) -> int | None:
         return int(dt.timestamp() * 1000)
     except (TypeError, ValueError):
         return None
+
+
+def _market_regime_gate_column_available(conn: Any) -> bool:
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    return "market_regime_gate_passed" in columns
 
 
 def _pair_row(row: dict[str, Any], pnl_fn) -> dict[str, Any]:

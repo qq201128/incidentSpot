@@ -66,7 +66,7 @@ export default function MiningKpiCards({
             {busy === "agent" ? "排队中…" : "联网 Agent 挖掘"}
           </button>
           <button type="button" className="is-primary" disabled={busy === "search-all"} onClick={onSearchAll}>
-            {busy === "search-all" ? "全部排队中" : "全量搜索全部算法"}
+            {busy === "search-all" ? "全部排队中" : "快速补搜全部算法"}
           </button>
           <button type="button" className="is-danger" disabled={busy === "retrain-all"} onClick={onRetrainAll}>
             {busy === "retrain-all" ? "重训排队中" : "重训当前全部"}

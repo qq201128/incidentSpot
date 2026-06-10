@@ -75,6 +75,40 @@ def test_worker_trains_reset_history_job_even_when_already_trained(monkeypatch: 
     assert report["job"]["resetHistory"] is True
 
 
+def test_worker_continues_incomplete_search_even_when_model_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("incomplete-ready-worker") / "model-search.db"
+    log_dir = _runtime_path("incomplete-ready-worker-logs")
+    _patch_store_db(monkeypatch, db_path)
+    store.enqueue_model_search_jobs(
+        symbols=("BTCUSDT",),
+        durations=("10m",),
+        families=("knn",),
+        profile="fast",
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        runner,
+        "model_family_status",
+        lambda *_args: {
+            "status": "shadow_active",
+            "shadowPredictionReady": True,
+            "candidateSearchProgress": {"completed": 32, "total": 72},
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_model_candidate_search",
+        lambda config: calls.append(config) or {"status": "validation_failed"},
+    )
+
+    report = runner.run_one_model_search_job(runner.ModelSearchWorkerConfig(log_dir=log_dir, candidate_budget=64))
+
+    assert report["status"] == "rejected"
+    assert calls
+    assert calls[0].candidate_budget == 64
+
+
 def test_worker_continues_partial_job_even_when_active_model_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("partial-ready-worker") / "model-search.db"
     log_dir = _runtime_path("partial-ready-worker-logs")

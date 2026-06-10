@@ -52,6 +52,8 @@ def _prediction_rows(conn: Any, symbol: str, duration: str, keys: list[str]) -> 
 
 
 def _event_rows(conn: Any, symbol: str, duration: str, keys: list[str]) -> dict[str, dict[str, Any]]:
+    if not _market_regime_gate_column_available(conn):
+        return {}
     placeholders = ",".join("?" for _key in keys)
     rows = conn.execute(
         f"""
@@ -60,11 +62,17 @@ def _event_rows(conn: Any, symbol: str, duration: str, keys: list[str]) -> dict[
                MAX(id) AS latest_event_id
         FROM events
         WHERE strategy_key IN ({placeholders}) AND symbol = ? AND event_interval = ?
+          AND market_regime_gate_passed = 1
         GROUP BY strategy_key
         """,
         (*keys, symbol, duration),
     ).fetchall()
     return {str(row["strategy_key"]): dict(row) for row in rows}
+
+
+def _market_regime_gate_column_available(conn: Any) -> bool:
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    return "market_regime_gate_passed" in columns
 
 
 def _family_rows(keys: list[str], predictions: dict[str, dict[str, Any]], events: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

@@ -28,12 +28,40 @@ const STATUS_PRIORITY = Object.freeze({
   model_status_failed: 0,
 });
 
+const SETTLED_SOURCE_LIMIT = 120;
+
 export function settledRows(report) {
   const rows = [
-    ...(Array.isArray(report?.allCandidates) ? report.allCandidates : []),
+    ...dashboardCandidateSources(report),
     ...(Array.isArray(report?.modelFamilyStatusRows) ? report.modelFamilyStatusRows : []),
   ];
   return rows.map(rowPayload).filter(visibleResearchRow).sort(sampleSort);
+}
+
+function dashboardCandidateSources(report) {
+  const pooled = [
+    ...(Array.isArray(report?.stable) ? report.stable : []),
+    ...(Array.isArray(report?.collecting) ? report.collecting : []),
+    ...(Array.isArray(report?.failed) ? report.failed : []),
+    ...(Array.isArray(report?.candidates) ? report.candidates : []),
+  ];
+  if (pooled.length) {
+    return dedupeCandidates(pooled).slice(0, SETTLED_SOURCE_LIMIT);
+  }
+  const all = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
+  return all.slice(0, SETTLED_SOURCE_LIMIT);
+}
+
+function dedupeCandidates(rows) {
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows) {
+    const key = row?.candidateKey || row?.strategyKey;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+  return unique;
 }
 
 export function mergeModelFamilyStatusRows(report, models) {
@@ -50,6 +78,7 @@ export function mergeModelFamilyStatusRows(report, models) {
     allCandidates: mergedCandidates,
     allCandidateCount: mergedCandidates.length + modelFamilyStatusRows.length,
     modelFamilyStatusRows,
+    modelFamilyStatuses: statusRows,
   };
 }
 

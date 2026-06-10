@@ -26,6 +26,7 @@ from app.services.factor_candidate_signal_keys import is_factor_candidate_signal
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
+from app.services.market_regime_trade_gate import evaluate_market_regime_trade_gate
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.runtime_symbols import configured_runtime_symbols
 from app.services.strategy_registry import (
@@ -40,10 +41,6 @@ logger = logging.getLogger("uvicorn.error")
 
 MS_PER_SECOND = 1000
 LOOP_NAME = "auto_trade"
-
-
-class AutoTradeStrategyNotFound(ValueError):
-    pass
 
 
 async def auto_trade_loop(stop_event: asyncio.Event, poll_seconds: int = 1) -> None:
@@ -86,21 +83,6 @@ def list_auto_trade_settings() -> list[AutoTradeSettings]:
 def list_auto_trade_strategy_payloads() -> list[dict[str, Any]]:
     payloads = [_strategy_payload(settings) for settings in list_auto_trade_settings()]
     return with_simulation_status(payloads)
-
-
-def get_auto_trade_strategy_payload(
-    strategy_key: str,
-    symbol: str = DEFAULT_SYMBOL,
-    duration: str = DEFAULT_DURATION,
-) -> dict[str, Any]:
-    key = str(strategy_key or "").strip()
-    sym = str(symbol or "").strip().upper()
-    dur = str(duration or "").strip()
-    _validate_slot_request(key, sym, dur)
-    settings = _find_auto_trade_settings(key, sym, dur)
-    if settings is None:
-        raise AutoTradeStrategyNotFound(f"auto trade slot not found: {sym} {dur} {key}")
-    return with_simulation_status([_strategy_payload(settings)])[0]
 
 
 def get_auto_trade_settings(strategy_key: str = DEFAULT_STRATEGY_KEY, symbol: str = DEFAULT_SYMBOL) -> AutoTradeSettings:
@@ -153,6 +135,22 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
     if not _is_fresh_prediction(prediction, settings):
         return None
     if not _is_prediction_tradable(prediction, settings):
+        return None
+    regime_decision = evaluate_market_regime_trade_gate(
+        symbol=settings.symbol,
+        duration=settings.duration,
+        open_time=int(prediction["open_time"]),
+        direction=str(prediction["direction"]),
+    )
+    if not regime_decision.allowed:
+        logger.info(
+            "auto trade skipped by market regime strategy=%s symbol=%s duration=%s reason=%s regime=%s",
+            settings.strategy_key,
+            settings.symbol,
+            settings.duration,
+            regime_decision.reason,
+            regime_decision.regime,
+        )
         return None
     result = _create_trade(settings, prediction)
     logger.info(
@@ -240,7 +238,13 @@ def fresh_prediction_ms_for_strategy(strategy_key: str) -> int:
 def _has_open_position(symbol: str, strategy_key: str, duration: str) -> bool:
     conn = get_conn()
     try:
-        return has_open_position(conn, symbol, strategy_key, event_interval=duration)
+        return has_open_position(
+            conn,
+            symbol,
+            strategy_key,
+            event_interval=duration,
+            require_market_regime_gate_passed=True,
+        )
     finally:
         conn.close()
 
@@ -297,16 +301,6 @@ def _find_auto_trade_settings(key: str, symbol: str, duration: str) -> AutoTrade
         if settings.strategy_key == key and settings.symbol == symbol and settings.duration == duration:
             return settings
     return None
-
-
-def _validate_slot_request(strategy_key: str, symbol: str, duration: str) -> None:
-    if not strategy_key:
-        raise ValueError("strategyKey is required")
-    if not symbol:
-        raise ValueError("symbol is required")
-    if duration not in AUTO_TRADE_SLOT_DURATIONS:
-        supported = ", ".join(AUTO_TRADE_SLOT_DURATIONS)
-        raise ValueError(f"duration must be one of: {supported}")
 
 
 def _validated_settings(settings: AutoTradeSettings) -> AutoTradeSettings:

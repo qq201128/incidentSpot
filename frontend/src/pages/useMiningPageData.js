@@ -106,12 +106,12 @@ export function useMiningPageData(symbol, duration) {
     try {
       await Promise.all(
         MODEL_FAMILIES.map((family) =>
-          requestModelCandidateSearch(family, normalizedSymbol, duration, "full", DEFAULT_MODEL_SEARCH_RESOURCE),
+          requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", DEFAULT_MODEL_SEARCH_RESOURCE),
         ),
       );
       await load(undefined, { fresh: true });
     } catch (error) {
-      setStatus(`全量搜索失败：${errorMessage(error)}`);
+      setStatus(`快速补搜失败：${errorMessage(error)}`);
     } finally {
       setBusy("");
     }
@@ -142,7 +142,7 @@ export function useMiningPageData(symbol, duration) {
       if (!isValidSymbol(normalizedSymbol)) return;
       setBusy(`search-${family}`);
       try {
-        await requestModelCandidateSearch(family, normalizedSymbol, duration, "full", DEFAULT_MODEL_SEARCH_RESOURCE);
+        await requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", DEFAULT_MODEL_SEARCH_RESOURCE);
         await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`${family} 搜索失败：${errorMessage(error)}`);

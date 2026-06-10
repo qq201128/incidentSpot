@@ -14,6 +14,8 @@ def test_queued_progress_caps_completed_and_preserves_stage_counts(monkeypatch) 
             "total": 1,
             "searchSpaceTotal": 1,
             "percent": 1.0,
+            "stageEvaluationCompleted": 648,
+            "stageEvaluationTotal": 1,
         },
     )
     monkeypatch.setattr(
@@ -35,7 +37,7 @@ def test_queued_progress_caps_completed_and_preserves_stage_counts(monkeypatch) 
 
 
 def test_queued_progress_uses_candidate_library_count(monkeypatch) -> None:
-    records = [{"status": "validation_failed"} for _ in range(42)]
+    records = [{"status": "validation_failed", "profile": "full"} for _ in range(42)]
     monkeypatch.setattr(
         progress,
         "read_model_candidate_progress_view",
@@ -45,6 +47,8 @@ def test_queued_progress_uses_candidate_library_count(monkeypatch) -> None:
             "total": 1,
             "searchSpaceTotal": 1,
             "percent": 1.0,
+            "stageEvaluationCompleted": 1,
+            "stageEvaluationTotal": 1,
         },
     )
     monkeypatch.setattr(

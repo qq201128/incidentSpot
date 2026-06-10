@@ -26,6 +26,7 @@ SETTLED_EVENT_JOIN = """
       AND e.symbol = ?
       AND e.event_interval = ?
 """
+MARKET_REGIME_GATE_FILTER = "AND e.market_regime_gate_passed = 1"
 
 
 def _events_table_available(conn: Any) -> bool:
@@ -44,9 +45,9 @@ def settled_event_metric_rows(
     high_winrate_rule: str | None = None,
     limit: int | None = RECENT_EVENT_SAMPLE_LIMIT,
 ) -> list[dict[str, Any]]:
-    if not _events_table_available(conn):
+    if not _events_table_available(conn) or not _market_regime_gate_column_available(conn):
         return []
-    clauses = [SETTLED_EVENT_JOIN.strip()]
+    clauses = [SETTLED_EVENT_JOIN.strip(), MARKET_REGIME_GATE_FILTER]
     params: list[Any] = [symbol.strip().upper(), duration]
     if strategy_key is not None:
         clauses.append("AND e.strategy_key = ?")
@@ -87,7 +88,7 @@ def settled_event_rows_for_high_winrate_rule(
     *,
     limit: int | None = RECENT_EVENT_SAMPLE_LIMIT,
 ) -> list[dict[str, Any]]:
-    if not _events_table_available(conn):
+    if not _events_table_available(conn) or not _market_regime_gate_column_available(conn):
         return []
     parent_keys = (HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY)
     if rule is None:
@@ -115,6 +116,7 @@ def settled_event_rows_for_high_winrate_rule(
           o.qty AS order_qty,
           o.price AS order_price
         {SETTLED_EVENT_JOIN}
+          {MARKET_REGIME_GATE_FILTER}
           AND (
             e.strategy_key IN (?, ?)
             OR e.strategy_key LIKE ?
@@ -148,12 +150,13 @@ def _limit_clause(limit: int | None) -> tuple[str, tuple[int, ...]]:
 
 
 def batch_combo_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str]:
-    if not _events_table_available(conn):
+    if not _events_table_available(conn) or not _market_regime_gate_column_available(conn):
         return []
     rows = conn.execute(
         f"""
         SELECT DISTINCT e.strategy_key
         {SETTLED_EVENT_JOIN}
+          {MARKET_REGIME_GATE_FILTER}
           AND (
             e.strategy_key LIKE ?
             OR e.strategy_key LIKE ?
@@ -170,12 +173,13 @@ def batch_combo_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str
 
 
 def factor_candidate_strategy_keys(conn: Any, symbol: str, duration: str) -> list[str]:
-    if not _events_table_available(conn):
+    if not _events_table_available(conn) or not _market_regime_gate_column_available(conn):
         return []
     rows = conn.execute(
         f"""
         SELECT DISTINCT e.strategy_key
         {SETTLED_EVENT_JOIN}
+          {MARKET_REGIME_GATE_FILTER}
           AND e.strategy_key LIKE ?
         """,
         (
@@ -185,6 +189,11 @@ def factor_candidate_strategy_keys(conn: Any, symbol: str, duration: str) -> lis
         ),
     ).fetchall()
     return [str(row["strategy_key"]) for row in rows if is_factor_candidate_signal_strategy(row["strategy_key"])]
+
+
+def _market_regime_gate_column_available(conn: Any) -> bool:
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    return "market_regime_gate_passed" in columns
 
 
 def _metric_row(row: dict[str, Any]) -> dict[str, Any]:

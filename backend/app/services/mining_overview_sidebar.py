@@ -8,7 +8,12 @@ OPERATOR_CATEGORY_LABELS = {
     "difference": "差分类",
     "cross_section": "截面类",
     "microstructure": "微观结构",
+    "derivatives": "资金/持仓",
     "derived": "衍生指标",
+    "volume_price": "量价类",
+    "risk_shape": "风险形态",
+    "price_action": "价格行为",
+    "onchain_sentiment": "链上/情绪",
 }
 
 RANKING_SOURCE_LABELS = {

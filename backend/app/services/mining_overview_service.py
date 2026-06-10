@@ -118,6 +118,7 @@ def _summary_payload(memory: dict, models: list[dict], search_queue: dict[str, A
     adaptive = memory.get("adaptiveLearning") or {}
     loss = memory.get("lossMemory") or {}
     promotion = memory.get("agentCandidatePromotion") or {}
+    agent_library = memory.get("agentMinedFactorLibrary") or {}
     queue_counts = search_queue.get("counts") or {}
     samples = _sample_counts(adaptive, loss)
     search = _search_counts(queue_counts, search_queue)
@@ -128,8 +129,11 @@ def _summary_payload(memory: dict, models: list[dict], search_queue: dict[str, A
         **samples,
         **search,
         **candidates,
-        "readyModelCount": sum(1 for row in models if row.get("cardState") == "ready"),
+        "readyModelCount": sum(1 for row in models if row.get("predictionUsable")),
+        "searchCompleteModelCount": sum(1 for row in models if row.get("searchComplete")),
+        "budgetLimitedModelCount": sum(1 for row in models if row.get("budgetLimited")),
         "totalModelCount": len(models),
+        "agentFactorCategoryShare": agent_library.get("categoryShare") or [],
     }
 
 

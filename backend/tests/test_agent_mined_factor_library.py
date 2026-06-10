@@ -157,6 +157,25 @@ def test_agent_candidate_with_vwap_can_materialize_and_reach_backtest(monkeypatc
     assert isinstance(record["metrics"], dict)
 
 
+def test_derivative_candidate_is_marked_saturated_when_category_overweight(monkeypatch, tmp_path: Path) -> None:
+    _patch_paths(monkeypatch, tmp_path)
+    _write_existing_derivative_library(tmp_path, count=5)
+    monkeypatch.setattr(agent_lib, "run_factor_backtest_on_frame", _strong_backtest)
+    monkeypatch.setattr(agent_lib, "enrich_factor_results", lambda *_args, **_kwargs: None)
+
+    result = agent_lib.process_agent_factor_candidates(_memory("FundingZ(20)"), _frame())
+    record = result["agentCandidatePromotion"]["records"][0]
+    rows = agent_lib.load_agent_factor_library()["factors"]
+    row = next(item for item in rows if item["candidateStatus"] == "category_saturated")
+
+    assert record["status"] == "category_saturated"
+    assert result["agentCandidateEvaluation"]["statusCounts"]["category_saturated"] == 1
+    assert row["candidateStatus"] == "category_saturated"
+    assert row["qualityPassed"] is False
+    assert row["factorCategory"] == "derivatives"
+    assert result["agentMinedFactorLibrary"]["categoryShare"][0]["category"] == "derivatives"
+
+
 def _patch_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(agent_lib, "AGENT_FACTOR_LIBRARY_PATH", tmp_path / "agent_mined_factor_library.json")
     monkeypatch.setattr(agent_lib, "AGENT_CANDIDATE_HISTORY_PATH", tmp_path / "agent_factor_candidate_history.json")
@@ -168,6 +187,19 @@ def _write_existing_library(tmp_path: Path, count: int, rejected_count: int = 0)
     payload = {"version": agent_lib.AGENT_FACTOR_LIBRARY_VERSION, "factors": rows}
     path = tmp_path / "agent_mined_factor_library.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_existing_derivative_library(tmp_path: Path, count: int) -> None:
+    rows = [_existing_library_row(index) for index in range(count)]
+    for index, row in enumerate(rows):
+        row["factorName"] = f"existing_derivative_{index}"
+        row["formula"] = "OpenInterestZ(60)"
+        row["factorCategory"] = "derivatives"
+    payload = {"version": agent_lib.AGENT_FACTOR_LIBRARY_VERSION, "factors": rows}
+    (tmp_path / "agent_mined_factor_library.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _existing_library_row(index: int) -> dict:
@@ -237,9 +269,14 @@ def _frame() -> pd.DataFrame:
             "low": close * 0.998,
             "volume": 100.0 + 20.0 * (1.0 + np.sin(idx / 11.0)),
             "factor_a": future + noise,
+            "funding_rate": 0.0001 * np.sin(idx / 17.0),
         }
     )
 
 
 def _weak_backtest(*_args, **_kwargs) -> dict:
     return {"winRate": 0.2, "profitFactor": 0.4, "totalPeriods": ROWS, "ir": -0.1}
+
+
+def _strong_backtest(*_args, **_kwargs) -> dict:
+    return {"winRate": 0.7, "profitFactor": 1.5, "totalPeriods": ROWS, "ir": 0.8}

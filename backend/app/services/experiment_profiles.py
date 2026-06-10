@@ -12,6 +12,7 @@ from app.services.factor_combination_service import (
     DEFAULT_NATIVE_FACTOR_LIMIT,
     DEFAULT_PARALLEL_WORKERS,
     DEFAULT_PREFILTER_LIMIT,
+    DEFAULT_LOOKBACK_BARS,
     DEFAULT_RESULT_LIMIT,
 )
 from app.services.high_winrate_strategy_demotion import (
@@ -38,26 +39,28 @@ EXPERIMENT_PROFILE_FULL = "full"
 EXPERIMENT_PROFILES = (EXPERIMENT_PROFILE_FAST, EXPERIMENT_PROFILE_FULL)
 
 FAST_COMBINATION_CONFIG = CombinationSearchConfig(
-    base_factor_limit=16,
-    native_factor_limit=10,
-    mined_factor_limit=4,
-    agent_factor_limit=1,
+    base_factor_limit=72,
+    native_factor_limit=72,
+    mined_factor_limit=6,
+    agent_factor_limit=6,
     combo_sizes=(2,),
-    result_limit=50,
-    prefilter_limit=120,
-    beam_width=120,
-    parallel_workers=2,
+    result_limit=250,
+    prefilter_limit=200,
+    beam_width=200,
+    parallel_workers=1,
+    lookback_bars=DEFAULT_LOOKBACK_BARS,
 )
 FULL_COMBINATION_CONFIG = CombinationSearchConfig(
     base_factor_limit=DEFAULT_BASE_FACTOR_LIMIT,
     native_factor_limit=DEFAULT_NATIVE_FACTOR_LIMIT,
     mined_factor_limit=DEFAULT_MINED_FACTOR_LIMIT,
     agent_factor_limit=DEFAULT_AGENT_FACTOR_LIMIT,
-    combo_sizes=(2, 3),
+    combo_sizes=(2,),
     result_limit=DEFAULT_RESULT_LIMIT,
     prefilter_limit=DEFAULT_PREFILTER_LIMIT,
     beam_width=DEFAULT_BEAM_WIDTH,
     parallel_workers=DEFAULT_PARALLEL_WORKERS,
+    lookback_bars=DEFAULT_LOOKBACK_BARS,
 )
 
 FAST_LSTM_CONFIG = {
@@ -114,6 +117,8 @@ def combination_search_config_for_profile(
     agent_factor_limit: int | None = None,
     combo_sizes: tuple[int, ...] | None = None,
     result_limit: int | None = None,
+    lookback_days: int | None = None,
+    lookback_bars: int | None = None,
 ) -> CombinationSearchConfig:
     selected = _combination_profile(profile)
     return CombinationSearchConfig(
@@ -126,6 +131,8 @@ def combination_search_config_for_profile(
         prefilter_limit=selected.prefilter_limit,
         beam_width=selected.beam_width,
         parallel_workers=selected.parallel_workers,
+        lookback_days=lookback_days if lookback_days is not None else selected.lookback_days,
+        lookback_bars=lookback_bars if lookback_bars is not None else selected.lookback_bars,
     )
 
 

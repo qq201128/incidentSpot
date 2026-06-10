@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.services.auto_trade_types import AutoTradeSettings
@@ -20,6 +21,12 @@ class PredictionTargetConfigError(RuntimeError):
         self.details = {"invalidTargets": invalid_targets}
         labels = ", ".join(f"{row['strategyKey']}:{row['symbol']}:{row['duration']}" for row in invalid_targets)
         super().__init__(f"enabled prediction targets have unsupported durations: {labels}")
+
+
+@dataclass(frozen=True)
+class ReadyPredictionTargetResult:
+    ready: tuple[AutoTradeSettings, ...]
+    skipped: tuple[dict[str, Any], ...]
 
 
 def prediction_targets(
@@ -99,19 +106,38 @@ def ready_due_prediction_targets(
     due_targets: Callable[[list[AutoTradeSettings]], list[AutoTradeSettings]],
     readiness: Callable[..., Any],
     logger: logging.Logger,
+    attempt_recovery: bool = True,
 ) -> list[AutoTradeSettings]:
+    result = ready_due_prediction_target_result(
+        targets,
+        due_targets=due_targets,
+        readiness=readiness,
+        logger=logger,
+        attempt_recovery=attempt_recovery,
+    )
+    if result.skipped:
+        raise PredictionTargetReadinessError(list(result.skipped))
+    return list(result.ready)
+
+
+def ready_due_prediction_target_result(
+    targets: list[AutoTradeSettings],
+    *,
+    due_targets: Callable[[list[AutoTradeSettings]], list[AutoTradeSettings]],
+    readiness: Callable[..., Any],
+    logger: logging.Logger,
+    attempt_recovery: bool = True,
+) -> ReadyPredictionTargetResult:
     ready = []
     skipped = []
     for settings in due_targets(targets):
-        status = readiness(settings.strategy_key, settings.symbol, settings.duration, attempt_recovery=False)
+        status = readiness(settings.strategy_key, settings.symbol, settings.duration, attempt_recovery=attempt_recovery)
         if status.ready:
             ready.append(settings)
             continue
         log_readiness_skip(logger, settings, status)
         skipped.append(readiness_skip_payload(settings, status))
-    if skipped:
-        raise PredictionTargetReadinessError(skipped)
-    return ready
+    return ReadyPredictionTargetResult(tuple(ready), tuple(skipped))
 
 
 def readiness_skip_payload(settings: AutoTradeSettings, status: Any) -> dict[str, Any]:

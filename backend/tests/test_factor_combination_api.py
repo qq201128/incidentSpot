@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from fastapi import BackgroundTasks
+import pandas as pd
 
 from app.api import factor_combinations
 from app.api.factor_combinations import _stale_combination_ranking
 from app.services.combination_ranking_page import build_combination_ranking_page
 from app.services.factor_combination_refresh_api import combination_config
+from app.services import factor_combination_incremental_refresh as incremental_refresh
 
 
 def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
@@ -19,8 +21,13 @@ def test_combination_config_maps_query_values_to_dataclass_fields() -> None:
     assert config.base_factor_limit == 25
     assert config.combo_sizes == (2, 3)
     assert config.result_limit == 400
-    assert config.native_factor_limit == 32
-    assert config.prefilter_limit == 800
+    assert config.native_factor_limit == 120
+    assert config.mined_factor_limit == 12
+    assert config.agent_factor_limit == 12
+    assert config.prefilter_limit == 500
+    assert config.beam_width == 500
+    assert config.lookback_days is None
+    assert config.lookback_bars == 720
 
 
 def test_stale_combination_ranking_filters_nested_combo_rows() -> None:
@@ -142,6 +149,48 @@ def test_combination_ranking_api_does_not_return_full_regular_ranking(monkeypatc
     assert "regularRanking" not in payload
 
 
+def test_combination_ranking_api_displays_evaluated_rows_without_promoting_to_trading(monkeypatch) -> None:
+    rows = [
+        {
+            "factorName": "combo__passed__volume",
+            "members": [{"name": "passed"}, {"name": "volume"}],
+            "walkForwardPassed": True,
+        }
+    ]
+    evaluated = [
+        *rows,
+        {
+            "factorName": "combo__failed__carry",
+            "members": [{"name": "failed"}, {"name": "carry"}],
+            "walkForwardPassed": False,
+            "walkForwardFailureReason": "validation_profit_factor_below_min",
+        },
+    ]
+    monkeypatch.setattr(
+        factor_combinations,
+        "get_cached_combination_ranking",
+        lambda _symbol, _duration: {
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "ranking": rows,
+            "evaluatedRanking": evaluated,
+            "updatedAt": "2026-05-31T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(factor_combinations, "cache_is_usable", lambda _cached: True)
+    monkeypatch.setattr(factor_combinations, "_high_winrate_view", lambda _symbol, _duration: {})
+
+    payload = factor_combinations.factor_combination_ranking(symbol="BTCUSDT", duration="10m", page_size=10)
+
+    assert [row["factorName"] for row in payload["ranking"]] == [
+        "combo__passed__volume",
+        "combo__failed__carry",
+    ]
+    assert payload["passedRankingTotal"] == 1
+    assert payload["evaluatedRankingTotal"] == 2
+    assert payload["regularTotal"] == 2
+
+
 def test_combination_ranking_route_normalizes_optional_query_defaults(monkeypatch) -> None:
     rows = [
         {"factorName": "combo__trend__volume", "members": [{"name": "trend"}, {"name": "volume"}]},
@@ -183,3 +232,33 @@ def test_combination_refresh_route_normalizes_optional_query_defaults(monkeypatc
     assert payload["duration"] is None
     assert payload["profile"] == "full"
     assert tasks.tasks[0].args[1] is None
+
+
+def test_incremental_refresh_filters_non_computable_source_rows(monkeypatch) -> None:
+    frame = pd.DataFrame({"open": [1, 2], "close": [2, 3], "factor_a": [1, 2], "factor_b": [2, 1]})
+    monkeypatch.setattr(incremental_refresh, "load_factor_frame", lambda *_args, **_kwargs: frame)
+    monkeypatch.setattr(incremental_refresh, "get_cached_combination_ranking", lambda *_args: None)
+    monkeypatch.setattr(incremental_refresh, "save_cached_combination_ranking", lambda _report: None)
+    monkeypatch.setattr(incremental_refresh, "assert_cache_usable_for_live_signal", lambda *_args: None)
+    monkeypatch.setattr(
+        incremental_refresh,
+        "get_cached_ranking",
+        lambda *_args: {
+            "ranking": [
+                {"factorName": "missing_agent"},
+                {"factorName": "factor_a"},
+                {"factorName": "factor_b"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        incremental_refresh,
+        "combination_result_for_member_rows",
+        lambda *_args, **_kwargs: {"factorName": "combo__factor_a__factor_b", "walkForwardPassed": False},
+    )
+
+    report = incremental_refresh.refresh_incremental_combination_cache("BTCUSDT", "30m", batch_size=10)
+
+    assert report["evaluatedTotal"] == 1
+    assert report["searchDiagnostics"]["missingSourceFactorCount"] == 1
+    assert report["searchDiagnostics"]["lookbackDays"] == incremental_refresh.DEFAULT_LOOKBACK_DAYS

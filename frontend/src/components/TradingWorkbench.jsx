@@ -109,8 +109,8 @@ function WorkbenchHeader({ status, summary }) {
   return (
     <header className="topbar">
       <div>
-        <span className="eyebrow">规则事件交易工作台</span>
-        <h1>Binance 指数事件交易控制台</h1>
+        <span className="eyebrow">事件合约方向预测工作台</span>
+        <h1>Binance 指数事件合约控制台</h1>
       </div>
       <div className="status-pill-wrap">
         <div className="status-pill">

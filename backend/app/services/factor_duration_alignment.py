@@ -10,7 +10,8 @@ from app.services.rule_config import MS_PER_MINUTE, horizon_minutes_for_duration
 def backtest_duration_frame(frame: pd.DataFrame, factor_name: str, duration: str) -> pd.DataFrame:
     _require_columns(frame, (factor_name, "close", "open_time"))
     horizon = _horizon_bars(duration)
-    out = frame[[factor_name, "close", "open_time"]].copy()
+    columns = _available_metric_columns(frame, factor_name)
+    out = frame[columns].copy()
     out["fwd_ret"] = out["close"].shift(-horizon) / out["close"] - 1.0
     return duration_entry_rows(out, duration)
 
@@ -87,6 +88,12 @@ def _require_columns(frame: pd.DataFrame, columns: tuple[str, ...]) -> None:
     missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise ValueError(f"factor frame missing columns: {', '.join(missing)}")
+
+
+def _available_metric_columns(frame: pd.DataFrame, factor_name: str) -> list[str]:
+    base = [factor_name, "close", "open_time"]
+    optional = [column for column in ("open", "high", "low", "volume") if column in frame.columns]
+    return list(dict.fromkeys([*base, *optional]))
 
 
 def _duration_ms(duration: str) -> int:

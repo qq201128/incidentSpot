@@ -4,9 +4,9 @@ from app.services import factor_combo_batch_predictions as service
 
 
 def test_offline_screening_reports_focus_pool_and_rejected_reasons(monkeypatch) -> None:
-    rows = [_ranking_row(index) for index in range(11)]
+    rows = [_ranking_row(index) for index in range(service.OBSERVATION_POOL_LIMIT + 1)]
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "materialize_factor_combo_frame_for_row", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "build_live_signal_from_ranking", _signal)
 
@@ -15,10 +15,10 @@ def test_offline_screening_reports_focus_pool_and_rejected_reasons(monkeypatch) 
     assert report["focusedCount"] == service.OBSERVATION_POOL_LIMIT
     assert report["policy"] == "offline_cross_period_stability_sample_size_profit_factor_prefilter_only"
     assert report["rankingPolicy"] == ["cross_period_stability", "sample_count", "profit_factor"]
-    assert report["candidateCount"] == 11
+    assert report["candidateCount"] == service.OBSERVATION_POOL_LIMIT + 1
     assert report["rejectedCount"] == 1
     assert report["rejectedReasons"][0]["reason"] == "outside_observation_pool_limit"
-    assert report["focusedCandidates"][0]["factorName"] == "combo_10"
+    assert report["focusedCandidates"][0]["factorName"] == f"combo_{service.OBSERVATION_POOL_LIMIT}"
 
 
 def test_offline_screening_ranks_stability_before_sample_size_before_profit_factor(monkeypatch) -> None:
@@ -29,7 +29,7 @@ def test_offline_screening_ranks_stability_before_sample_size_before_profit_fact
         _ranking_row(4, stability=0.80, total_periods=100, profit_factor=5.0),
     ]
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "materialize_factor_combo_frame_for_row", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "build_live_signal_from_ranking", _signal)
 
@@ -78,10 +78,10 @@ def test_prediction_rows_use_offline_focused_pool(monkeypatch) -> None:
 
 
 def test_prediction_rows_only_use_ranked_offline_focused_pool(monkeypatch) -> None:
-    rows = [_ranking_row(index) for index in range(11)]
+    rows = [_ranking_row(index) for index in range(service.OBSERVATION_POOL_LIMIT + 1)]
     predicted = []
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "materialize_factor_combo_frame_for_row", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "build_live_signal_from_ranking", _signal)
     monkeypatch.setattr(
@@ -98,7 +98,7 @@ def test_prediction_rows_only_use_ranked_offline_focused_pool(monkeypatch) -> No
     )
 
     assert len(result) == service.OBSERVATION_POOL_LIMIT
-    assert predicted == [f"combo_{index}" for index in range(10, 0, -1)]
+    assert predicted == [f"combo_{index}" for index in range(service.OBSERVATION_POOL_LIMIT, 0, -1)]
     assert "combo_0" not in predicted
 
 
@@ -114,7 +114,7 @@ def test_offline_screening_reports_no_usable_cache_reason(monkeypatch) -> None:
 def test_offline_screening_rejects_rows_with_non_finite_live_score(monkeypatch) -> None:
     rows = [_ranking_row(1), _ranking_row(2)]
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "materialize_factor_combo_frame_for_row", lambda *_args, **_kwargs: object())
 
     def _signal(_frame, row, **_kwargs) -> dict:
@@ -136,7 +136,7 @@ def test_offline_screening_materializes_each_candidate_row(monkeypatch) -> None:
     source_rows = [{"factorName": "source_combo"}]
     materialized = []
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(service, "mined_factor_rows_for_duration", lambda *_args: source_rows)
 
     def _materialize(_frame, **kwargs) -> object:
@@ -155,7 +155,7 @@ def test_offline_screening_materializes_each_candidate_row(monkeypatch) -> None:
 def test_offline_screening_rejects_materialization_failure(monkeypatch) -> None:
     rows = [_ranking_row(1)]
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [{"ranking": rows}])
-    monkeypatch.setattr(service, "load_factor_frame", lambda *_args: object())
+    monkeypatch.setattr(service, "load_factor_frame", lambda *_args, **_kwargs: object())
 
     def _materialize(_frame, **_kwargs) -> object:
         raise ValueError("factor combo materialization failed: combo_1")

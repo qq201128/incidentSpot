@@ -23,6 +23,7 @@ COMBO_SOURCE_FILE = "factor_combination_service.py"
 @dataclass(frozen=True)
 class CombinationRankResult:
     ranking: list[dict[str, Any]]
+    evaluated_ranking: list[dict[str, Any]]
     tested_count: int
     failures: list[dict[str, Any]]
     diagnostics: dict[str, Any]
@@ -40,6 +41,7 @@ def rank_combinations(
     failures = evaluation.failures
     enrich_factor_results(rows)
     failures.extend(_walk_forward_failures(rows))
+    evaluated_ranking = sorted(rows, key=_combo_rank_key, reverse=True)
     ranking = [row for row in rows if row["walkForwardPassed"]]
     ranking.sort(key=_combo_rank_key, reverse=True)
     if rows and not ranking:
@@ -47,7 +49,13 @@ def rank_combinations(
     diagnostics = combination_search_diagnostics(
         config, candidates, evaluation.plan, rows, failures, evaluation.generated_count, evaluation.stages
     )
-    return CombinationRankResult(ranking[: config.result_limit], len(evaluation.plan), failures, diagnostics)
+    return CombinationRankResult(
+        ranking[: config.result_limit],
+        evaluated_ranking,
+        len(evaluation.plan),
+        failures,
+        diagnostics,
+    )
 
 
 def combination_result(
@@ -79,6 +87,45 @@ def combination_result(
     except Exception as exc:
         failure = {"factorName": factor_def.name, "stage": "combination", "error": str(exc)}
         return None, failure
+
+
+def combination_result_for_member_rows(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    duration: str,
+    combo_name: str,
+    member_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    factor_def = FactorDefinition(
+        name=combo_name,
+        category=FactorCategory.PERFORMANCE,
+        description=combo_display_name(member_rows),
+        formula=f"{COMBINATION_METHOD}(" + ", ".join(str(row["name"]) for row in member_rows) + ")",
+        source_file=COMBO_SOURCE_FILE,
+        timeframes=(duration,),
+        direction=FactorDirection.HIGHER_BETTER,
+        parameters={"members": member_rows, "method": COMBINATION_METHOD},
+    )
+    combo_frame = frame[_combo_frame_columns(frame)].copy()
+    combo_frame[combo_name] = combination_score(frame, member_rows)
+    result = run_factor_backtest_on_frame(factor_def, combo_frame, symbol=symbol, duration=duration)
+    walk_forward = walk_forward_validation(combo_frame, factor_def, duration)
+    payload = {
+        **result,
+        "comboSize": len(member_rows),
+        "method": COMBINATION_METHOD,
+        "members": member_rows,
+        "avgAbsCorrelation": None,
+        "prefilterScore": None,
+        "walkForward": walk_forward.payload,
+        "walkForwardPassed": walk_forward.passed,
+        "walkForwardFailureReason": walk_forward.failure_reason,
+        "factorDisplayName": combo_display_name(member_rows),
+    }
+    payload["description"] = payload["factorDisplayName"]
+    payload["factorScore"] = factor_score(payload)
+    return payload
 
 
 def combination_definition(
@@ -116,11 +163,15 @@ def _combo_backtest_payload(
     duration: str,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     member_rows = _learned_payloads(frame, members, duration)
-    out = frame[["close"]].copy()
+    out = frame[_combo_frame_columns(frame)].copy()
     if "open_time" in frame.columns:
         out["open_time"] = frame["open_time"]
     out[combo_name] = combination_score(frame, member_rows)
     return out, member_rows
+
+
+def _combo_frame_columns(frame: pd.DataFrame) -> list[str]:
+    return [column for column in ("open", "high", "low", "close", "volume", "open_time") if column in frame.columns]
 
 
 def enriched_combo_result(

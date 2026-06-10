@@ -48,7 +48,11 @@ def test_factor_backtest_exposes_out_of_sample_selection_gate() -> None:
     future = pd.Series(close).pct_change().shift(-1).fillna(0.0)
     frame = pd.DataFrame({
         "open_time": np.arange(rows) * 60_000,
+        "open": close,
+        "high": close * 1.001,
+        "low": close * 0.999,
         "close": close,
+        "volume": np.full(rows, 100.0),
         "alpha": future,
     })
     factor = FactorDefinition(
@@ -67,6 +71,34 @@ def test_factor_backtest_exposes_out_of_sample_selection_gate() -> None:
     assert oos["validation"]["returnMetrics"]["sampleCount"] > 0
     assert oos["validation"]["researchMetrics"]["quintileReturns"]
     assert oos["selectionGate"]["status"] in {"passed", "failed"}
+
+
+def test_factor_backtest_reports_regime_buckets() -> None:
+    rows = 180
+    close = 100.0 + np.arange(rows) * 0.2
+    frame = pd.DataFrame({
+        "open_time": np.arange(rows) * 60_000,
+        "open": close,
+        "high": close * 1.001,
+        "low": close * 0.999,
+        "close": close,
+        "volume": np.full(rows, 100.0),
+        "alpha": np.arange(rows, dtype=float),
+    })
+    factor = FactorDefinition(
+        name="alpha",
+        category=FactorCategory.RETURN,
+        description="alpha",
+        formula="alpha",
+        direction=FactorDirection.HIGHER_BETTER,
+    )
+
+    result = run_factor_backtest_on_frame(factor, frame, symbol="btcusdt", duration="10m")
+
+    assert result["regime"]["policy"] == "factor_regime_bucket_v1"
+    assert result["regime"]["byTrend"]
+    assert result["regime"]["byVolatility"]
+    assert result["regime"]["byRegime"]
 
 
 def _window_spearman(factor: pd.Series, fwd_ret: pd.Series) -> float:

@@ -4,15 +4,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.exception_payloads import exception_details
-from app.services.experiment_profiles import lstm_training_config_for_profile, normalize_experiment_profile
+from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.model_family_candidate_executor import (
     CandidateDatasetCache,
     CandidateTrainingResult,
     train_candidate_reports,
 )
 from app.services.model_family_candidate_attempts import recorded_model_search_keys
+from app.services.model_family_candidate_budget import candidate_budget_exhausted_result
 from app.services.model_family_candidate_reset import reset_model_candidate_history
-from app.services.model_family_candidate_batches import candidate_job_batch, job_batch_payload
+from app.services.model_family_candidate_batches import budgeted_candidates, candidate_job_batch, job_batch_payload
 from app.services.model_family_candidate_halving import (
     close_halving_stage,
     coarse_candidate_config,
@@ -31,8 +32,8 @@ from app.services.model_family_candidates import (
     start_model_candidate_progress,
 )
 from app.services.model_family_candidate_publisher import publish_best_model_candidate
+from app.services.model_family_candidate_profile import model_training_config_for_profile
 from app.services.model_family_config import ModelFamilyTrainingConfig, normalize_model_family
-from app.services.model_family_default_params import family_default_params
 from app.services.model_family_search_rules import (
     DEFAULT_PARALLEL_WORKERS,
     model_family_training_rules,
@@ -49,6 +50,7 @@ class ModelCandidateSearchConfig:
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS
     reset_history: bool = False
     candidates_per_job: int | None = None
+    candidate_budget: int | None = None
 
 
 def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, Any]:
@@ -60,16 +62,31 @@ def run_model_candidate_search(config: ModelCandidateSearchConfig) -> dict[str, 
     available = next_model_candidate_configs(base, cfg.profile, attempted)
     if not available:
         return _exhausted_search_result(cfg)
-    candidates = candidate_job_batch(available, cfg.candidates_per_job)
-    return _run_candidate_batch(cfg, candidates, available_count=len(available))
+    budgeted = budgeted_candidates(available, candidate_budget=cfg.candidate_budget, attempted_count=len(attempted))
+    if not budgeted:
+        status = _exhausted_candidate_status(cfg.family, cfg.symbol, cfg.duration)
+        return candidate_budget_exhausted_result(
+            cfg,
+            status=status,
+            full_available_count=len(available),
+            attempted_count=len(attempted),
+        )
+    candidates = candidate_job_batch(budgeted, cfg.candidates_per_job)
+    return _run_candidate_batch(
+        cfg,
+        candidates,
+        available_count=len(budgeted),
+        full_available_count=len(available),
+        attempted_count=len(attempted),
+    )
 
 
 def _attempted_search_keys(cfg: ModelCandidateSearchConfig) -> frozenset[str]:
     if cfg.reset_history:
         return frozenset()
     if cfg.candidates_per_job is not None:
-        return recorded_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
-    return attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration)
+        return recorded_model_search_keys(cfg.family, cfg.symbol, cfg.duration, cfg.profile)
+    return attempted_model_search_keys(cfg.family, cfg.symbol, cfg.duration, cfg.profile)
 
 
 def _exhausted_search_result(cfg: ModelCandidateSearchConfig) -> dict[str, Any]:
@@ -94,6 +111,8 @@ def _run_candidate_batch(
     candidates: list[ModelFamilyTrainingConfig],
     *,
     available_count: int,
+    full_available_count: int,
+    attempted_count: int,
 ) -> dict[str, Any]:
     start_model_candidate_progress(
         cfg.family,
@@ -120,7 +139,13 @@ def _run_candidate_batch(
             "reports": reports,
             "trainingRules": model_family_training_rules(cfg.family),
             "successiveHalvingStages": evaluation["stages"],
-            "jobBatch": job_batch_payload(candidates, available_count),
+            "jobBatch": job_batch_payload(
+                candidates,
+                available_count,
+                full_available_count=full_available_count,
+                candidate_budget=cfg.candidate_budget,
+                attempted_count=attempted_count,
+            ),
         }
     except Exception as exc:
         finish_model_candidate_progress(
@@ -131,37 +156,6 @@ def _run_candidate_batch(
             failure=exception_details(exc, "candidate_search"),
         )
         raise
-
-
-def model_training_config_for_profile(
-    family: str,
-    symbol: str,
-    duration: str,
-    *,
-    profile: str,
-    **overrides,
-) -> ModelFamilyTrainingConfig:
-    selected = normalize_model_family(family)
-    base = lstm_training_config_for_profile(symbol, duration, normalize_experiment_profile(profile), **overrides)
-    params = family_default_params(selected)
-    return ModelFamilyTrainingConfig(
-        family=selected,
-        symbol=base.symbol,
-        duration=base.duration,
-        feature_window=base.feature_window,
-        horizon_minutes=base.horizon_minutes,
-        min_samples=base.min_samples,
-        epochs=base.epochs,
-        batch_size=base.batch_size,
-        hidden_size=base.hidden_size,
-        num_layers=base.num_layers,
-        learning_rate=base.learning_rate,
-        train_ratio=base.train_ratio,
-        val_ratio=base.val_ratio,
-        min_move_bps=base.min_move_bps,
-        seed=base.seed,
-        params=params,
-    )
 
 
 def queue_total_for_family(family: str) -> int:
@@ -265,6 +259,8 @@ def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig
         raise ValueError("parallel_workers must be positive")
     if config.candidates_per_job is not None and config.candidates_per_job <= 0:
         raise ValueError("candidates_per_job must be positive")
+    if config.candidate_budget is not None and config.candidate_budget <= 0:
+        raise ValueError("candidate_budget must be positive")
     return ModelCandidateSearchConfig(
         family=normalize_model_family(config.family),
         symbol=config.symbol.strip().upper(),
@@ -273,6 +269,7 @@ def _validated(config: ModelCandidateSearchConfig) -> ModelCandidateSearchConfig
         parallel_workers=int(config.parallel_workers),
         reset_history=bool(config.reset_history),
         candidates_per_job=None if config.candidates_per_job is None else int(config.candidates_per_job),
+        candidate_budget=None if config.candidate_budget is None else int(config.candidate_budget),
     )
 
 

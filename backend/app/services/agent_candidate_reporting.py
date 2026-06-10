@@ -9,7 +9,7 @@ from app.services.json_atomic_io import load_json_object, save_json_object
 
 AGENT_CANDIDATE_HISTORY_VERSION = "agent_factor_candidate_history_v1"
 AGENT_CANDIDATE_HISTORY_PATH = FACTOR_LEARNING_DIR / "agent_factor_candidate_history.json"
-KNOWN_STATUSES = ("promoted", "duplicate_existing", "rejected_metrics", "failed")
+KNOWN_STATUSES = ("promoted", "category_saturated", "duplicate_existing", "rejected_metrics", "failed")
 
 
 def agent_candidate_promotion(records: list[dict[str, Any]]) -> dict[str, Any]:

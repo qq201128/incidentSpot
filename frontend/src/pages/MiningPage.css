@@ -352,6 +352,11 @@
   border-color: rgba(243, 155, 49, 0.38);
 }
 
+.mining-model-card.is-budget_limited {
+  border-color: rgba(243, 185, 77, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(243, 185, 77, 0.06);
+}
+
 .mining-model-card.is-blocked {
   border-color: rgba(255, 104, 104, 0.28);
 }
@@ -402,7 +407,8 @@
 }
 
 .mining-model-state.is-searching,
-.mining-model-state.is-pending_train {
+.mining-model-state.is-pending_train,
+.mining-model-state.is-budget_limited {
   color: #ffd9a8;
   background: rgba(243, 155, 49, 0.12);
 }
@@ -525,6 +531,7 @@
   background: #33c37b;
 }
 
+.mining-legend-item i.is-budget,
 .mining-legend-item i.is-searching,
 .mining-legend-item i.is-pending {
   background: #f3b94d;

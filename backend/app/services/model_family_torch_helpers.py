@@ -13,7 +13,7 @@ def tensor_pack(torch, x: np.ndarray, y: np.ndarray, returns: np.ndarray | None,
     return (
         torch.tensor(x, dtype=torch.float32),
         torch.tensor(y, dtype=torch.float32),
-        torch.tensor(_returns_or_zeros(y, returns), dtype=torch.float32),
+        torch.tensor(returns_or_zeros(y, returns), dtype=torch.float32),
         options,
     )
 
@@ -52,7 +52,7 @@ def _return_weights(returns, options: Any):
     return (returns.abs() / scale).clamp(max=RETURN_WEIGHT_CLIP).clamp_min(WEIGHT_EPSILON)
 
 
-def _returns_or_zeros(y: np.ndarray, returns: np.ndarray | None) -> np.ndarray:
+def returns_or_zeros(y: np.ndarray, returns: np.ndarray | None) -> np.ndarray:
     if returns is None:
         return np.zeros_like(y, dtype=np.float32)
     return returns.astype(np.float32)

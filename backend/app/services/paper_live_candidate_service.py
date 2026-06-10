@@ -32,7 +32,8 @@ STATUS_STABLE = "paper_stable"
 STATUS_FAILED = "paper_failed"
 STATUS_BACKTEST = "backtest_candidate"
 STATUS_LEAKAGE = "invalid_data_leakage"
-OBSERVATION_POOL_LIMIT = 10
+OBSERVATION_POOL_LIMIT = 150
+FAILED_LIST_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -201,7 +202,11 @@ def _report_payload(data: ReportPayloadInput) -> dict[str, Any]:
         "rankingPolicy": _ranking_policy(),
         "collecting": [row for row in focused if row["status"] == STATUS_COLLECTING],
         "stable": [row for row in focused if row["status"] == STATUS_STABLE],
-        "failed": [row for row in data.ranked if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}],
+        "failed": [
+            row
+            for row in data.ranked
+            if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}
+        ][:FAILED_LIST_LIMIT],
         "predictionFailures": data.failures,
         "stageLogs": data.stage_logs,
         "statusChanges": data.status_changes,

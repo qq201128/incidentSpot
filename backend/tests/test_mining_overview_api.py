@@ -34,7 +34,10 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
             "weights": {"trend": 0.28, "volatility": 0.21},
             "llmAgent": {"review": {"factorMiningPlan": {"candidateFactorIdeas": [{"nameHint": "f1"}]}}},
             "agentCandidatePromotion": {"candidateCount": 1, "promoted": 0, "records": []},
-            "agentMinedFactorLibrary": {"total": 0},
+            "agentMinedFactorLibrary": {
+                "total": 1,
+                "categoryShare": [{"category": "derivatives", "count": 1, "share": 1.0}],
+            },
             "minedFactorLibrary": {"total": 0},
             "monitoring": {"issues": []},
         }
@@ -81,6 +84,7 @@ def test_mining_overview_shape(isolated_memory_dir: Path, monkeypatch: pytest.Mo
     assert payload["trainingRules"]["workerStatus"]["latestLogPath"] is None
     assert "--adaptive-parallelism" in payload["trainingRules"]["workerStatus"]["workerRequiredCommand"]
     assert payload["summary"]["searchPendingCount"] == 2
+    assert payload["summary"]["agentFactorCategoryShare"][0]["category"] == "derivatives"
     assert len(payload["models"]) == 14
     assert payload["agentCandidates"][0]["factorName"]
 
@@ -103,6 +107,7 @@ def test_mining_overview_model_card_treats_combo_mismatch_as_ready() -> None:
 
     assert card["cardState"] == "ready"
     assert card["predictionReadyLabel"] == "就绪"
+    assert card["predictionUsable"] is True
 
 
 def test_mining_overview_model_card_hides_stale_baseline_validation_reason() -> None:
@@ -123,6 +128,53 @@ def test_mining_overview_model_card_hides_stale_baseline_validation_reason() -> 
 
     assert card["cardState"] == "ready"
     assert card["latestFailureReason"] is None
+
+
+def test_mining_overview_model_card_marks_budget_limited_search() -> None:
+    from app.services.mining_overview_service import _model_card
+
+    card = _model_card(
+        {
+            "modelFamily": "svm",
+            "strategyKey": "factor_svm_shadow_10m",
+            "status": "shadow_active",
+            "shadowPredictionReady": True,
+            "candidateSearchProgress": {"status": "shadow_active", "completed": 32, "total": 108},
+            "candidateLibrary": {"total": 32, "bestShadowCandidate": {"status": "shadow_active"}},
+            "trainingRules": {"searchSpaceTotal": 108},
+        }
+    )
+
+    assert card["cardState"] == "budget_limited"
+    assert card["cardStateLabel"] == "预算完成"
+    assert card["predictionUsable"] is True
+    assert card["searchComplete"] is False
+    assert card["budgetLimited"] is True
+
+
+def test_mining_overview_model_card_keeps_explicit_failure_blocked() -> None:
+    from app.services.mining_overview_service import _model_card
+
+    card = _model_card(
+        {
+            "modelFamily": "transformer",
+            "strategyKey": "factor_transformer_shadow_10m",
+            "status": "shadow_active",
+            "shadowPredictionReady": True,
+            "candidateSearchProgress": {
+                "status": "failed",
+                "completed": 0,
+                "total": 1800,
+                "modelSearchJob": {"failure_type": "BrokenProcessPool"},
+            },
+            "candidateLibrary": {"total": 0},
+            "trainingRules": {"searchSpaceTotal": 1800},
+        }
+    )
+
+    assert card["cardState"] == "blocked"
+    assert card["predictionUsable"] is True
+    assert card["budgetLimited"] is True
 
 
 def test_mining_run_status_reports_ready_running_and_failed_models() -> None:

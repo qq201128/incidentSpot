@@ -1,28 +1,42 @@
 from __future__ import annotations
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
 from app.api import factor_combinations as factor_combo_api
-from app.api import factors as factors_api
 from app.api import lstm as lstm_api
 from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services import experiment_profiles as profiles
+from app.services import factor_combination_refresh_api as combo_refresh_api
+from app.services import factor_ranking_api_payloads as factor_ranking_api
 from app.services import lstm_daily_review as review
 from app.services.lstm_daily_review import LstmDailyReviewConfig, LstmDailyReviewDependencies, run_lstm_daily_review
 
 
 def test_fast_profile_uses_smaller_combo_and_lstm_configs() -> None:
     combo = profiles.combination_search_config_for_profile(profiles.EXPERIMENT_PROFILE_FAST)
+    full_combo = profiles.combination_search_config_for_profile(profiles.EXPERIMENT_PROFILE_FULL)
     lstm = profiles.lstm_training_config_for_profile("btcusdt", "10m", profiles.EXPERIMENT_PROFILE_FAST)
 
-    assert combo.base_factor_limit == 16
-    assert combo.native_factor_limit == 10
-    assert combo.mined_factor_limit == 4
-    assert combo.agent_factor_limit == 1
+    assert combo.base_factor_limit == 72
+    assert combo.native_factor_limit == 72
+    assert combo.mined_factor_limit == 6
+    assert combo.agent_factor_limit == 6
     assert combo.combo_sizes == (2,)
-    assert combo.result_limit == 50
-    assert combo.prefilter_limit == 120
-    assert combo.parallel_workers == 2
+    assert combo.result_limit == 250
+    assert combo.prefilter_limit == 200
+    assert combo.beam_width == 200
+    assert combo.parallel_workers == 1
+    assert combo.lookback_days is None
+    assert combo.lookback_bars == 720
+    assert full_combo.base_factor_limit == 120
+    assert full_combo.native_factor_limit == 120
+    assert full_combo.agent_factor_limit == 12
+    assert full_combo.result_limit == 500
+    assert full_combo.prefilter_limit == 500
+    assert full_combo.beam_width == 500
+    assert full_combo.combo_sizes == (2,)
+    assert full_combo.lookback_days is None
+    assert full_combo.lookback_bars == 720
     assert lstm.feature_window == 32
     assert lstm.epochs == 2
     assert lstm.batch_size == 64
@@ -86,8 +100,8 @@ def test_full_daily_review_blocks_before_expensive_work(monkeypatch) -> None:
 def test_lstm_train_route_rejects_direct_training_overrides() -> None:
     try:
         lstm_api.lstm_train(symbol="btcusdt", feature_window=40)
-    except Exception as exc:
-        assert "direct in-process LSTM training is disabled" in str(exc)
+    except HTTPException as exc:
+        assert "direct in-process LSTM training is disabled" in exc.detail
     else:
         raise AssertionError("direct LSTM training overrides should be rejected")
 
@@ -133,7 +147,9 @@ def test_factor_combination_refresh_route_uses_profile_defaults_and_aliases() ->
     assert report["searchConfig"]["baseFactorLimit"] == 9
     assert report["searchConfig"]["comboSizes"] == [2, 3]
     assert report["searchConfig"]["resultLimit"] == 20
-    assert task.func == factor_combo_api._background_refresh_combo_rankings
+    assert report["searchConfig"]["lookbackDays"] is None
+    assert report["searchConfig"]["lookbackBars"] == 720
+    assert task.func == factor_combo_api.background_refresh_combo_rankings
     assert task.args[0] == "BTCUSDT"
     assert task.args[1] is None
     assert config.base_factor_limit == 9
@@ -144,13 +160,13 @@ def test_factor_combination_refresh_route_uses_profile_defaults_and_aliases() ->
 def test_factor_ranking_background_refresh_failure_is_visible(monkeypatch) -> None:
     reset_background_loop_statuses()
     monkeypatch.setattr(
-        factors_api,
+        factor_ranking_api,
         "refresh_symbol_rankings",
         lambda *_args: (_ for _ in ()).throw(RuntimeError("ranking refresh failed")),
     )
 
     try:
-        factors_api._background_refresh_rankings("BTCUSDT", "10m")
+        factor_ranking_api.background_refresh_rankings("BTCUSDT", "10m")
     except RuntimeError as exc:
         assert str(exc) == "ranking refresh failed"
     else:
@@ -169,13 +185,13 @@ def test_factor_ranking_background_refresh_failure_is_visible(monkeypatch) -> No
 def test_factor_combo_background_refresh_failure_is_visible(monkeypatch) -> None:
     reset_background_loop_statuses()
     monkeypatch.setattr(
-        factor_combo_api,
+        combo_refresh_api,
         "refresh_symbol_combination_rankings",
         lambda *_args: (_ for _ in ()).throw(RuntimeError("combo refresh failed")),
     )
 
     try:
-        factor_combo_api._background_refresh_combo_rankings("BTCUSDT", "10m", None)
+        combo_refresh_api.background_refresh_combo_rankings("BTCUSDT", "10m", None)
     except RuntimeError as exc:
         assert str(exc) == "combo refresh failed"
     else:

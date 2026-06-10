@@ -56,7 +56,7 @@ def test_ranking_entry_passes_base_metric_cache(monkeypatch) -> None:
         captured["cache"] = kwargs["base_metric_cache"]
         return {"ok": True}
 
-    monkeypatch.setattr(combo_service, "load_factor_frame", lambda *_args: frame)
+    monkeypatch.setattr(combo_service, "load_factor_frame", lambda *_args, **_kwargs: frame)
     monkeypatch.setattr(combo_service, "cached_factor_metrics_by_name", lambda *_args: {"factor_a": _metrics()})
     monkeypatch.setattr(combo_service, "run_factor_combination_ranking_on_frame", rank_on_frame)
 

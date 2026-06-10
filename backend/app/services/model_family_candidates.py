@@ -32,12 +32,19 @@ def read_model_candidate_library(family: str, symbol: str, duration: str, *, art
         raise ValueError(f"{family} candidate library records must be a list: {path}")
     return payload
 
-def attempted_model_search_keys(family: str, symbol: str, duration: str, *, artifact_root: Path | None = None):
+def attempted_model_search_keys(
+    family: str,
+    symbol: str,
+    duration: str,
+    profile: str | None = None,
+    *,
+    artifact_root: Path | None = None,
+):
     library = read_model_candidate_library(family, symbol, duration, artifact_root=artifact_root)
     return frozenset(
         str(row.get("searchKey"))
         for row in library["records"]
-        if row.get("searchKey") and row.get("status") != "failed"
+        if row.get("searchKey") and row.get("status") != "failed" and _profile_matches(row, profile)
     )
 
 def record_model_candidate(config: ModelFamilyTrainingConfig, profile: str, report: dict, *, artifact_root=None) -> dict:
@@ -72,6 +79,7 @@ def queue_model_candidate_progress(
     total: int,
     search_space_total: int | None = None,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+    artifact_root: Path | None = None,
 ) -> dict:
     payload = _progress_payload(
         family,
@@ -83,7 +91,7 @@ def queue_model_candidate_progress(
         search_space_total=search_space_total,
         parallel_workers=parallel_workers,
     )
-    write_json(candidate_progress_path(family, symbol, duration), payload)
+    write_json(candidate_progress_path(family, symbol, duration, artifact_root=artifact_root), payload)
     return payload
 
 def start_model_candidate_progress(
@@ -95,6 +103,7 @@ def start_model_candidate_progress(
     total: int,
     search_space_total: int | None = None,
     parallel_workers: int = DEFAULT_PARALLEL_WORKERS,
+    artifact_root: Path | None = None,
 ) -> dict:
     payload = _progress_payload(
         family,
@@ -106,23 +115,42 @@ def start_model_candidate_progress(
         search_space_total=search_space_total,
         parallel_workers=parallel_workers,
     )
-    write_json(candidate_progress_path(family, symbol, duration), payload)
+    write_json(candidate_progress_path(family, symbol, duration, artifact_root=artifact_root), payload)
     return payload
 
-def complete_model_candidate_progress(config, *, profile: str, report: dict, completed: int, total: int) -> dict:
+def complete_model_candidate_progress(
+    config,
+    *,
+    profile: str,
+    report: dict,
+    completed: int,
+    total: int,
+    artifact_root: Path | None = None,
+) -> dict:
     latest = _candidate_payload(config, profile, report)
-    path = candidate_progress_path(config.family, config.symbol, config.duration)
+    path = candidate_progress_path(config.family, config.symbol, config.duration, artifact_root=artifact_root)
 
     def _updater(payload: dict[str, Any] | None) -> dict[str, Any]:
         current = payload or _empty_progress(config.family, config.symbol, config.duration)
+        search_total = _search_total(current, total)
+        library_completed = _library_completed_count(
+            config.family,
+            config.symbol,
+            config.duration,
+            profile=profile,
+            artifact_root=artifact_root,
+        )
         recent = [latest, *list(current.get("recent") or [])][:RECENT_LIMIT]
         return {
             **current,
             "status": "running",
             "updatedAt": _utc_now(),
-            "completed": int(completed),
-            "total": int(total),
-            "percent": _percent(completed, total),
+            "completed": library_completed,
+            "total": search_total,
+            "searchSpaceTotal": search_total,
+            "percent": _percent(library_completed, search_total),
+            "stageEvaluationCompleted": int(completed),
+            "stageEvaluationTotal": int(max(total, completed)),
             "counts": _updated_counts(current.get("counts") or {}, report),
             "latestCompleted": latest,
             "recent": recent,
@@ -147,10 +175,22 @@ def finish_model_candidate_progress(
 
     return update_json(path, _updater)
 
-def finish_model_candidate_progress_from_library(family: str, *, symbol: str, duration: str, profile: str, parallel_workers: int, status: str) -> dict:
+def finish_model_candidate_progress_from_library(
+    family: str,
+    *,
+    symbol: str,
+    duration: str,
+    profile: str,
+    parallel_workers: int,
+    status: str,
+    artifact_root: Path | None = None,
+) -> dict:
     selected = normalize_model_family(family)
-    path = candidate_progress_path(selected, symbol, duration)
-    records = list(read_model_candidate_library(selected, symbol, duration)["records"])
+    path = candidate_progress_path(selected, symbol, duration, artifact_root=artifact_root)
+    records = _records_for_profile(
+        read_model_candidate_library(selected, symbol, duration, artifact_root=artifact_root)["records"],
+        profile,
+    )
     search_space_total = model_search_space_size(selected)
     total = max(search_space_total, len(records))
 
@@ -249,10 +289,33 @@ def _progress_payload(
         "profile": profile,
         "startedAt": now if status == "running" else None,
         "updatedAt": now,
-        "total": int(total),
+        "total": search_total,
         "searchSpaceTotal": search_total,
         "parallelWorkers": int(parallel_workers),
+        "stageEvaluationCompleted": 0,
+        "stageEvaluationTotal": int(total),
     }
+
+def _search_total(progress: dict[str, Any], fallback_total: int) -> int:
+    raw = progress.get("searchSpaceTotal") or progress.get("total") or fallback_total
+    return int(raw)
+
+def _library_completed_count(
+    family: str,
+    symbol: str,
+    duration: str,
+    *,
+    profile: str | None = None,
+    artifact_root: Path | None = None,
+) -> int:
+    records = read_model_candidate_library(family, symbol, duration, artifact_root=artifact_root)["records"]
+    return len(_records_for_profile(records, profile))
+
+def _records_for_profile(records: list[dict], profile: str | None) -> list[dict]:
+    return [record for record in records if _profile_matches(record, profile)]
+
+def _profile_matches(record: dict, profile: str | None) -> bool:
+    return profile is None or record.get("profile") == profile
 
 def _updated_counts(counts: dict, report: dict) -> dict[str, int]:
     selected = {**_empty_counts(), **{key: int(value or 0) for key, value in counts.items()}}

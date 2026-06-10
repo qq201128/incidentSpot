@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.agent_factor_categories import category_budget_payload, category_share
 from app.services.factor_learning_retrieval import build_factor_learning_retrieval
 
 AGENT_PROMPT_FORMULA_BLOCK_LIMIT = 48
@@ -29,6 +30,7 @@ def compact_memory(memory: dict[str, Any], blocklist: list[Any]) -> dict[str, An
         "weights": top_weights(memory.get("weights") or {}),
         "minedFactorLibrary": slim_mined_library(memory.get("minedFactorLibrary") or {}),
         "agentMinedFactorLibrary": slim_agent_library(memory.get("agentMinedFactorLibrary") or {}),
+        "agentFactorCategoryBudget": category_budget_payload(),
         "doNotSuggestFactorNames": limited_strings(agent_factor_names, AGENT_PROMPT_NAME_BLOCK_LIMIT),
         "doNotSuggestFactorNameTotal": len(agent_factor_names),
         "doNotSuggestFormulas": limited_strings(blocklist, AGENT_PROMPT_FORMULA_BLOCK_LIMIT),
@@ -159,6 +161,7 @@ def slim_agent_library(library: dict[str, Any]) -> dict[str, Any]:
         "rejectedTotal": library.get("rejectedTotal"),
         "duration": library.get("duration"),
         "symbol": library.get("symbol"),
+        "categoryShare": library.get("categoryShare") or category_share(list(library.get("factors") or [])),
         "factors": rows[:AGENT_PROMPT_LIBRARY_ROW_LIMIT],
     }
 
@@ -169,6 +172,7 @@ def agent_library_row(row: dict[str, Any]) -> dict[str, Any]:
         "factorName": truncate_text(row.get("factorName"), AGENT_PROMPT_SHORT_TEXT_LIMIT),
         "factorDisplayName": truncate_text(row.get("factorDisplayName")),
         "formula": truncate_text(row.get("formula")),
+        "factorCategory": row.get("factorCategory"),
         "winRate": metrics.get("winRate"),
         "profitFactor": metrics.get("profitFactor"),
         "qualityPassed": row.get("qualityPassed"),

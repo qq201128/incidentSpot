@@ -74,6 +74,7 @@ def claim_next_model_search_job(
     *,
     max_running_jobs: int = DEFAULT_MAX_RUNNING_JOBS,
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+    filters: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if max_running_jobs <= 0:
         raise ValueError("max_running_jobs must be positive")
@@ -83,7 +84,7 @@ def claim_next_model_search_job(
         try:
             ensure_model_search_jobs_table(conn)
             _mark_stale_running_jobs(conn, stale_after_seconds)
-            job = _claim_available_row(conn, max_running_jobs)
+            job = _claim_available_row(conn, max_running_jobs, filters)
             conn.commit()
             return job
         finally:
@@ -160,7 +161,12 @@ def fail_model_search_job(
     return run_db_write_with_retry(_operation)
 
 
-def retry_failed_model_search_job(job_id: str, *, clear_reset_history: bool = False) -> dict[str, Any]:
+def retry_failed_model_search_job(
+    job_id: str,
+    *,
+    clear_reset_history: bool = False,
+    move_to_back: bool = False,
+) -> dict[str, Any]:
     def _operation() -> dict[str, Any]:
         conn = get_conn()
         try:
@@ -168,8 +174,13 @@ def retry_failed_model_search_job(job_id: str, *, clear_reset_history: bool = Fa
             current = _required_job(conn, job_id)
             if current["status"] not in {JOB_STATUS_FAILED, JOB_STATUS_REJECTED}:
                 raise ValueError(f"job {job_id} is not failed/rejected")
-            sql = retry_sql(clear_reset_history=clear_reset_history)
-            conn.execute(sql, (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, job_id))
+            sql = retry_sql(clear_reset_history=clear_reset_history, move_to_back=move_to_back)
+            values = (
+                (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, utc_now(), job_id)
+                if move_to_back
+                else (JOB_STATUS_PENDING, JOB_STAGE_QUEUED, job_id)
+            )
+            conn.execute(sql, values)
             row = _required_job(conn, job_id)
             conn.commit()
             return decode_job(row)

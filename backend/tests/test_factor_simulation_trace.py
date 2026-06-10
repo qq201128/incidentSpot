@@ -181,9 +181,9 @@ def _seed_settled_event(db_path: Path, strategy_key: str, factor_name: str, *, p
         event_id = conn.execute(
             """
             INSERT INTO events(strategy_key, symbol, title, event_interval, rule_type, strike_value,
-              start_time, end_time, status, result, ai_high_winrate_rule)
+              start_time, end_time, status, result, ai_high_winrate_rule, market_regime_gate_passed)
             VALUES(?, 'BTCUSDT', 'sim', '10m', 'ABOVE', 100,
-              '2026-01-01T00:00:00+00:00', '2026-01-01T00:10:00+00:00', 'SETTLED', 'YES', ?)
+              '2026-01-01T00:00:00+00:00', '2026-01-01T00:10:00+00:00', 'SETTLED', 'YES', ?, 1)
             """,
             (strategy_key, factor_name),
         ).lastrowid

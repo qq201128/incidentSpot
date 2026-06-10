@@ -19,6 +19,7 @@ def combination_config(
     base_factor_limit: int | None,
     combo_sizes: str | None,
     result_limit: int | None,
+    lookback_days: int | None = None,
 ) -> CombinationSearchConfig:
     try:
         config = combination_search_config_for_profile(
@@ -26,8 +27,14 @@ def combination_config(
             base_factor_limit=base_factor_limit,
             combo_sizes=_parse_combo_sizes(combo_sizes) if combo_sizes is not None else None,
             result_limit=result_limit,
+            lookback_days=lookback_days,
         )
-        _validate_combo_config_values(config.base_factor_limit, config.combo_sizes, config.result_limit)
+        _validate_combo_config_values(
+            config.base_factor_limit,
+            config.combo_sizes,
+            config.result_limit,
+            config.lookback_days,
+        )
         return config
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -41,6 +48,8 @@ def config_response(config: CombinationSearchConfig) -> dict:
         "prefilterLimit": config.prefilter_limit,
         "beamWidth": config.beam_width,
         "parallelWorkers": config.parallel_workers,
+        "lookbackDays": config.lookback_days,
+        "lookbackBars": config.lookback_bars,
         "method": config.method,
     }
 
@@ -79,8 +88,11 @@ def _validate_combo_config_values(
     base_factor_limit: int,
     sizes: tuple[int, ...],
     result_limit: int,
+    lookback_days: int | None,
 ) -> None:
     if base_factor_limit < max(sizes):
         raise ValueError("baseFactorLimit must be >= largest combo size")
     if result_limit <= 0 or any(size < MIN_COMBO_SIZE for size in sizes):
         raise ValueError("resultLimit must be > 0 and comboSizes must be >= 2")
+    if lookback_days is not None and lookback_days <= 0:
+        raise ValueError("lookbackDays must be greater than 0")

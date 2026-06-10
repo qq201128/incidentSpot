@@ -110,6 +110,7 @@ def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artif
         raise ValueError(f"{family} model is not ready for {symbol} {duration}: {status.get('reason') or status.get('status')}")
     if not required_artifacts_exist(paths):
         raise ValueError(f"{family} model artifacts are incomplete for {symbol} {duration}: {paths.root}")
+    _assert_clean_event_features(paths)
     if status.get("status") != LSTM_STATUS_LEGACY_TRAINED:
         return
     reason = model_validation_block_reason(status, version, report)
@@ -131,6 +132,13 @@ def _live_feature_windows(
         windows.append(window.reshape(feature_window, len(columns)))
         metas.append(meta)
     return np.asarray(windows, dtype=np.float32), metas
+
+
+def _assert_clean_event_features(paths) -> None:
+    features = read_json(paths.features) or {}
+    columns = features.get("columns") or []
+    if not any(str(column).startswith("regime_") for column in columns):
+        raise ValueError("model artifacts were trained before event regime features; retrain required")
 
 
 def _signal_payload(family: str, symbol: str, duration: str, probability_up: float, meta, features, version, status) -> dict:

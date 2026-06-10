@@ -14,6 +14,11 @@ from app.services.binance_event_contract import (
 )
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
 from app.services.live_order_failure_log import log_live_order_failure
+from app.services.market_regime_trade_gate import (
+    MARKET_REGIME_TRADE_GATE_VERSION,
+    MarketRegimeTradeDecision,
+    evaluate_market_regime_trade_gate,
+)
 from app.services.position_guard import has_open_position
 from app.services.event_search_index import refresh_event_search_row
 from app.services.strategy_registry import MANUAL_STRATEGY_KEY, strategy_definition
@@ -53,10 +58,17 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
     conn = get_conn()
     now = datetime.now(timezone.utc).isoformat()
     try:
-        if has_open_position(conn, ctx.symbol, ctx.strategy_key, event_interval=ctx.event_interval):
+        if has_open_position(
+            conn,
+            ctx.symbol,
+            ctx.strategy_key,
+            event_interval=ctx.event_interval,
+            require_market_regime_gate_passed=_requires_market_regime_position_guard(ctx),
+        ):
             raise HTTPException(status_code=409, detail="已有进行中持仓，需等待上一笔结束后再下单")
+        regime_decision = _enforce_market_regime_trade_gate(ctx)
         external_order = _place_external_order(ctx)
-        event_id = _insert_event(conn=conn, ctx=ctx, now=now)
+        event_id = _insert_event(conn=conn, ctx=ctx, now=now, regime_decision=regime_decision)
         order_id = _insert_order(
             conn=conn,
             order=OrderInsertContext(ctx, event_id, now, external_order),
@@ -69,6 +81,34 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
         raise
     conn.close()
     return _response(QuickTradeResult(event_id, order_id, ctx.entry_price, external_order))
+
+
+def _enforce_market_regime_trade_gate(ctx: QuickTradeContext) -> MarketRegimeTradeDecision | None:
+    if ctx.strategy_key == MANUAL_STRATEGY_KEY or ctx.predicted is None:
+        return None
+    if ctx.prediction_open_time is None:
+        raise HTTPException(status_code=400, detail="prediction_open_time is required for market regime trade gate")
+    decision = evaluate_market_regime_trade_gate(
+        symbol=ctx.symbol,
+        duration=ctx.event_interval,
+        open_time=ctx.prediction_open_time,
+        direction=ctx.predicted,
+    )
+    if decision.allowed:
+        return decision
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "reason": "market_regime_trade_gate_blocked",
+            "gateReason": decision.reason,
+            "mode": decision.mode,
+            "regime": decision.regime,
+        },
+    )
+
+
+def _requires_market_regime_position_guard(ctx: QuickTradeContext) -> bool:
+    return ctx.strategy_key != MANUAL_STRATEGY_KEY and ctx.predicted is not None
 
 
 def _place_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
@@ -108,16 +148,24 @@ def _simulated_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
     }
 
 
-def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
+def _insert_event(
+    *,
+    conn: Any,
+    ctx: QuickTradeContext,
+    now: str,
+    regime_decision: MarketRegimeTradeDecision | None,
+) -> int:
     cursor = conn.execute(
         """
         INSERT INTO events(
           strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
           start_time, end_time, status, prediction_open_time,
           ai_probability_up, ai_predicted_direction, ai_quality_score, ai_quality_passed,
-          ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value
+          ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed, ai_high_winrate_value,
+          market_regime_gate_version, market_regime_gate_passed, market_regime_gate_reason,
+          market_regime_gate_mode, market_regime_label
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             ctx.strategy_key,
@@ -142,9 +190,22 @@ def _insert_event(*, conn: Any, ctx: QuickTradeContext, now: str) -> int:
                 else None
             ),
             ctx.payload.event.aiHighWinrateValue,
+            *_market_regime_event_values(regime_decision),
         ),
     )
     return int(cursor.lastrowid)
+
+
+def _market_regime_event_values(decision: MarketRegimeTradeDecision | None) -> tuple:
+    if decision is None:
+        return (None, None, None, None, None)
+    return (
+        MARKET_REGIME_TRADE_GATE_VERSION,
+        int(decision.allowed),
+        decision.reason,
+        decision.mode,
+        decision.regime.get("regimeLabel"),
+    )
 
 
 def quick_trade_strategy_key(payload: Any) -> str:

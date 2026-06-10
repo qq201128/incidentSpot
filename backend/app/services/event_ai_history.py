@@ -27,6 +27,7 @@ _SETTLED_AI_WHERE = """
   AND e.status = 'SETTLED'
   AND e.ai_predicted_direction IS NOT NULL
   AND e.ai_prediction_correct IS NOT NULL
+  AND e.market_regime_gate_passed = 1
 """
 
 

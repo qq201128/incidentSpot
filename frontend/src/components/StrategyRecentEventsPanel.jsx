@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchEventsPage } from "../api/client";
+import { fetchEventsPage } from "../api/eventsClient";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { formatPnlU, settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import "./StrategyRecentEventsPanel.css";
@@ -33,7 +33,6 @@ export default function StrategyRecentEventsPanel({
         durationMinutes,
         page,
         pageSize: PAGE_SIZE,
-        view: "events",
       });
       setItems(Array.isArray(data.items) ? data.items : []);
       setTotal(Number(data.total) || 0);

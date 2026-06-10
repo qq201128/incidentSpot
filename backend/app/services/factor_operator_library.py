@@ -4,6 +4,7 @@ from collections import Counter
 from typing import Any
 
 from app.services.agent_factor_formula import SUPPORTED_AGENT_FORMULA_FUNCTIONS
+from app.services.agent_factor_categories import category_budget_payload
 
 OPERATOR_LIBRARY_VERSION = "factor_operator_library_v1"
 EXECUTABLE_OPERATOR_NAMES = SUPPORTED_AGENT_FORMULA_FUNCTIONS
@@ -154,6 +155,7 @@ def factor_operator_prompt_payload() -> dict[str, Any]:
             }
             for item in operators
         ],
+        "categoryBudgets": category_budget_payload(),
         "formulaRules": list(AGENT_FORMULA_RULES),
     }
 

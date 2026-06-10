@@ -244,7 +244,7 @@ def test_search_candidate_can_stage_trade_model_before_serial_publish(monkeypatc
     assert _read_json(paths.status)["status"] == "trade_active"
     assert _read_json(paths.attempt)["status"] == "trade_active"
     assert status["tradePredictionReady"] is True
-    assert status["validationRole"] == "validation_gate_allows_paper_live_only"
+    assert status["validationRole"] == "validation_or_relative_shadow_collects_paper_live_only"
     assert status["paperLiveSampleCount"] == 0
 
 

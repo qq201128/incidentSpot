@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import json
 from collections.abc import Iterator
@@ -14,7 +15,24 @@ from app.services.model_family_candidates import model_search_key, record_model_
 from app.services.model_family_config import ModelFamilyTrainingConfig, TORCH_MODEL_FAMILIES
 from app.services.model_family_training_service import train_model_family
 
-PROCESS_EXECUTOR_FAMILIES = frozenset({"xgboost"})
+REAL_TRAIN_MODEL_FAMILY = train_model_family
+PROCESS_EXECUTOR_FAMILIES = frozenset({
+    "lstm",
+    "gru",
+    "cnn",
+    "transformer",
+    "random_forest",
+    "extra_trees",
+    "xgboost",
+    "lightgbm",
+    "catboost",
+    "logistic_elasticnet",
+    "svm",
+    "bayesian",
+    "knn",
+    "rl_strategy",
+})
+PROCESS_WORKERS_ENV = "MODEL_FAMILY_PROCESS_WORKERS"
 XGBOOST_PROCESS_WORKERS_ENV = "MODEL_FAMILY_XGBOOST_PROCESS_WORKERS"
 TORCH_JOBS_ENV = "MODEL_FAMILY_TORCH_JOBS"
 
@@ -37,6 +55,11 @@ class CandidateDatasetCache:
                 self.datasets[key] = build_lstm_training_dataset(config)
             return self.datasets[key]
 
+    def clear(self) -> None:
+        with self.lock:
+            self.datasets.clear()
+        gc.collect()
+
 
 def train_candidate_reports(
     configs: list[ModelFamilyTrainingConfig],
@@ -49,12 +72,11 @@ def train_candidate_reports(
 ) -> Iterator[CandidateTrainingResult]:
     pairs = _training_pairs(configs, record_configs)
     if workers <= 1 or len(pairs) <= 1:
-        for train_config, record_config in pairs:
-            report = train_candidate(train_config, profile, dataset_builder, stage=stage, record_config=record_config)
-            yield CandidateTrainingResult(record_config, report)
+        yield from _train_candidate_reports_serial(pairs, profile, dataset_builder, stage)
         return
-    if _uses_process_executor(configs):
-        yield from _train_candidate_reports_in_processes(pairs, profile, _process_worker_count(workers), stage)
+    if _uses_process_executor(configs, dataset_builder):
+        count = _process_worker_count(workers, family=configs[0].family)
+        yield from _train_candidate_reports_in_processes(pairs, profile, count, stage)
         return
     yield from _train_candidate_reports_in_threads(
         pairs,
@@ -63,6 +85,17 @@ def train_candidate_reports(
         dataset_builder,
         stage,
     )
+
+
+def _train_candidate_reports_serial(
+    pairs: list[tuple[ModelFamilyTrainingConfig, ModelFamilyTrainingConfig]],
+    profile: str,
+    dataset_builder,
+    stage: str,
+) -> Iterator[CandidateTrainingResult]:
+    for train_config, record_config in pairs:
+        report = train_candidate(train_config, profile, dataset_builder, stage=stage, record_config=record_config)
+        yield CandidateTrainingResult(record_config, report)
 
 
 def train_candidate(
@@ -88,6 +121,8 @@ def train_candidate(
     except Exception as exc:
         _candidate_event("candidate_failed", train_config, stage, status=type(exc).__name__)
         report = _failed_report(record_config, profile, exc)
+    finally:
+        _clear_dataset_builder_cache(dataset_builder)
     report = _stage_report(record_config, profile, report, stage)
     record_model_candidate(record_config, profile, report)
     return report
@@ -136,17 +171,26 @@ def _stage_report(config: ModelFamilyTrainingConfig, profile: str, report: dict[
     return {**report, "searchKey": model_search_key(config, profile), "searchStage": stage}
 
 
-def _uses_process_executor(configs: list[ModelFamilyTrainingConfig]) -> bool:
-    return bool(configs) and configs[0].family in PROCESS_EXECUTOR_FAMILIES
+def _uses_process_executor(configs: list[ModelFamilyTrainingConfig], dataset_builder) -> bool:
+    return (
+        bool(configs)
+        and configs[0].family in PROCESS_EXECUTOR_FAMILIES
+        and _is_default_dataset_builder(dataset_builder)
+        and train_model_family is REAL_TRAIN_MODEL_FAMILY
+    )
 
 
-def _process_worker_count(max_workers: int) -> int:
-    raw = os.environ.get(XGBOOST_PROCESS_WORKERS_ENV)
+def _process_worker_count(max_workers: int, *, family: str | None = None) -> int:
+    raw = os.environ.get(PROCESS_WORKERS_ENV)
+    source = PROCESS_WORKERS_ENV
+    if raw is None and (family is None or family == "xgboost"):
+        raw = os.environ.get(XGBOOST_PROCESS_WORKERS_ENV)
+        source = XGBOOST_PROCESS_WORKERS_ENV
     if raw is None:
         return max_workers
     selected = int(raw)
     if selected <= 0:
-        raise ValueError(f"{XGBOOST_PROCESS_WORKERS_ENV} must be positive")
+        raise ValueError(f"{source} must be positive")
     return min(max_workers, selected)
 
 
@@ -160,6 +204,17 @@ def _thread_worker_count(configs: list[ModelFamilyTrainingConfig], max_workers: 
     if selected <= 0:
         raise ValueError(f"{TORCH_JOBS_ENV} must be positive")
     return min(max_workers, selected)
+
+
+def _is_default_dataset_builder(dataset_builder) -> bool:
+    owner = getattr(dataset_builder, "__self__", None)
+    return dataset_builder is build_lstm_training_dataset or isinstance(owner, CandidateDatasetCache)
+
+
+def _clear_dataset_builder_cache(dataset_builder) -> None:
+    owner = getattr(dataset_builder, "__self__", None)
+    if isinstance(owner, CandidateDatasetCache):
+        owner.clear()
 
 
 def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Exception) -> dict[str, Any]:

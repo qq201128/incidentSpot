@@ -131,7 +131,8 @@ function useRefreshHandler({ loadRanking, loadSignals, setRankingState, setRefre
     if (!isValidSymbol(symbol)) return setInvalidRanking(setRankingState);
     setRefreshing(true);
     try {
-      await requestFactorCombinationRefresh(symbol, targetDuration);
+      const config = targetDuration ? { incremental: true, batchSize: 120 } : { profile: "full" };
+      await requestFactorCombinationRefresh(symbol, targetDuration, config);
       setRankingState((state) => ({ ...state, status: refreshStatus(targetDuration) }));
       window.setTimeout(() => void loadRanking(new AbortController().signal), REFRESH_RELOAD_DELAY_MS);
       window.setTimeout(() => void loadSignals(), REFRESH_RELOAD_DELAY_MS);
@@ -183,6 +184,8 @@ async function loadRankingState({ symbol, duration, page, query, signal, setBase
       pageSize: data.pageSize ?? RANKING_PAGE_SIZE,
       total: data.total ?? items.length,
       unfilteredTotal: data.unfilteredTotal ?? data.total ?? items.length,
+      passedTotal: data.passedRankingTotal ?? data.passedTotal ?? null,
+      evaluatedTotal: data.evaluatedRankingTotal ?? data.evaluatedTotal ?? null,
     });
   } catch (error) {
     if (isCanceled(error, signal)) return;
@@ -256,6 +259,8 @@ function ComboPanelView(props) {
         ranking={props.rankingState.items}
         total={props.rankingState.total}
         unfilteredTotal={props.rankingState.unfilteredTotal}
+        passedTotal={props.rankingState.passedTotal}
+        evaluatedTotal={props.rankingState.evaluatedTotal}
       />
     </section>
   );
@@ -367,7 +372,9 @@ function baseFactorSummary(data) {
   const mined = data.minedFactorUsedCount ?? 0;
   const agent = data.agentMinedFactorUsedCount ?? 0;
   const source = data.minedFactorSourceCount ?? 0;
-  return `候选基础因子 ${total} 个 · 挖掘参与 ${mined} · Agent ${agent} · 挖掘库来源 ${source} 条`;
+  const evaluated = data.evaluatedRankingTotal ?? data.evaluatedTotal ?? data.testedCombinationCount ?? 0;
+  const passed = data.passedRankingTotal ?? data.passedTotal ?? data.rawTotal ?? 0;
+  return `候选基础因子 ${total} 个 · 挖掘参与 ${mined} · Agent ${agent} · 已评估 ${evaluated} · 通过 ${passed} · 来源 ${source}`;
 }
 
 function signalStatus(items, missing, failures, cacheStatus) {
@@ -417,6 +424,8 @@ function initialRankingState() {
     pageSize: RANKING_PAGE_SIZE,
     total: 0,
     unfilteredTotal: 0,
+    passedTotal: null,
+    evaluatedTotal: null,
   };
 }
 

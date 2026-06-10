@@ -147,24 +147,6 @@
     minmax(0, 0.45fr) minmax(0, 0.45fr);
 }
 
-.event-records-row--orders {
-  grid-template-columns:
-    minmax(0, 1.1fr) minmax(0, 0.75fr) minmax(0, 0.45fr) minmax(0, 0.5fr) minmax(0, 0.5fr)
-    minmax(0, 0.62fr) minmax(0, 0.62fr) minmax(0, 0.5fr) minmax(0, 1fr);
-}
-
-.event-records-row--settlements {
-  grid-template-columns:
-    minmax(0, 1.1fr) minmax(0, 0.45fr) minmax(0, 0.72fr) minmax(0, 0.72fr) minmax(0, 0.45fr)
-    minmax(0, 0.52fr) minmax(0, 0.62fr) minmax(0, 0.95fr);
-}
-
-.event-records-row--failures {
-  grid-template-columns:
-    minmax(0, 1fr) minmax(0, 0.72fr) minmax(0, 0.62fr) minmax(0, 0.62fr) minmax(0, 0.5fr)
-    minmax(0, 1.4fr);
-}
-
 .event-records-row--header {
   color: #7f90a0;
   font-size: 10px;

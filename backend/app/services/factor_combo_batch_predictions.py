@@ -14,11 +14,13 @@ from app.services.factor_combination_cache_service import get_cached_combination
 from app.services.factor_combo_strategy import predict_factor_combo_row_direction
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_combo_frame_materialization import materialize_factor_combo_frame_for_row
-from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_frame_service import load_factor_frame, lookback_days_for_bars
 from app.services.factor_mined_library import mined_factor_rows_for_duration
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.paper_live_candidate_service import OBSERVATION_POOL_LIMIT
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+
+OFFLINE_CANDIDATE_LOOKBACK_BARS = 720
 
 
 @dataclass(frozen=True)
@@ -149,7 +151,11 @@ def _screen_offline_candidates(symbol: str, duration: str) -> tuple[list[dict[st
         rejected.append({"symbol": symbol, "duration": duration, "reason": "no_usable_offline_candidate_cache"})
         return rows, rejected
     context = _ScreenContext(
-        frame=load_factor_frame(symbol, duration),
+        frame=load_factor_frame(
+            symbol,
+            duration,
+            lookback_days=lookback_days_for_bars(duration, OFFLINE_CANDIDATE_LOOKBACK_BARS),
+        ),
         symbol=symbol,
         duration=duration,
         source_rows=mined_factor_rows_for_duration(symbol, duration),

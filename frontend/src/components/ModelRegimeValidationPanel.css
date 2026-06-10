@@ -1,0 +1,48 @@
+.research-regime-panel .research-regime-card {
+  margin-bottom: 0.65rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.research-regime-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.research-regime-card header span {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+}
+
+.research-regime-card header span.is-ready {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950;
+}
+
+.research-regime-card header span.is-blocked,
+.research-regime-card header span.is-warn {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+}
+
+.research-regime-block {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: #d29922;
+}
+
+.research-regime-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.research-regime-table th,
+.research-regime-table td {
+  padding: 0.2rem 0.25rem;
+  text-align: left;
+}

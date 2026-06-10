@@ -1,0 +1,43 @@
+.factors-catalog-table-scored th:nth-child(2) {
+  width: 30%;
+}
+
+.factors-catalog-table-scored th:nth-child(5) {
+  width: 12%;
+}
+
+.factors-catalog-table-scored th:nth-child(6) {
+  width: 14%;
+}
+
+.factors-catalog-table-scored th:nth-child(7) {
+  width: 16%;
+}
+
+.factors-observe-cell {
+  overflow: hidden;
+}
+
+.factors-observe-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.factors-observe-tag.is-pass {
+  border: 1px solid rgba(51, 195, 123, 0.45);
+  color: #baf7e5;
+  background: rgba(51, 195, 123, 0.1);
+}
+
+.factors-observe-tag.is-observe {
+  border: 1px solid rgba(246, 211, 107, 0.45);
+  color: #f8df8a;
+  background: rgba(246, 211, 107, 0.1);
+}

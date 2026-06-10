@@ -27,11 +27,13 @@ export function useFactorsPageData() {
   const [listReloadKey, setListReloadKey] = useState(0);
   const list = useFactorsList({
     category,
+    duration,
     kind: listTab,
     listPage,
     listPageSize,
     query,
     reloadKey: listReloadKey,
+    symbol: normalizeSymbol(symbol),
   });
   const detail = useFactorDetail(selectedName, symbol, duration);
   const previewMetrics = usePreviewMetrics(selectedName, symbol, previewDuration);

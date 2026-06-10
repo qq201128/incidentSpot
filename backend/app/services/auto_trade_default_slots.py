@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.event_final_decision_service import EVENT_FINAL_DECISION_STRATEGY_KEY
 from app.services.runtime_symbols import configured_runtime_symbols
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
-DEFAULT_SIMULATION_STRATEGY_KEYS = frozenset({FACTOR_COMBO_STRATEGY_KEY})
+DEFAULT_SIMULATION_STRATEGY_KEYS = frozenset({
+    FACTOR_COMBO_STRATEGY_KEY,
+    EVENT_FINAL_DECISION_STRATEGY_KEY,
+})
 
 
 def default_slot_flags(strategy_key: str) -> tuple[int, int]:

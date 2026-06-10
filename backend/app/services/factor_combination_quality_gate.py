@@ -14,6 +14,8 @@ from app.services.kline_timing import is_within_entry_grace
 LIVE_MIN_WIN_RATE = SUCCESS_WIN_RATE_MIN
 LIVE_MIN_PROFIT_FACTOR = SUCCESS_PROFIT_FACTOR_MIN
 LIVE_MIN_TOTAL_PERIODS = BACKTEST_MIN_PERIODS
+LIVE_MIN_OOS_SAMPLE_COUNT = 50
+LIVE_MIN_PAPER_SAMPLE_COUNT = 30
 DEFAULT_SIGNAL_THRESHOLD = 0.0
 
 
@@ -21,6 +23,14 @@ DEFAULT_SIGNAL_THRESHOLD = 0.0
 class EntryWindow:
     open_time: int | None
     grace_ms: int | None
+
+
+@dataclass(frozen=True)
+class RegimeGate:
+    passed: bool
+    reason: str
+    regime: dict[str, Any] | None = None
+    min_win_rate: float | None = None
 
 
 def resolve_apply_quality_gate(requested: bool) -> bool:
@@ -39,6 +49,14 @@ def backtest_aligned_quality() -> dict[str, Any]:
         "thresholdPassed": True,
         "entryWindowPassed": True,
         "factorTimingPassed": True,
+        "regimePassed": True,
+        "regimeReason": "passed",
+        "regime": None,
+        "regimeMinWinRate": None,
+        "liveEvidenceSource": "disabled_backtest_alignment",
+        "liveEvidenceWinRate": None,
+        "liveEvidenceProfitFactor": None,
+        "liveEvidenceSampleCount": 0,
         "reason": "backtest_aligned",
     }
 
@@ -50,27 +68,58 @@ def quality_gate(
     *,
     timing: FactorSignalTiming,
     score: float,
+    regime: RegimeGate | None = None,
 ) -> dict[str, Any]:
-    metric_reason = quality_metric_reason(row, confidence)
+    evidence = live_evidence(row)
+    metric_reason = quality_metric_reason(row, confidence, evidence=evidence)
     threshold_reason = threshold_reason_for(row, score)
     entry_passed = entry_window_passed(window)
+    regime_gate = regime or RegimeGate(True, "passed")
     metrics_passed = metric_reason == "passed"
     threshold_passed = threshold_reason == "passed"
-    passed = metrics_passed and threshold_passed and entry_passed is not False and timing.passed
+    passed = (
+        metrics_passed
+        and threshold_passed
+        and entry_passed is not False
+        and timing.passed
+        and regime_gate.passed
+    )
     return {
         "passed": passed,
         "metricsPassed": metrics_passed,
         "thresholdPassed": threshold_passed,
         "entryWindowPassed": entry_passed,
         "factorTimingPassed": timing.passed,
-        "reason": quality_reason(metric_reason, threshold_reason, entry_passed, timing),
+        "regimePassed": regime_gate.passed,
+        "regimeReason": regime_gate.reason,
+        "regime": regime_gate.regime,
+        "regimeMinWinRate": regime_gate.min_win_rate,
+        "liveEvidenceSource": evidence["source"],
+        "liveEvidenceWinRate": evidence["winRate"],
+        "liveEvidenceProfitFactor": evidence["profitFactor"],
+        "liveEvidenceSampleCount": evidence["sampleCount"],
+        "reason": quality_reason(
+            metric_reason=metric_reason,
+            threshold_reason=threshold_reason,
+            entry_passed=entry_passed,
+            timing=timing,
+            regime=regime_gate,
+        ),
     }
 
 
-def quality_metric_reason(row: dict[str, Any], confidence: float) -> str:
-    if confidence < LIVE_MIN_WIN_RATE:
+def quality_metric_reason(
+    row: dict[str, Any],
+    confidence: float,
+    *,
+    evidence: dict[str, Any] | None = None,
+) -> str:
+    selected = evidence or live_evidence(row)
+    if selected["reason"] != "passed":
+        return str(selected["reason"])
+    if float(selected["winRate"]) < LIVE_MIN_WIN_RATE:
         return "win_rate_below_min"
-    profit_factor = finite_float(row.get("profitFactor"))
+    profit_factor = finite_float(selected.get("profitFactor"))
     if profit_factor is None:
         return "profit_factor_missing"
     if profit_factor < LIVE_MIN_PROFIT_FACTOR:
@@ -87,6 +136,99 @@ def period_and_walk_forward_reason(row: dict[str, Any]) -> str:
         return "total_periods_below_min"
     reason = walk_forward_reason(row)
     return reason or "passed"
+
+
+def live_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    paper = _paper_live_evidence(row)
+    if paper["reason"] == "passed":
+        return paper
+    oos = _oos_evidence(row)
+    if oos["reason"] == "passed":
+        return oos
+    return paper if paper["reason"] != "paper_live_evidence_missing" else oos
+
+
+def _paper_live_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    sample_count = int(finite_float(row.get("paperLiveSampleCount")) or 0)
+    win_rate = finite_float(row.get("paperLiveWinRate"))
+    profit_factor = finite_float(row.get("paperLiveProfitFactor"))
+    reason = _paper_live_evidence_reason(sample_count, win_rate, profit_factor)
+    return _evidence_payload(
+        source="paper_live",
+        sample_count=sample_count,
+        win_rate=win_rate,
+        profit_factor=profit_factor,
+        reason=reason,
+    )
+
+
+def _paper_live_evidence_reason(
+    sample_count: int,
+    win_rate: float | None,
+    profit_factor: float | None,
+) -> str:
+    if sample_count <= 0 and win_rate is None and profit_factor is None:
+        return "paper_live_evidence_missing"
+    if sample_count < LIVE_MIN_PAPER_SAMPLE_COUNT:
+        return "paper_live_sample_count_below_min"
+    if win_rate is None:
+        return "paper_live_win_rate_missing"
+    if profit_factor is None:
+        return "paper_live_profit_factor_missing"
+    return "passed"
+
+
+def _oos_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    walk_forward = row.get("walkForward") if isinstance(row.get("walkForward"), dict) else {}
+    test = walk_forward.get("test") if isinstance(walk_forward.get("test"), dict) else {}
+    win_rate = _first_float(walk_forward.get("oosWinRate"), row.get("oosWinRate"), test.get("winRate"))
+    profit_factor = _first_float(
+        walk_forward.get("oosProfitFactor"),
+        row.get("oosProfitFactor"),
+        test.get("profitFactor"),
+    )
+    sample_count = int(_first_float(walk_forward.get("oosSampleCount"), row.get("oosSampleCount"), test.get("sampleCount")) or 0)
+    reason = _oos_evidence_reason(sample_count, win_rate, profit_factor)
+    return _evidence_payload(
+        source="oos",
+        sample_count=sample_count,
+        win_rate=win_rate,
+        profit_factor=profit_factor,
+        reason=reason,
+    )
+
+
+def _oos_evidence_reason(
+    sample_count: int,
+    win_rate: float | None,
+    profit_factor: float | None,
+) -> str:
+    if sample_count <= 0 and win_rate is None and profit_factor is None:
+        return "oos_evidence_missing"
+    if sample_count < LIVE_MIN_OOS_SAMPLE_COUNT:
+        return "oos_sample_count_below_min"
+    if win_rate is None:
+        return "oos_win_rate_missing"
+    if profit_factor is None:
+        return "oos_profit_factor_missing"
+    return "passed"
+
+
+def _evidence_payload(
+    *,
+    source: str,
+    sample_count: int,
+    win_rate: float | None,
+    profit_factor: float | None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "sampleCount": sample_count,
+        "winRate": win_rate,
+        "profitFactor": profit_factor,
+        "reason": reason,
+    }
 
 
 def walk_forward_reason(row: dict[str, Any]) -> str | None:
@@ -131,10 +273,12 @@ def entry_window_passed(window: EntryWindow) -> bool | None:
 
 
 def quality_reason(
+    *,
     metric_reason: str,
     threshold_reason: str,
     entry_passed: bool | None,
     timing: FactorSignalTiming,
+    regime: RegimeGate,
 ) -> str:
     if metric_reason != "passed":
         return metric_reason
@@ -142,6 +286,8 @@ def quality_reason(
         return threshold_reason
     if not timing.passed:
         return timing.reason
+    if not regime.passed:
+        return regime.reason
     if entry_passed is False:
         return "entry_window_closed"
     return "passed"
@@ -152,3 +298,11 @@ def finite_float(value: Any) -> float | None:
         return None
     number = float(value)
     return number if isfinite(number) else None
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        number = finite_float(value)
+        if number is not None:
+            return number
+    return None

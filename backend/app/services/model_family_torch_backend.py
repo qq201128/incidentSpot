@@ -6,10 +6,11 @@ from typing import Any
 
 import numpy as np
 
-from app.services.model_family_torch_helpers import position_tensor, tensor_pack, weighted_loss
+from app.services.model_family_torch_helpers import position_tensor, returns_or_zeros, weighted_loss
 
 DEFAULT_DROPOUT = 0.0
 DEFAULT_TRANSFORMER_HEADS = 4
+PREDICT_BATCH_SIZE = 1024
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,11 @@ class TorchSequenceBackend:
         persist_model: bool = True,
         train_returns: np.ndarray | None = None,
         val_returns: np.ndarray | None = None,
+        scaler: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         torch, nn = _torch_modules()
         torch.manual_seed(options.seed)
+        mean, std = _scaler_arrays(scaler)
         model = _model_for_family(nn, options)
         optimizer = torch.optim.Adam(model.parameters(), lr=options.learning_rate, weight_decay=options.weight_decay)
         loss_fn = nn.BCEWithLogitsLoss(reduction="none")
@@ -55,13 +58,14 @@ class TorchSequenceBackend:
             model,
             optimizer,
             loss_fn,
-            tensor_pack(torch, train_x, train_y, train_returns, options),
-            tensor_pack(torch, val_x, val_y, val_returns, options),
+            ArrayPack(train_x, train_y, returns_or_zeros(train_y, train_returns), options, mean, std),
+            ArrayPack(val_x, val_y, returns_or_zeros(val_y, val_returns), options, mean, std),
             options,
         )
         model.load_state_dict(best_state or model.state_dict())
         self._trained_model = model
         self._trained_options = options
+        self._trained_scaler = (mean, std) if mean is not None and std is not None else None
         if persist_model:
             _save_model(torch, model, options, model_path)
         return {"trainLoss": losses["train"], "valLoss": losses["val"]}
@@ -71,7 +75,7 @@ class TorchSequenceBackend:
         model = getattr(self, "_trained_model", None)
         if model is None:
             raise RuntimeError("torch sequence model has not been trained")
-        return _predict_model(torch, model, x)
+        return _predict_model(torch, model, x, getattr(self, "_trained_scaler", None))
 
     def predict(self, model_path: Path, x: np.ndarray) -> np.ndarray:
         torch, nn = _torch_modules()
@@ -91,14 +95,28 @@ class TorchSequenceBackend:
         )
         model = _model_for_family(nn, options)
         model.load_state_dict(payload["state_dict"])
-        return _predict_model(torch, model, x)
+        return _predict_model(torch, model, x, None)
 
 
-def _predict_model(torch, model, x: np.ndarray) -> np.ndarray:
+def _predict_model(torch, model, x: np.ndarray, scaler) -> np.ndarray:
     model.eval()
+    batches = []
     with torch.no_grad():
-        logits = model(torch.tensor(x, dtype=torch.float32))
-    return torch.sigmoid(logits).detach().cpu().numpy().astype(np.float32)
+        for start in range(0, x.shape[0], PREDICT_BATCH_SIZE):
+            batch = _tensor_batch(torch, x, slice(start, start + PREDICT_BATCH_SIZE), scaler)
+            logits = model(batch)
+            batches.append(torch.sigmoid(logits).detach().cpu().numpy().astype(np.float32))
+    return np.concatenate(batches) if batches else np.empty(0, dtype=np.float32)
+
+
+@dataclass(frozen=True)
+class ArrayPack:
+    x: np.ndarray
+    y: np.ndarray
+    returns: np.ndarray
+    options: TorchSequenceOptions
+    mean: np.ndarray | None
+    std: np.ndarray | None
 
 
 def _train_epochs(torch, model, optimizer, loss_fn, train_pack, val_pack, options):
@@ -123,13 +141,14 @@ def _train_epochs(torch, model, optimizer, loss_fn, train_pack, val_pack, option
 
 
 def _train_one_epoch(torch, model, optimizer, loss_fn, train_pack, batch_size: int) -> float:
-    x, y, returns, options = train_pack
     losses = []
     model.train()
-    for start in range(0, x.shape[0], batch_size):
-        idx = torch.randperm(x.shape[0])[start:start + batch_size]
+    permutation = torch.randperm(train_pack.x.shape[0]).numpy()
+    for start in range(0, train_pack.x.shape[0], batch_size):
+        idx = permutation[start:start + batch_size]
         optimizer.zero_grad()
-        loss = weighted_loss(loss_fn, model(x[idx]), y[idx], returns[idx], options)
+        batch_x, batch_y, batch_returns = _batch_pack(torch, train_pack, idx)
+        loss = weighted_loss(loss_fn, model(batch_x), batch_y, batch_returns, train_pack.options)
         loss.backward()
         optimizer.step()
         losses.append(float(loss.detach().cpu()))
@@ -137,10 +156,44 @@ def _train_one_epoch(torch, model, optimizer, loss_fn, train_pack, batch_size: i
 
 
 def _validation_loss(model, loss_fn, val_pack) -> float:
-    x, y, returns, options = val_pack
+    import torch
+
+    losses = []
     model.eval()
-    with _no_grad():
-        return float(weighted_loss(loss_fn, model(x), y, returns, options).detach().cpu())
+    with torch.no_grad():
+        for start in range(0, val_pack.x.shape[0], val_pack.options.batch_size):
+            idx = slice(start, start + val_pack.options.batch_size)
+            batch_x, batch_y, batch_returns = _batch_pack(torch, val_pack, idx)
+            loss = weighted_loss(loss_fn, model(batch_x), batch_y, batch_returns, val_pack.options)
+            losses.append(float(loss.detach().cpu()))
+    return float(np.mean(losses)) if losses else float("inf")
+
+
+def _batch_pack(torch, pack: ArrayPack, idx):
+    scaler = (pack.mean, pack.std) if pack.mean is not None and pack.std is not None else None
+    return (
+        _tensor_batch(torch, pack.x, idx, scaler),
+        _tensor_vector(torch, pack.y, idx),
+        _tensor_vector(torch, pack.returns, idx),
+    )
+
+
+def _tensor_batch(torch, values: np.ndarray, idx, scaler=None):
+    batch = np.array(values[idx], dtype=np.float32, copy=True)
+    if scaler is not None:
+        mean, std = scaler
+        batch = ((batch - mean) / std).astype(np.float32)
+    return torch.as_tensor(batch, dtype=torch.float32)
+
+
+def _tensor_vector(torch, values: np.ndarray, idx):
+    return torch.as_tensor(np.array(values[idx], dtype=np.float32, copy=True), dtype=torch.float32)
+
+
+def _scaler_arrays(scaler: dict[str, Any] | None) -> tuple[np.ndarray | None, np.ndarray | None]:
+    if scaler is None:
+        return None, None
+    return np.asarray(scaler["mean"], dtype=np.float32), np.asarray(scaler["std"], dtype=np.float32)
 
 
 def _model_for_family(nn, options: TorchSequenceOptions):

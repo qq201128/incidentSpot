@@ -163,6 +163,30 @@
   overflow-wrap: anywhere;
 }
 
+.factor-combo-rank-gate {
+  margin: 0;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.factor-combo-rank-gate.is-pass {
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.22);
+}
+
+.factor-combo-rank-gate.is-fail {
+  color: #f0b36a;
+  background: rgba(240, 179, 106, 0.1);
+  border: 1px solid rgba(240, 179, 106, 0.24);
+}
+
 .factor-combo-rank-metrics {
   min-width: 0;
   display: grid;

@@ -124,7 +124,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `GET /api/auto-trade/status`
 - `GET /api/auto-trade/strategies`
 - `PUT /api/auto-trade/settings`
-- `PUT /api/auto-trade/strategies/{strategy_key}`
+- `PUT /api/auto-trade/strategies/{strategy_key}`（工作台自动执行更新）
 
 ### WebSocket
 

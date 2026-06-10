@@ -31,4 +31,9 @@ def _failed_report(config: ModelFamilyTrainingConfig, profile: str, exc: Excepti
         "modelVersion": None,
         "searchKey": model_search_key(config, profile),
         "validationFailureReason": str(exc),
+        "failure": {
+            "stage": "candidate_training",
+            "exceptionType": type(exc).__name__,
+            "error": str(exc),
+        },
     }

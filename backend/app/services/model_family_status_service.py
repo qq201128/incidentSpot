@@ -48,6 +48,7 @@ class _ReadinessContext:
     report: dict[str, Any]
     artifacts_ready: bool
     dependency_ready: bool
+    clean_event_features: bool
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,7 @@ def model_family_status(
     inputs = _status_inputs(family, symbol, duration, artifact_root=artifact_root)
     status = _active_status(inputs)
     dependency = dependency_status(inputs.family)
-    readiness = _ReadinessContext(status, inputs.version, inputs.report, inputs.artifacts_ready, dependency["available"])
+    readiness = _ReadinessContext(status, inputs.version, inputs.report, inputs.artifacts_ready, dependency["available"], _has_clean_event_features(inputs.paths.features))
     snapshot = _combo_snapshot_status(inputs.symbol, duration, inputs.paths.features, current=current_combo_snapshot)
     progress = candidate_search_progress(inputs.family, inputs.symbol, duration, artifact_root=artifact_root)
     context = _StatusPayloadContext(inputs, status, dependency, snapshot, progress, readiness)
@@ -115,6 +116,7 @@ def _status_payload(context: _StatusPayloadContext) -> dict[str, Any]:
     metadata = _model_metadata_payload(inputs, context.status, gate)
     shadow_reason = _shadow_ready_reason(context.readiness)
     trade_reason = _trade_ready_reason(context.readiness)
+    report = inputs.report
     return {
         **context.status,
         **_display_metadata_payload(metadata, context.progress, library),
@@ -127,6 +129,8 @@ def _status_payload(context: _StatusPayloadContext) -> dict[str, Any]:
         "shadowPredictionBlockedReason": shadow_reason,
         "tradePredictionReady": trade_reason == "passed",
         "tradePredictionBlockedReason": trade_reason,
+        "cleanEventFeatures": context.readiness.clean_event_features,
+        "regimeValidation": report.get("regimeValidation") if isinstance(report, dict) else None,
         **model_status_policy_payload(context.status.get("status"), gate),
     }
 
@@ -229,6 +233,7 @@ def _active_artifacts_pass_validation(inputs: _StatusInputs) -> bool:
     return (
         inputs.raw_status.get("status") != "untrained"
         and inputs.artifacts_ready
+        and _has_clean_event_features(inputs.paths.features)
         and model_validation_block_reason({"status": LSTM_STATUS_TRADE_ACTIVE}, inputs.version, inputs.report) == "passed"
     )
 
@@ -260,6 +265,8 @@ def _shadow_ready_reason(context: _ReadinessContext) -> str:
         return context.status.get("reason") or f"model_status_{context.status.get('status') or 'unknown'}"
     if not context.artifacts_ready:
         return "artifacts_incomplete"
+    if not context.clean_event_features:
+        return "clean_event_retrain_required"
     if context.status.get("status") == LSTM_STATUS_LEGACY_TRAINED:
         return model_validation_block_reason(context.status, context.version, context.report)
     return "passed"
@@ -270,7 +277,13 @@ def _trade_ready_reason(context: _ReadinessContext) -> str:
         return "dependency_unavailable"
     if not context.artifacts_ready:
         return "artifacts_incomplete"
+    if not context.clean_event_features:
+        return "clean_event_retrain_required"
     return model_validation_block_reason(context.status, context.version, context.report)
+
+def _has_clean_event_features(features_path: Path) -> bool:
+    features = read_json(features_path) or {}
+    return any(str(column).startswith("regime_") for column in (features.get("columns") or []))
 
 
 def _validation_failure_reason(status, attempt, report) -> str | None:

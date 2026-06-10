@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-PAPER_LIVE_PREFILTER_POLICY = "validation_gate_allows_paper_live_only"
-PAPER_LIVE_RELATIVE_POLICY = "validation_gate_or_relative_shadow_observation"
+PAPER_LIVE_PREFILTER_POLICY = "validation_gate_is_paper_live_prefilter_only"
+PAPER_LIVE_RELATIVE_POLICY = "validation_or_relative_shadow_collects_paper_live_only"
 PAPER_LIVE_CREDIBILITY_SOURCE = "settled_paper_live_predictions"
 
 
@@ -20,6 +20,8 @@ def paper_live_admission_payload(status: str | None, gate: dict[str, Any]) -> di
         "paperLiveWinRate": None,
         "paperLiveSampleCount": 0,
         "credibilitySource": PAPER_LIVE_CREDIBILITY_SOURCE,
+        "tradeCredibility": "unproven_until_settled_paper_live",
+        "validationGateRole": "prefilter_not_live_credibility",
         "realTradingEnabled": False,
     }
 
@@ -33,6 +35,8 @@ def model_status_policy_payload(active_status: str | None, gate: dict[str, Any])
         "paperLiveSampleCount": 0,
         "modelCredibilitySource": PAPER_LIVE_CREDIBILITY_SOURCE,
         "validationRole": PAPER_LIVE_RELATIVE_POLICY,
+        "tradeCredibility": admission["tradeCredibility"],
+        "validationGateRole": admission["validationGateRole"],
         "realTradingEnabled": False,
     }
 

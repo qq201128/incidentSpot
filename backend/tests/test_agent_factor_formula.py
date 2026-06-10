@@ -107,6 +107,12 @@ def test_operator_prompt_exposes_lag_constraints() -> None:
     assert "positive integer" in " ".join(pct_change["constraints"])
 
 
+def test_operator_prompt_exposes_category_budgets() -> None:
+    payload = factor_operator_prompt_payload()
+
+    assert payload["categoryBudgets"]["budgets"]["derivatives"]["maxShare"] == 0.4
+
+
 def _operator_by_name(payload: dict, name: str) -> dict:
     for item in payload["operators"]:
         if item["name"] == name:

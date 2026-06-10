@@ -1,3 +1,4 @@
+import { modelBlockReasonLabel } from "../../utils/eventFinalDecisionLabels";
 import { strategyDurationLabel, strategyLabel } from "../../utils/strategyLabels";
 import { formatPct } from "./miningFormatters";
 import { attachModelRunStatuses } from "./modelRunStatus";
@@ -11,7 +12,9 @@ export default function MiningModelGrid({ busy, duration, models, onSearchModel,
         <h2>
           多模型独立系统
           <span className="mining-ready-badge">
-            Ready {summary?.readyModelCount ?? 0}/{summary?.totalModelCount ?? 0}
+            可用 {summary?.readyModelCount ?? 0}/{summary?.totalModelCount ?? 0}
+            {" · "}
+            完整 {summary?.searchCompleteModelCount ?? 0}/{summary?.totalModelCount ?? 0}
           </span>
         </h2>
       </div>
@@ -30,6 +33,7 @@ export default function MiningModelGrid({ busy, duration, models, onSearchModel,
 
       <footer className="mining-model-legend">
         <LegendDot tone="ready" label="可模拟下单" />
+        <LegendDot tone="budget" label="预算完成" />
         <LegendDot tone="ready-soft" label="就绪" />
         <LegendDot tone="searching" label="搜索中" />
         <LegendDot tone="pending" label="待训练" />
@@ -84,6 +88,7 @@ function ModelCard({ model, busy, context, onSearch }) {
       </div>
       <p className="mining-model-latest">
         最新候选: {model.latestCandidateLabel || (model.candidateLibraryTotal ? `${model.candidateLibraryTotal} 条` : "—")}
+        {model.budgetLimited ? " · 未完整搜索" : ""}
       </p>
       <ModelRuntimeDetails runtime={runtime} model={model} />
       <button type="button" className="mining-model-search-btn" disabled={busy || active} onClick={onSearch}>
@@ -99,13 +104,25 @@ function modelContext(symbol, duration) {
 
 function ModelRuntimeDetails({ runtime, model }) {
   const failure = runtime.latestFailureReason || model.latestFailureReason;
+  const blocked = model.blockedReason;
+  const retrain = blocked === "clean_event_retrain_required";
   const logPath = runtime.latestLogPath || model.latestLogPath;
   const command = runtime.command || REQUIRED_COMMAND_FALLBACK;
   return (
     <div className="mining-model-runtime">
       <span>候选库 {runtime.candidateLibraryTotal ?? model.candidateLibraryTotal ?? 0} 条</span>
+      {retrain ? (
+        <span className="is-warn" title={blocked}>
+          {modelBlockReasonLabel(blocked)}
+        </span>
+      ) : null}
       {runtime.pendingWorker ? <code>需启动 worker: {command}</code> : null}
       {failure ? <span className="is-error" title={failure}>失败原因 {failure}</span> : null}
+      {!retrain && blocked && blocked !== "passed" ? (
+        <span className="is-warn" title={blocked}>
+          阻断 {modelBlockReasonLabel(blocked)}
+        </span>
+      ) : null}
       {logPath ? <span title={logPath}>日志 {logPath}</span> : null}
     </div>
   );

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAiHistoryMeta, fetchAiHistorySuccess } from "../api/workbenchClient";
+import FinalDecisionHitRateSection from "../components/FinalDecisionHitRateSection";
 import StrategyRecentEventsPanel from "../components/StrategyRecentEventsPanel";
 import { contractDurationLabel } from "../utils/eventDuration";
 import { formatPnlU } from "../utils/eventSettlement";
@@ -206,7 +207,7 @@ export default function RuleHitRatePage() {
         <div className="rhr-topbar-main">
           <span className="rhr-eyebrow">Performance</span>
           <h1>规则命中率</h1>
-          <p>按结算周期切换查看因子命中率 · 点击因子查看最近合约记录</p>
+          <p>优先查看事件最终裁判验证；下方保留因子历史命中率对照</p>
         </div>
         <div className="rhr-topbar-actions">
           <div className="rhr-symbol-tabs" role="tablist" aria-label="交易对">
@@ -230,6 +231,8 @@ export default function RuleHitRatePage() {
       </header>
 
       {status ? <div className="rhr-banner">{status}</div> : null}
+
+      <FinalDecisionHitRateSection symbol={symbol} durationMinutes={queryDurationMinutes} />
 
       <div className="rhr-duration-tabs-wrap">
         <span className="rhr-duration-tabs-label">结算周期</span>

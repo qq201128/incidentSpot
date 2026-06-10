@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.factor_cache_metadata import cache_is_usable
+from app.services.factor_combination_ranking_view import regular_ranking_rows
 from app.services.factor_combo_backtest_cache_service import (
     ComboBacktestCacheWrite,
     get_usable_combo_backtest,
@@ -31,7 +32,18 @@ def cached_combo_row_for_factor(symbol: str, duration: str, factor_name: str) ->
     cached = get_cached_combination_ranking(symbol.strip().upper(), duration)
     if not cache_is_usable(cached):
         return None
-    for row in cached.get("ranking") or []:
+    return _cached_combo_row(cached, duration, factor_name)
+
+
+def cached_combo_row_for_display(symbol: str, duration: str, factor_name: str) -> dict[str, Any] | None:
+    cached = get_cached_combination_ranking(symbol.strip().upper(), duration)
+    return _cached_combo_row(cached, duration, factor_name)
+
+
+def _cached_combo_row(cached: dict[str, Any] | None, duration: str, factor_name: str) -> dict[str, Any] | None:
+    if cached is None:
+        return None
+    for row in regular_ranking_rows(cached):
         if row.get("factorName") == factor_name or row.get("name") == factor_name:
             return _normalize_combo_metrics(row, duration)
     return None

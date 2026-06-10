@@ -9,12 +9,13 @@ from app.services.factor_cache_metadata import (
 from app.services.factor_combination_cache_service import get_cached_combination_ranking
 from app.services.factor_combination_signal_service import build_live_signal_from_ranking
 from app.services.factor_duration_alignment import duration_entry_source_open_time
-from app.services.factor_frame_service import load_factor_frame
+from app.services.factor_frame_service import load_factor_frame, lookback_days_for_bars
 from app.services.kline_prediction_refresh import refresh_prediction_klines
 from app.services.kline_timing import MS_PER_MINUTE, current_rule_entry_open_time_for_duration
 from app.services.factor_combo_simulation_keys import is_high_winrate_combo_name
 from app.services.factor_combo_simulation_keys import simulation_strategy_key_for_factor_name
 from app.services.factor_combo_frame_materialization import materialize_factor_combo_frame_for_row
+from app.services.factor_combo_rule_reasons import factor_combo_rule_reasons
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_strategy_demotion import high_winrate_active_rank
 from app.services.rule_config import RULE_DURATION, SUPPORTED_RULE_DURATIONS
@@ -24,6 +25,8 @@ from app.services.strategy_registry import (
     HIGH_WINRATE_FACTOR_COMBO_STRATEGY_KEY,
     HIGH_WINRATE_FACTOR_COMBO_RULE_NAME,
 )
+
+LIVE_SIGNAL_LOOKBACK_BARS = 720
 
 
 def predict_factor_combo_direction(
@@ -81,10 +84,10 @@ def predict_factor_combo_rank_direction(
     assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
     top = _ranked_combo(cached, combo_rank)
     if require_high_winrate_goal:
-        _assert_high_winrate_combo(top, combo_rank, symbol, duration)
+        _assert_high_winrate_combo(top, combo_rank, symbol=symbol, duration=duration)
     _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
     frame = materialize_factor_combo_frame_for_row(
-        load_factor_frame(symbol, duration),
+        _load_live_factor_frame(symbol, duration),
         symbol=symbol,
         duration=duration,
         row=top,
@@ -123,7 +126,7 @@ def predict_factor_combo_row_direction(
     assert_cache_usable_for_live_signal(cached, f"factor combination ranking {symbol.upper()} {duration}")
     _refresh_factor_combo_source_klines(symbol, duration, entry_open_time)
     frame = materialize_factor_combo_frame_for_row(
-        load_factor_frame(symbol, duration),
+        _load_live_factor_frame(symbol, duration),
         symbol=symbol,
         duration=duration,
         row=row,
@@ -170,7 +173,15 @@ def _available_high_winrate_rank(symbol: str, duration: str, preferred_rank: int
     return 1
 
 
-def _assert_high_winrate_combo(row: dict[str, Any], rank: int, symbol: str, duration: str) -> None:
+def _load_live_factor_frame(symbol: str, duration: str):
+    return load_factor_frame(
+        symbol,
+        duration,
+        lookback_days=lookback_days_for_bars(duration, LIVE_SIGNAL_LOOKBACK_BARS),
+    )
+
+
+def _assert_high_winrate_combo(row: dict[str, Any], rank: int, *, symbol: str, duration: str) -> None:
     factor_name = str(row.get("factorName") or "")
     if is_high_winrate_combo_name(factor_name):
         return
@@ -218,39 +229,10 @@ def _prediction_payload(
         "quality_gate_reason": signal["qualityGateReason"],
         "signal_source": signal["source"],
         "rule_score": signal["score"],
-        "rule_reasons": _rule_reasons(signal, cache_reason),
+        "rule_reasons": factor_combo_rule_reasons(signal, cache_reason, _signal_rule_name(signal)),
         "orderbook": None,
         "timeframe_votes": [],
     }
-
-
-def _rule_reasons(signal: dict[str, Any], cache_reason: str) -> list[str]:
-    member_names = ",".join(str(member["name"]) for member in signal["members"])
-    reasons = [
-        f"rule={_signal_rule_name(signal)}",
-        f"combo={signal['factorName']}",
-        f"combo_rank={signal.get('comboRank') or 1}",
-        f"combo_cache={cache_reason}",
-        f"members={member_names}",
-        f"method={signal['method']}",
-        f"historical_win_rate={signal['historicalWinRate']}",
-        f"historical_profit_factor={signal['historicalProfitFactor']}",
-        f"walk_forward_passed={signal.get('walkForwardPassed')}",
-        f"walk_forward_failure={signal.get('walkForwardFailureReason')}",
-        f"score={signal['score']}",
-        f"signal_threshold={signal.get('signalThreshold')}",
-        f"signal_threshold_passed={signal.get('qualityThresholdPassed')}",
-        f"quality_gate={signal['qualityGateReason']}",
-        f"factor_timing={signal.get('factorTimingReason')}",
-        f"factor_timing_passed={signal.get('factorTimingPassed')}",
-        f"factor_timing_blocked={','.join(signal.get('factorTimingBlockedMembers') or [])}",
-        f"quality_min_win_rate={signal['qualityMinWinRate']}",
-        f"quality_min_profit_factor={signal['qualityMinProfitFactor']}",
-    ]
-    learning = signal.get("factorLearning")
-    if isinstance(learning, dict):
-        reasons.extend(_factor_learning_reasons(learning))
-    return reasons
 
 
 def _gate_name(strategy_key: str) -> str:
@@ -270,16 +252,6 @@ def _trade_quality_score(signal: dict[str, Any]) -> float:
     if isinstance(learning, dict) and learning.get("qualityScore") is not None:
         return float(learning["qualityScore"])
     return float(signal["confidence"])
-
-
-def _factor_learning_reasons(learning: dict[str, Any]) -> list[str]:
-    matches = learning.get("lossPatternMatches") or []
-    return [
-        f"factor_learning={learning.get('state')}",
-        f"factor_learning_filter_passed={learning.get('filterPassed')}",
-        f"factor_learning_confirmations={learning.get('confirmationCount')}",
-        f"factor_learning_loss_matches={len(matches) if isinstance(matches, list) else 0}",
-    ]
 
 
 def _refresh_factor_combo_source_klines(

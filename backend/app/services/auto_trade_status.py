@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,6 +8,7 @@ from app.db.session import get_conn
 from app.services.auto_predict_loop_status import auto_predict_loop_status
 from app.services.auto_trade_service import fresh_prediction_ms_for_strategy, list_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.event_regime_status import market_regime_status
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.position_guard import has_open_position
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
@@ -15,18 +17,40 @@ from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, strategy_uses_t
 MS_PER_SECOND = 1000
 
 
+@dataclass(frozen=True)
+class StatusRuntimeData:
+    predictions: dict[tuple[str, str, str], dict[str, Any]]
+    open_positions: set[tuple[str, str, str]]
+
+
 def get_auto_trade_status() -> dict[str, Any]:
-    strategies = [_strategy_status(settings) for settings in list_auto_trade_settings()]
+    settings_list = list_auto_trade_settings()
+    runtime = _runtime_data(settings_list)
+    strategies = [_strategy_status(settings, runtime) for settings in settings_list]
     default_status = _default_status(strategies)
     return {**default_status, "strategies": strategies, "autoPredictLoop": auto_predict_loop_status()}
 
 
-def _strategy_status(settings: AutoTradeSettings) -> dict[str, Any]:
-    prediction = _latest_prediction(settings)
+def _strategy_status(
+    settings: AutoTradeSettings,
+    runtime: StatusRuntimeData | None = None,
+) -> dict[str, Any]:
+    if not _include_runtime_details(settings):
+        return _disabled_runtime_status(settings)
+    prediction = _runtime_prediction(settings, runtime)
     status = {
         "settings": settings.to_response(),
-        "openPosition": _has_open_position(settings),
+        "openPosition": _runtime_open_position(settings, runtime),
         "latestPrediction": _prediction_status(prediction, settings),
+    }
+    return {**status, "reason": _reason(status)}
+
+
+def _disabled_runtime_status(settings: AutoTradeSettings) -> dict[str, Any]:
+    status = {
+        "settings": settings.to_response(),
+        "openPosition": False,
+        "latestPrediction": None,
     }
     return {**status, "reason": _reason(status)}
 
@@ -67,6 +91,7 @@ def _prediction_status(
         "highWinrateGateEnabled": policy.get("highWinrateGateEnabled"),
         "productionTarget": policy.get("productionTarget"),
         "tradePolicyGatesEnabled": strategy_uses_trade_policy_gates(settings.strategy_key),
+        "marketRegime": market_regime_status(settings.symbol, settings.duration, int(prediction["open_time"])),
     }
 
 
@@ -119,6 +144,7 @@ def _has_open_position(settings: AutoTradeSettings) -> bool:
             settings.symbol,
             settings.strategy_key,
             event_interval=settings.duration,
+            require_market_regime_gate_passed=True,
         )
     finally:
         conn.close()
@@ -160,3 +186,69 @@ def _ungated_strategy_reason(prediction: dict[str, Any]) -> str:
     if prediction["qualityPassed"]:
         return "ready_to_place_order"
     return "signal_condition_not_met"
+
+
+def _include_runtime_details(settings: AutoTradeSettings) -> bool:
+    return bool(settings.enabled)
+
+
+def _runtime_data(settings_list: list[AutoTradeSettings]) -> StatusRuntimeData:
+    active = [settings for settings in settings_list if _include_runtime_details(settings)]
+    if not active:
+        return StatusRuntimeData(predictions={}, open_positions=set())
+    conn = get_conn()
+    try:
+        return StatusRuntimeData(
+            predictions=_latest_predictions(conn, active),
+            open_positions=_open_position_keys(conn),
+        )
+    finally:
+        conn.close()
+
+
+def _latest_predictions(conn: Any, settings_list: list[AutoTradeSettings]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    rows = {}
+    for settings in settings_list:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM predictions
+            WHERE strategy_key = ? AND symbol = ? AND duration = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (settings.strategy_key, settings.symbol, settings.duration),
+        ).fetchone()
+        if row:
+            rows[_slot_key(settings)] = dict(row)
+    return rows
+
+
+def _open_position_keys(conn: Any) -> set[tuple[str, str, str]]:
+    rows = conn.execute(
+        """
+        SELECT strategy_key, symbol, event_interval
+        FROM events
+        WHERE status = 'OPEN' AND market_regime_gate_passed = 1
+        """
+    ).fetchall()
+    return {(str(row["strategy_key"]), str(row["symbol"]).upper(), str(row["event_interval"])) for row in rows}
+
+
+def _runtime_prediction(
+    settings: AutoTradeSettings,
+    runtime: StatusRuntimeData | None,
+) -> dict[str, Any] | None:
+    if runtime is None:
+        return _latest_prediction(settings)
+    return runtime.predictions.get(_slot_key(settings))
+
+
+def _runtime_open_position(settings: AutoTradeSettings, runtime: StatusRuntimeData | None) -> bool:
+    if runtime is None:
+        return _has_open_position(settings)
+    return _slot_key(settings) in runtime.open_positions
+
+
+def _slot_key(settings: AutoTradeSettings) -> tuple[str, str, str]:
+    return (settings.strategy_key, settings.symbol.upper(), settings.duration)

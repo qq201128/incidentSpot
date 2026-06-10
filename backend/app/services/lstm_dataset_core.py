@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
 
 from app.services.factor_learning_controls import learning_risk_blocked_factor_names
 from app.services.lstm_factor_combo_features import FACTOR_COMBO_FEATURE_PREFIX
@@ -115,29 +115,43 @@ def _window_arrays(
     returns: np.ndarray,
     feature_window: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    x, y, future_returns, entry_times = [], [], [], []
-    for end in range(feature_window - 1, len(frame)):
-        window = values[end - feature_window + 1:end + 1]
-        if _valid_sample(window, labels[end], returns[end]):
-            x.append(window)
-            y.append(labels[end])
-            future_returns.append(returns[end])
-            entry_times.append(int(frame.iloc[end]["entry_open_time"]))
+    if len(frame) < feature_window:
+        return _empty_window_arrays(values.shape[1], feature_window)
+    windows = sliding_window_view(values, feature_window, axis=0).transpose(0, 2, 1)
+    y = labels[feature_window - 1:]
+    future_returns = returns[feature_window - 1:]
+    entry_times = frame["entry_open_time"].to_numpy(dtype=np.int64)[feature_window - 1:]
+    valid = _valid_window_mask(values, labels, returns, feature_window)
+    if bool(valid.all()):
+        return windows, y, future_returns, entry_times
+    return windows[valid], y[valid], future_returns[valid], entry_times[valid]
+
+
+def _empty_window_arrays(feature_count: int, feature_window: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     return (
-        np.asarray(x, dtype=np.float32),
-        np.asarray(y, dtype=np.float32),
-        np.asarray(future_returns, dtype=np.float32),
-        np.asarray(entry_times, dtype=np.int64),
+        np.empty((0, feature_window, feature_count), dtype=np.float32),
+        np.empty(0, dtype=np.float32),
+        np.empty(0, dtype=np.float32),
+        np.empty(0, dtype=np.int64),
     )
+
+
+def _valid_window_mask(
+    values: np.ndarray,
+    labels: np.ndarray,
+    returns: np.ndarray,
+    feature_window: int,
+) -> np.ndarray:
+    row_finite = np.isfinite(values).all(axis=1).astype(np.int16)
+    window_counts = np.convolve(row_finite, np.ones(feature_window, dtype=np.int16), mode="valid")
+    label_tail = labels[feature_window - 1:]
+    return_tail = returns[feature_window - 1:]
+    return (window_counts == feature_window) & np.isfinite(label_tail) & np.isfinite(return_tail)
 
 
 def _column_is_finite_enough(values: pd.Series) -> bool:
     finite = np.isfinite(values.to_numpy(dtype=np.float32)).mean()
     return float(finite) >= MIN_FEATURE_FINITE_RATIO
-
-
-def _valid_sample(window: np.ndarray, label: float, future_return: float) -> bool:
-    return bool(np.isfinite(window).all() and isfinite(float(label)) and isfinite(float(future_return)))
 
 
 def _is_candidate_feature_column(column: str) -> bool:

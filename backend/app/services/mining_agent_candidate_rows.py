@@ -78,6 +78,8 @@ def agent_candidate_row(
         "factorName": candidate_display_name(record_payload, idea_payload),
         "operatorTrace": idea_payload.get("operatorTrace") or [],
         "formulaHint": record_payload.get("formula") or idea_payload.get("formulaHint"),
+        "factorCategory": record_payload.get("factorCategory") or idea_payload.get("factorCategory"),
+        "categorySaturation": record_payload.get("categorySaturation") or {},
         "rationale": candidate_rationale(record_payload, idea_payload),
         "validationStatus": validation_status_label(record_payload, idea_payload if has_idea else {}),
         "validationStatusKey": validation_status_key(record_payload, idea_payload if has_idea else {}),
@@ -127,6 +129,8 @@ def validation_status_key(record: dict, idea: dict) -> str:
         return "promoted"
     if status == "rejected_metrics":
         return "rejected_metrics"
+    if status == "category_saturated":
+        return "category_saturated"
     if status == "failed":
         return "failed"
     if status == "duplicate_existing":
@@ -142,6 +146,7 @@ def validation_status_label(record: dict, idea: dict) -> str:
     labels = {
         "promoted": "已入库",
         "rejected_metrics": "入库：未达标",
+        "category_saturated": "类别过量",
         "failed": "物化失败",
         "duplicate": "已存在",
         "pending_backtest": "待回测",

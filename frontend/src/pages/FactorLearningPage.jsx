@@ -83,7 +83,7 @@ function MiningInitialState() {
       <div>
         <span className="mining-loading-kicker">REAL API REQUEST</span>
         <h2>正在读取自动挖掘数据</h2>
-        <p>汇总模型族运行态、候选库、Agent 入库和 Worker 日志，首次请求可能需要数秒。</p>
+        <p>汇总模型族运行态、候选库、重训阻断与 Worker 日志，首次请求可能需要数秒。</p>
       </div>
       <div className="mining-loading-steps" aria-label="读取中的数据源">
         <span>模型族状态</span>

@@ -9,6 +9,14 @@ import numpy as np
 import pandas as pd
 
 from app.db.session import get_conn
+from app.services.enhanced_feature_queries import (
+    FUNDING_LOOKBACK_SELECT_SQL,
+    FUNDING_SELECT_SQL,
+    KLINES_LOOKBACK_SELECT_SQL,
+    KLINES_SELECT_SQL,
+    ORDERBOOK_LOOKBACK_SELECT_SQL,
+    ORDERBOOK_SELECT_SQL,
+)
 from app.services.enhanced_timeframes import add_online_timeframe_features
 from app.services.external_factor_data import ExternalFeatureFrames, add_external_factor_features
 from app.services.kline_features import build_feature_frame as _base_build_features
@@ -28,22 +36,19 @@ ORDERBOOK_COLUMNS = (
     "microprice_bps",
     "ofi_ratio",
 )
+MS_PER_DAY = 86_400_000
 
 # --------------------------------------------------------------------------- #
 # Data load helpers
 # --------------------------------------------------------------------------- #
-def load_klines(symbol: str, interval: str = "1m") -> pd.DataFrame:
+def load_klines(symbol: str, interval: str = "1m", *, lookback_days: int | None = None) -> pd.DataFrame:
+    sym = symbol.upper()
     conn = get_conn()
-    rows = conn.execute(
-        """
-        SELECT open_time, open, high, low, close, volume
-        FROM klines
-        WHERE symbol = ? AND interval = ?
-        ORDER BY open_time ASC
-        """,
-        (symbol.upper(), interval),
-    ).fetchall()
-    conn.close()
+    try:
+        cutoff = _lookback_cutoff(conn, "klines", sym, interval=interval, lookback_days=lookback_days)
+        rows = _select_klines(conn, sym, interval=interval, cutoff=cutoff)
+    finally:
+        conn.close()
     if not rows:
         raise ValueError(f"no klines for {symbol} {interval}")
     df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "volume"])
@@ -52,20 +57,16 @@ def load_klines(symbol: str, interval: str = "1m") -> pd.DataFrame:
     return df.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
 
 
-def load_orderbook_features(symbol: str) -> pd.DataFrame:
+def load_orderbook_features(symbol: str, *, lookback_days: int | None = None) -> pd.DataFrame:
     """Load cached orderbook snapshots that were persisted alongside klines."""
     # Backend stores OB snapshots with kline open_time when fetched proactively.
+    sym = symbol.upper()
     conn = get_conn()
-    rows = conn.execute(
-        """
-        SELECT open_time, imbalance, spread_bps, bid_qty_sum, ask_qty_sum, microprice_bps, ofi_ratio
-        FROM orderbook_features
-        WHERE symbol = ?
-        ORDER BY open_time ASC
-        """,
-        (symbol.upper(),),
-    ).fetchall()
-    conn.close()
+    try:
+        cutoff = _lookback_cutoff(conn, "orderbook_features", sym, interval=None, lookback_days=lookback_days)
+        rows = _select_orderbook_features(conn, sym, cutoff=cutoff)
+    finally:
+        conn.close()
     if not rows:
         return pd.DataFrame(columns=["open_time", *ORDERBOOK_COLUMNS])
     df = pd.DataFrame(rows, columns=["open_time", *ORDERBOOK_COLUMNS])
@@ -75,23 +76,62 @@ def load_orderbook_features(symbol: str) -> pd.DataFrame:
     return df
 
 
-def load_funding_features(symbol: str) -> pd.DataFrame:
+def load_funding_features(symbol: str, *, lookback_days: int | None = None) -> pd.DataFrame:
+    sym = symbol.upper()
     conn = get_conn()
-    rows = conn.execute(
-        """
-        SELECT open_time, funding_rate
-        FROM funding_features
-        WHERE symbol = ?
-        ORDER BY open_time ASC
-        """,
-        (symbol.upper(),),
-    ).fetchall()
-    conn.close()
+    try:
+        cutoff = _lookback_cutoff(conn, "funding_features", sym, interval=None, lookback_days=lookback_days)
+        rows = _select_funding_features(conn, sym, cutoff=cutoff)
+    finally:
+        conn.close()
     if not rows:
         return pd.DataFrame(columns=["open_time", "funding_rate"])
     df = pd.DataFrame(rows, columns=["open_time", "funding_rate"])
     df["funding_rate"] = pd.to_numeric(df["funding_rate"], errors="coerce")
     return df
+
+
+def _lookback_cutoff(
+    conn,
+    table: str,
+    symbol: str,
+    *,
+    interval: str | None,
+    lookback_days: int | None,
+) -> int | None:
+    if lookback_days is None:
+        return None
+    if lookback_days <= 0:
+        raise ValueError("lookback_days must be greater than 0")
+    latest = _latest_open_time(conn, table, symbol, interval=interval)
+    if latest is None:
+        return 0
+    return int(latest) - int(lookback_days) * MS_PER_DAY
+
+
+def _latest_open_time(conn, table: str, symbol: str, *, interval: str | None) -> int | None:
+    where = "symbol = ?" if interval is None else "symbol = ? AND interval = ?"
+    params = (symbol,) if interval is None else (symbol, interval)
+    row = conn.execute(f"SELECT MAX(open_time) AS latest FROM {table} WHERE {where}", params).fetchone()
+    return None if row is None or row["latest"] is None else int(row["latest"])
+
+
+def _select_klines(conn, symbol: str, *, interval: str, cutoff: int | None):
+    if cutoff is None:
+        return conn.execute(KLINES_SELECT_SQL, (symbol, interval)).fetchall()
+    return conn.execute(KLINES_LOOKBACK_SELECT_SQL, (symbol, interval, cutoff)).fetchall()
+
+
+def _select_orderbook_features(conn, symbol: str, cutoff: int | None):
+    if cutoff is None:
+        return conn.execute(ORDERBOOK_SELECT_SQL, (symbol,)).fetchall()
+    return conn.execute(ORDERBOOK_LOOKBACK_SELECT_SQL, (symbol, cutoff)).fetchall()
+
+
+def _select_funding_features(conn, symbol: str, cutoff: int | None):
+    if cutoff is None:
+        return conn.execute(FUNDING_SELECT_SQL, (symbol,)).fetchall()
+    return conn.execute(FUNDING_LOOKBACK_SELECT_SQL, (symbol, cutoff)).fetchall()
 
 
 # --------------------------------------------------------------------------- #

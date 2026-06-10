@@ -96,6 +96,49 @@ def test_combo_factor_list_page_sorts_by_score(monkeypatch) -> None:
     assert [row["name"] for row in page["factors"]] == ["combo__high", "combo__mid", "combo__low"]
 
 
+def test_combo_factor_list_page_uses_current_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: [])
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+    monkeypatch.setattr(
+        "app.services.factor_page_combo_rows.get_cached_combination_ranking",
+        lambda *_a: {
+            "ranking": [],
+            "evaluatedRanking": [
+                {
+                    "factorName": "combo__a__b",
+                    "factorScore": 11.0,
+                    "walkForwardPassed": False,
+                    "walkForwardFailureReason": "validation_win_rate_below_min",
+                    "members": [{"name": "a"}, {"name": "b"}],
+                },
+                {
+                    "factorName": "combo__c__d",
+                    "factorScore": 22.0,
+                    "members": [{"name": "c"}, {"name": "d"}],
+                },
+            ],
+        },
+    )
+
+    page = factor_page_service.build_factor_list_page(
+        category=None,
+        kind="combo",
+        symbol="BTCUSDT",
+        duration="30m",
+        query=None,
+        page=1,
+        page_size=20,
+    )
+
+    assert page["comboTotal"] == 2
+    assert page["total"] == 2
+    assert [row["name"] for row in page["factors"]] == ["combo__c__d", "combo__a__b"]
+    failed = next(row for row in page["factors"] if row["name"] == "combo__a__b")
+    assert failed["paperLiveStatus"] == "observe_only"
+    assert failed["walkForwardFailureReason"] == "validation_win_rate_below_min"
+
+
 def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
     cached = {
         "ranking": [
@@ -123,6 +166,28 @@ def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyP
     assert "ranking" not in payload
     assert payload["rankingPageTotal"] == 2
     assert payload["rankingTotal"] == 2
+
+
+def test_factor_page_context_counts_evaluated_combo_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: [])
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "agent_factor_rows_for_duration", lambda *_a: [])
+    monkeypatch.setattr(factor_page_service, "_high_winrate_card", lambda *_a: None)
+    monkeypatch.setattr(
+        "app.services.factor_page_combo_rows.get_cached_combination_ranking",
+        lambda *_a: {
+            "ranking": [],
+            "evaluatedRanking": [
+                {"factorName": "combo__a__b", "members": [{"name": "a"}, {"name": "b"}]},
+                {"factorName": "combo__c__d", "members": [{"name": "c"}, {"name": "d"}]},
+            ],
+        },
+    )
+    monkeypatch.setattr(factor_page_service, "get_cached_ranking", lambda *_a: None)
+
+    payload = factor_page_service.build_factor_page_context("BTCUSDT", "30m")
+
+    assert payload["comboTotal"] == 2
 
 
 def test_build_factor_period_scores_from_cache(monkeypatch) -> None:
@@ -169,6 +234,32 @@ def test_combo_detail_uses_combination_metrics(monkeypatch: pytest.MonkeyPatch) 
 
     assert detail["factorScore"] == 91.2
     assert detail["winRate"] == 0.72
+
+
+def test_combo_detail_uses_evaluated_cache_without_library_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(factors_api, "get_factor_payload_by_name", lambda _name: None)
+    monkeypatch.setattr(
+        "app.services.factor_combo_metrics.get_cached_combination_ranking",
+        lambda *_args: {
+            "cacheStatus": {"usable": False, "reason": "market_data_changed"},
+            "ranking": [],
+            "evaluatedRanking": [
+                {
+                    "factorName": "combo__a__b",
+                    "factorDisplayName": "组合：A + B",
+                    "factorScore": 42.0,
+                    "winRate": 0.51,
+                    "members": [{"name": "a"}, {"name": "b"}],
+                }
+            ],
+        },
+    )
+
+    detail = factors_api.get_factor_detail("combo__a__b", symbol="BTCUSDT", duration="30m")
+
+    assert detail["name"] == "combo__a__b"
+    assert detail["factorScore"] == 42.0
+    assert detail["winRate"] == 0.51
 
 
 def test_combo_period_scores_use_combination_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -373,3 +464,20 @@ def test_factor_page_route_normalizes_optional_query_defaults(
     assert captured["kind"] == "single"
     assert captured["page"] == 1
     assert captured["page_size"] == 20
+
+
+def test_factor_list_route_passes_symbol_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_page(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(factors_api, "build_factor_list_page", fake_page)
+
+    payload = factors_api.list_factors(kind="combo", symbol="BTCUSDT", duration="30m")
+
+    assert payload == {"ok": True}
+    assert captured["symbol"] == "BTCUSDT"
+    assert captured["duration"] == "30m"
+    assert captured["kind"] == "combo"

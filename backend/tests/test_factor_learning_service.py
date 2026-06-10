@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from app.services import factor_learning_service
+from app.services import factor_learning_ranking
 from app.services import factor_mined_candidates
 from app.services.factor_learning_core import build_factor_learning_memory
 from app.services.factor_learning_signal_filter import apply_factor_learning_memory
@@ -187,21 +188,21 @@ def _patch_refresh_dependencies(
     saved: list,
     cached: dict,
 ) -> None:
-    monkeypatch.setattr(factor_learning_service, "load_factor_frame", lambda *_args: frame)
+    monkeypatch.setattr(factor_learning_service, "load_factor_frame", lambda *_args, **_kwargs: frame)
     monkeypatch.setattr(factor_learning_service, "load_factor_learning_memory", lambda *_args: None)
-    monkeypatch.setattr(factor_learning_service, "get_cached_combination_ranking", lambda *_args: cached)
+    monkeypatch.setattr(factor_learning_ranking, "get_cached_combination_ranking", lambda *_args: cached)
     monkeypatch.setattr(
-        factor_learning_service,
+        factor_learning_ranking,
         "run_factor_combination_ranking_on_frame",
         lambda frame_arg, **kwargs: calls.append(("rank", frame_arg is frame, kwargs["duration"])) or _ranking_report(),
     )
     monkeypatch.setattr(
-        factor_learning_service,
+        factor_learning_ranking,
         "save_cached_combination_ranking",
         lambda report: calls.append(("cache", report["symbol"], report["duration"])),
     )
     monkeypatch.setattr(factor_learning_service, "settle_due_predictions", lambda *_args: _empty_settlement())
-    monkeypatch.setattr(factor_learning_service, "_settled_factor_combo_predictions", lambda *_args: [])
+    monkeypatch.setattr(factor_learning_service, "settled_factor_combo_predictions", lambda *_args: [])
     monkeypatch.setattr(
         factor_learning_service,
         "materialize_mined_factor_frame",

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import AutoStrategyControls from "./AutoStrategyControls";
 import EnsembleJudgePanel from "./EnsembleJudgePanel";
+import EventFinalDecisionPanel from "./EventFinalDecisionPanel";
+import MarketRegimeStatusBar from "./MarketRegimeStatusBar";
 import TradeControls from "./TradeControls";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
 const LIVE_TRADING_ENABLED = false;
-const PANEL_TABS = /** @type {const} */ (["execution", "judge", "trade"]);
+const PANEL_TABS = /** @type {const} */ (["final", "judge", "trade"]);
 
 export default function EventContractPanel({
   symbol,
@@ -15,7 +16,6 @@ export default function EventContractPanel({
   onQuickTrade,
   onPredict,
   latestPrediction,
-  onClearAllEvents,
   onEnsembleRefreshed,
 }) {
   const [durationMinutes, setDurationMinutes] = useState(() =>
@@ -27,10 +27,9 @@ export default function EventContractPanel({
   const [predictError, setPredictError] = useState("");
   const [predictInfo, setPredictInfo] = useState("");
   const [localOpenPositionPending, setLocalOpenPositionPending] = useState(false);
-  const [clearAllLoading, setClearAllLoading] = useState(false);
   const [panelTab, setPanelTab] = useState(() => _initialPanelTab());
-  const [strategyReloadKey, setStrategyReloadKey] = useState(0);
   const hasOpenPosition = dbHasOpenPosition || localOpenPositionPending;
+  const predictionDuration = predictDurationKey(durationMinutes);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_PANEL_TAB, panelTab);
@@ -53,11 +52,10 @@ export default function EventContractPanel({
   }, [dbHasOpenPosition]);
 
   useEffect(() => {
-    const duration = predictDurationKey(durationMinutes);
-    if (latestPrediction?.symbol === symbol && latestPrediction?.duration === duration) {
+    if (latestPrediction?.symbol === symbol && latestPrediction?.duration === predictionDuration) {
       setPrediction(latestPrediction);
     }
-  }, [durationMinutes, latestPrediction, symbol]);
+  }, [latestPrediction, predictionDuration, symbol]);
 
   const runAiPredictAndTrade = useCallback(async () => {
     if (!onPredict || !onQuickTrade) return "error";
@@ -112,17 +110,6 @@ export default function EventContractPanel({
     }
   }
 
-  async function handleClearAllEventsClick() {
-    if (!onClearAllEvents || clearAllLoading) return;
-    setClearAllLoading(true);
-    try {
-      await onClearAllEvents();
-      setLocalOpenPositionPending(false);
-    } finally {
-      setClearAllLoading(false);
-    }
-  }
-
   async function handlePredictClick() {
     if (!onPredict || !onQuickTrade) return;
     await runAiPredictAndTrade();
@@ -132,16 +119,21 @@ export default function EventContractPanel({
     <section className="panel panel-with-tabs">
       <div className="panel-head-tabs">
         <h2 className="panel-title">事件合约</h2>
+        <MarketRegimeStatusBar
+          symbol={symbol}
+          duration={predictionDuration}
+          latestPrediction={latestPrediction}
+        />
         <div className="panel-tab-bar" role="tablist" aria-label="事件合约分区">
           <button
             type="button"
             role="tab"
-            className={`panel-tab ${panelTab === "execution" ? "is-active" : ""}`}
-            aria-selected={panelTab === "execution"}
-            id="panel-tab-execution"
-            onClick={() => setPanelTab("execution")}
+            className={`panel-tab ${panelTab === "final" ? "is-active" : ""}`}
+            aria-selected={panelTab === "final"}
+            id="panel-tab-final"
+            onClick={() => setPanelTab("final")}
           >
-            自动执行
+            最终裁判
           </button>
           <button
             type="button"
@@ -166,15 +158,11 @@ export default function EventContractPanel({
         </div>
       </div>
 
-      {panelTab === "execution" && (
-        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-execution">
-          <AutomationCard
-            amount={amount}
-            clearAllLoading={clearAllLoading}
-            reloadKey={strategyReloadKey}
-            onClearAllEvents={onClearAllEvents}
-            onClearAllEventsClick={handleClearAllEventsClick}
+      {panelTab === "final" && (
+        <div className="panel-tab-panel" role="tabpanel" aria-labelledby="panel-tab-final">
+          <EventFinalDecisionPanel
             symbol={symbol}
+            duration={predictionDuration}
           />
         </div>
       )}
@@ -186,12 +174,8 @@ export default function EventContractPanel({
         >
           <EnsembleJudgePanel
             symbol={symbol}
-            duration={predictDurationKey(durationMinutes)}
-            onConfirmed={() => setStrategyReloadKey((value) => value + 1)}
-            onRefreshed={() => {
-              setStrategyReloadKey((value) => value + 1);
-              onEnsembleRefreshed?.();
-            }}
+            duration={predictionDuration}
+            onRefreshed={() => onEnsembleRefreshed?.()}
           />
         </div>
       )}
@@ -224,33 +208,8 @@ export default function EventContractPanel({
 
 function _initialPanelTab() {
   const raw = localStorage.getItem(STORAGE_PANEL_TAB);
-  if (raw === "events" || raw === "strategies") return "trade";
-  return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "trade";
-}
-
-function AutomationCard({ amount, clearAllLoading, reloadKey, onClearAllEvents, onClearAllEventsClick, symbol }) {
-  return (
-    <div className="card automation-toggles">
-      <p className="toggle-hint trade-mode-hint automation-intro">
-        当前阶段所有执行项均为模拟下单，仅对已点亮的周期自动创建本地事件与订单；多执行项可并行。
-      </p>
-      <AutoStrategyControls symbol={symbol} amount={amount} reloadKey={reloadKey} />
-      <p className="toggle-hint trade-mode-hint">
-        同一执行项在不同周期上的持仓相互独立。
-      </p>
-      <div className="clear-all-row">
-        <button
-          type="button"
-          className="clear-all-events-btn"
-          onClick={() => void onClearAllEventsClick()}
-          disabled={!onClearAllEvents || clearAllLoading}
-        >
-          {clearAllLoading ? "清除中..." : "清除全部执行事件"}
-        </button>
-        <p className="toggle-hint clear-all-hint">立即删除库中全部事件与关联订单、结算记录并重载列表。</p>
-      </div>
-    </div>
-  );
+  if (raw === "execution" || raw === "events" || raw === "strategies") return "final";
+  return PANEL_TABS.includes(/** @type {any} */ (raw)) ? raw : "final";
 }
 
 function predictionBlockReason(result) {

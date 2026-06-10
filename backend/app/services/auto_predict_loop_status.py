@@ -23,6 +23,12 @@ _STATE: dict[str, Any] = {
     "targetCount": 0,
     "nextWaitSeconds": None,
     "pollSeconds": None,
+    "readyDueCount": 0,
+    "collectionTargetCount": 0,
+    "activeTargetCount": 0,
+    "skippedTargetCount": 0,
+    "skippedTargets": [],
+    "phase": None,
 }
 
 
@@ -43,14 +49,53 @@ def record_auto_predict_loop_start(*, initial_delay: float, poll_seconds: int) -
         failureDetails=None,
         initialDelaySeconds=float(initial_delay),
         pollSeconds=int(poll_seconds),
+        readyDueCount=0,
+        collectionTargetCount=0,
+        activeTargetCount=0,
+        skippedTargetCount=0,
+        skippedTargets=[],
+        phase="initial_delay" if initial_delay > 0 else "starting",
         stoppedAt=None,
         stopReason=None,
     )
 
 
-def record_auto_predict_cycle_success(target_count: int, next_wait_seconds: float) -> None:
+def record_auto_predict_cycle_progress(
+    target_count: int,
+    *,
+    cycle_details: dict[str, Any],
+) -> None:
+    details = {"targetCount": int(target_count), **cycle_details}
+    skipped_targets = list(details.get("skippedTargets") or [])
+    _replace_state(
+        status=STATUS_RUNNING,
+        updatedAt=_utc_now(),
+        error=None,
+        exceptionType=None,
+        failureDetails=None,
+        targetCount=int(target_count),
+        readyDueCount=int(details.get("readyDueCount") or 0),
+        collectionTargetCount=int(details.get("collectionTargetCount") or 0),
+        activeTargetCount=int(details.get("activeTargetCount") or 0),
+        skippedTargetCount=len(skipped_targets),
+        skippedTargets=skipped_targets,
+        phase=details.get("phase"),
+        stoppedAt=None,
+        stopReason=None,
+    )
+
+
+def record_auto_predict_cycle_success(
+    target_count: int,
+    next_wait_seconds: float,
+    *,
+    cycle_details: dict[str, Any] | None = None,
+) -> None:
     details = {"targetCount": int(target_count), "nextWaitSeconds": float(next_wait_seconds)}
+    if cycle_details:
+        details.update(cycle_details)
     record_loop_success(BACKGROUND_LOOP_NAME, details)
+    skipped_targets = list(details.get("skippedTargets") or [])
     _replace_state(
         status=STATUS_PASSED,
         updatedAt=_utc_now(),
@@ -59,6 +104,12 @@ def record_auto_predict_cycle_success(target_count: int, next_wait_seconds: floa
         failureDetails=None,
         targetCount=int(target_count),
         nextWaitSeconds=float(next_wait_seconds),
+        readyDueCount=int(details.get("readyDueCount") or 0),
+        collectionTargetCount=int(details.get("collectionTargetCount") or 0),
+        activeTargetCount=int(details.get("activeTargetCount") or 0),
+        skippedTargetCount=len(skipped_targets),
+        skippedTargets=skipped_targets,
+        phase="completed",
         stoppedAt=None,
         stopReason=None,
     )
@@ -77,6 +128,12 @@ def record_auto_predict_cycle_failure(exc: Exception, next_wait_seconds: float) 
         exceptionType=type(exc).__name__,
         failureDetails=getattr(exc, "details", None),
         nextWaitSeconds=float(next_wait_seconds),
+        readyDueCount=0,
+        collectionTargetCount=0,
+        activeTargetCount=0,
+        skippedTargetCount=0,
+        skippedTargets=[],
+        phase=None,
         stoppedAt=None,
         stopReason=None,
     )
