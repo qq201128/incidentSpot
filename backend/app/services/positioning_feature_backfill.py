@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -10,12 +11,16 @@ from app.services.binance_context_data import (
     fetch_taker_buy_sell_volume,
 )
 from app.services.external_factor_data import upsert_positioning_rows
-from app.services.kline_timing import MS_PER_MINUTE
+from app.services.kline_timing import MS_PER_MINUTE, utc_now_ms
 
 POSITIONING_PERIOD = "5m"
 POSITIONING_STEP_MS = 5 * MS_PER_MINUTE
 POSITIONING_FETCH_LIMIT = 500
 MAX_POSITIONING_BACKFILL_ROUNDS = 24
+POSITIONING_RETENTION_DAYS = 30
+MS_PER_DAY = 86_400_000
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass(frozen=True)
@@ -40,17 +45,44 @@ def refresh_positioning_features_for_lookback(symbol: str, lookback_start_ms: in
     return len(rows)
 
 
-def _paginated_positioning_rows(symbol: str, lookback_start_ms: int) -> list[dict[str, Any]]:
+def _paginated_positioning_rows(
+    symbol: str,
+    lookback_start_ms: int,
+    *,
+    now_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    effective_start_ms = _effective_positioning_lookback_start(symbol, lookback_start_ms, now_ms=now_ms)
     state = _PositioningBackfillState(defaultdict(dict))
     for _round in range(MAX_POSITIONING_BACKFILL_ROUNDS):
         batch = _positioning_batch(symbol, state.end_time)
         if batch is None:
             break
         state = _next_positioning_state(state, batch, symbol)
-        if batch.oldest <= lookback_start_ms:
+        if batch.oldest <= effective_start_ms:
             break
-    _assert_positioning_coverage(symbol, lookback_start_ms, state.rows_by_time)
+    _assert_positioning_coverage(symbol, effective_start_ms, state.rows_by_time)
     return _positioning_payload_rows(state.rows_by_time)
+
+
+def _effective_positioning_lookback_start(
+    symbol: str,
+    lookback_start_ms: int,
+    *,
+    now_ms: int | None,
+) -> int:
+    start_ms = max(0, int(lookback_start_ms))
+    retention_start_ms = int(now_ms if now_ms is not None else utc_now_ms()) - POSITIONING_RETENTION_DAYS * MS_PER_DAY
+    if start_ms >= retention_start_ms:
+        return start_ms
+    logger.warning(
+        "positioning lookback clipped to Binance futures data retention "
+        "symbol=%s requested_start=%s effective_start=%s retention_days=%s",
+        symbol.strip().upper(),
+        start_ms,
+        retention_start_ms,
+        POSITIONING_RETENTION_DAYS,
+    )
+    return retention_start_ms
 
 
 def _next_positioning_state(

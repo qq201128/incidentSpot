@@ -8,9 +8,9 @@ incidentSpot 是一个面向 Binance USD-M 指数事件交易研究的本地工�
 
 - 行情工作台：展示 Binance 指数价、指数 K 线、普通 K 线、订单簿、近期聚合成交和最新预测。
 - 事件交易闭环：支持手动事件、快速事件、订单记录、自动结算和事件列表检索。
-- 模拟交易边界：`liveTradingEnabled=false` 时只写本地事件和订单；当前后端会拒绝真实交易开启请求。
+- 模拟/实盘边界：`liveTradingEnabled=false` 时只写本地事件和订单；`liveTradingEnabled=true` 时必须调用 Binance 下单接口，失败会显式报错并记录。
 - 规则预测：基于策略窗口刷新 K 线、生成方向预测、写入预测缓存并通过 WebSocket 广播。
-- 自动交易观察：按策略槽位读取最新预测，满足入场条件时创建本地模拟事件和订单。
+- 自动交易观察：按策略槽位读取最新预测，满足入场条件时创建事件和订单；手动开启实盘的稳定 paper-live 单因子候选会用最新 paper-live 稳定性作为执行门控。
 - 因子研究：提供单因子目录、单因子回测、因子排名、多因子组合排名和组合信号 watchlist。
 - 因子学习：把组合排名、已结算预测、亏损模式、回灌因子库和 Agent 候选写入学习记忆。
 - 多模型族搜索：支持 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、LightGBM、CatBoost、SVM、Bayesian、KNN 等候选搜索任务。

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchFactorsList } from "../api/client";
+import { fetchFactorPageBundle } from "../api/factorPageClient";
 
 const LIST_DEBOUNCE_MS = 280;
 
@@ -19,15 +19,17 @@ export function useFactorsList({ category, duration, kind, listPage, listPageSiz
   useEffect(() => {
     let cancelled = false;
     setState((prev) => ({ ...prev, status: "加载中…" }));
-    fetchFactorsList({
-      category: category || undefined,
-      duration,
-      kind,
-      q: debouncedQuery.trim() || undefined,
-      page: listPage,
-      pageSize: listPageSize,
+    fetchFactorPageBundle(
       symbol,
-    })
+      duration,
+      {
+        category: category || undefined,
+        kind,
+        q: debouncedQuery.trim() || undefined,
+        page: listPage,
+        pageSize: listPageSize,
+      },
+    )
       .then((data) => {
         if (!cancelled) setState(listStateFromResponse(data, kind));
       })
@@ -49,6 +51,7 @@ function initialListState() {
     comboTotal: 0,
     factors: [],
     listTotal: 0,
+    overview: null,
     page: 1,
     pageCount: 1,
     sourceSummary: {},
@@ -66,11 +69,30 @@ function listStateFromResponse(data, kind) {
     comboTotal: data.comboTotal ?? 0,
     factors: Array.isArray(data.factors) ? data.factors : [],
     listTotal,
+    overview: overviewFromResponse(data),
     page: data.page ?? 1,
     pageCount: data.pageCount ?? 1,
     sourceSummary: data.sourceSummary ?? {},
     status: listStatusText(kind, listTotal),
     total: kind === "combo" ? data.singleTotal ?? 0 : data.unfilteredTotal ?? total,
+  };
+}
+
+function overviewFromResponse(data) {
+  return {
+    alerts: Array.isArray(data.alerts) ? data.alerts : [],
+    category: data.category ?? null,
+    comboTotal: data.comboTotal ?? 0,
+    duration: data.duration,
+    highWinrateCombo: data.highWinrateCombo ?? null,
+    rankingSource: data.rankingSource,
+    rankingStatus: data.rankingStatus,
+    rankingTotal: data.rankingTotal ?? 0,
+    rankingUpdatedAt: data.rankingUpdatedAt ?? null,
+    singleTotal: data.singleTotal ?? data.total ?? 0,
+    sourceSummary: data.sourceSummary ?? {},
+    sourceSummaryGlobal: data.sourceSummaryGlobal ?? {},
+    symbol: data.symbol,
   };
 }
 

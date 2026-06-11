@@ -7,16 +7,19 @@ from typing import Any
 import pandas as pd
 
 from app.services.binance_service import fetch_klines
+from app.db.session import get_conn
 from app.services.agent_mined_factor_library import agent_factor_rows_for_duration
 from app.services.factor_backtest_materialization import materialized_frame_for_factor
 from app.services.factor_backtest_service import BACKTEST_MIN_PERIODS
 from app.services.factor_cache_metadata import assert_cache_usable_for_live_signal
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.factor_candidate_signal_payloads import (
+    LIVE_ADMISSION_KEY,
     FactorSignal,
     factor_candidate_prediction_payload,
 )
-from app.services.paper_live_candidate_service import log_prediction_failure
+from app.services.high_winrate_strategy_metrics import high_winrate_decision, high_winrate_metrics
+from app.services.paper_live_candidate_service import STATUS_STABLE, log_prediction_failure
 from app.services.factor_catalog import factor_definition_for_backtest
 from app.services.factor_candidate_signal_utils import (
     agent_candidate_row,
@@ -56,6 +59,7 @@ class _PredictionContext:
     symbol: str
     duration: str
     entry_open_time: int
+    live_admissions: dict[str, dict[str, Any]]
 
 @dataclass(frozen=True)
 class _SignalContext:
@@ -92,7 +96,12 @@ def predict_factor_candidate_signals(
         min_history=min_history,
         lookback_days=lookback_days_for_bars(duration, min_history),
     )
-    context = _PredictionContext(symbol.strip().upper(), duration, int(entry_open_time))
+    context = _PredictionContext(
+        symbol.strip().upper(),
+        duration,
+        int(entry_open_time),
+        _live_candidate_admissions(symbol, duration),
+    )
     predictions = []
     failures = []
     for row in rows:
@@ -185,6 +194,7 @@ def _prediction_for_row(
     row: dict[str, Any],
     context: _PredictionContext,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    row = _row_with_live_admission(row, context)
     factor = factor_definition_for_backtest(str(row["factorName"]), context.symbol, context.duration)
     working = materialized_frame_for_factor(frame, factor, context.symbol, context.duration)
     if factor.name not in working.columns:
@@ -197,6 +207,72 @@ def _prediction_for_row(
         duration=context.duration,
         entry_open_time=context.entry_open_time,
     )
+
+
+def _row_with_live_admission(row: dict[str, Any], context: _PredictionContext) -> dict[str, Any]:
+    signal_key = factor_candidate_signal_key(str(row["factorName"]))
+    admission = context.live_admissions.get(signal_key)
+    return {**row, LIVE_ADMISSION_KEY: admission} if admission else row
+
+
+def _live_candidate_admissions(symbol: str, duration: str) -> dict[str, dict[str, Any]]:
+    conn = get_conn()
+    try:
+        enabled = _live_enabled_factor_candidate_keys(conn, symbol, duration)
+        if not enabled:
+            return {}
+        grouped = _settled_prediction_rows(conn, symbol, duration, enabled)
+    finally:
+        conn.close()
+    admissions = {}
+    for signal_key, rows in grouped.items():
+        metrics = high_winrate_metrics(rows)
+        decision = high_winrate_decision(metrics)
+        admissions[signal_key] = {
+            "status": decision["status"],
+            "reason": decision["reason"],
+            "metrics": metrics,
+        }
+    return admissions
+
+
+def _live_enabled_factor_candidate_keys(conn: Any, symbol: str, duration: str) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT strategy_key
+        FROM auto_trade_strategies
+        WHERE symbol = ? AND duration = ?
+          AND enabled = 1 AND live_trading_enabled = 1
+          AND strategy_key LIKE 'factor_candidate_signal_%'
+        """,
+        (symbol.strip().upper(), duration),
+    ).fetchall()
+    return {str(row["strategy_key"]) for row in rows}
+
+
+def _settled_prediction_rows(
+    conn: Any,
+    symbol: str,
+    duration: str,
+    enabled_keys: set[str],
+) -> dict[str, list[dict[str, Any]]]:
+    placeholders = ",".join("?" for _key in enabled_keys)
+    rows = conn.execute(
+        f"""
+        SELECT signal_key, open_time, direction, entry_price, exit_price,
+               actual_return, prediction_correct, high_winrate_rule,
+               data_freshness_status, missing_feature_status, settled_at
+        FROM predictions
+        WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+          AND signal_key IN ({placeholders})
+        ORDER BY signal_key ASC, open_time DESC
+        """,
+        (symbol.strip().upper(), duration, *sorted(enabled_keys)),
+    ).fetchall()
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["signal_key"]), []).append(dict(row))
+    return grouped
 
 def _live_factor_signal(
     frame: pd.DataFrame,
@@ -214,7 +290,7 @@ def _live_factor_signal(
     if score is None or median is None or entry_price is None:
         raise ValueError(f"factor candidate signal has insufficient score history: {context.factor_name}")
     direction = "up" if score >= median else "down"
-    confidence = directional_win_rate(context.row, orientation)
+    confidence = _signal_confidence(context.row, orientation)
     regime = factor_regime_gate(
         direction,
         confidence,
@@ -233,6 +309,15 @@ def _live_factor_signal(
         regime.reason,
         regime.min_win_rate,
     )
+
+
+def _signal_confidence(row: dict[str, Any], orientation: int) -> float:
+    admission = row.get(LIVE_ADMISSION_KEY)
+    metrics = admission.get("metrics") if isinstance(admission, dict) and admission.get("status") == STATUS_STABLE else {}
+    win_rate = metrics.get("winRate") if isinstance(metrics, dict) else None
+    if win_rate is not None:
+        return max(0.0, min(float(win_rate), 0.99))
+    return directional_win_rate(row, orientation)
 
 def _strict_duration_entry_index(
     frame: pd.DataFrame,

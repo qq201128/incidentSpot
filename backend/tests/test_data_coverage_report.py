@@ -72,6 +72,32 @@ def test_quote_time_table_reports_unavailable_coverage() -> None:
     assert ticks["missingReason"] == "no_open_time_column"
 
 
+def test_primary_only_limits_interval_scoped_tables() -> None:
+    conn = _connect()
+    _create_schema(conn)
+    _insert_klines(conn, count=2)
+    conn.execute(
+        "INSERT INTO klines(symbol, interval, open_time) VALUES('BTCUSDT', '30m', ?)",
+        (START_TIME,),
+    )
+    conn.execute(
+        "INSERT INTO klines_multi(symbol, interval, open_time) VALUES('BTCUSDT', '30m', ?)",
+        (START_TIME,),
+    )
+
+    report = build_data_coverage_report(
+        CoverageOptions(symbol="BTCUSDT", interval="10m", primary_only=True),
+        conn,
+    )
+
+    klines_rows = _table_rows(report, "klines")
+    multi_rows = _table_rows(report, "klines_multi")
+    assert [row["interval"] for row in klines_rows] == ["10m"]
+    assert [row["interval"] for row in multi_rows] == ["10m"]
+    assert klines_rows[0]["status"] == "healthy"
+    assert klines_rows[0]["coveragePct"] == 100.0
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -132,8 +158,12 @@ def _insert_orderbook_feature(conn: sqlite3.Connection, open_time: int) -> None:
 
 
 def _first_row(report: dict, table: str) -> dict:
+    return _table_rows(report, table)[0]
+
+
+def _table_rows(report: dict, table: str) -> list[dict]:
     table_report = next(item for item in report["tables"] if item["table"] == table)
-    return table_report["rows"][0]
+    return table_report["rows"]
 
 
 def _options() -> CoverageOptions:

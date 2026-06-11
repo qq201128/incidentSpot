@@ -28,6 +28,7 @@
 - Binance USD-M Futures Open Interest Statistics：`/futures/data/openInterestHist`，用于持仓量、持仓价值、持仓量 Z 分数。
 - Binance USD-M Futures Long/Short Ratio：`/futures/data/globalLongShortAccountRatio`，用于多空账户比、长短账户占比。
 - Binance USD-M Futures Taker Buy/Sell Volume：`/futures/data/takerlongshortRatio`，用于主动买卖量比、主动买入占比。
+- 以上 Binance Futures Data 接口只保留最近 30 天数据；定位特征回填会把更早的 lookback 截断到可查询窗口，并写入 warning 日志。
 - Alternative.me Fear & Greed Index：`/fng/`，用于币圈情绪因子。
 
 链上外部数据（`onchain_features`）由 CoinMetrics Community API 按日采集：`exchange_netflow`（交易所净流入 = FlowInExNtv - FlowOutExNtv）、`active_addresses`、`transaction_count`、`stablecoin_supply_ratio`（USDT+USDC 流通量 / 标的市值）。采集入口为 `market_context_ingest_service.ingest_market_context_data`，与持仓/情绪数据一同由后台 `market_context_refresh_loop` 周期刷新。当前支持 `BTCUSDT`、`ETHUSDT`；无真实链上数据入库前不生成空值假信号。

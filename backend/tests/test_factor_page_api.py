@@ -59,6 +59,31 @@ def test_build_factor_list_page_pagination(monkeypatch) -> None:
     assert page1["query"] == ""
 
 
+def test_single_factor_list_page_does_not_expand_combo_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [{"name": "ret_1", "sourceFile": "kline_features.py"}]
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: rows)
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+
+    def fail_combo_rows(*_args):
+        raise AssertionError("single factor list should not expand combo rows")
+
+    monkeypatch.setattr(factor_page_service, "combo_list_rows", fail_combo_rows)
+
+    page = factor_page_service.build_factor_list_page(
+        category=None,
+        kind="single",
+        symbol="BTCUSDT",
+        duration="10m",
+        query=None,
+        page=1,
+        page_size=20,
+    )
+
+    assert page["factors"][0]["name"] == "ret_1"
+    assert page["comboFactors"] == []
+
+
 def test_build_factor_list_page_search_and_clamps_last_page(monkeypatch) -> None:
     rows = [
         {"name": "ret_1", "description": "return", "sourceFile": "kline_features.py"},
@@ -153,7 +178,13 @@ def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
     monkeypatch.setattr(factor_page_service, "agent_factor_rows_for_duration", lambda *_a: [])
     monkeypatch.setattr(factor_page_service, "_high_winrate_card", lambda *_a: None)
-    monkeypatch.setattr(factor_page_service, "get_cached_ranking", lambda *_a: cached)
+    calls = []
+
+    def fake_cached_ranking(*_args):
+        calls.append(_args)
+        return cached
+
+    monkeypatch.setattr(factor_page_service, "get_cached_ranking", fake_cached_ranking)
 
     payload = factor_page_service.build_factor_page_bundle(
         "btcusdt",
@@ -166,6 +197,25 @@ def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyP
     assert "ranking" not in payload
     assert payload["rankingPageTotal"] == 2
     assert payload["rankingTotal"] == 2
+    assert len(calls) == 1
+
+
+def test_build_factor_page_bundle_does_not_build_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(factor_page_service, "list_single_factor_summaries", lambda *_a, **_k: [])
+    monkeypatch.setattr(factor_page_service, "list_combo_factor_summaries", lambda: [])
+    monkeypatch.setattr(factor_page_service, "list_single_factor_categories", lambda: [])
+    monkeypatch.setattr(factor_page_service, "agent_factor_rows_for_duration", lambda *_a: [])
+    monkeypatch.setattr(factor_page_service, "_high_winrate_card", lambda *_a: None)
+    monkeypatch.setattr(factor_page_service, "get_cached_ranking", lambda *_a: None)
+
+    def fail_alerts(*_args, **_kwargs):
+        raise AssertionError("page bundle should not block on alerts")
+
+    monkeypatch.setattr(factor_page_service, "build_factor_alerts", fail_alerts)
+
+    payload = factor_page_service.build_factor_page_bundle("BTCUSDT", "10m")
+
+    assert payload["alerts"] == []
 
 
 def test_factor_page_context_counts_evaluated_combo_cache(monkeypatch: pytest.MonkeyPatch) -> None:

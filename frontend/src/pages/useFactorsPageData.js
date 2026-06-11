@@ -3,7 +3,7 @@ import {
   fetchFactorBacktest,
   fetchFactorDetail,
 } from "../api/client";
-import { fetchFactorPageOverview, fetchFactorPeriodScores } from "../api/factorPageClient";
+import { fetchFactorAlerts, fetchFactorPeriodScores } from "../api/factorPageClient";
 import { useDebouncedValue, useFactorsList } from "./useFactorList";
 import { useFactorRanking } from "./useFactorRanking";
 
@@ -21,7 +21,7 @@ export function useFactorsPageData() {
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState(20);
   const [selectedName, setSelectedName] = useState(null);
-  const [overview, setOverview] = useState(null);
+  const [alerts, setAlerts] = useState([]);
   const [periodScoresState, setPeriodScoresState] = useState({ factorName: null, scores: [] });
   const backtest = useBacktest({ duration, selectedName, symbol });
   const [listReloadKey, setListReloadKey] = useState(0);
@@ -36,7 +36,7 @@ export function useFactorsPageData() {
     symbol: normalizeSymbol(symbol),
   });
   const detail = useFactorDetail(selectedName, symbol, duration);
-  const previewMetrics = usePreviewMetrics(selectedName, symbol, previewDuration);
+  const previewMetrics = usePreviewMetrics(selectedName, symbol, previewDuration, duration);
   const ranking = useFactorRanking({ category, duration, symbol });
   const debouncedQuery = useDebouncedValue(query);
 
@@ -63,6 +63,26 @@ export function useFactorsPageData() {
   }, [list.page, listPage]);
 
   useEffect(() => {
+    let cancelled = false;
+    const sym = normalizeSymbol(symbol);
+    if (sym.length < MIN_SYMBOL_LENGTH) {
+      setAlerts([]);
+      return undefined;
+    }
+    setAlerts([]);
+    fetchFactorAlerts(sym, duration)
+      .then((data) => {
+        if (!cancelled) setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAlerts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [duration, symbol]);
+
+  useEffect(() => {
     const first = list.factors[0]?.name;
     if (!first) {
       setSelectedName(null);
@@ -70,25 +90,6 @@ export function useFactorsPageData() {
     }
     if (!selectedName) setSelectedName(first);
   }, [list.factors, listTab, selectedName]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const sym = normalizeSymbol(symbol);
-    if (sym.length < MIN_SYMBOL_LENGTH) {
-      setOverview(null);
-      return undefined;
-    }
-    fetchFactorPageOverview(sym, duration, category || undefined)
-      .then((data) => {
-        if (!cancelled) setOverview(data);
-      })
-      .catch(() => {
-        if (!cancelled) setOverview(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [symbol, duration, category]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +140,7 @@ export function useFactorsPageData() {
     return cachedMetrics;
   }, [backtest.data, cachedMetrics, detail.data, previewMetrics, selectedName]);
 
+  const overview = list.overview;
   const rankingTotal = overview?.rankingTotal ?? ranking.items.length;
 
   return {
@@ -163,7 +165,7 @@ export function useFactorsPageData() {
       rankingKey: `${ranking.items.length}:${ranking.status}:${ranking.page}:${ranking.query}`,
     },
     state: {
-      alerts: overview?.alerts ?? [],
+      alerts,
       backtest,
       cachedMetrics,
       categories: list.categories,
@@ -197,11 +199,11 @@ export function useFactorsPageData() {
   };
 }
 
-function usePreviewMetrics(selectedName, symbol, previewDuration) {
+function usePreviewMetrics(selectedName, symbol, previewDuration, currentDuration) {
   const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
-    if (!selectedName) {
+    if (!selectedName || previewDuration === currentDuration) {
       setMetrics(null);
       return undefined;
     }
@@ -223,7 +225,7 @@ function usePreviewMetrics(selectedName, symbol, previewDuration) {
     return () => {
       cancelled = true;
     };
-  }, [previewDuration, selectedName, symbol]);
+  }, [currentDuration, previewDuration, selectedName, symbol]);
 
   return metrics;
 }

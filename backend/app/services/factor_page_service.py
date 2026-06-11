@@ -44,11 +44,10 @@ def build_factor_list_page(
     page_size: int,
 ) -> dict[str, Any]:
     singles = [enrich_factor_summary(row) for row in list_single_factor_summaries(category)]
-    combos = [enrich_factor_summary(row) for row in combo_list_rows(symbol, duration, list_combo_factor_summaries())]
     overview = build_factor_overview(category)
-    if kind == "combo" and symbol and duration:
-        overview = {**overview, "comboTotal": len(combos)}
     if kind == "combo":
+        combos = [enrich_factor_summary(row) for row in combo_list_rows(symbol, duration, list_combo_factor_summaries())]
+        overview = {**overview, "comboTotal": len(combos)}
         base_rows = sorted_combo_list_rows(combos)
         rows = filter_factor_rows(base_rows, query)
         paginated = paginate_rows(rows, page, page_size)
@@ -75,7 +74,7 @@ def build_factor_list_page(
         **overview,
         "kind": "single",
         "factors": paginated["items"],
-        "comboFactors": combos,
+        "comboFactors": [],
         "categories": list_single_factor_categories(),
         "total": paginated["total"],
         "comboTotal": overview["comboTotal"],
@@ -108,21 +107,11 @@ def build_factor_page_bundle(
         page=page,
         page_size=page_size,
     )
-    context = build_factor_page_context(sym, duration, category=category)
-    cached = get_cached_ranking(sym, duration)
-    ranking_rows: list[dict[str, Any]] = []
-    if cached is not None:
-        ranking_rows = list(cached.get("ranking") or [])
-        if category:
-            ranking_rows = [row for row in ranking_rows if row.get("category") == category]
-        ranking_rows.sort(
-            key=lambda row: (float(row.get("factorScore") or 0.0), abs(float(row.get("ir") or 0.0))),
-            reverse=True,
-        )
+    context = build_factor_page_context(sym, duration, category=category, include_alerts=False)
     return {
         **list_payload,
         **context,
-        "rankingPageTotal": len(ranking_rows),
+        "rankingPageTotal": int(context.get("rankingTotal") or 0),
     }
 
 def build_factor_overview(category: str | None = None) -> dict[str, Any]:
@@ -140,6 +129,7 @@ def build_factor_page_context(
     duration: str,
     *,
     category: str | None = None,
+    include_alerts: bool = True,
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
     overview = build_factor_overview(category)
@@ -152,7 +142,7 @@ def build_factor_page_context(
     display_summary = _display_source_summary(sym, duration, category, global_summary)
     ranking_payload = _ranking_payload(sym, duration, category)
     combo_card = _high_winrate_card(sym, duration)
-    alerts = build_factor_alerts(sym, duration, ranking_payload=ranking_payload)
+    alerts = build_factor_alerts(sym, duration, ranking_payload=ranking_payload) if include_alerts else []
     return {
         **overview,
         "symbol": sym,

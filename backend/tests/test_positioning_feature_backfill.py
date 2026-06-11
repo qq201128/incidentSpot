@@ -18,10 +18,35 @@ def test_paginated_positioning_rows_merges_batches(monkeypatch) -> None:
     monkeypatch.setattr(backfill, "fetch_global_long_short_ratio", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(backfill, "fetch_taker_buy_sell_volume", lambda *_args, **_kwargs: [])
 
-    rows = backfill._paginated_positioning_rows("ETHUSDT", lookback_start_ms=600_000)
+    rows = backfill._paginated_positioning_rows("ETHUSDT", lookback_start_ms=600_000, now_ms=1_200_000)
 
     assert calls == [None, 1_000_000 - backfill.POSITIONING_STEP_MS]
     assert [row["open_time"] for row in rows] == [500_000, 1_000_000]
+
+
+def test_paginated_positioning_rows_stops_at_retention_window(monkeypatch) -> None:
+    calls: list[int | None] = []
+    retention_start = 10_000_000
+    now_ms = retention_start + backfill.POSITIONING_RETENTION_DAYS * backfill.MS_PER_DAY
+
+    def fake_open_interest(_symbol: str, **_kwargs) -> list[dict]:
+        end_time = _kwargs.get("end_time")
+        calls.append(end_time)
+        if end_time is None:
+            return [{"open_time": retention_start + 2 * backfill.POSITIONING_STEP_MS}]
+        return [{"open_time": retention_start}]
+
+    monkeypatch.setattr(backfill, "fetch_open_interest_statistics", fake_open_interest)
+    monkeypatch.setattr(backfill, "fetch_global_long_short_ratio", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(backfill, "fetch_taker_buy_sell_volume", lambda *_args, **_kwargs: [])
+
+    rows = backfill._paginated_positioning_rows("BTCUSDT", lookback_start_ms=0, now_ms=now_ms)
+
+    assert calls == [None, retention_start + backfill.POSITIONING_STEP_MS]
+    assert [row["open_time"] for row in rows] == [
+        retention_start,
+        retention_start + 2 * backfill.POSITIONING_STEP_MS,
+    ]
 
 
 def test_refresh_positioning_features_for_lookback_upserts(monkeypatch) -> None:

@@ -20,6 +20,7 @@ OPEN_TIME_COLUMN = "open_time"
 class CoverageOptions:
     symbol: str = "BTCUSDT"
     interval: str = "10m"
+    primary_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,8 @@ def _coverage(
 ) -> dict[str, Any]:
     if _int_value(row, "row_count") == 0:
         return _coverage_payload(STATUS_MISSING, None, "no_rows")
+    if _is_primary_klines_scope(options, spec, row):
+        return _coverage_payload(STATUS_HEALTHY, 100.0, None)
     if spec.time_column != OPEN_TIME_COLUMN:
         return _coverage_payload(STATUS_UNAVAILABLE, None, "no_open_time_column")
     if int(main["rowCount"]) == 0:
@@ -193,9 +196,29 @@ def _coverage_where(
 
 
 def _target_where(spec: TableSpec, options: CoverageOptions) -> tuple[str, tuple[Any, ...]]:
-    if "symbol" not in spec.group_columns:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if "symbol" in spec.group_columns:
+        clauses.append("symbol = ?")
+        params.append(options.symbol.strip().upper())
+    if options.primary_only and "interval" in spec.group_columns:
+        clauses.append("interval = ?")
+        params.append(options.interval)
+    if not clauses:
         return "", ()
-    return "WHERE symbol = ?", (options.symbol.strip().upper(),)
+    return "WHERE " + " AND ".join(clauses), tuple(params)
+
+
+def _is_primary_klines_scope(
+    options: CoverageOptions,
+    spec: TableSpec,
+    row: sqlite3.Row | dict[str, Any],
+) -> bool:
+    return (
+        spec.name == "klines"
+        and _row_value(row, "symbol") == options.symbol.strip().upper()
+        and _row_value(row, "interval") == options.interval
+    )
 
 
 def _empty_scope(options: CoverageOptions, spec: TableSpec) -> dict[str, Any]:

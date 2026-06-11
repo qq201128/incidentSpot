@@ -28,7 +28,7 @@ def build_alerts(symbol: str, duration: str, ranking_payload: dict[str, Any]) ->
 
 
 def coverage_alerts(symbol: str, duration: str) -> list[dict[str, Any]]:
-    report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration))
+    report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration, primary_only=True))
     gaps = coverage_gaps(report, primary_interval=duration)
     if not gaps:
         return []
