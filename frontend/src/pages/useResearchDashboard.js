@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchPaperLiveCandidates, runPaperLiveDailyLoop } from "../api/factorCombinations";
+import { fetchPaperLiveCandidates, runPaperLiveDailyLoop, setPaperLiveCandidateLiveTrading } from "../api/factorCombinations";
 import { fetchResearchModelBundle } from "../api/researchDashboardClient";
 import {
   errorMessage,
@@ -24,6 +24,7 @@ export function useResearchDashboard(symbol, duration) {
     if (cached?.report) {
       setState({
         loadError: null,
+        liveToggleKey: null,
         loading: false,
         mergingModels: true,
         report: cached.report,
@@ -41,7 +42,20 @@ export function useResearchDashboard(symbol, duration) {
     await runDailyLoopReport({ duration, normalizedSymbol, setState });
   }, [duration, normalizedSymbol]);
 
-  return { ...state, runDailyLoop };
+  const toggleCandidateLiveTrading = useCallback(
+    async (row, liveTradingEnabled) => {
+      await toggleLiveTradingReport({
+        duration,
+        liveTradingEnabled,
+        normalizedSymbol,
+        row,
+        setState,
+      });
+    },
+    [duration, normalizedSymbol],
+  );
+
+  return { ...state, runDailyLoop, toggleCandidateLiveTrading };
 }
 
 function initialState(symbol, duration) {
@@ -53,6 +67,7 @@ function initialState(symbol, duration) {
       mergingModels: false,
       report: cached.report,
       status: reportStatus(cached.report),
+      liveToggleKey: null,
     };
   }
   return {
@@ -61,6 +76,7 @@ function initialState(symbol, duration) {
     mergingModels: false,
     report: null,
     status: "读取结算样本…",
+    liveToggleKey: null,
   };
 }
 
@@ -120,6 +136,49 @@ async function runDailyLoopReport({ duration, normalizedSymbol, setState }) {
   }
 }
 
+async function toggleLiveTradingReport({
+  duration,
+  liveTradingEnabled,
+  normalizedSymbol,
+  row,
+  setState,
+}) {
+  const candidateKey = row?.candidateKey;
+  if (!candidateKey) throw new Error("candidateKey is required");
+  setState((current) => ({
+    ...current,
+    loadError: null,
+    liveToggleKey: candidateKey,
+    status: `${row.name} · ${liveTradingEnabled ? "开启" : "关闭"}实盘…`,
+  }));
+  try {
+    const result = await setPaperLiveCandidateLiveTrading(
+      normalizedSymbol,
+      duration,
+      candidateKey,
+      liveTradingEnabled,
+    );
+    publishLiveToggleReport({ duration, normalizedSymbol, report: result.report, setState });
+  } catch (error) {
+    publishLiveToggleError({ error, row, setState });
+  }
+}
+
+function publishLiveToggleReport({ duration, normalizedSymbol, report, setState }) {
+  publishReport(setState, report, `${reportStatus(report)} · 合并模型族状态…`);
+  storeResearchDashboardCache(normalizedSymbol, duration, report);
+  void mergeModelBundle({ duration, normalizedSymbol, report, setState });
+}
+
+function publishLiveToggleError({ error, row, setState }) {
+  const message = errorMessage(error);
+  setState((current) => ({
+    ...current,
+    liveToggleKey: null,
+    status: `${row?.name || "候选"} · 实盘切换失败：${message}`,
+  }));
+}
+
 async function mergeModelBundle({ duration, normalizedSymbol, report, setState, signal }) {
   setState((current) => ({ ...current, mergingModels: true }));
   try {
@@ -129,6 +188,7 @@ async function mergeModelBundle({ duration, normalizedSymbol, report, setState, 
     const merged = mergeModelFamilyStatusRows(report, models);
     setState({
       loadError: null,
+      liveToggleKey: null,
       loading: false,
       mergingModels: false,
       report: merged,
@@ -139,6 +199,7 @@ async function mergeModelBundle({ duration, normalizedSymbol, report, setState, 
     if (signal?.aborted) return;
     setState((current) => ({
       ...current,
+      liveToggleKey: null,
       loading: false,
       mergingModels: false,
       status: `${reportStatus(current.report || report)} · 模型族合并失败：${errorMessage(error)}`,
@@ -187,6 +248,7 @@ function publishLoadError(setState, prefix, error) {
   setState((current) => ({
     ...current,
     loadError: message,
+    liveToggleKey: null,
     loading: false,
     mergingModels: false,
     status: `${prefix}：${message}`,
@@ -201,5 +263,6 @@ function publishReport(setState, report, status) {
     mergingModels: false,
     report,
     status,
+    liveToggleKey: null,
   });
 }

@@ -41,6 +41,7 @@ const report = {
       paperLiveStatus: "paper_stable",
       paperLiveWinRate: 0.68,
       paperLiveSampleCount: 31,
+      liveTradingEnabled: true,
       backtestWinRate: 0.7,
       reason: "stable_paper_live_target_met",
       metrics: {
@@ -83,6 +84,7 @@ assert.equal(rows.length, 3);
 assert.ok(rows.every((row) => row.sampleCount > 0));
 assert.equal(rows[0].name, "lstm · lstm_v4");
 assert.equal(rows[0].status, "paper_stable");
+assert.equal(rows[0].liveTradingEnabled, true);
 assert.equal(rows[1].name, "combo__alpha__beta");
 assert.equal(candidateTypeLabel(rows[1]), "组合");
 assert.notEqual(rows[1].rowKey, "factor_alpha");

@@ -52,14 +52,14 @@ def refresh_combo_event_governance_all() -> None:
                 from app.services.workbench_summary_service import build_workbench_summary
 
                 store_workbench_summary(symbol, duration, build_workbench_summary(symbol, duration))
-                logger.info(
-                    "combo event governance refreshed: %s %s paired=%s batch_watch=%s single_watch=%s",
-                    symbol,
-                    duration,
-                    monitoring.get("shadowEventDeviation", {}).get("summary", {}).get("pairedCount"),
-                    monitoring.get("batchComboDemotion", {}).get("watchlistCount"),
-                    monitoring.get("factorCandidateDemotion", {}).get("watchlistCount"),
-                )
+                # logger.info(
+                #     "combo event governance refreshed: %s %s paired=%s batch_watch=%s single_watch=%s",
+                #     symbol,
+                #     duration,
+                #     monitoring.get("shadowEventDeviation", {}).get("summary", {}).get("pairedCount"),
+                #     monitoring.get("batchComboDemotion", {}).get("watchlistCount"),
+                #     monitoring.get("factorCandidateDemotion", {}).get("watchlistCount"),
+                # )
             except Exception as exc:
                 failed.append({"symbol": symbol, "duration": duration})
                 record_loop_failure(LOOP_NAME, exc, {"symbol": symbol, "duration": duration})

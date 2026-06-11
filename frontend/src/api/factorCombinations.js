@@ -54,6 +54,18 @@ export async function runPaperLiveDailyLoop(symbol, duration = "10m") {
   return data;
 }
 
+export async function setPaperLiveCandidateLiveTrading(symbol, duration, candidateKey, liveTradingEnabled) {
+  const { data } = await axios.post(
+    `${API_BASE_URL}/api/factors/combinations/paper-live/candidates/live-trading`,
+    null,
+    {
+      params: { symbol, duration, candidateKey, liveTradingEnabled },
+      timeout: DEFAULT_TIMEOUT_MS,
+    },
+  );
+  return data;
+}
+
 export async function requestFactorCombinationRefresh(symbol, duration, config = {}) {
   const params = { symbol, ..._configParams(config) };
   if (duration) {

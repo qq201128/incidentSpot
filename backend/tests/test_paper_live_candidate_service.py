@@ -163,6 +163,17 @@ def _create_db(path: Path) -> None:
           settled_at TEXT,
           created_at TEXT NOT NULL
         );
+        CREATE TABLE auto_trade_strategies (
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 0,
+          live_trading_enabled INTEGER NOT NULL DEFAULT 0,
+          duration_minutes INTEGER NOT NULL DEFAULT 10,
+          qty REAL NOT NULL DEFAULT 5.0,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(strategy_key, symbol, duration)
+        );
         """
     )
     conn.close()

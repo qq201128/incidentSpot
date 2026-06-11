@@ -12,6 +12,7 @@ from app.services.high_winrate_combo_cache_service import get_cached_high_winrat
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
 from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_candidate_live_control import set_candidate_live_trading
 from app.services.paper_live_report_cache import get_cached_paper_live_report
 from app.services.paper_live_daily_loop_service import run_paper_live_daily_closed_loop
 from app.services.factor_combination_refresh_api import (
@@ -130,6 +131,26 @@ def paper_live_daily_loop(
     symbols = [safe_symbol.upper()] if safe_symbol else None
     durations = [safe_duration] if safe_duration else None
     return run_paper_live_daily_closed_loop(symbols=symbols, durations=durations)
+
+
+@router.post("/paper-live/candidates/live-trading")
+def paper_live_candidate_live_trading(
+    symbol: str = Query(..., min_length=6),
+    duration: str = Query("10m"),
+    candidate_key: str = Query(..., alias="candidateKey", min_length=1),
+    live_trading_enabled: bool = Query(..., alias="liveTradingEnabled"),
+) -> dict:
+    safe_duration = _query_str(duration, "10m") or "10m"
+    _validate_duration(safe_duration)
+    try:
+        return set_candidate_live_trading(
+            symbol.upper(),
+            safe_duration,
+            candidate_key=candidate_key,
+            live_trading_enabled=live_trading_enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/refresh")

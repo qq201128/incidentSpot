@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { researchSummary, settledRows } from "./researchDashboardData";
 import { ResearchHeader, SummaryStrip } from "./ResearchDashboardSummary";
-import { ResearchSidePanel, SettledSampleMatrix } from "./ResearchDashboardEvidence";
+import { ResearchSidePanel } from "./ResearchDashboardEvidence";
+import { SettledSampleMatrix } from "./ResearchDashboardMatrix";
 import { useResearchDashboard } from "./useResearchDashboard";
 import "./ResearchDashboardPage.css";
 import "./ResearchDashboardMatrix.css";
@@ -13,10 +14,16 @@ export default function ResearchDashboardPage() {
   const [searchParams] = useSearchParams();
   const [symbol, setSymbol] = useState(searchParams.get("symbol") || "BTCUSDT");
   const [duration, setDuration] = useState(searchParams.get("duration") || "10m");
-  const { loadError, loading, mergingModels, report, runDailyLoop, status } = useResearchDashboard(
-    symbol,
-    duration,
-  );
+  const {
+    liveToggleKey,
+    loadError,
+    loading,
+    mergingModels,
+    report,
+    runDailyLoop,
+    status,
+    toggleCandidateLiveTrading,
+  } = useResearchDashboard(symbol, duration);
   const rows = useMemo(() => settledRows(report), [report]);
   const summary = useMemo(() => researchSummary(report, rows), [report, rows]);
 
@@ -34,12 +41,12 @@ export default function ResearchDashboardPage() {
       <SummaryStrip summary={summary} />
       <section className="research-main-grid">
         <SettledSampleMatrix
-          duration={duration}
+          liveToggleKey={liveToggleKey}
           loadError={loadError}
           loading={loading && !report}
+          onLiveToggle={toggleCandidateLiveTrading}
           reportLoaded={summary.reportLoaded}
           rows={rows}
-          symbol={symbol}
         />
         <ResearchSidePanel
           report={report}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -12,31 +13,82 @@ from app.services.auto_trade_types import (
 )
 from app.services.binance_service import fetch_premium_index
 from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_notification import notify_live_order_failure, notify_live_order_success
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.strategy_registry import strategy_definition
 
 PERCENT_SCALE = 1000
 PERCENT_DECIMALS = 10
+logger = logging.getLogger("uvicorn.error")
 
 
 def create_trade_from_prediction(settings: AutoTradeSettings, prediction: dict[str, Any]) -> dict:
-    entry_price = _fetch_latest_entry_price(settings.symbol)
-    side = "BUY" if prediction["direction"] == "up" else "SELL"
-    payload = _build_quick_trade_payload(settings, prediction, entry_price, side=side)
-    return create_quick_trade_record(
-        QuickTradeContext(
-            payload=payload,
-            strategy_key=settings.strategy_key,
-            symbol=settings.symbol,
-            side=side,
-            event_interval=settings.duration,
-            rule_type="ABOVE",
-            predicted=prediction["direction"],
-            entry_price=entry_price,
-            live_trading_enabled=settings.live_trading_enabled,
-            prediction_open_time=int(prediction["open_time"]) if prediction.get("open_time") is not None else None,
+    entry_price = None
+    try:
+        entry_price = _fetch_latest_entry_price(settings.symbol)
+        side = "BUY" if prediction["direction"] == "up" else "SELL"
+        payload = _build_quick_trade_payload(settings, prediction, entry_price, side=side)
+        result = create_quick_trade_record(
+            QuickTradeContext(
+                payload=payload,
+                strategy_key=settings.strategy_key,
+                symbol=settings.symbol,
+                side=side,
+                event_interval=settings.duration,
+                rule_type="ABOVE",
+                predicted=prediction["direction"],
+                entry_price=entry_price,
+                live_trading_enabled=settings.live_trading_enabled,
+                prediction_open_time=int(prediction["open_time"]) if prediction.get("open_time") is not None else None,
+            )
         )
-    )
+    except Exception as exc:
+        _notify_live_order_failure(settings, prediction, exc, entry_price)
+        raise
+    _notify_live_order_success(settings, prediction, result, entry_price)
+    return result
+
+
+def _notify_live_order_success(
+    settings: AutoTradeSettings,
+    prediction: dict[str, Any],
+    result: dict[str, Any],
+    entry_price: float,
+) -> None:
+    if not settings.live_trading_enabled:
+        return
+    try:
+        status = _notification_status(
+            notify_live_order_success(settings, prediction, result, entry_price=entry_price)
+        )
+        if status:
+            logger.warning("live order success notification not sent: %s", status)
+    except Exception:
+        logger.exception("live order success notification failed")
+
+
+def _notify_live_order_failure(
+    settings: AutoTradeSettings,
+    prediction: dict[str, Any],
+    exc: Exception,
+    entry_price: float | None,
+) -> None:
+    if not settings.live_trading_enabled:
+        return
+    try:
+        status = _notification_status(
+            notify_live_order_failure(settings, prediction, exc, entry_price=entry_price)
+        )
+        if status:
+            logger.warning("live order failure notification not sent: %s", status)
+    except Exception:
+        logger.exception("live order failure notification failed")
+
+
+def _notification_status(result: dict[str, Any]) -> str | None:
+    if result.get("sent") is True:
+        return None
+    return str(result.get("reason") or "unknown")
 
 
 def _build_quick_trade_payload(

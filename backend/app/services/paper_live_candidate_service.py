@@ -12,6 +12,7 @@ from app.services.paper_live_failure_store import (
     log_prediction_failure,
     recent_prediction_failures,
 )
+from app.services.paper_live_candidate_live_state import live_state_by_strategy
 from app.services.paper_live_candidate_ranking import (
     ValidationMetadata,
     candidate_rank_key,
@@ -82,7 +83,11 @@ def _ensure_report_write_tables(conn: Any) -> None:
 def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
     rows = _candidate_rows(conn, symbol, duration)
     settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
-    candidates = [_candidate_payload(item, settled_by_identity.get(_candidate_identity_key(item), [])) for item in rows]
+    live_states = live_state_by_strategy(conn, symbol, duration)
+    candidates = [
+        _candidate_payload(item, settled_by_identity.get(_candidate_identity_key(item), []), live_states.get(str(item["strategy_key"])))
+        for item in rows
+    ]
     failures = recent_prediction_failures(conn, symbol, duration)
     stage_logs = recent_stage_logs(conn, symbol, duration)
     status_changes = recent_status_changes(conn, symbol, duration)
@@ -129,11 +134,16 @@ def _settled_rows_by_identity(conn: Any, symbol: str, duration: str) -> dict[tup
     return grouped
 
 
-def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _candidate_payload(
+    candidate: dict[str, Any],
+    rows: list[dict[str, Any]],
+    live_state: dict[str, Any] | None,
+) -> dict[str, Any]:
     metrics = high_winrate_metrics(rows) if rows else _empty_metrics()
     decision = _candidate_decision(candidate, metrics, rows)
     walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
     recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
+    live_enabled = bool(live_state and live_state["liveTradingEnabled"])
     payload = {
         "candidateKey": _candidate_key(candidate),
         "strategyKey": candidate["strategy_key"],
@@ -151,7 +161,10 @@ def _candidate_payload(candidate: dict[str, Any], rows: list[dict[str, Any]]) ->
         "paperLiveWinRate": metrics.get("winRate"),
         "paperLiveSampleCount": metrics.get("sampleCount"),
         "paperLiveStatus": decision["status"],
-        "liveReadiness": live_readiness_gate(metrics, decision["status"], status_reason=decision["reason"]),
+        "autoTradeEnabled": bool(live_state and live_state["autoTradeEnabled"]),
+        "liveTradingEnabled": live_enabled,
+        "liveTradingUpdatedAt": live_state.get("updatedAt") if live_state else None,
+        "liveReadiness": live_readiness_gate(metrics, decision["status"], status_reason=decision["reason"], real_trading_enabled=live_enabled),
         "status": decision["status"],
         "reason": decision["reason"],
         "metrics": metrics,
@@ -194,7 +207,7 @@ def _report_payload(data: ReportPayloadInput) -> dict[str, Any]:
         "symbol": data.symbol.strip().upper(),
         "duration": data.duration,
         "updatedAt": _utc_now(),
-        "realTradingEnabled": False,
+        "realTradingEnabled": any(bool(row.get("liveTradingEnabled")) for row in data.ranked),
         "observationPoolLimit": OBSERVATION_POOL_LIMIT,
         "allCandidateCount": len(data.ranked),
         "allCandidates": data.ranked,

@@ -35,8 +35,8 @@ def live_readiness_gate(
         "reason": LIVE_READINESS_REASON_PASSED if eligible else reasons[0],
         "reasons": reasons,
         "paperLiveStatus": status,
-        "realTradingEnabled": False,
-        "manualEnableRequired": True,
+        "realTradingEnabled": real_trading_enabled,
+        "manualEnableRequired": not real_trading_enabled,
         "thresholds": _thresholds(),
         "metrics": metrics,
         "decision": decision,
@@ -57,7 +57,7 @@ def _gate_reasons(
     _append_reason(reasons, _pnl_reason(metrics))
     if status is not None and status != REQUIRED_PAPER_LIVE_STATUS:
         _append_reason(reasons, LIVE_READINESS_REASON_STATUS_NOT_STABLE)
-    if real_trading_enabled:
+    if not real_trading_enabled:
         _append_reason(reasons, LIVE_READINESS_REASON_POLICY_DISABLED)
     return reasons
 
