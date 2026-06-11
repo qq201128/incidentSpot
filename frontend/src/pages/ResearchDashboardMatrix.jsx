@@ -7,6 +7,7 @@ import {
   formatNum,
   formatPct,
   formatWindow,
+  rollingWindowItems,
   visibleSettledRows,
 } from "./researchDashboardData";
 import { reasonLabel, statusClass, statusLabel } from "./researchDashboardLabels";
@@ -61,6 +62,7 @@ function MatrixTable({ liveToggleKey, onLiveToggle, rows }) {
             <th>近30</th>
             <th>近60</th>
             <th>近100</th>
+            <th>滚动10</th>
             <th>PF</th>
             <th>均收益</th>
             <th>回测差</th>
@@ -103,6 +105,7 @@ function SettledRow({ liveToggleKey, onLiveToggle, row }) {
       <td>{formatWindow(row.windows?.recent30)}</td>
       <td>{formatWindow(row.windows?.recent60)}</td>
       <td>{formatWindow(row.windows?.recent100)}</td>
+      <td><RollingWindows row={row} /></td>
       <td className={metricClass(row.profitFactor, EVIDENCE_TARGETS.profitFactorMin)}>{formatNum(row.profitFactor, 2)}</td>
       <td className={metricClass(row.avgReturn, 0)}>{formatPct(row.avgReturn)}</td>
       <td className={gapRisk ? "is-warn" : ""}>{formatGap(row)}</td>
@@ -118,10 +121,22 @@ function SettledRow({ liveToggleKey, onLiveToggle, row }) {
   );
 }
 
+function RollingWindows({ row }) {
+  const items = rollingWindowItems(row);
+  if (!items.length) return <span className="research-live-empty">{EMPTY}</span>;
+  return (
+    <span className="research-rolling-windows">
+      {items.map((item) => (
+        <small className={item.passed ? "is-good" : "is-bad"} key={item.key}>{item.text}</small>
+      ))}
+    </span>
+  );
+}
+
 function LiveToggleButton({ liveToggleKey, onLiveToggle, row }) {
-  if (row.status !== STABLE_STATUS) return <span className="research-live-empty">{EMPTY}</span>;
-  const pending = liveToggleKey === row.candidateKey;
   const liveEnabled = Boolean(row.liveTradingEnabled);
+  if (row.status !== STABLE_STATUS && !liveEnabled) return <span className="research-live-empty">{EMPTY}</span>;
+  const pending = liveToggleKey === row.candidateKey;
   return (
     <button
       className={`research-live-toggle ${liveEnabled ? "is-on" : "is-off"}`}

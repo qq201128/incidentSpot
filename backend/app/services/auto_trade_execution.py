@@ -12,7 +12,7 @@ from app.services.auto_trade_types import (
     AutoTradeSettings,
 )
 from app.services.binance_service import fetch_premium_index
-from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_settings import payout_ratio_for_duration
 from app.services.live_order_notification import notify_live_order_failure, notify_live_order_success
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.strategy_registry import strategy_definition
@@ -118,7 +118,11 @@ def _build_quick_trade_payload(
             aiHighWinratePassed=_as_bool(prediction.get("high_winrate_gate_passed")),
             aiHighWinrateValue=prediction.get("high_winrate_gate_value"),
         ),
-        order=AutoTradeOrderPayload(side=side, qty=float(settings.qty), price=FIXED_PAYOUT_RATIO),
+        order=AutoTradeOrderPayload(
+            side=side,
+            qty=float(settings.qty),
+            price=payout_ratio_for_duration(settings.duration),
+        ),
     )
 
 

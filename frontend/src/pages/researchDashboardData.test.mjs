@@ -4,6 +4,7 @@ import {
   prefilterRows,
   researchSummary,
   candidateTypeLabel,
+  rollingWindowItems,
   settledRows,
   topReasons,
   visibleSettledRows,
@@ -29,6 +30,13 @@ const report = {
         avgReturn: -0.004,
         maxConsecutiveLosses: 6,
         paperLiveWindows: { recent30: { sampleCount: 30, winRate: 0.5 } },
+        paperStability: {
+          rollingWindows: [
+            { sampleCount: 10, winRate: 0.5 },
+            { sampleCount: 10, winRate: 0.7 },
+          ],
+          thresholds: { rollingWindowWinRateMin: 0.58 },
+        },
       },
       dataFreshnessStatus: "fresh",
       missingFeatureStatus: "complete",
@@ -89,6 +97,10 @@ assert.equal(rows[1].name, "combo__alpha__beta");
 assert.equal(candidateTypeLabel(rows[1]), "组合");
 assert.notEqual(rows[1].rowKey, "factor_alpha");
 assert.ok(Math.abs(rows[2].backtestGap - 0.23) < 0.000001);
+assert.deepEqual(
+  rollingWindowItems(rows[2]).map((item) => [item.text, item.passed]),
+  [["50.0% / 10", false], ["70.0% / 10", true]],
+);
 
 const prefilter = prefilterRows(report);
 assert.equal(prefilter.length, 1);
@@ -267,3 +279,49 @@ const stableRowsTakePriority = visibleSettledRows([
 ], 18);
 assert.equal(stableRowsTakePriority.length, 18);
 assert.equal(stableRowsTakePriority.filter((row) => row.status === "paper_stable").length, 9);
+
+const liveFailedRowVisible = visibleSettledRows([
+  ...Array.from({ length: 18 }, (_, index) => ({
+    rowKey: `stable-full-${index}`,
+    type: "factor",
+    sampleCount: 100 - index,
+    winRate: 0.64,
+    status: "paper_stable",
+  })),
+  {
+    rowKey: "live-failed",
+    type: "factor",
+    sampleCount: 49,
+    winRate: 0.69,
+    status: "paper_failed",
+    liveTradingEnabled: true,
+  },
+], 18);
+assert.equal(liveFailedRowVisible.length, 18);
+assert.ok(liveFailedRowVisible.some((row) => row.rowKey === "live-failed"));
+
+const liveOutsidePooledLimitRows = settledRows({
+  allCandidateCount: 131,
+  allCandidates: [
+    {
+      candidateKey: "live_outside_limit",
+      candidateType: "factor",
+      factorName: "live_outside_limit",
+      paperLiveStatus: "paper_failed",
+      paperLiveWinRate: 0.69,
+      paperLiveSampleCount: 49,
+      liveTradingEnabled: true,
+      metrics: { sampleCount: 49, winRate: 0.69 },
+    },
+  ],
+  collecting: Array.from({ length: 130 }, (_, index) => ({
+    candidateKey: `collecting-${index}`,
+    candidateType: "factor",
+    factorName: `collecting-${index}`,
+    paperLiveStatus: "paper_collecting",
+    paperLiveWinRate: 0.6,
+    paperLiveSampleCount: 1,
+    metrics: { sampleCount: 1, winRate: 0.6 },
+  })),
+});
+assert.ok(liveOutsidePooledLimitRows.some((row) => row.name === "live_outside_limit"));

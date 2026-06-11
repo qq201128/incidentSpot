@@ -39,6 +39,7 @@ export function settledRows(report) {
 }
 
 function dashboardCandidateSources(report) {
+  const liveRows = liveCandidateSources(report);
   const pooled = [
     ...(Array.isArray(report?.stable) ? report.stable : []),
     ...(Array.isArray(report?.collecting) ? report.collecting : []),
@@ -46,10 +47,27 @@ function dashboardCandidateSources(report) {
     ...(Array.isArray(report?.candidates) ? report.candidates : []),
   ];
   if (pooled.length) {
-    return dedupeCandidates(pooled).slice(0, SETTLED_SOURCE_LIMIT);
+    return dedupeCandidates([...liveRows, ...pooled]).slice(0, SETTLED_SOURCE_LIMIT);
   }
   const all = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
-  return all.slice(0, SETTLED_SOURCE_LIMIT);
+  return dedupeCandidateRows([...liveRows, ...all]).slice(0, SETTLED_SOURCE_LIMIT);
+}
+
+function liveCandidateSources(report) {
+  const all = Array.isArray(report?.allCandidates) ? report.allCandidates : [];
+  return all.filter((row) => row?.liveTradingEnabled);
+}
+
+function dedupeCandidateRows(rows) {
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows) {
+    const key = rowIdentity(row);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+  return unique;
 }
 
 function dedupeCandidates(rows) {
@@ -62,6 +80,18 @@ function dedupeCandidates(rows) {
     unique.push(row);
   }
   return unique;
+}
+
+function rowIdentity(row) {
+  return [
+    row?.candidateKey,
+    row?.candidateType,
+    row?.factorName,
+    row?.modelFamily,
+    row?.modelVersion,
+    row?.strategyKey,
+    row?.firstPredictionCreatedAt,
+  ].filter(Boolean).join("::");
 }
 
 export function mergeModelFamilyStatusRows(report, models) {
@@ -83,16 +113,20 @@ export function mergeModelFamilyStatusRows(report, models) {
 }
 
 export function visibleSettledRows(rows, limit = TOP_ROW_LIMIT) {
-  const stableRows = rows.filter((row) => STATUS_KEYS.stable.has(row.status)).slice(0, limit);
-  const reserved = new Set(stableRows.map((row) => row.rowKey));
+  const liveRows = rows.filter((row) => row.liveTradingEnabled).slice(0, limit);
+  const reserved = new Set(liveRows.map((row) => row.rowKey));
+  const stableRows = rows
+    .filter((row) => STATUS_KEYS.stable.has(row.status) && !reserved.has(row.rowKey))
+    .slice(0, Math.max(limit - liveRows.length, 0));
+  for (const row of stableRows) reserved.add(row.rowKey);
   const slotsAfterStable = Math.max(limit - stableRows.length, 0);
   const modelRows = rows
     .filter((row) => row.type === "model" && !reserved.has(row.rowKey))
-    .slice(0, Math.min(MODEL_ROW_RESERVE, slotsAfterStable));
+    .slice(0, Math.min(MODEL_ROW_RESERVE, Math.max(slotsAfterStable - liveRows.length, 0)));
   for (const row of modelRows) reserved.add(row.rowKey);
-  const slotsAfterModels = Math.max(slotsAfterStable - modelRows.length, 0);
+  const slotsAfterModels = Math.max(limit - liveRows.length - stableRows.length - modelRows.length, 0);
   const primary = rows.filter((row) => !reserved.has(row.rowKey)).slice(0, slotsAfterModels);
-  return [...stableRows, ...primary, ...modelRows].sort(sampleSort);
+  return [...liveRows, ...stableRows, ...primary, ...modelRows].sort(sampleSort);
 }
 
 export function researchSummary(report, rows) {
@@ -162,6 +196,21 @@ export function statusChangeRows(report) {
 export function formatWindow(window) {
   if (!window || Number(window.sampleCount || 0) <= 0) return EMPTY;
   return `${formatPct(window.winRate)} / ${window.sampleCount}`;
+}
+
+export function rollingWindowItems(row) {
+  const windows = Array.isArray(row?.stability?.rollingWindows) ? row.stability.rollingWindows : [];
+  const threshold = numberOrNull(row?.stability?.thresholds?.rollingWindowWinRateMin);
+  return windows
+    .filter((window) => Number(window?.sampleCount || 0) > 0)
+    .map((window) => {
+      const winRate = numberOrNull(window.winRate);
+      return {
+        key: `${window.sampleCount}:${winRate}:${window.avgReturn ?? ""}`,
+        passed: threshold == null || winRate == null || winRate >= threshold,
+        text: formatWindow(window),
+      };
+    });
 }
 
 export function formatGap(row) {
@@ -296,7 +345,8 @@ function candidateName(row, type) {
     return row.factorName || row.modelVersion || row.candidateKey || row.strategyKey || EMPTY;
   }
   if (type === "model" && row.modelFamily && row.modelVersion) return `${row.modelFamily} · ${row.modelVersion}`;
-  return row.modelFamily || row.factorName || row.candidateKey || row.strategyKey || EMPTY;
+  if (type === "model") return row.modelFamily || row.modelVersion || row.candidateKey || row.strategyKey || EMPTY;
+  return row.factorName || row.candidateKey || row.strategyKey || row.modelFamily || EMPTY;
 }
 
 function isComboName(name) {

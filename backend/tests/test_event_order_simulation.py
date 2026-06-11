@@ -93,6 +93,34 @@ def test_quick_trade_live_trading_calls_binance_and_writes_rows(monkeypatch: pyt
     assert result["externalOrderId"] == "live-1"
     assert order["external_status"] == "PLACED"
     assert external["externalOrderId"] == "live-1"
+    assert order["price"] == 0.8
+
+
+@pytest.mark.parametrize(
+    ("event_interval", "expected_payout_ratio"),
+    [
+        ("10m", 0.8),
+        ("30m", 0.85),
+        ("60m", 0.85),
+        ("1d", 0.85),
+    ],
+)
+def test_quick_trade_uses_duration_payout_ratio(
+    event_interval: str,
+    expected_payout_ratio: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+
+    result = create_quick_trade(_quick_trade_payload(live=False, event_interval=event_interval))
+
+    order = keeper.execute("SELECT * FROM orders WHERE id = ?", (result["orderId"],)).fetchone()
+    external = json.loads(order["external_response"])
+    assert order["price"] == expected_payout_ratio
+    assert external["request"]["payoutRatio"] == f"{expected_payout_ratio:.2f}"
 
 
 def test_quick_trade_live_failure_does_not_write_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,14 +229,19 @@ def test_strategy_quick_trade_records_market_regime_gate(monkeypatch: pytest.Mon
     assert row["market_regime_label"] == "trend_up:normal_vol"
 
 
-def _quick_trade_payload(*, live: bool, strategy_key: str | None = None) -> QuickTradeCreate:
+def _quick_trade_payload(
+    *,
+    live: bool,
+    strategy_key: str | None = None,
+    event_interval: str = "10m",
+) -> QuickTradeCreate:
     return QuickTradeCreate(
         liveTradingEnabled=live,
         event=EventCreate(
             strategyKey=strategy_key,
             symbol="BTCUSDT",
             title="manual quick trade",
-            eventInterval="10m",
+            eventInterval=event_interval,
             ruleType="ABOVE",
             strikeValue=100.0,
             endTime="2026-05-31T00:10:00+00:00",

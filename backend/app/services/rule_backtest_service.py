@@ -10,7 +10,7 @@ import pandas as pd
 from app.db.session import get_conn
 from app.services.enhanced_features import load_orderbook_features
 from app.services.kline_timing import is_rule_entry_boundary_for_duration
-from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_settings import payout_ratio_for_duration
 from app.services.optimized_rule_engine import build_optimized_feature_frame, evaluate_optimized_rules
 from app.services.rule_backtest_metrics import (
     daily_stats,
@@ -64,7 +64,7 @@ def run_rule_backtest(
     resolved_key = strategy_key or OPTIMIZED_RULES_BACKTEST_META_KEY
     strategy = strategy_definition(resolved_key)
     feature_frame = _labeled_feature_frame(symbol, duration)
-    trades = _simulate_trades(feature_frame, resolved_key)
+    trades = _simulate_trades(feature_frame, resolved_key, duration)
     walk_forward = walk_forward_validation(feature_frame, trades, duration=duration)
     report = _backtest_report(
         BacktestReportInput(
@@ -154,17 +154,17 @@ def _load_1m_klines(symbol: str) -> pd.DataFrame:
     return frame
 
 
-def _simulate_trades(frame: pd.DataFrame, strategy_key: str) -> list[dict[str, Any]]:
+def _simulate_trades(frame: pd.DataFrame, strategy_key: str, duration: str) -> list[dict[str, Any]]:
     trades = []
     for _, row in frame.iterrows():
         rule = evaluate_optimized_rules(row.to_dict(), strategy_key=strategy_key)
         if rule is None:
             continue
-        trades.append(_trade_result(row, rule))
+        trades.append(_trade_result(row, rule, duration))
     return trades
 
 
-def _trade_result(row: pd.Series, rule: dict[str, Any]) -> dict[str, Any]:
+def _trade_result(row: pd.Series, rule: dict[str, Any], duration: str) -> dict[str, Any]:
     direction = str(rule["direction"])
     fwd_ret = float(row["fwd_ret"])
     win = (fwd_ret > 0) if direction == "up" else (fwd_ret < 0)
@@ -176,7 +176,7 @@ def _trade_result(row: pd.Series, rule: dict[str, Any]) -> dict[str, Any]:
         "direction": direction,
         "rule": rule["name"],
         "win": bool(win),
-        "pnlPerStake": FIXED_PAYOUT_RATIO if win else -1.0,
+        "pnlPerStake": payout_ratio_for_duration(duration) if win else -1.0,
     }
 
 

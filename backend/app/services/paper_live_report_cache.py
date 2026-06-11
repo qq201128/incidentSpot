@@ -53,6 +53,14 @@ def clear_paper_live_report_cache() -> None:
         _refreshing.clear()
 
 
+def store_paper_live_report_cache(symbol: str, duration: str, payload: dict[str, Any]) -> None:
+    key = (symbol.strip().upper(), duration)
+    stored = dict(payload)
+    stored.pop("cache", None)
+    with _lock:
+        _cache[key] = (time.monotonic(), stored)
+
+
 def _schedule_refresh(
     key: tuple[str, str],
     build: Callable[[str, str], dict[str, Any]],

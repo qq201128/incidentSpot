@@ -9,7 +9,15 @@ import pytest
 
 from app.services import paper_live_candidate_live_control as control
 from app.services import paper_live_candidate_service as report_service
+from app.services import paper_live_report_cache as report_cache
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
+
+
+@pytest.fixture(autouse=True)
+def _clear_report_cache() -> None:
+    report_cache.clear_paper_live_report_cache()
+    yield
+    report_cache.clear_paper_live_report_cache()
 
 
 def test_stable_candidate_live_trading_can_be_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -18,6 +26,11 @@ def test_stable_candidate_live_trading_can_be_enabled(monkeypatch: pytest.Monkey
     _create_db(db_path)
     _insert_predictions(db_path, candidate_key, correct_count=30)
     _patch_db(monkeypatch, db_path)
+    report_cache.store_paper_live_report_cache(
+        "BTCUSDT",
+        "10m",
+        {"stable": [{"candidateKey": candidate_key, "liveTradingEnabled": False}]},
+    )
 
     result = control.set_candidate_live_trading(
         "BTCUSDT",
@@ -28,11 +41,18 @@ def test_stable_candidate_live_trading_can_be_enabled(monkeypatch: pytest.Monkey
 
     slot = _slot_row(db_path, candidate_key)
     candidate = result["report"]["stable"][0]
+    cached = report_cache.get_cached_paper_live_report(
+        "BTCUSDT",
+        "10m",
+        build=lambda _symbol, _duration: pytest.fail("expected live-control report cache hit"),
+    )
     assert result["liveTradingEnabled"] is True
     assert slot["enabled"] == 1
     assert slot["live_trading_enabled"] == 1
     assert candidate["liveTradingEnabled"] is True
     assert result["report"]["realTradingEnabled"] is True
+    assert cached["cache"]["hit"] is True
+    assert cached["stable"][0]["liveTradingEnabled"] is True
 
 
 def test_non_stable_candidate_live_trading_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,6 +71,27 @@ def test_non_stable_candidate_live_trading_fails(monkeypatch: pytest.MonkeyPatch
         )
 
     assert _slot_row(db_path, candidate_key) is None
+
+
+def test_non_stable_candidate_live_trading_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-control-disable-failed") / "candidates.db"
+    candidate_key = factor_candidate_signal_key("gamma")
+    _create_db(db_path)
+    _insert_predictions(db_path, candidate_key, correct_count=1)
+    _insert_slot(db_path, candidate_key, live_trading_enabled=True)
+    _patch_db(monkeypatch, db_path)
+
+    result = control.set_candidate_live_trading(
+        "BTCUSDT",
+        "10m",
+        candidate_key=candidate_key,
+        live_trading_enabled=False,
+    )
+
+    slot = _slot_row(db_path, candidate_key)
+    assert result["liveTradingEnabled"] is False
+    assert slot["enabled"] == 1
+    assert slot["live_trading_enabled"] == 0
 
 
 def _patch_db(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
@@ -104,6 +145,22 @@ def _create_db(path: Path) -> None:
         );
         """
     )
+    conn.close()
+
+
+def _insert_slot(path: Path, strategy_key: str, *, live_trading_enabled: bool) -> None:
+    conn = _connect(path)
+    conn.execute(
+        """
+        INSERT INTO auto_trade_strategies(
+          strategy_key, symbol, duration, enabled, live_trading_enabled,
+          duration_minutes, qty, updated_at
+        )
+        VALUES(?, 'BTCUSDT', '10m', 1, ?, 10, 5.0, '2026-05-26T00:00:00+00:00')
+        """,
+        (strategy_key, int(live_trading_enabled)),
+    )
+    conn.commit()
     conn.close()
 
 

@@ -7,6 +7,7 @@ from app.services.auto_trade_settings_payloads import DEFAULT_QTY, write_setting
 from app.services.auto_trade_settings_validation import validated_auto_trade_settings
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.paper_live_candidate_service import STATUS_STABLE, refresh_paper_live_candidate_states
+from app.services.paper_live_report_cache import store_paper_live_report_cache
 from app.services.rule_config import DURATION_TO_MINUTES
 
 
@@ -19,10 +20,11 @@ def set_candidate_live_trading(
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
     report = refresh_paper_live_candidate_states(sym, duration)
-    candidate = _stable_candidate(report, candidate_key)
+    candidate = _candidate_for_live_control(report, candidate_key, live_trading_enabled)
     settings = _settings(candidate, sym, duration, live_trading_enabled=live_trading_enabled)
     _write_validated_settings(settings)
     updated_report = refresh_paper_live_candidate_states(sym, duration)
+    store_paper_live_report_cache(sym, duration, updated_report)
     return {
         "ok": True,
         "candidateKey": candidate_key,
@@ -32,11 +34,15 @@ def set_candidate_live_trading(
     }
 
 
-def _stable_candidate(report: dict[str, Any], candidate_key: str) -> dict[str, Any]:
+def _candidate_for_live_control(
+    report: dict[str, Any],
+    candidate_key: str,
+    live_trading_enabled: bool,
+) -> dict[str, Any]:
     candidate = _candidate_by_key(report, candidate_key)
     if candidate is None:
         raise ValueError(f"paper-live candidate not found: {candidate_key}")
-    if candidate.get("status") != STATUS_STABLE:
+    if live_trading_enabled and candidate.get("status") != STATUS_STABLE:
         raise ValueError(f"candidate is not stable: {candidate_key}")
     if not candidate.get("strategyKey"):
         raise ValueError(f"candidate has no strategy key: {candidate_key}")

@@ -1,7 +1,12 @@
 
 import { formatFinalScore, regimePartLabel } from "../utils/eventFinalDecisionLabels";
 
-const FIXED_PAYOUT_PERCENT = 80;
+const PAYOUT_PERCENT_BY_DURATION = {
+  10: 80,
+  30: 85,
+  60: 85,
+  1440: 85,
+};
 
 export default function TradeControls({
   symbol,
@@ -18,6 +23,7 @@ export default function TradeControls({
   onTrade,
 }) {
   const priceText = Number(currentPrice || 0).toFixed(2);
+  const payoutPercent = payoutPercentForDuration(durationMinutes);
 
   return (
     <div className="card trade-card">
@@ -65,8 +71,8 @@ export default function TradeControls({
       </label>
 
       <div className="rate-row">
-        <RateCell label="上涨支付率" value={`${FIXED_PAYOUT_PERCENT}%`} />
-        <RateCell label="下跌支付率" value={`${FIXED_PAYOUT_PERCENT}%`} />
+        <RateCell label="上涨支付率" value={`${payoutPercent}%`} />
+        <RateCell label="下跌支付率" value={`${payoutPercent}%`} />
         <RateCell label="结算周期" value={durationLabel(durationMinutes)} />
       </div>
 
@@ -153,4 +159,10 @@ function formatPredictionTime(value) {
 
 function durationLabel(minutes) {
   return minutes === 1440 ? "1天" : `${minutes}分钟`;
+}
+
+function payoutPercentForDuration(minutes) {
+  const percent = PAYOUT_PERCENT_BY_DURATION[minutes];
+  if (percent == null) throw new Error(`unsupported payout duration: ${minutes}`);
+  return percent;
 }

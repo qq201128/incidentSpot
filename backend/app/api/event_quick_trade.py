@@ -12,7 +12,7 @@ from app.services.binance_event_contract import (
     build_event_contract_order_payload,
     place_event_contract_order,
 )
-from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_settings import payout_ratio_for_duration
 from app.services.live_order_failure_log import log_live_order_failure
 from app.services.market_regime_trade_gate import (
     MARKET_REGIME_TRADE_GATE_VERSION,
@@ -112,28 +112,29 @@ def _requires_market_regime_position_guard(ctx: QuickTradeContext) -> bool:
 
 
 def _place_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
+    payout_ratio = payout_ratio_for_duration(ctx.event_interval)
     if not ctx.live_trading_enabled:
-        return _simulated_external_order(ctx)
+        return _simulated_external_order(ctx, payout_ratio)
     try:
         return place_event_contract_order(
             symbol=ctx.symbol,
             event_interval=ctx.event_interval,
             side=ctx.side,
             amount=ctx.payload.order.qty,
-            payout_ratio=FIXED_PAYOUT_RATIO,
+            payout_ratio=payout_ratio,
         )
     except Exception as exc:
         log_live_order_failure(ctx, exc)
         raise
 
 
-def _simulated_external_order(ctx: QuickTradeContext) -> dict[str, Any]:
+def _simulated_external_order(ctx: QuickTradeContext, payout_ratio: float) -> dict[str, Any]:
     request = build_event_contract_order_payload(
         symbol=ctx.symbol,
         event_interval=ctx.event_interval,
         side=ctx.side,
         amount=ctx.payload.order.qty,
-        payout_ratio=FIXED_PAYOUT_RATIO,
+        payout_ratio=payout_ratio,
     )
     return {
         "request": request,
@@ -220,6 +221,7 @@ def _insert_order(
     conn: Any,
     order: OrderInsertContext,
 ) -> int:
+    payout_ratio = payout_ratio_for_duration(order.trade.event_interval)
     cursor = conn.execute(
         """
         INSERT INTO orders(
@@ -231,7 +233,7 @@ def _insert_order(
         (
             order.event_id,
             order.trade.side,
-            FIXED_PAYOUT_RATIO,
+            payout_ratio,
             order.trade.payload.order.qty,
             order.now,
             order.external_order.get("externalOrderId"),

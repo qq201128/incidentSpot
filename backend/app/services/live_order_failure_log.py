@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.services.live_order_settings import FIXED_PAYOUT_RATIO
+from app.services.live_order_settings import payout_ratio_for_duration
 
 PROJECT_ROOT_PARENT_INDEX = 3
 PROJECT_ROOT = Path(__file__).resolve().parents[PROJECT_ROOT_PARENT_INDEX]
@@ -41,7 +41,7 @@ def _failure_details(ctx: Any, exc: Exception) -> dict[str, Any]:
         "eventInterval": ctx.event_interval,
         "side": ctx.side,
         "qty": ctx.payload.order.qty,
-        "payoutRatio": FIXED_PAYOUT_RATIO,
+        "payoutRatio": payout_ratio_for_duration(ctx.event_interval),
         "strikeValue": ctx.entry_price,
         "eventTitle": ctx.payload.event.title,
         "eventEndTime": ctx.payload.event.endTime,
