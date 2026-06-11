@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
+import numpy as np
+
 from app.services import auto_predict_input_deps as input_deps
+from app.services import auto_predict_model_shadow_collection as model_shadow_collection
 from app.services import auto_predict_service as service
-from app.services.auto_predict_loop_status import auto_predict_loop_status
+from app.services.auto_predict_loop_status import auto_predict_loop_status, record_auto_predict_loop_start
+from app.services.model_family_prediction_runtime import PredictionCycleContext
 from app.services.background_loop_status import background_loop_statuses, reset_background_loop_statuses
 from app.services.auto_trade_types import AutoTradeSettings
 from app.services.factor_combo_simulation_keys import (
@@ -397,7 +401,7 @@ def test_model_family_shadow_prediction_failure_is_recorded(monkeypatch) -> None
     failures = []
 
     monkeypatch.setattr(
-        service.collection_helpers,
+        model_shadow_collection,
         "log_prediction_failure",
         lambda **kwargs: failures.append(kwargs),
     )
@@ -443,6 +447,160 @@ def test_model_family_shadow_prediction_failure_is_recorded(monkeypatch) -> None
     ]
 
 
+def test_model_family_shadow_progress_and_timing_are_recorded(monkeypatch) -> None:
+    snapshots = []
+
+    async def save_prediction(_result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        snapshots.append(auto_predict_loop_status()["currentTask"])
+        return True
+
+    def predict_shadow(*_args, **kwargs) -> dict:
+        kwargs["timings"]["featureWindowSeconds"] = 0.25
+        return _prediction(
+            "factor_xgboost_shadow_10m",
+            symbol="BTCUSDT",
+            duration=DEFAULT_DURATION,
+        )
+
+    record_auto_predict_loop_start(initial_delay=0.0, poll_seconds=1)
+    monkeypatch.setattr(model_shadow_collection.logger, "info", lambda *_args, **_kwargs: None)
+
+    asyncio.run(
+        service.collection_helpers.save_one_model_family_shadow_prediction(
+            _model_context("xgboost", {
+                "model_family_status": lambda *_args: {
+                    "shadowPredictionReady": True,
+                    "modelVersion": "xgboost_v2",
+                    "status": "trade_active",
+                },
+                "predict_model_family_shadow_prediction": predict_shadow,
+                "save_prediction": save_prediction,
+                "create_batch_combo_simulation_trade": lambda *_args: None,
+            }),
+        )
+    )
+
+    assert snapshots[0]["currentStage"] == "model_family_shadow_prediction"
+    assert snapshots[0]["currentFamily"] == "xgboost"
+    assert snapshots[0]["operation"] == "save_prediction"
+    status = auto_predict_loop_status()
+    assert status["currentTask"] is None
+    assert status["lastTaskTiming"]["currentFamily"] == "xgboost"
+    assert status["lastTaskTiming"]["timings"]["outcome"] == "saved"
+    assert "statusSeconds" in status["lastTaskTiming"]["timings"]
+    assert "predictionSeconds" in status["lastTaskTiming"]["timings"]
+    assert status["lastTaskTiming"]["timings"]["featureWindowSeconds"] == 0.25
+    assert "saveSeconds" in status["lastTaskTiming"]["timings"]
+
+
+def test_model_family_shadow_collection_runs_with_limited_concurrency(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+    families = ("lstm", "gru", "catboost", "xgboost")
+
+    async def save_one(context, *, create_simulation_trade: bool = True):
+        nonlocal active, max_active
+        assert create_simulation_trade is True
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        if context.family == "catboost":
+            raise RuntimeError("catboost failed")
+        return service.collection_helpers.ModelFamilyShadowOutcome(context.family, {}, True)
+
+    context = service.collection_helpers.CandidateCollectionContext(
+        _settings(FACTOR_COMBO_STRATEGY_KEY),
+        ENTRY_OPEN_TIME,
+        asyncio.Lock(),
+        {},
+    )
+    monkeypatch.setattr(service.collection_helpers, "MODEL_FAMILIES", families)
+    monkeypatch.setattr(service.collection_helpers, "save_one_model_family_shadow_prediction", save_one)
+
+    try:
+        asyncio.run(service.collection_helpers.save_model_family_shadow_predictions(context))
+    except service.collection_helpers.ModelFamilyShadowBatchError as exc:
+        assert exc.details == [
+            {
+                "family": "catboost",
+                "strategyKey": FACTOR_COMBO_STRATEGY_KEY,
+                "symbol": "BTCUSDT",
+                "duration": DEFAULT_DURATION,
+                "entryOpenTime": ENTRY_OPEN_TIME,
+                "error": "catboost failed",
+                "exceptionType": "RuntimeError",
+            }
+        ]
+    else:
+        raise AssertionError("model family shadow batch failure was not exposed")
+
+    assert max_active > 1
+    assert max_active <= service.collection_helpers.MODEL_FAMILY_SHADOW_CONCURRENCY
+
+
+def test_final_required_model_family_predictions_defer_simulation_sidecars(monkeypatch) -> None:
+    trades = []
+    family_key = "factor_catboost_shadow_10m"
+
+    async def save_prediction(_result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        return True
+
+    def predict_shadow(*_args, **_kwargs) -> dict:
+        return _prediction(family_key, symbol="BTCUSDT", duration=DEFAULT_DURATION)
+
+    monkeypatch.setattr(service.collection_helpers, "MODEL_FAMILIES", ("catboost",))
+    context = _model_context("catboost", {
+        "model_family_status": lambda *_args: {"shadowPredictionReady": True},
+        "predict_model_family_shadow_prediction": predict_shadow,
+        "save_prediction": save_prediction,
+        "create_batch_combo_simulation_trade": lambda _settings, result: trades.append(result["strategy_key"]),
+    }).collection
+
+    outcomes = asyncio.run(service.collection_helpers.save_final_decision_required_predictions(context))
+
+    assert [outcome.family for outcome in outcomes] == ["catboost"]
+    assert trades == []
+
+    asyncio.run(service.collection_helpers.save_model_family_shadow_simulation_trades(context, outcomes))
+
+    assert trades == [family_key]
+
+
+def test_prediction_cycle_context_caches_live_feature_windows() -> None:
+    calls = []
+
+    def loader(*args, **_kwargs):
+        calls.append(args)
+        return np.ones((1, 2, 2), dtype=np.float32), {"entryOpenTime": ENTRY_OPEN_TIME}
+
+    context = PredictionCycleContext()
+    first, first_meta = context.live_feature_window(
+        loader,
+        "BTCUSDT",
+        DEFAULT_DURATION,
+        ["a", "b"],
+        2,
+        ENTRY_OPEN_TIME,
+        "catboost",
+    )
+    second, second_meta = context.live_feature_window(
+        loader,
+        "BTCUSDT",
+        DEFAULT_DURATION,
+        ["a", "b"],
+        2,
+        ENTRY_OPEN_TIME,
+        "xgboost",
+    )
+
+    first[0, 0, 0] = 9.0
+
+    assert len(calls) == 1
+    assert second[0, 0, 0] == 1.0
+    assert first_meta == second_meta == {"entryOpenTime": ENTRY_OPEN_TIME}
+
+
 def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatch) -> None:
     calls = []
     targets = [_settings(FACTOR_COMBO_STRATEGY_KEY)]
@@ -475,7 +633,7 @@ def test_predict_due_entries_collects_candidates_when_primary_not_due(monkeypatc
     ]
 
 
-def test_predict_due_entries_runs_final_decision_after_candidates(monkeypatch) -> None:
+def test_predict_due_entries_runs_final_decision_after_required_candidates(monkeypatch) -> None:
     calls = []
     primary = _settings(FACTOR_COMBO_STRATEGY_KEY)
     final = _settings(EVENT_FINAL_DECISION_STRATEGY_KEY)
@@ -490,6 +648,13 @@ def test_predict_due_entries_runs_final_decision_after_candidates(monkeypatch) -
     async def collect(settings_list: list[AutoTradeSettings]) -> None:
         calls.append(("collect", [item.strategy_key for item in settings_list]))
 
+    async def required(settings_list: list[AutoTradeSettings]):
+        calls.append(("required", [item.strategy_key for item in settings_list]))
+        return [("batch", [])]
+
+    async def observe(settings_list: list[AutoTradeSettings], _batches) -> None:
+        calls.append(("observe", [item.strategy_key for item in settings_list]))
+
     async def backfill(settings_list: list[AutoTradeSettings]) -> None:
         calls.append(("backfill", [item.strategy_key for item in settings_list]))
 
@@ -498,6 +663,8 @@ def test_predict_due_entries_runs_final_decision_after_candidates(monkeypatch) -
     monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
     monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
     monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
+    monkeypatch.setattr(service, "_run_final_decision_required_candidate_batch", required)
+    monkeypatch.setattr(service, "_run_observe_only_candidate_collection_batch", observe)
     monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
 
     asyncio.run(service._predict_due_entries(targets))
@@ -505,9 +672,10 @@ def test_predict_due_entries_runs_final_decision_after_candidates(monkeypatch) -
     assert calls == [
         ("prepare", [FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY]),
         ("run_batch", [FACTOR_COMBO_STRATEGY_KEY]),
-        ("collect", [FACTOR_COMBO_STRATEGY_KEY]),
-        ("backfill", [FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY]),
+        ("required", [FACTOR_COMBO_STRATEGY_KEY]),
         ("run_batch", [EVENT_FINAL_DECISION_STRATEGY_KEY]),
+        ("observe", [FACTOR_COMBO_STRATEGY_KEY]),
+        ("backfill", [FACTOR_COMBO_STRATEGY_KEY, EVENT_FINAL_DECISION_STRATEGY_KEY]),
     ]
 
 
@@ -1021,6 +1189,28 @@ def test_candidate_collection_batch_error_has_details() -> None:
     assert logged[0][0] == "candidate collection failed strategy=%s symbol=%s duration=%s"
     assert logged[0][1] == (FACTOR_COMBO_STRATEGY_KEY, "BTCUSDT", DEFAULT_DURATION)
     assert logged[0][2][0] is RuntimeError
+
+
+def test_candidate_collection_batch_error_exposes_nested_details() -> None:
+    setting = _settings(FACTOR_COMBO_STRATEGY_KEY)
+
+    class NestedFailure(RuntimeError):
+        details = [{"family": "catboost", "error": "catboost failed"}]
+
+    async def save_collection(_setting: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
+        del write_lock
+        raise NestedFailure("model family shadow failed")
+
+    class Logger:
+        def error(self, *_args, **_kwargs) -> None:
+            return None
+
+    try:
+        asyncio.run(service.runtime_helpers.run_candidate_collection_batch([setting], save_collection, Logger()))
+    except service.runtime_helpers.CandidateCollectionBatchError as exc:
+        assert exc.details[0]["details"] == [{"family": "catboost", "error": "catboost failed"}]
+    else:
+        raise AssertionError("nested candidate collection failure details were not exposed")
 
 
 def test_prediction_failures_include_base_exceptions() -> None:

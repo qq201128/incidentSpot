@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from app.db.session import get_conn
@@ -12,7 +11,6 @@ from app.services.position_guard import has_open_position
 from app.services.rule_config import DURATION_TO_MINUTES
 
 MARKET_REGIME_GATE_STAGE = "market_regime_trade_gate"
-logger = logging.getLogger("uvicorn.error")
 
 
 def create_batch_combo_simulation_trade(
@@ -29,14 +27,6 @@ def create_batch_combo_simulation_trade(
         direction=str(prediction["direction"]),
     )
     if not regime_decision.allowed:
-        logger.info(
-            "batch combo simulation skipped by market regime strategy=%s symbol=%s duration=%s reason=%s regime=%s",
-            settings.strategy_key,
-            settings.symbol,
-            settings.duration,
-            regime_decision.reason,
-            regime_decision.regime,
-        )
         _log_market_regime_skip(settings, prediction, regime_decision)
         return None
     return create_trade_from_prediction(settings, prediction)

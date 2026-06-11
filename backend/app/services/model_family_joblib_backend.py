@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import time
 
 import joblib
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
+from app.services.prediction_timing import record_timing
 from app.services.model_family_joblib_extra_estimators import (
     catboost_estimator,
     extra_trees_estimator,
@@ -57,33 +59,36 @@ class JoblibModelBackend:
             raise RuntimeError("joblib model has not been trained")
         return _predict_model(model, x)
 
-    def predict(self, model_path: Path, x: np.ndarray) -> np.ndarray:
+    def predict(self, model_path: Path, x: np.ndarray, *, timings: dict[str, Any] | None = None) -> np.ndarray:
+        started = time.perf_counter()
         model = joblib.load(model_path)
-        return _predict_model(model, x)
+        record_timing(timings, "modelLoadSeconds", started)
+        started = time.perf_counter()
+        result = _predict_model(model, x)
+        record_timing(timings, "modelPredictSeconds", started)
+        return result
 
 
 def _estimator(options: JoblibModelOptions):
-    if options.family == "random_forest":
-        return _random_forest(options)
-    if options.family == "extra_trees":
-        return extra_trees_estimator(options.params, options.seed)
-    if options.family == "xgboost":
-        return _xgboost(options)
-    if options.family == "lightgbm":
-        return lightgbm_estimator(options.params, options.seed)
-    if options.family == "catboost":
-        return catboost_estimator(options.params, options.seed)
-    if options.family == "logistic_elasticnet":
-        return logistic_elasticnet_estimator(options.params, options.seed)
-    if options.family == "svm":
-        return _svm(options)
-    if options.family == "bayesian":
-        return _bayesian(options)
-    if options.family == "knn":
-        return _knn(options)
-    if options.family == "rl_strategy":
-        return _rl_strategy(options)
+    for family, factory in _estimator_factories():
+        if options.family == family:
+            return factory(options)
     raise ValueError(f"unsupported joblib model family: {options.family}")
+
+
+def _estimator_factories():
+    return (
+        ("random_forest", _random_forest),
+        ("extra_trees", lambda options: extra_trees_estimator(options.params, options.seed)),
+        ("xgboost", _xgboost),
+        ("lightgbm", lambda options: lightgbm_estimator(options.params, options.seed)),
+        ("catboost", lambda options: catboost_estimator(options.params, options.seed)),
+        ("logistic_elasticnet", lambda options: logistic_elasticnet_estimator(options.params, options.seed)),
+        ("svm", _svm),
+        ("bayesian", _bayesian),
+        ("knn", _knn),
+        ("rl_strategy", _rl_strategy),
+    )
 
 
 def _fit_estimator(model, train_x: np.ndarray, train_y: np.ndarray, val_x: np.ndarray, val_y: np.ndarray, options: JoblibModelOptions) -> None:
@@ -274,7 +279,6 @@ def _sigmoid(value: np.ndarray) -> np.ndarray:
     result[positive] = 1.0 / (1.0 + np.exp(-value[positive]))
     result[~positive] = negative_exp / (1.0 + negative_exp)
     return result
-
 
 def _rl_features(x: np.ndarray) -> np.ndarray:
     values = x.reshape(x.shape[0], -1).astype(np.float32)

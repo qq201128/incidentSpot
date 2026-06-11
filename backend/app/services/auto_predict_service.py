@@ -25,10 +25,12 @@ from app.services.rule_signal_service import predict_rule_direction
 from app.services.strategy_registry import DEFAULT_STRATEGY_KEY, FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
 from app.services.strategy_prediction_readiness import strategy_prediction_readiness
 from app.services.model_family_prediction_service import predict_model_family_shadow_prediction
+from app.services.model_family_prediction_runtime import PredictionCycleContext
 from app.services.model_family_status_service import model_family_status
 from app.services import auto_predict_targets as target_helpers
 from app.services import auto_predict_candidate_collection as collection_helpers
 from app.services import auto_predict_cycle_summary as cycle_helpers
+from app.services import auto_predict_due_entries as due_entry_helpers
 from app.services import auto_predict_input_deps as input_deps
 from app.services import auto_predict_shadow as shadow_helpers
 from app.services import auto_predict_runtime as runtime_helpers
@@ -36,6 +38,7 @@ logger = logging.getLogger("uvicorn.error")
 _SUBSCRIBERS: dict[tuple[str, str, str], set] = {}
 DEFAULT_PREDICT_SECONDS = 1
 DEFAULT_DURATION = "10m"
+FinalCandidateBatch = tuple[collection_helpers.CandidateCollectionContext, list[collection_helpers.ModelFamilyShadowOutcome]]
 
 
 def _predict_initial_delay_seconds() -> float:
@@ -73,62 +76,24 @@ async def auto_predict_loop(stop_event: asyncio.Event, poll_seconds: int = DEFAU
             record_auto_predict_loop_stopped("stop_between_cycles")
             return
 async def _predict_due_entries(targets: list[AutoTradeSettings]) -> dict[str, Any]:
-    due_result = await asyncio.to_thread(_ready_due_prediction_targets, targets)
-    due_targets = list(due_result.ready)
-    skipped_targets = list(due_result.skipped)
-    collection_targets = await asyncio.to_thread(_candidate_collection_targets, targets)
-    cycle_targets = cycle_helpers.prediction_cycle_targets(
-        targets,
-        due_targets,
-        collection_targets,
-        skipped_targets=skipped_targets,
+    return await due_entry_helpers.predict_due_entries(targets, _predict_due_entry_deps())
+
+
+def _predict_due_entry_deps() -> due_entry_helpers.PredictDueEntryDeps:
+    return due_entry_helpers.PredictDueEntryDeps(
+        ready_due_prediction_targets=_ready_due_prediction_targets,
+        candidate_collection_targets=_candidate_collection_targets,
+        prediction_cycle_targets=cycle_helpers.prediction_cycle_targets,
+        record_prediction_progress=cycle_helpers.record_prediction_progress,
+        prediction_cycle_summary=cycle_helpers.prediction_cycle_summary,
+        prepare_prediction_inputs=_prepare_prediction_inputs,
+        run_prediction_batch=_run_prediction_batch,
+        run_candidate_collection_batch=_run_candidate_collection_batch,
+        run_final_decision_required_candidate_batch=_run_final_decision_required_candidate_batch,
+        run_observe_only_candidate_collection_batch=_run_observe_only_candidate_collection_batch,
+        backfill_lstm_shadow_predictions=_backfill_lstm_shadow_predictions,
+        logger=logger,
     )
-    primary_due_targets, final_due_targets = _split_final_decision_targets(due_targets)
-    active_targets = list(cycle_targets.active)
-    cycle_helpers.record_prediction_progress(cycle_targets, "inputs_preparing")
-    if not active_targets:
-        return cycle_helpers.prediction_cycle_summary(cycle_targets)
-    await _prepare_prediction_inputs(active_targets)
-    cycle_helpers.record_prediction_progress(cycle_targets, "primary_prediction_running")
-    prediction_error = None
-    if primary_due_targets:
-        try:
-            await _run_prediction_batch(primary_due_targets)
-        except Exception as exc:
-            logger.exception("primary prediction batch failed; candidate collection will still run")
-            prediction_error = exc
-    cycle_helpers.record_prediction_progress(cycle_targets, "primary_prediction_done")
-    if collection_targets:
-        cycle_helpers.record_prediction_progress(cycle_targets, "candidate_collection_running")
-        await _run_candidate_collection_batch(collection_targets)
-    cycle_helpers.record_prediction_progress(cycle_targets, "shadow_backfill_running")
-    await _backfill_lstm_shadow_predictions(active_targets)
-    final_error = None
-    if final_due_targets:
-        cycle_helpers.record_prediction_progress(cycle_targets, "final_decision_running")
-        try:
-            await _run_prediction_batch(final_due_targets)
-        except Exception as exc:
-            logger.exception("final decision prediction batch failed")
-            final_error = exc
-    if prediction_error is not None:
-        raise prediction_error
-    if final_error is not None:
-        raise final_error
-    return cycle_helpers.prediction_cycle_summary(cycle_targets)
-
-
-def _split_final_decision_targets(
-    targets: list[AutoTradeSettings],
-) -> tuple[list[AutoTradeSettings], list[AutoTradeSettings]]:
-    primary = []
-    final = []
-    for settings in targets:
-        if settings.strategy_key == EVENT_FINAL_DECISION_STRATEGY_KEY:
-            final.append(settings)
-        else:
-            primary.append(settings)
-    return primary, final
 async def _prepare_prediction_inputs(settings_list: list[AutoTradeSettings]) -> None:
     await runtime_helpers.prepare_prediction_inputs(settings_list, input_deps.runtime_deps())
 async def _run_prediction_batch(settings_list: list[AutoTradeSettings]) -> None:
@@ -154,6 +119,23 @@ async def _run_prediction(settings: AutoTradeSettings, *, write_lock: asyncio.Lo
     )
 async def _run_candidate_collection_batch(settings_list: list[AutoTradeSettings]) -> None:
     await runtime_helpers.run_candidate_collection_batch(settings_list, _save_candidate_collection_predictions, logger)
+async def _run_final_decision_required_candidate_batch(settings_list: list[AutoTradeSettings]) -> list[FinalCandidateBatch]:
+    batches: list[FinalCandidateBatch] = []
+
+    async def save_required(settings: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
+        context = _candidate_collection_context(settings, current_rule_entry_open_time_for_duration(settings.duration), write_lock)
+        outcomes = await collection_helpers.save_final_decision_required_predictions(context)
+        batches.append((context, outcomes))
+
+    await runtime_helpers.run_candidate_collection_batch(settings_list, save_required, logger)
+    return batches
+async def _run_observe_only_candidate_collection_batch(
+    settings_list: list[AutoTradeSettings],
+    final_candidate_batches: list[FinalCandidateBatch],
+) -> None:
+    for context, outcomes in final_candidate_batches:
+        await collection_helpers.save_model_family_shadow_simulation_trades(context, outcomes)
+    await runtime_helpers.run_candidate_collection_batch(settings_list, _save_observe_only_candidate_collection_predictions, logger)
 async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time: int) -> dict | None:
     if settings.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
         return await asyncio.to_thread(
@@ -181,19 +163,9 @@ async def _save_candidate_collection_predictions(settings: AutoTradeSettings, *,
     await collection_helpers.save_candidate_collection_predictions(
         _candidate_collection_context(settings, entry_open_time, write_lock)
     )
-async def _save_factor_combo_shadow_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
-    await collection_helpers.save_factor_combo_shadow_predictions(
-        _candidate_collection_context(settings, entry_open_time, write_lock)
-    )
-async def _save_model_family_shadow_predictions(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
-    if settings.strategy_key == FACTOR_COMBO_STRATEGY_KEY:
-        for family in MODEL_FAMILIES:
-            await _save_one_model_family_shadow_prediction(
-                family,
-                {"settings": settings, "entry_open_time": entry_open_time, "write_lock": write_lock},
-            )
-async def _save_factor_candidate_signals(settings: AutoTradeSettings, entry_open_time: int, write_lock: asyncio.Lock) -> None:
-    await collection_helpers.save_factor_candidate_signals(
+async def _save_observe_only_candidate_collection_predictions(settings: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
+    entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
+    await collection_helpers.save_observe_only_candidate_collection_predictions(
         _candidate_collection_context(settings, entry_open_time, write_lock)
     )
 async def _save_lstm_shadow_prediction(settings, entry_open_time, write_lock) -> None:
@@ -210,8 +182,6 @@ async def _save_one_model_family_shadow_prediction(family, context) -> None:
     await collection_helpers.save_one_model_family_shadow_prediction(
         collection_helpers.ModelFamilyShadowContext(family, collection_context)
     )
-async def _save_model_family_shadow_trade(parent: AutoTradeSettings, result: dict) -> None:
-    await collection_helpers.save_model_family_shadow_trade(parent, result, create_batch_combo_simulation_trade)
 def _candidate_collection_context(
     settings: AutoTradeSettings,
     entry_open_time: int,
@@ -219,7 +189,7 @@ def _candidate_collection_context(
 ) -> collection_helpers.CandidateCollectionContext:
     return collection_helpers.CandidateCollectionContext(settings, entry_open_time, write_lock, _collection_deps())
 def _collection_deps() -> dict[str, Any]:
-    return {"predict_eligible_factor_combo_rows": predict_eligible_factor_combo_rows, "predict_factor_candidate_signals": predict_factor_candidate_signals, "create_batch_combo_simulation_trade": create_batch_combo_simulation_trade, "save_prediction": _save_prediction, "lstm_model_status": lstm_model_status, "model_family_status": model_family_status, "predict_lstm_shadow_prediction": predict_lstm_shadow_prediction, "predict_model_family_shadow_prediction": predict_model_family_shadow_prediction, "log_model_family_shadow_skip": _log_model_family_shadow_skip}
+    return {"predict_eligible_factor_combo_rows": predict_eligible_factor_combo_rows, "predict_factor_candidate_signals": predict_factor_candidate_signals, "create_batch_combo_simulation_trade": create_batch_combo_simulation_trade, "save_prediction": _save_prediction, "lstm_model_status": lstm_model_status, "model_family_status": model_family_status, "predict_lstm_shadow_prediction": predict_lstm_shadow_prediction, "predict_model_family_shadow_prediction": predict_model_family_shadow_prediction, "prediction_cycle_context": PredictionCycleContext(), "log_model_family_shadow_skip": _log_model_family_shadow_skip}
 async def _save_prediction(result: dict, write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
     async with write_lock:
         return await asyncio.to_thread(save_prediction, result, allow_existing=allow_existing)

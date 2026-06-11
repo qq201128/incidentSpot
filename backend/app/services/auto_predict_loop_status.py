@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
@@ -29,12 +30,15 @@ _STATE: dict[str, Any] = {
     "skippedTargetCount": 0,
     "skippedTargets": [],
     "phase": None,
+    "currentTask": None,
+    "currentTasks": [],
+    "lastTaskTiming": None,
 }
 
 
 def auto_predict_loop_status() -> dict[str, Any]:
     with _LOCK:
-        return dict(_STATE)
+        return _status_snapshot(_STATE)
 
 
 def record_auto_predict_loop_start(*, initial_delay: float, poll_seconds: int) -> None:
@@ -55,6 +59,9 @@ def record_auto_predict_loop_start(*, initial_delay: float, poll_seconds: int) -
         skippedTargetCount=0,
         skippedTargets=[],
         phase="initial_delay" if initial_delay > 0 else "starting",
+        currentTask=None,
+        currentTasks=[],
+        lastTaskTiming=None,
         stoppedAt=None,
         stopReason=None,
     )
@@ -110,6 +117,8 @@ def record_auto_predict_cycle_success(
         skippedTargetCount=len(skipped_targets),
         skippedTargets=skipped_targets,
         phase="completed",
+        currentTask=None,
+        currentTasks=[],
         stoppedAt=None,
         stopReason=None,
     )
@@ -134,15 +143,63 @@ def record_auto_predict_cycle_failure(exc: Exception, next_wait_seconds: float) 
         skippedTargetCount=0,
         skippedTargets=[],
         phase=None,
+        currentTask=None,
+        currentTasks=[],
         stoppedAt=None,
         stopReason=None,
     )
 
 
+def record_auto_predict_current_task(task: dict[str, Any]) -> str:
+    started_at = _utc_now()
+    task_id = _task_id(task)
+    current = {**task, "taskId": task_id, "startedAt": started_at, "elapsedSeconds": 0.0}
+    with _LOCK:
+        _STATE["status"] = STATUS_RUNNING
+        _STATE["updatedAt"] = started_at
+        _STATE["currentTasks"] = _upsert_task(_current_tasks(), current)
+        _STATE["currentTask"] = current
+    return task_id
+
+
+def record_auto_predict_current_task_progress(task_id: str | None = None, **changes: Any) -> None:
+    updated_at = _utc_now()
+    with _LOCK:
+        current = _matching_current_task(task_id)
+        if isinstance(current, dict):
+            updated = {**current, **changes, "updatedAt": updated_at}
+            _STATE["currentTasks"] = _upsert_task(_current_tasks(), updated)
+            _STATE["currentTask"] = updated
+            _STATE["updatedAt"] = updated_at
+
+
+def record_auto_predict_current_task_done(timings: dict[str, Any], task_id: str | None = None) -> None:
+    finished_at = _utc_now()
+    with _LOCK:
+        current = _matching_current_task(task_id)
+        if isinstance(current, dict):
+            _STATE["lastTaskTiming"] = {
+                **current,
+                "finishedAt": finished_at,
+                "elapsedSeconds": _elapsed_seconds(str(current["startedAt"]), finished_at),
+                "timings": dict(timings),
+            }
+            _STATE["currentTasks"] = _remove_task(_current_tasks(), str(current["taskId"]))
+        remaining = _current_tasks()
+        _STATE["currentTask"] = remaining[-1] if remaining else None
+        _STATE["updatedAt"] = finished_at
+
+
 def record_auto_predict_loop_stopped(reason: str) -> None:
     record_loop_stopped(BACKGROUND_LOOP_NAME, reason)
     stopped_at = _utc_now()
-    changes = {"updatedAt": stopped_at, "stoppedAt": stopped_at, "stopReason": reason}
+    changes = {
+        "updatedAt": stopped_at,
+        "currentTask": None,
+        "currentTasks": [],
+        "stoppedAt": stopped_at,
+        "stopReason": reason,
+    }
     with _LOCK:
         failed = _STATE.get("status") == STATUS_FAILED
     if not failed:
@@ -153,6 +210,57 @@ def record_auto_predict_loop_stopped(reason: str) -> None:
 def _replace_state(**changes: Any) -> None:
     with _LOCK:
         _STATE.update(changes)
+
+
+def _status_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    snapshot = deepcopy(state)
+    current = snapshot.get("currentTask")
+    if isinstance(current, dict) and current.get("startedAt"):
+        current["elapsedSeconds"] = _elapsed_seconds(str(current["startedAt"]), _utc_now())
+    for task in snapshot.get("currentTasks") or []:
+        if isinstance(task, dict) and task.get("startedAt"):
+            task["elapsedSeconds"] = _elapsed_seconds(str(task["startedAt"]), _utc_now())
+    return snapshot
+
+
+def _task_id(task: dict[str, Any]) -> str:
+    parts = [
+        task.get("currentStage"),
+        task.get("currentFamily"),
+        task.get("symbol"),
+        task.get("duration"),
+        task.get("entryOpenTime"),
+    ]
+    return ":".join(str(part) for part in parts)
+
+
+def _current_tasks() -> list[dict[str, Any]]:
+    tasks = _STATE.get("currentTasks")
+    return list(tasks) if isinstance(tasks, list) else []
+
+
+def _matching_current_task(task_id: str | None) -> dict[str, Any] | None:
+    if task_id is None:
+        current = _STATE.get("currentTask")
+        return current if isinstance(current, dict) else None
+    for task in _current_tasks():
+        if task.get("taskId") == task_id:
+            return task
+    return None
+
+
+def _upsert_task(tasks: list[dict[str, Any]], task: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in tasks if item.get("taskId") != task.get("taskId")] + [task]
+
+
+def _remove_task(tasks: list[dict[str, Any]], task_id: str) -> list[dict[str, Any]]:
+    return [item for item in tasks if item.get("taskId") != task_id]
+
+
+def _elapsed_seconds(started_at: str, ended_at: str) -> float:
+    start = datetime.fromisoformat(started_at)
+    end = datetime.fromisoformat(ended_at)
+    return round(max((end - start).total_seconds(), 0.0), 6)
 
 
 def _utc_now() -> str:

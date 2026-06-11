@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.auto_predict_model_shadow_collection import (
+    ModelFamilyShadowContext,
+    ModelFamilyShadowOutcome,
+    save_model_family_shadow_trade_for_outcome,
+    save_model_family_shadow_trade,
+    save_one_model_family_shadow_prediction,
+)
 from app.services.model_family_config import MODEL_FAMILIES
 from app.services.paper_live_candidate_service import log_prediction_failure
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
+
+MODEL_FAMILY_SHADOW_CONCURRENCY = 3
 
 
 @dataclass(frozen=True)
@@ -19,12 +28,6 @@ class CandidateCollectionContext:
 
 
 @dataclass(frozen=True)
-class ModelFamilyShadowContext:
-    family: str
-    collection: CandidateCollectionContext
-
-
-@dataclass(frozen=True)
 class PredictionFailureContext:
     settings: AutoTradeSettings
     entry_open_time: int
@@ -33,12 +36,18 @@ class PredictionFailureContext:
 
 
 @dataclass(frozen=True)
-class ModelPredictionFailureContext:
-    settings: AutoTradeSettings
+class ModelFamilyShadowFailure:
     family: str
-    entry_open_time: int
-    exc: Exception
-    status: dict[str, Any]
+    exception: Exception
+
+
+class ModelFamilyShadowBatchError(RuntimeError):
+    def __init__(self, context: CandidateCollectionContext, failures: list[ModelFamilyShadowFailure]) -> None:
+        self.failures = tuple(failures)
+        self.details = [_model_family_shadow_failure_detail(context, failure) for failure in failures]
+        families = ", ".join(failure.family for failure in failures)
+        settings = context.settings
+        super().__init__(f"model family shadow prediction failed for {settings.symbol}:{settings.duration}: {families}")
 
 
 async def save_candidate_collection_predictions(context: CandidateCollectionContext) -> None:
@@ -47,13 +56,79 @@ async def save_candidate_collection_predictions(context: CandidateCollectionCont
     await save_model_family_shadow_predictions(context)
 
 
+async def save_final_decision_required_predictions(
+    context: CandidateCollectionContext,
+) -> list[ModelFamilyShadowOutcome]:
+    return await _save_model_family_shadow_predictions(context, create_simulation_trades=False)
+
+
+async def save_observe_only_candidate_collection_predictions(context: CandidateCollectionContext) -> None:
+    await save_factor_candidate_signals(context)
+    await save_factor_combo_shadow_predictions(context)
+
+
 async def save_model_family_shadow_predictions(
     context: CandidateCollectionContext,
-) -> None:
+) -> list[ModelFamilyShadowOutcome]:
+    return await _save_model_family_shadow_predictions(context, create_simulation_trades=True)
+
+
+async def _save_model_family_shadow_predictions(
+    context: CandidateCollectionContext,
+    *,
+    create_simulation_trades: bool,
+) -> list[ModelFamilyShadowOutcome]:
     if context.settings.strategy_key != FACTOR_COMBO_STRATEGY_KEY:
-        return
-    for family in MODEL_FAMILIES:
-        await save_one_model_family_shadow_prediction(ModelFamilyShadowContext(family, context))
+        return []
+    outcomes, failures = await _run_model_family_shadow_predictions(context, MODEL_FAMILIES, create_simulation_trades)
+    if failures:
+        raise ModelFamilyShadowBatchError(context, failures) from failures[0].exception
+    return outcomes
+
+
+async def _run_model_family_shadow_predictions(
+    context: CandidateCollectionContext,
+    families: tuple[str, ...],
+    create_simulation_trades: bool,
+) -> tuple[list[ModelFamilyShadowOutcome], list[ModelFamilyShadowFailure]]:
+    semaphore = asyncio.Semaphore(MODEL_FAMILY_SHADOW_CONCURRENCY)
+    results = await asyncio.gather(
+        *(
+            _run_model_family_shadow_prediction(semaphore, context, family, create_simulation_trades)
+            for family in families
+        )
+    )
+    failures = [item for item in results if isinstance(item, ModelFamilyShadowFailure)]
+    outcomes = [item for item in results if isinstance(item, ModelFamilyShadowOutcome)]
+    return outcomes, failures
+
+
+async def _run_model_family_shadow_prediction(
+    semaphore: asyncio.Semaphore,
+    context: CandidateCollectionContext,
+    family: str,
+    create_simulation_trade: bool,
+) -> ModelFamilyShadowOutcome | ModelFamilyShadowFailure:
+    async with semaphore:
+        try:
+            return await save_one_model_family_shadow_prediction(
+                ModelFamilyShadowContext(family, context),
+                create_simulation_trade=create_simulation_trade,
+            )
+        except Exception as exc:
+            return ModelFamilyShadowFailure(family, exc)
+
+
+async def save_model_family_shadow_simulation_trades(
+    context: CandidateCollectionContext,
+    outcomes: list[ModelFamilyShadowOutcome],
+) -> None:
+    for outcome in outcomes:
+        await save_model_family_shadow_trade_for_outcome(
+            context.settings,
+            outcome,
+            context.deps["create_batch_combo_simulation_trade"],
+        )
 
 
 async def save_factor_combo_shadow_predictions(context: CandidateCollectionContext) -> None:
@@ -103,45 +178,6 @@ async def _save_prediction_and_simulation_trade(
         await asyncio.to_thread(context.deps["create_batch_combo_simulation_trade"], context.settings, result)
 
 
-async def save_one_model_family_shadow_prediction(context: ModelFamilyShadowContext) -> None:
-    family = context.family
-    collection = context.collection
-    deps = collection.deps
-    settings = collection.settings
-    status_loader = deps["lstm_model_status"] if family == "lstm" else deps["model_family_status"]
-    status_args = (settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)
-    status = await asyncio.to_thread(status_loader, *status_args)
-    if not status.get("shadowPredictionReady"):
-        _log_model_skip((settings, family, status, collection.entry_open_time))
-        deps["log_model_family_shadow_skip"](settings, family, status, role="sidecar")
-        return
-    predictor = deps["predict_lstm_shadow_prediction"] if family == "lstm" else deps["predict_model_family_shadow_prediction"]
-    args = (settings.symbol, settings.duration) if family == "lstm" else (family, settings.symbol, settings.duration)
-    try:
-        result = await asyncio.to_thread(predictor, *args, entry_open_time=collection.entry_open_time)
-    except Exception as exc:
-        _log_model_prediction_failure(ModelPredictionFailureContext(settings, family, collection.entry_open_time, exc, status))
-        raise
-    saved = await deps["save_prediction"](result, collection.write_lock)
-    if saved:
-        # Shadow sidecar is observe-only: any shadow-ready prediction gets a SIM event,
-        # not only models promoted to trade_active with validation gate passed.
-        await save_model_family_shadow_trade(
-            settings,
-            _shadow_trade_payload(settings, result),
-            deps["create_batch_combo_simulation_trade"],
-        )
-
-
-async def save_model_family_shadow_trade(
-    parent: AutoTradeSettings,
-    result: dict,
-    create_trade: Callable[[AutoTradeSettings, dict], Any],
-) -> None:
-    if result.get("trade_quality_passed"):
-        await asyncio.to_thread(create_trade, parent, result)
-
-
 def _log_collection_failure(context: PredictionFailureContext) -> None:
     log_prediction_failure(
         candidate_key=context.settings.strategy_key,
@@ -154,40 +190,17 @@ def _log_collection_failure(context: PredictionFailureContext) -> None:
     )
 
 
-def _shadow_trade_payload(parent: AutoTradeSettings, result: dict[str, Any]) -> dict[str, Any]:
+def _model_family_shadow_failure_detail(
+    context: CandidateCollectionContext,
+    failure: ModelFamilyShadowFailure,
+) -> dict[str, Any]:
+    settings = context.settings
     return {
-        **result,
-        "trade_quality_passed": True,
+        "family": failure.family,
+        "strategyKey": settings.strategy_key,
+        "symbol": settings.symbol,
+        "duration": settings.duration,
+        "entryOpenTime": int(context.entry_open_time),
+        "error": str(failure.exception),
+        "exceptionType": type(failure.exception).__name__,
     }
-
-
-def _log_model_skip(context: tuple[AutoTradeSettings, str, dict[str, Any], int]) -> None:
-    settings, family, status, entry_open_time = context
-    reason = str(status.get("shadowPredictionBlockedReason") or status.get("reason") or "model_shadow_not_ready")
-    log_prediction_failure(
-        candidate_key=f"{family}:{settings.symbol.upper()}:{settings.duration}",
-        strategy_key=settings.strategy_key,
-        symbol=settings.symbol,
-        duration=settings.duration,
-        stage="model_shadow_readiness",
-        reason=reason,
-        details={"family": family, "entryOpenTime": int(entry_open_time), "status": status.get("status")},
-    )
-
-
-def _log_model_prediction_failure(context: ModelPredictionFailureContext) -> None:
-    log_prediction_failure(
-        candidate_key=f"{context.family}:{context.settings.symbol.upper()}:{context.settings.duration}",
-        strategy_key=context.settings.strategy_key,
-        symbol=context.settings.symbol,
-        duration=context.settings.duration,
-        stage="model_shadow_prediction",
-        reason=str(context.exc),
-        details={
-            "family": context.family,
-            "entryOpenTime": int(context.entry_open_time),
-            "exceptionType": type(context.exc).__name__,
-            "modelVersion": context.status.get("modelVersion"),
-            "status": context.status.get("status"),
-        },
-    )

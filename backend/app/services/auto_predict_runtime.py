@@ -99,16 +99,20 @@ def prediction_failures(settings_list: list[AutoTradeSettings], results: list[ob
     ]
 
 
-def _failure_detail(failure: PredictionFailure) -> dict[str, str]:
+def _failure_detail(failure: PredictionFailure) -> dict[str, Any]:
     settings = failure.settings
     exc = failure.exception
-    return {
+    detail = {
         "strategyKey": settings.strategy_key,
         "symbol": settings.symbol,
         "duration": settings.duration,
         "error": str(exc),
         "exceptionType": type(exc).__name__,
     }
+    nested = getattr(exc, "details", None)
+    if nested is not None:
+        detail["details"] = nested
+    return detail
 
 
 def _exception_detail(exc: BaseException) -> dict[str, str]:

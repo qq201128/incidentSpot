@@ -143,14 +143,6 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
         direction=str(prediction["direction"]),
     )
     if not regime_decision.allowed:
-        logger.info(
-            "auto trade skipped by market regime strategy=%s symbol=%s duration=%s reason=%s regime=%s",
-            settings.strategy_key,
-            settings.symbol,
-            settings.duration,
-            regime_decision.reason,
-            regime_decision.regime,
-        )
         return None
     result = _create_trade(settings, prediction)
     logger.info(

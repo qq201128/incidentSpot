@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from app.services.lstm_artifacts import artifact_paths, read_json, require_json, required_artifacts_exist
+from app.services.lstm_artifacts import artifact_paths, read_json, required_artifacts_exist
 from app.services.lstm_feature_builder import (
     build_live_feature_window,
 )
@@ -20,11 +20,19 @@ from app.services.model_family_config import (
     normalize_model_family,
 )
 from app.services.model_family_joblib_backend import JoblibModelBackend
+from app.services.model_family_prediction_runtime import (
+    PredictionCycleContext,
+    live_feature_window_for_context,
+    live_feature_windows_for_context,
+    predict_backend,
+    prediction_artifacts_for_context,
+)
 from app.services.model_family_status_service import (
     active_model_family_status,
     model_family_status,
     model_validation_block_reason,
 )
+from app.services.prediction_timing import timed_call
 from app.services.model_family_torch_backend import TorchSequenceBackend
 
 
@@ -36,32 +44,63 @@ def predict_model_family_signal(
     entry_open_time: int | None = None,
     artifact_root: Path | None = None,
     backend: Any | None = None,
+    timings: dict[str, Any] | None = None,
+    cycle_context: PredictionCycleContext | None = None,
 ) -> dict[str, Any]:
     selected = normalize_model_family(family)
     sym = symbol.strip().upper()
     paths = artifact_paths(sym, duration, artifact_root, family=selected)
-    _assert_predictable(selected, sym, duration, paths, artifact_root=artifact_root)
-    features = require_json(paths.features, "features")
-    scaler = require_json(paths.scaler, "scaler")
-    version = require_json(paths.version, "version")
-    report = require_json(paths.report, "training report")
-    window, meta = build_live_feature_window(
-        sym,
-        duration,
-        list(features["columns"]),
-        int(features["featureWindow"]),
-        entry_open_time,
-        model_family=selected,
+    status = timed_call(
+        "readinessSeconds",
+        timings,
+        lambda: _assert_predictable(selected, sym, duration, paths, artifact_root=artifact_root),
     )
-    raw_probability = float((backend or _default_backend(selected)).predict(paths.model, apply_standardizer(window, scaler))[0])
-    status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
+    features, scaler, version, report = timed_call(
+        "artifactJsonSeconds",
+        timings,
+        lambda: prediction_artifacts_for_context(paths, cycle_context),
+    )
+    window, meta = timed_call(
+        "featureWindowSeconds",
+        timings,
+        lambda: live_feature_window_for_context(
+            build_live_feature_window,
+            sym,
+            duration,
+            list(features["columns"]),
+            int(features["featureWindow"]),
+            entry_open_time,
+            selected,
+            cycle_context,
+        )
+    )
+    raw_probability = float(
+        predict_backend(selected, paths.model, apply_standardizer(window, scaler), backend, _default_backend, timings)[0]
+    )
     payload = _version_payload(version, report)
     probability_up = _calibrated_probability(raw_probability, payload)
     return _signal_payload(selected, sym, duration, probability_up, meta, features, payload, status)
 
 
-def predict_model_family_shadow_prediction(family: str, symbol: str, duration: str, *, entry_open_time: int | None = None) -> dict:
-    return _prediction_payload(predict_model_family_signal(family, symbol, duration, entry_open_time=entry_open_time))
+def predict_model_family_shadow_prediction(
+    family: str,
+    symbol: str,
+    duration: str,
+    *,
+    entry_open_time: int | None = None,
+    timings: dict[str, Any] | None = None,
+    cycle_context: PredictionCycleContext | None = None,
+) -> dict:
+    return _prediction_payload(
+        predict_model_family_signal(
+            family,
+            symbol,
+            duration,
+            entry_open_time=entry_open_time,
+            timings=timings,
+            cycle_context=cycle_context,
+        )
+    )
 
 
 def predict_model_family_shadow_predictions(
@@ -72,6 +111,8 @@ def predict_model_family_shadow_predictions(
     *,
     artifact_root: Path | None = None,
     backend: Any | None = None,
+    timings: dict[str, Any] | None = None,
+    cycle_context: PredictionCycleContext | None = None,
 ) -> list[dict[str, Any]]:
     selected = normalize_model_family(family)
     entries = sorted({int(item) for item in entry_open_times})
@@ -79,21 +120,33 @@ def predict_model_family_shadow_predictions(
         return []
     sym = symbol.strip().upper()
     paths = artifact_paths(sym, duration, artifact_root, family=selected)
-    _assert_predictable(selected, sym, duration, paths, artifact_root=artifact_root)
-    features = require_json(paths.features, "features")
-    scaler = require_json(paths.scaler, "scaler")
-    version = require_json(paths.version, "version")
-    report = require_json(paths.report, "training report")
-    windows, metas = _live_feature_windows(
-        sym,
-        duration,
-        list(features["columns"]),
-        int(features["featureWindow"]),
-        entries,
-        selected,
+    status = timed_call(
+        "readinessSeconds",
+        timings,
+        lambda: _assert_predictable(selected, sym, duration, paths, artifact_root=artifact_root),
     )
-    raw_probabilities = (backend or _default_backend(selected)).predict(paths.model, apply_standardizer(windows, scaler))
-    status = active_model_family_status(selected, sym, duration, artifact_root=artifact_root)
+    features, scaler, version, report = timed_call(
+        "artifactJsonSeconds",
+        timings,
+        lambda: prediction_artifacts_for_context(paths, cycle_context),
+    )
+    windows, metas = timed_call(
+        "featureWindowSeconds",
+        timings,
+        lambda: live_feature_windows_for_context(
+            build_live_feature_window,
+            sym,
+            duration,
+            list(features["columns"]),
+            int(features["featureWindow"]),
+            entries,
+            selected,
+            cycle_context,
+        ),
+    )
+    raw_probabilities = predict_backend(
+        selected, paths.model, apply_standardizer(windows, scaler), backend, _default_backend, timings
+    )
     version_payload = _version_payload(version, report)
     probabilities = _calibrated_probabilities(raw_probabilities, version_payload)
     return [
@@ -102,7 +155,7 @@ def predict_model_family_shadow_predictions(
     ]
 
 
-def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artifact_root: Path | None) -> None:
+def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artifact_root: Path | None) -> dict:
     version = read_json(paths.version) or {}
     report = read_json(paths.report) or {}
     status = active_model_family_status(family, symbol, duration, artifact_root=artifact_root)
@@ -112,26 +165,11 @@ def _assert_predictable(family: str, symbol: str, duration: str, paths, *, artif
         raise ValueError(f"{family} model artifacts are incomplete for {symbol} {duration}: {paths.root}")
     _assert_clean_event_features(paths)
     if status.get("status") != LSTM_STATUS_LEGACY_TRAINED:
-        return
+        return status
     reason = model_validation_block_reason(status, version, report)
     if reason != "passed":
         raise ValueError(f"{family} model is not ready for {symbol} {duration}: {reason}")
-
-
-def _live_feature_windows(
-    symbol: str,
-    duration: str,
-    columns: list[str],
-    feature_window: int,
-    entries: list[int],
-    family: str,
-):
-    windows, metas = [], []
-    for entry in entries:
-        window, meta = build_live_feature_window(symbol, duration, columns, feature_window, entry, model_family=family)
-        windows.append(window.reshape(feature_window, len(columns)))
-        metas.append(meta)
-    return np.asarray(windows, dtype=np.float32), metas
+    return status
 
 
 def _assert_clean_event_features(paths) -> None:
