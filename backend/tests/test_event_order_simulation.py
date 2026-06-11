@@ -105,6 +105,40 @@ def test_quick_trade_live_trading_calls_binance_and_writes_rows(monkeypatch: pyt
         ("1d", 0.85),
     ],
 )
+def test_live_quick_trade_passes_duration_payout_ratio_to_binance(
+    event_interval: str,
+    expected_payout_ratio: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_uri = _quick_trade_db_uri()
+    keeper = _quick_trade_conn(db_uri)
+    placed = []
+    monkeypatch.setattr(event_quick_trade, "get_conn", lambda: _connect_quick_trade(db_uri))
+    monkeypatch.setattr(event_quick_trade, "has_open_position", lambda *_args, **_kwargs: False)
+
+    def place_order(**kwargs):
+        placed.append(kwargs)
+        return {"externalOrderId": "live-1", "externalStatus": "PLACED", "response": {"success": True}}
+
+    monkeypatch.setattr(event_quick_trade, "place_event_contract_order", place_order)
+
+    result = create_quick_trade(_quick_trade_payload(live=True, event_interval=event_interval))
+
+    order = keeper.execute("SELECT * FROM orders WHERE id = ?", (result["orderId"],)).fetchone()
+    assert placed[0]["event_interval"] == event_interval
+    assert placed[0]["payout_ratio"] == expected_payout_ratio
+    assert order["price"] == expected_payout_ratio
+
+
+@pytest.mark.parametrize(
+    ("event_interval", "expected_payout_ratio"),
+    [
+        ("10m", 0.8),
+        ("30m", 0.85),
+        ("60m", 0.85),
+        ("1d", 0.85),
+    ],
+)
 def test_quick_trade_uses_duration_payout_ratio(
     event_interval: str,
     expected_payout_ratio: float,
