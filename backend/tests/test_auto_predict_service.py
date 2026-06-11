@@ -17,6 +17,7 @@ from app.services.factor_combo_simulation_keys import (
 )
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.lstm_config import lstm_shadow_strategy_key
+from app.services.lstm_dataset_core import LstmDataError
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_prediction_readiness import PredictionReadiness
 from app.services.strategy_registry import (
@@ -442,6 +443,59 @@ def test_model_family_shadow_prediction_failure_is_recorded(monkeypatch) -> None
                 "exceptionType": "RuntimeError",
                 "modelVersion": "xgboost_v2",
                 "status": "trade_active",
+            },
+        }
+    ]
+
+
+def test_model_family_shadow_lstm_data_error_is_skipped_without_exception(monkeypatch) -> None:
+    failures = []
+    logged_exceptions: list[Exception] = []
+
+    monkeypatch.setattr(
+        model_shadow_collection,
+        "log_prediction_failure",
+        lambda **kwargs: failures.append(kwargs),
+    )
+    monkeypatch.setattr(
+        model_shadow_collection.logger,
+        "exception",
+        lambda *_args, **_kwargs: logged_exceptions.append(True),
+    )
+
+    outcome = asyncio.run(
+        service.collection_helpers.save_one_model_family_shadow_prediction(
+            _model_context("gru", {
+                "model_family_status": lambda *_args: {
+                    "shadowPredictionReady": True,
+                    "modelVersion": "gru_v1",
+                    "status": "shadow_active",
+                },
+                "predict_model_family_shadow_prediction": lambda *_args, **_kwargs: (
+                    _ for _ in ()
+                ).throw(LstmDataError("missing completed LSTM source row at open_time=1781163000000")),
+                "save_prediction": lambda *_args, **_kwargs: None,
+                "create_batch_combo_simulation_trade": lambda *_args: None,
+            }),
+        )
+    )
+
+    assert outcome == service.collection_helpers.ModelFamilyShadowOutcome("gru", None, False)
+    assert logged_exceptions == []
+    assert failures == [
+        {
+            "candidate_key": "gru:BTCUSDT:10m",
+            "strategy_key": FACTOR_COMBO_STRATEGY_KEY,
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "stage": "model_shadow_data_not_ready",
+            "reason": "missing completed LSTM source row at open_time=1781163000000",
+            "details": {
+                "family": "gru",
+                "entryOpenTime": ENTRY_OPEN_TIME,
+                "exceptionType": "LstmDataError",
+                "modelVersion": "gru_v1",
+                "status": "shadow_active",
             },
         }
     ]

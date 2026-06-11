@@ -12,6 +12,7 @@ from app.services.auto_predict_loop_status import (
     record_auto_predict_current_task_progress,
 )
 from app.services.auto_trade_types import AutoTradeSettings
+from app.services.lstm_dataset_core import LstmDataError
 from app.services.paper_live_candidate_service import log_prediction_failure
 
 logger = logging.getLogger("uvicorn.error")
@@ -71,7 +72,6 @@ async def save_one_model_family_shadow_prediction(
         raise
     timings["totalSeconds"] = _elapsed(started)
     _record_model_shadow_done(timings, str(timings.get("outcome") or "completed"), None, task_id)
-    _log_model_shadow_timing(task, timings)
     return outcome
 
 
@@ -87,7 +87,12 @@ async def _save_one_model_family_shadow_prediction(
         timings["outcome"] = "skipped_not_ready"
         _record_model_shadow_skip(context, status)
         return ModelFamilyShadowOutcome(context.family, None, False)
-    result = await _model_shadow_prediction(context, status, timings, task_id)
+    try:
+        result = await _model_shadow_prediction(context, status, timings, task_id)
+    except LstmDataError as exc:
+        timings["outcome"] = "skipped_data_not_ready"
+        _log_model_data_not_ready(context, exc, status)
+        return ModelFamilyShadowOutcome(context.family, None, False)
     saved = await _save_model_shadow_result(
         context,
         result,
@@ -135,6 +140,8 @@ async def _model_shadow_prediction(
             timings,
             asyncio.to_thread(predictor, *args, **prediction_kwargs),
         )
+    except LstmDataError:
+        raise
     except Exception as exc:
         _log_model_prediction_failure(ModelPredictionFailureContext(settings, family, collection.entry_open_time, exc, status))
         raise
@@ -228,17 +235,6 @@ def _record_model_shadow_skip(context: ModelFamilyShadowContext, status: dict[st
     collection.deps["log_model_family_shadow_skip"](settings, family, status, role="sidecar")
 
 
-def _log_model_shadow_timing(task: dict[str, Any], timings: dict[str, Any]) -> None:
-    logger.info(
-        "model family shadow timing family=%s symbol=%s duration=%s entry=%s timings=%s",
-        task["currentFamily"],
-        task["symbol"],
-        task["duration"],
-        task["entryOpenTime"],
-        timings,
-    )
-
-
 def _shadow_trade_payload(result: dict[str, Any]) -> dict[str, Any]:
     return {**result, "trade_quality_passed": True}
 
@@ -254,6 +250,30 @@ def _log_model_skip(context: tuple[AutoTradeSettings, str, dict[str, Any], int])
         stage="model_shadow_readiness",
         reason=reason,
         details={"family": family, "entryOpenTime": int(entry_open_time), "status": status.get("status")},
+    )
+
+
+def _log_model_data_not_ready(
+    context: ModelFamilyShadowContext,
+    exc: LstmDataError,
+    status: dict[str, Any],
+) -> None:
+    collection = context.collection
+    settings = collection.settings
+    log_prediction_failure(
+        candidate_key=f"{context.family}:{settings.symbol.upper()}:{settings.duration}",
+        strategy_key=settings.strategy_key,
+        symbol=settings.symbol,
+        duration=settings.duration,
+        stage="model_shadow_data_not_ready",
+        reason=str(exc),
+        details={
+            "family": context.family,
+            "entryOpenTime": int(collection.entry_open_time),
+            "exceptionType": type(exc).__name__,
+            "modelVersion": status.get("modelVersion"),
+            "status": status.get("status"),
+        },
     )
 
 
