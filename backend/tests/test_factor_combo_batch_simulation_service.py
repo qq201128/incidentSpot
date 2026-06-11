@@ -30,6 +30,7 @@ def test_create_batch_combo_simulation_trade_observes_backtest_failed_prediction
         return {"eventId": 1}
 
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
+    monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
     monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
     monkeypatch.setattr(service, "create_trade_from_prediction", create_trade)
 
@@ -64,6 +65,7 @@ def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(mon
     }
 
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
+    monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
     monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _blocked_regime_gate)
     monkeypatch.setattr(service, "log_prediction_failure", lambda **kwargs: failures.append(kwargs))
     monkeypatch.setattr(service, "create_trade_from_prediction", lambda *_args: created.append(True))
@@ -76,6 +78,37 @@ def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(mon
     assert failures[0]["stage"] == service.MARKET_REGIME_GATE_STAGE
     assert failures[0]["reason"] == "counter_trend_down_vs_up"
     assert failures[0]["details"]["mode"] == "skip"
+
+
+def test_create_batch_combo_simulation_trade_skips_live_enabled_candidate(monkeypatch) -> None:
+    created = []
+    parent = AutoTradeSettings(
+        strategy_key="factor_combo_ranker_v1",
+        enabled=True,
+        symbol="BTCUSDT",
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=False,
+    )
+    prediction = {
+        "strategy_key": "paper_combo_live",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "open_time": 1_700_000_000_000,
+        "direction": "up",
+        "probability_up": 0.7,
+    }
+
+    monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: True)
+    monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
+    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(service, "create_trade_from_prediction", lambda *_args: created.append(True))
+
+    result = service.create_batch_combo_simulation_trade(parent, prediction)
+
+    assert result is None
+    assert created == []
 
 
 class _RegimeDecision:

@@ -790,6 +790,29 @@ def test_goal_combo_live_direction_uses_threshold_sign(
     assert signal["qualityPassed"] is True
 
 
+def test_live_signal_reweights_available_members_when_entry_member_score_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(factor_learning_signal_filter, "load_factor_learning_memory", lambda *_args: None)
+    frame = _trend_frame(260, direction="down")
+    frame["sparse_signal"] = frame["factor_signal"]
+    frame.loc[frame.index[-1], "sparse_signal"] = np.nan
+    row = {
+        **_median_direction_row(),
+        "factorName": "combo__factor_signal__sparse_signal",
+        "members": [
+            {"name": "factor_signal", "category": "return", "orientation": 1, "weight": 0.25},
+            {"name": "sparse_signal", "category": "return", "orientation": 1, "weight": 0.75},
+        ],
+    }
+
+    signal = build_live_signal_from_ranking(frame, row, symbol="BTCUSDT", duration="10m")
+
+    assert np.isfinite(signal["score"])
+    assert np.isfinite(signal["historicalMedianScore"])
+    assert signal["direction"] in {"up", "down"}
+
+
 def test_live_signal_direction_requires_historical_median(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

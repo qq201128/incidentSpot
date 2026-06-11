@@ -16,7 +16,14 @@ def combination_score(frame: pd.DataFrame, members: list[dict[str, Any]]) -> pd.
     weights = np.asarray([float(member.get("weight") or 0.0) for member in members], dtype=float)
     if float(weights.sum()) <= 0:
         return stacked.mean(axis=1).replace([np.inf, -np.inf], np.nan)
-    return stacked.dot(weights / weights.sum()).replace([np.inf, -np.inf], np.nan)
+    return _weighted_mean_score(stacked, weights).replace([np.inf, -np.inf], np.nan)
+
+
+def _weighted_mean_score(stacked: pd.DataFrame, weights: np.ndarray) -> pd.Series:
+    valid_weights = stacked.notna().mul(weights, axis=1)
+    total_weight = valid_weights.sum(axis=1)
+    weighted_sum = stacked.mul(weights, axis=1).sum(axis=1)
+    return (weighted_sum / total_weight).where(total_weight > 0)
 
 
 def oriented_zscore(series: pd.Series, orientation: int) -> pd.Series:

@@ -18,6 +18,8 @@ def create_batch_combo_simulation_trade(
     prediction: dict[str, Any],
 ) -> dict[str, Any] | None:
     settings = _batch_settings(parent, prediction)
+    if _live_trading_enabled(settings):
+        return None
     if _has_open_position(settings):
         return None
     regime_decision = evaluate_market_regime_trade_gate(
@@ -55,6 +57,22 @@ def _has_open_position(settings: AutoTradeSettings) -> bool:
             event_interval=settings.duration,
             require_market_regime_gate_passed=True,
         )
+    finally:
+        conn.close()
+
+
+def _live_trading_enabled(settings: AutoTradeSettings) -> bool:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT live_trading_enabled
+            FROM auto_trade_strategies
+            WHERE strategy_key = ? AND symbol = ? AND duration = ?
+            """,
+            (settings.strategy_key, settings.symbol, settings.duration),
+        ).fetchone()
+        return bool(row and row["live_trading_enabled"])
     finally:
         conn.close()
 
