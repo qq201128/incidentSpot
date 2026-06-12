@@ -7,7 +7,7 @@ from app.services.model_family_config import MODEL_FAMILIES
 def test_research_bundle_returns_all_families(monkeypatch) -> None:
     monkeypatch.setattr(
         bundle,
-        "model_family_status",
+        "model_family_research_status",
         lambda family, symbol, duration, current_combo_snapshot=None: {
             "modelFamily": family,
             "strategyKey": f"factor_{family}_shadow_{duration}",

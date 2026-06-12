@@ -31,6 +31,20 @@ def test_candidate_report_batches_settled_prediction_lookup(monkeypatch: pytest.
     assert holder["conn"].ddl_count == 0
 
 
+def test_candidate_report_keeps_full_metrics_with_bounded_recent_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-bounded-report") / "candidates.db"
+    _create_db(db_path)
+    _insert_candidate_predictions(db_path, candidate_count=1, settled_per_candidate=150)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.paper_live_candidate_report("BTCUSDT", "10m")
+
+    candidate = report["allCandidates"][0]
+    assert candidate["paperLiveSampleCount"] == 150
+    assert candidate["metrics"]["sampleCount"] == 150
+    assert candidate["metrics"]["paperLiveWindows"]["recent100"]["sampleCount"] == 100
+
+
 class _CountingConnection:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -53,7 +67,7 @@ class _CountingConnection:
 
 def _is_prediction_select(sql: str) -> bool:
     normalized = " ".join(sql.upper().split())
-    return normalized.startswith("SELECT") and " FROM PREDICTIONS" in normalized
+    return normalized.startswith(("SELECT", "WITH")) and " FROM PREDICTIONS" in normalized
 
 
 def _is_ddl(sql: str) -> bool:
@@ -128,6 +142,17 @@ def _create_db(path: Path) -> None:
           reason TEXT NOT NULL,
           details_json TEXT NOT NULL,
           changed_at TEXT NOT NULL
+        );
+        CREATE TABLE auto_trade_strategies (
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 0,
+          live_trading_enabled INTEGER NOT NULL DEFAULT 0,
+          duration_minutes INTEGER NOT NULL DEFAULT 10,
+          qty REAL NOT NULL DEFAULT 5.0,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(strategy_key, symbol, duration)
         );
         """
     )

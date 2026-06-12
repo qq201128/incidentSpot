@@ -31,7 +31,7 @@ def lightgbm_estimator(params: dict[str, Any], seed: int):
         from lightgbm import LGBMClassifier
     except ImportError as exc:
         raise ImportError("missing dependency: lightgbm is required for lightgbm model family") from exc
-    _patch_lightgbm_sklearn_validation_compat()
+    ensure_lightgbm_sklearn_validation_compat()
     return LGBMClassifier(
         n_estimators=int(params.get("n_estimators", 100)),
         num_leaves=int(params.get("num_leaves", 31)),
@@ -45,7 +45,7 @@ def lightgbm_estimator(params: dict[str, Any], seed: int):
     )
 
 
-def _patch_lightgbm_sklearn_validation_compat() -> None:
+def ensure_lightgbm_sklearn_validation_compat() -> None:
     import lightgbm.sklearn as lgb_sklearn
 
     for hook_name in LIGHTGBM_VALIDATION_HOOKS:
@@ -53,6 +53,10 @@ def _patch_lightgbm_sklearn_validation_compat() -> None:
         if hook is None:
             continue
         setattr(lgb_sklearn, hook_name, _sklearn_finite_arg_adapter(hook))
+
+
+def _patch_lightgbm_sklearn_validation_compat() -> None:
+    ensure_lightgbm_sklearn_validation_compat()
 
 
 def _sklearn_finite_arg_adapter(func):

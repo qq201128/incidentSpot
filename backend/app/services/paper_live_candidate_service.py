@@ -35,6 +35,7 @@ STATUS_BACKTEST = "backtest_candidate"
 STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 150
 FAILED_LIST_LIMIT = 40
+RECENT_SETTLED_ROW_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,11 @@ def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
     settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
     live_states = live_state_by_strategy(conn, symbol, duration)
     candidates = [
-        _candidate_payload(item, settled_by_identity.get(_candidate_identity_key(item), []), live_states.get(str(item["strategy_key"])))
+        _candidate_payload(
+            item,
+            settled_by_identity.get(_candidate_identity_key(item), []),
+            live_states.get(str(item["strategy_key"])),
+        )
         for item in rows
     ]
     failures = recent_prediction_failures(conn, symbol, duration)
@@ -103,12 +108,19 @@ def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any
                model_duration, model_trained_at, data_freshness_status,
                missing_feature_status, oos_win_rate, walk_forward_result,
                recent_rolling_result, MIN(created_at) AS first_created_at,
-               MAX(created_at) AS latest_created_at, COUNT(*) AS prediction_count
+               MAX(created_at) AS latest_created_at, COUNT(*) AS prediction_count,
+               SUM(CASE WHEN settled_at IS NOT NULL THEN 1 ELSE 0 END) AS settled_sample_count,
+               SUM(CASE WHEN settled_at IS NOT NULL AND prediction_correct THEN 1 ELSE 0 END) AS settled_win_count,
+               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return IS NOT NULL THEN 1 ELSE 0 END) AS settled_return_count,
+               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return > 0 THEN actual_return ELSE 0 END) AS settled_gain_sum,
+               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return < 0 THEN -actual_return ELSE 0 END) AS settled_loss_sum,
+               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return IS NOT NULL THEN actual_return ELSE 0 END) AS settled_return_sum,
+               SUM(CASE WHEN settled_at IS NOT NULL AND data_freshness_status = ? THEN 1 ELSE 0 END) AS settled_leakage_count
         FROM predictions
         WHERE symbol = ? AND duration = ?
         GROUP BY signal_key, strategy_key, COALESCE(high_winrate_rule, model_version, signal_key)
         """,
-        (symbol.strip().upper(), duration),
+        (STATUS_LEAKAGE, symbol.strip().upper(), duration),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -116,15 +128,26 @@ def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any
 def _settled_rows_by_identity(conn: Any, symbol: str, duration: str) -> dict[tuple[str, str], list[dict[str, Any]]]:
     rows = conn.execute(
         """
-        SELECT signal_key, COALESCE(high_winrate_rule, model_version, signal_key) AS lifecycle_identity,
-               open_time, direction, entry_price, exit_price, actual_return,
-               prediction_correct, high_winrate_rule, data_freshness_status,
+        WITH ranked AS (
+            SELECT signal_key, COALESCE(high_winrate_rule, model_version, signal_key) AS lifecycle_identity,
+                   open_time, direction, entry_price, exit_price, actual_return,
+                   prediction_correct, high_winrate_rule, data_freshness_status,
+                   missing_feature_status, settled_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY signal_key, COALESCE(high_winrate_rule, model_version, signal_key)
+                       ORDER BY open_time DESC
+                   ) AS row_number
+            FROM predictions
+            WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+        )
+        SELECT signal_key, lifecycle_identity, open_time, direction, entry_price, exit_price,
+               actual_return, prediction_correct, high_winrate_rule, data_freshness_status,
                missing_feature_status, settled_at
-        FROM predictions
-        WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
+        FROM ranked
+        WHERE row_number <= ?
         ORDER BY open_time DESC
         """,
-        (symbol.strip().upper(), duration),
+        (symbol.strip().upper(), duration, RECENT_SETTLED_ROW_LIMIT),
     ).fetchall()
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
@@ -139,7 +162,7 @@ def _candidate_payload(
     rows: list[dict[str, Any]],
     live_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    metrics = high_winrate_metrics(rows) if rows else _empty_metrics()
+    metrics = _candidate_metrics(candidate, rows)
     decision = _candidate_decision(candidate, metrics, rows)
     walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
     recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
@@ -244,6 +267,43 @@ def _empty_metrics() -> dict[str, Any]:
     return high_winrate_metrics([])
 
 
+def _candidate_metrics(candidate: dict[str, Any], recent_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    sample_count = int(candidate.get("settled_sample_count") or 0)
+    if sample_count <= 0:
+        return _empty_metrics()
+    recent_metrics = high_winrate_metrics(recent_rows)
+    return {
+        **recent_metrics,
+        "sampleCount": sample_count,
+        "winRate": _ratio(int(candidate.get("settled_win_count") or 0), sample_count),
+        "profitFactor": _profit_factor(
+            gain_sum=float(candidate.get("settled_gain_sum") or 0.0),
+            loss_sum=float(candidate.get("settled_loss_sum") or 0.0),
+            return_count=int(candidate.get("settled_return_count") or 0),
+        ),
+        "avgReturn": _avg_return(
+            return_sum=float(candidate.get("settled_return_sum") or 0.0),
+            return_count=int(candidate.get("settled_return_count") or 0),
+        ),
+    }
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return None if denominator <= 0 else round(numerator / denominator, 4)
+
+
+def _profit_factor(*, gain_sum: float, loss_sum: float, return_count: int) -> float | None:
+    if return_count <= 0 or loss_sum == 0:
+        return None
+    return round(gain_sum / loss_sum, 4)
+
+
+def _avg_return(*, return_sum: float, return_count: int) -> float | None:
+    if return_count <= 0:
+        return None
+    return round(return_sum / return_count, 8)
+
+
 def _candidate_type(candidate: dict[str, Any]) -> str:
     family = candidate.get("model_family")
     if family and family not in {"factor", "factor_combo"}:
@@ -278,6 +338,8 @@ def _latest_status(candidate: dict[str, Any], rows: list[dict[str, Any]], key: s
 
 def _data_leakage_reason(candidate: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
     if candidate.get("data_freshness_status") == STATUS_LEAKAGE:
+        return STATUS_LEAKAGE
+    if int(candidate.get("settled_leakage_count") or 0) > 0:
         return STATUS_LEAKAGE
     for row in rows:
         if row.get("data_freshness_status") == STATUS_LEAKAGE:

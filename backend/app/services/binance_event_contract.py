@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from http.cookies import SimpleCookie
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -10,6 +11,7 @@ from requests import RequestException
 PLACE_ORDER_URL = "https://www.binance.com/bapi/futures/v2/private/future/event-contract/place-order"
 SUCCESS_CODE = "000000"
 REQUEST_TIMEOUT = (3, 8)
+ERROR_BODY_LIMIT = 500
 TIME_INCREMENT_BY_INTERVAL = {
     "10m": "TEN_MINUTE",
     "30m": "THIRTY_MINUTE",
@@ -72,16 +74,35 @@ def build_event_contract_order_payload(
 
 def _load_auth() -> tuple[dict[str, str], dict[str, str]]:
     csrf_token = os.getenv("BINANCE_EVENT_CSRF_TOKEN", "").strip()
+    cookie_header = os.getenv("BINANCE_EVENT_COOKIE", "").strip()
     p20t = os.getenv("BINANCE_EVENT_P20T", "").strip()
-    if not csrf_token or not p20t:
+    if not csrf_token or not (cookie_header or p20t):
         raise BinanceEventConfigError(
-            "missing BINANCE_EVENT_CSRF_TOKEN or BINANCE_EVENT_P20T environment variable"
+            "missing BINANCE_EVENT_CSRF_TOKEN and BINANCE_EVENT_COOKIE or BINANCE_EVENT_P20T environment variable"
         )
     return {
         "content-type": "application/json",
         "clienttype": "web",
         "csrftoken": csrf_token,
-    }, {"p20t": p20t}
+    }, _auth_cookies(cookie_header, p20t)
+
+
+def _auth_cookies(cookie_header: str, p20t: str) -> dict[str, str]:
+    if not cookie_header:
+        return {"p20t": p20t}
+    cookies = _parse_cookie_header(cookie_header)
+    if p20t and "p20t" not in cookies:
+        cookies["p20t"] = p20t
+    return cookies
+
+
+def _parse_cookie_header(cookie_header: str) -> dict[str, str]:
+    parsed = SimpleCookie()
+    parsed.load(cookie_header)
+    cookies = {key: morsel.value for key, morsel in parsed.items()}
+    if not cookies:
+        raise BinanceEventConfigError("BINANCE_EVENT_COOKIE did not contain any parseable cookies")
+    return cookies
 
 
 def _build_payload(
@@ -123,7 +144,19 @@ def _post_order(
     except ValueError as exc:
         raise BinanceEventOrderError("binance event order returned non-json response") from exc
     except RequestException as exc:
-        raise BinanceEventOrderError(f"binance event order request failed: {exc}") from exc
+        raise BinanceEventOrderError(f"binance event order request failed: {_request_error_message(exc)}") from exc
+
+
+def _request_error_message(exc: RequestException) -> str:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return str(exc)
+    body = (response.text or "").strip()
+    if len(body) > ERROR_BODY_LIMIT:
+        body = f"{body[:ERROR_BODY_LIMIT]}..."
+    if body:
+        return f"{exc}; response_body={body}"
+    return str(exc)
 
 
 def _assert_success(response_data: dict[str, Any]) -> None:

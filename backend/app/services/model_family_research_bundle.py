@@ -5,7 +5,7 @@ from typing import Any
 
 from app.services.lstm_combo_snapshot import current_combo_snapshot
 from app.services.model_family_config import MODEL_FAMILIES
-from app.services.model_family_status_service import model_family_status
+from app.services.model_family_status_service import model_family_research_status
 
 
 def model_family_research_bundle(symbol: str, duration: str) -> dict[str, Any]:
@@ -14,7 +14,7 @@ def model_family_research_bundle(symbol: str, duration: str) -> dict[str, Any]:
 
     def load(family: str) -> dict[str, Any]:
         try:
-            status = model_family_status(
+            status = model_family_research_status(
                 family,
                 sym,
                 duration,

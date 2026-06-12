@@ -79,6 +79,43 @@ def model_family_status(
     return _status_payload(context)
 
 
+def model_family_research_status(
+    family: str,
+    symbol: str,
+    duration: str,
+    *,
+    artifact_root: Path | None = None,
+    current_combo_snapshot: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    inputs = _status_inputs(family, symbol, duration, artifact_root=artifact_root)
+    status = _active_status(inputs)
+    dependency = dependency_status(inputs.family)
+    readiness = _ReadinessContext(
+        status,
+        inputs.version,
+        inputs.report,
+        inputs.artifacts_ready,
+        dependency["available"],
+        _has_clean_event_features(inputs.paths.features),
+    )
+    gate = validation_gate_payload(inputs.version, inputs.report)
+    snapshot = _combo_snapshot_status(inputs.symbol, duration, inputs.paths.features, current=current_combo_snapshot)
+    metadata = _model_metadata_payload(inputs, status, gate)
+    return {
+        **status,
+        **metadata,
+        **_dependency_payload(inputs.family, dependency),
+        **_snapshot_payload(snapshot),
+        "shadowPredictionReady": _shadow_ready_reason(readiness) == "passed",
+        "shadowPredictionBlockedReason": _shadow_ready_reason(readiness),
+        "tradePredictionReady": _trade_ready_reason(readiness) == "passed",
+        "tradePredictionBlockedReason": _trade_ready_reason(readiness),
+        "cleanEventFeatures": readiness.clean_event_features,
+        "regimeValidation": inputs.report.get("regimeValidation") if isinstance(inputs.report, dict) else None,
+        **model_status_policy_payload(status.get("status"), gate),
+    }
+
+
 def _status_inputs(
     family: str,
     symbol: str,

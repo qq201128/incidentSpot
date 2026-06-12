@@ -137,6 +137,12 @@ async def _run_observe_only_candidate_collection_batch(
         await collection_helpers.save_model_family_shadow_simulation_trades(context, outcomes)
     await runtime_helpers.run_candidate_collection_batch(settings_list, _save_observe_only_candidate_collection_predictions, logger)
 async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time: int) -> dict | None:
+    if is_factor_candidate_signal_key(settings.strategy_key):
+        return await asyncio.to_thread(
+            _predict_live_factor_candidate_signal,
+            settings,
+            entry_open_time,
+        )
     if settings.strategy_key == ENSEMBLE_RANKER_STRATEGY_KEY:
         return await asyncio.to_thread(
             predict_ensemble_ranker_prediction,
@@ -158,6 +164,23 @@ async def _predict_strategy_result(settings: AutoTradeSettings, entry_open_time:
         entry_open_time=entry_open_time,
         strategy_key=settings.strategy_key,
     )
+def _predict_live_factor_candidate_signal(settings: AutoTradeSettings, entry_open_time: int) -> dict:
+    predictions = predict_factor_candidate_signals(
+        settings.symbol,
+        settings.duration,
+        entry_open_time=entry_open_time,
+        entry_grace_ms=strategy_entry_grace_ms(settings.strategy_key),
+    )
+    for prediction in predictions:
+        if _is_settings_signal_prediction(prediction, settings):
+            return prediction
+    raise ValueError(f"live factor candidate prediction not produced: {settings.strategy_key}")
+
+
+def _is_settings_signal_prediction(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:
+    return prediction.get("strategy_key") == settings.strategy_key or prediction.get("signal_key") == settings.strategy_key
+
+
 async def _save_candidate_collection_predictions(settings: AutoTradeSettings, *, write_lock: asyncio.Lock) -> None:
     entry_open_time = current_rule_entry_open_time_for_duration(settings.duration)
     await collection_helpers.save_candidate_collection_predictions(
@@ -221,7 +244,7 @@ def _candidate_collection_due(settings: AutoTradeSettings, bucket: int) -> bool:
     )
 def _should_predict_entry(settings: AutoTradeSettings) -> bool:
     if is_factor_candidate_signal_key(settings.strategy_key):
-        return False
+        return _live_factor_candidate_signal_due(settings)
     bucket = current_rule_entry_open_time_for_duration(settings.duration)
     if settings.strategy_key == EVENT_FINAL_DECISION_STRATEGY_KEY:
         return not event_final_decision_exists(settings.symbol, settings.duration, bucket)
@@ -255,6 +278,18 @@ def _ready_model_family_strategy_due(settings: AutoTradeSettings, bucket: int) -
         bucket,
         lambda family, item, entry: _ready_model_family_shadow_due(family, item, entry, role="primary"),
     )
+def _live_factor_candidate_signal_due(settings: AutoTradeSettings) -> bool:
+    if not settings.live_trading_enabled:
+        return False
+    bucket = current_rule_entry_open_time_for_duration(settings.duration)
+    return not prediction_exists(
+        strategy_key=settings.strategy_key,
+        symbol=settings.symbol,
+        duration=settings.duration,
+        open_time=bucket,
+    )
+
+
 def _ready_lstm_shadow_due(settings: AutoTradeSettings, bucket: int) -> bool:
     return _ready_model_family_shadow_due("lstm", settings, bucket, role="sidecar")
 def _ready_lstm_strategy_due(settings: AutoTradeSettings, bucket: int) -> bool:

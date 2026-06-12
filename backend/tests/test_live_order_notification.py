@@ -8,6 +8,7 @@ from app.services.auto_trade_types import AutoTradeSettings
 
 def test_live_order_success_notification_contains_order_details(monkeypatch) -> None:
     sent = []
+    notification._LAST_SENT_AT.clear()
     monkeypatch.setenv("WXPUSHER_APP_TOKEN", "AT_test")
     monkeypatch.setenv("WXPUSHER_UIDS", "UID_test")
     monkeypatch.setattr(notification, "WxPusherAppClient", lambda: _Client(sent))
@@ -33,6 +34,7 @@ def test_live_order_success_notification_contains_order_details(monkeypatch) -> 
 
 def test_live_order_failure_notification_contains_error_details(monkeypatch) -> None:
     sent = []
+    notification._LAST_SENT_AT.clear()
     monkeypatch.setenv("WXPUSHER_APP_TOKEN", "AT_test")
     monkeypatch.setenv("WXPUSHER_UIDS", "UID_test")
     monkeypatch.setattr(notification, "WxPusherAppClient", lambda: _Client(sent))
@@ -54,6 +56,7 @@ def test_live_order_failure_notification_contains_error_details(monkeypatch) -> 
 
 
 def test_live_order_notification_skips_without_wxpusher_config(monkeypatch) -> None:
+    notification._LAST_SENT_AT.clear()
     monkeypatch.delenv("WXPUSHER_APP_TOKEN", raising=False)
     monkeypatch.delenv("WXPUSHER_UIDS", raising=False)
     monkeypatch.delenv("WXPUSHER_TOPIC_IDS", raising=False)
@@ -66,6 +69,93 @@ def test_live_order_notification_skips_without_wxpusher_config(monkeypatch) -> N
     )
 
     assert result == {"sent": False, "reason": "wxpusher_app_not_configured"}
+
+
+def test_live_order_failure_notification_dedupes_same_prediction(monkeypatch) -> None:
+    sent = []
+    notification._LAST_SENT_AT.clear()
+    monkeypatch.setenv("WXPUSHER_APP_TOKEN", "AT_test")
+    monkeypatch.setenv("WXPUSHER_UIDS", "UID_test")
+    monkeypatch.setenv("LIVE_ORDER_NOTIFICATION_DEDUPE_SECONDS", "3600")
+    monkeypatch.setattr(notification, "WxPusherAppClient", lambda: _Client(sent))
+
+    first = notification.notify_live_order_failure(
+        _settings(),
+        _prediction(),
+        RuntimeError("binance 401"),
+        entry_price=67890.5,
+        order_time=datetime(2026, 6, 11, 1, 3, tzinfo=timezone.utc),
+    )
+    second = notification.notify_live_order_failure(
+        _settings(),
+        _prediction(),
+        RuntimeError("binance 401"),
+        entry_price=67891.0,
+        order_time=datetime(2026, 6, 11, 1, 4, tzinfo=timezone.utc),
+    )
+
+    assert first["sent"] is True
+    assert second == {
+        "sent": False,
+        "reason": "duplicate_live_order_notification",
+        "dedupeSeconds": 3600.0,
+    }
+    assert len(sent) == 1
+
+
+def test_live_order_notification_allows_repeat_after_dedupe_window(monkeypatch) -> None:
+    sent = []
+    notification._LAST_SENT_AT.clear()
+    monkeypatch.setenv("WXPUSHER_APP_TOKEN", "AT_test")
+    monkeypatch.setenv("WXPUSHER_UIDS", "UID_test")
+    monkeypatch.setenv("LIVE_ORDER_NOTIFICATION_DEDUPE_SECONDS", "60")
+    monkeypatch.setattr(notification, "WxPusherAppClient", lambda: _Client(sent))
+
+    notification.notify_live_order_failure(
+        _settings(),
+        _prediction(),
+        RuntimeError("binance 401"),
+        entry_price=67890.5,
+        order_time=datetime(2026, 6, 11, 1, 3, tzinfo=timezone.utc),
+    )
+    result = notification.notify_live_order_failure(
+        _settings(),
+        _prediction(),
+        RuntimeError("binance 401"),
+        entry_price=67891.0,
+        order_time=datetime(2026, 6, 11, 1, 5, tzinfo=timezone.utc),
+    )
+
+    assert result["sent"] is True
+    assert len(sent) == 2
+
+
+def test_live_order_success_notification_dedupes_same_order(monkeypatch) -> None:
+    sent = []
+    notification._LAST_SENT_AT.clear()
+    monkeypatch.setenv("WXPUSHER_APP_TOKEN", "AT_test")
+    monkeypatch.setenv("WXPUSHER_UIDS", "UID_test")
+    monkeypatch.setenv("LIVE_ORDER_NOTIFICATION_DEDUPE_SECONDS", "3600")
+    monkeypatch.setattr(notification, "WxPusherAppClient", lambda: _Client(sent))
+
+    first = notification.notify_live_order_success(
+        _settings(),
+        _prediction(),
+        {"eventId": 7, "orderId": 8, "externalOrderId": "ex-1", "externalStatus": "PLACED"},
+        entry_price=67890.5,
+        order_time=datetime(2026, 6, 11, 1, 2, tzinfo=timezone.utc),
+    )
+    second = notification.notify_live_order_success(
+        _settings(),
+        _prediction(),
+        {"eventId": 7, "orderId": 8, "externalOrderId": "ex-1", "externalStatus": "PLACED"},
+        entry_price=67890.5,
+        order_time=datetime(2026, 6, 11, 1, 3, tzinfo=timezone.utc),
+    )
+
+    assert first["sent"] is True
+    assert second["reason"] == "duplicate_live_order_notification"
+    assert len(sent) == 1
 
 
 def _settings() -> AutoTradeSettings:
@@ -84,6 +174,7 @@ def _prediction() -> dict:
     return {
         "direction": "up",
         "high_winrate_rule": "combo__alpha__beta",
+        "open_time": 1_700_000_000_000,
         "probability_up": 0.72,
     }
 

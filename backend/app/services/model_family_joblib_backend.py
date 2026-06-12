@@ -12,6 +12,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from app.services.prediction_timing import record_timing
 from app.services.model_family_joblib_extra_estimators import (
     catboost_estimator,
+    ensure_lightgbm_sklearn_validation_compat,
     extra_trees_estimator,
     lightgbm_estimator,
     logistic_elasticnet_estimator,
@@ -265,11 +266,18 @@ def _flat(x: np.ndarray) -> np.ndarray:
 def _predict_model(model, x: np.ndarray) -> np.ndarray:
     if isinstance(model, QTableDirectionClassifier):
         return model.predict_proba(x)[:, 1].astype(np.float32)
+    _prepare_model_prediction_compat(model)
     flat = _flat(x)
     if hasattr(model, "predict_proba"):
         return model.predict_proba(flat)[:, 1].astype(np.float32)
     decision = model.decision_function(flat)
     return _sigmoid(decision).astype(np.float32)
+
+
+def _prepare_model_prediction_compat(model) -> None:
+    module_name = getattr(model.__class__, "__module__", "")
+    if module_name == "lightgbm" or module_name.startswith("lightgbm."):
+        ensure_lightgbm_sklearn_validation_compat()
 
 
 def _sigmoid(value: np.ndarray) -> np.ndarray:

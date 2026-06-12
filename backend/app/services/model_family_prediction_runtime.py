@@ -8,6 +8,7 @@ import numpy as np
 
 from app.services.lstm_artifacts import require_json
 from app.services.model_family_config import JOBLIB_MODEL_FAMILIES
+from app.services.model_family_joblib_extra_estimators import ensure_lightgbm_sklearn_validation_compat
 
 FeatureWindowLoader = Callable[..., tuple[np.ndarray, dict[str, Any]]]
 
@@ -101,6 +102,12 @@ def predict_backend(
     selected = backend or default_backend(family)
     if backend is not None:
         return selected.predict(model_path, window)
+    _prepare_default_prediction_runtime(family)
     if family in JOBLIB_MODEL_FAMILIES:
         return selected.predict(model_path, window, timings=timings)
     return selected.predict(model_path, window)
+
+
+def _prepare_default_prediction_runtime(family: str) -> None:
+    if family == "lightgbm":
+        ensure_lightgbm_sklearn_validation_compat()

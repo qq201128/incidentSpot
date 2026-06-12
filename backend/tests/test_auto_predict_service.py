@@ -225,6 +225,28 @@ def test_factor_candidate_signal_slot_is_collection_only(monkeypatch) -> None:
     assert calls == []
 
 
+def test_live_factor_candidate_signal_slot_predicts_current_bucket(monkeypatch) -> None:
+    candidate_key = factor_candidate_signal_key("rsi_14")
+    calls = []
+
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(service, "prediction_exists", lambda **kwargs: calls.append(kwargs) or False)
+
+    assert service._should_predict_entry(_settings(candidate_key, live_trading_enabled=True)) is True
+    assert calls == [
+        {
+            "strategy_key": candidate_key,
+            "symbol": "BTCUSDT",
+            "duration": DEFAULT_DURATION,
+            "open_time": ENTRY_OPEN_TIME,
+        }
+    ]
+
+
 def test_candidate_collection_saves_top_two_and_three_shadow_rows(monkeypatch) -> None:
     saved = []
     trades = []
@@ -351,6 +373,51 @@ def test_candidate_collection_saves_factor_candidate_signals(monkeypatch) -> Non
 
     assert saved == [(candidate_key, False)]
     assert trades == [candidate_key]
+
+
+def test_live_factor_candidate_signal_saves_primary_prediction(monkeypatch) -> None:
+    saved = []
+    candidate_key = factor_candidate_signal_key("rsi_14")
+    other_key = factor_candidate_signal_key("roc_5")
+
+    async def save_prediction(result: dict, _write_lock: asyncio.Lock, *, allow_existing: bool = False) -> bool:
+        saved.append((result["strategy_key"], allow_existing))
+        return True
+
+    candidate_calls = []
+    monkeypatch.setattr(
+        service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: ENTRY_OPEN_TIME,
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_factor_candidate_signals",
+        lambda symbol, duration, **kwargs: candidate_calls.append((symbol, duration, kwargs))
+        or [
+            _prediction(other_key, symbol=symbol, duration=duration),
+            _prediction(candidate_key, symbol=symbol, duration=duration),
+        ],
+    )
+    monkeypatch.setattr(service, "_save_prediction", save_prediction)
+    monkeypatch.setattr(service, "prediction_response", lambda result: result)
+    monkeypatch.setattr(service, "_broadcast", _noop_broadcast)
+
+    asyncio.run(
+        service._run_prediction(
+            _settings(candidate_key, live_trading_enabled=True),
+            write_lock=asyncio.Lock(),
+        )
+    )
+
+    assert saved == [(candidate_key, False)]
+    assert candidate_calls == [
+        (
+            "BTCUSDT",
+            DEFAULT_DURATION,
+            {"entry_open_time": ENTRY_OPEN_TIME, "entry_grace_ms": 30_000},
+        )
+    ]
 
 
 def test_factor_candidate_collection_failure_is_exposed(monkeypatch) -> None:
@@ -1504,6 +1571,7 @@ def _settings(
     symbol: str = "BTCUSDT",
     duration: str = DEFAULT_DURATION,
     enabled: bool = True,
+    live_trading_enabled: bool = False,
 ) -> AutoTradeSettings:
     return AutoTradeSettings(
         strategy_key=strategy_key,
@@ -1512,7 +1580,7 @@ def _settings(
         duration=duration,
         duration_minutes=int(DURATION_TO_MINUTES[duration]),
         qty=DEFAULT_QTY,
-        live_trading_enabled=False,
+        live_trading_enabled=live_trading_enabled,
     )
 
 
