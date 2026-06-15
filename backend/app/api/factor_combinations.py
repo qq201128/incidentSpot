@@ -12,6 +12,7 @@ from app.services.high_winrate_combo_cache_service import get_cached_high_winrat
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
 from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_candidate_live_state import live_trading_overview
 from app.services.paper_live_candidate_live_control import set_candidate_live_trading
 from app.services.paper_live_report_cache import get_cached_paper_live_report
 from app.services.paper_live_daily_loop_service import run_paper_live_daily_closed_loop
@@ -118,6 +119,11 @@ def paper_live_candidates(
     _validate_duration(safe_duration)
     sym = symbol.upper()
     return get_cached_paper_live_report(sym, safe_duration, build=paper_live_candidate_report)
+
+
+@router.get("/paper-live/live-summary")
+def paper_live_live_summary() -> dict:
+    return live_trading_overview()
 
 
 @router.post("/paper-live/daily-loop")

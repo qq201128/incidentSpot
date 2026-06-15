@@ -70,6 +70,93 @@ export function SummaryStrip({ summary }) {
   );
 }
 
+export function LiveTradingOverview({ error, overview }) {
+  const groups = Array.isArray(overview?.groups) ? overview.groups : [];
+  return (
+    <section className="research-live-overview" aria-label="全局实盘候选总览">
+      <header>
+        <span className="section-kicker">Live trading overview</span>
+        <strong>实盘开启总览</strong>
+        <b>{overview?.activeCount ?? 0}</b>
+      </header>
+      {error ? (
+        <p className="research-live-overview-empty" role="alert">读取失败：{error}</p>
+      ) : groups.length ? (
+        <div className="research-live-overview-grid">
+          {groups.map((group) => (
+            <LiveTradingGroup key={`${group.symbol}:${group.duration}`} group={group} />
+          ))}
+        </div>
+      ) : (
+        <p className="research-live-overview-empty">当前没有候选开启实盘。</p>
+      )}
+    </section>
+  );
+}
+
+function LiveTradingGroup({ group }) {
+  const candidates = Array.isArray(group.candidates) ? group.candidates : [];
+  return (
+    <article className="research-live-overview-group">
+      <div>
+        <strong>{group.symbol}</strong>
+        <span>{group.duration}</span>
+        <b>{group.activeCount}</b>
+      </div>
+      <ul>
+        {candidates.map((candidate) => (
+          <li key={`${candidate.symbol}:${candidate.duration}:${candidate.strategyKey}`}>
+            <span title={candidate.candidateName}>{candidate.candidateName || candidate.strategyKey || EMPTY}</span>
+            <small>{candidate.strategyKey || EMPTY}</small>
+            <small className={`research-live-runtime ${runtimeTone(candidate)}`}>
+              {runtimeLabel(candidate)} · {predictionLabel(candidate)}
+            </small>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+function runtimeLabel(candidate) {
+  const reason = candidate?.runtimeReason || "unknown";
+  const labels = {
+    ready_to_place_order: "可下单",
+    waiting_fresh_prediction: "等待新预测",
+    waiting_prediction: "待预测",
+    waiting_open_position_settled: "等持仓结算",
+    confidence_below_threshold: "置信不足",
+    production_target_failed: "生产目标未过",
+    high_winrate_gate_failed: "胜率门未过",
+    quality_gate_failed: "质量门未过",
+    signal_condition_not_met: "信号未触发",
+    disabled: "已停用",
+  };
+  return labels[reason] || reason;
+}
+
+function predictionLabel(candidate) {
+  if (!candidate?.latestPredictionAt) return "无预测";
+  const freshness = candidate.latestPredictionFresh ? "新鲜" : "过期";
+  return `${freshness} ${formatRuntimeDate(candidate.latestPredictionAt)}`;
+}
+
+function formatRuntimeDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return EMPTY;
+  return date.toLocaleString();
+}
+
+function runtimeTone(candidate) {
+  if (candidate?.latestPredictionFresh && candidate?.runtimeReason === "ready_to_place_order") {
+    return "is-ready";
+  }
+  if (candidate?.runtimeReason === "waiting_fresh_prediction" || candidate?.runtimeReason === "waiting_prediction") {
+    return "is-waiting";
+  }
+  return "is-muted";
+}
+
 function explicitFailureCount(summary) {
   if (!summary) return null;
   return summary.predictionFailureCount + summary.stageFailureCount;

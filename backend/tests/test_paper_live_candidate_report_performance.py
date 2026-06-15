@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -43,6 +44,42 @@ def test_candidate_report_keeps_full_metrics_with_bounded_recent_rows(monkeypatc
     assert candidate["paperLiveSampleCount"] == 150
     assert candidate["metrics"]["sampleCount"] == 150
     assert candidate["metrics"]["paperLiveWindows"]["recent100"]["sampleCount"] == 100
+
+
+def test_candidate_report_trims_public_all_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-slim-report") / "candidates.db"
+    _create_db(db_path)
+    _insert_candidate_predictions(db_path, candidate_count=220, settled_per_candidate=1)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.paper_live_candidate_report("BTCUSDT", "10m")
+    full_report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
+
+    assert report["payloadMode"] == "dashboard_slim"
+    assert report["allCandidateCount"] == 220
+    assert len(report["allCandidates"]) < report["allCandidateCount"]
+    assert len(full_report["allCandidates"]) == 220
+
+
+def test_candidate_report_prefers_status_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-status-snapshot") / "candidates.db"
+    _create_db(db_path)
+    _insert_status_snapshot(db_path)
+    holder: dict[str, _CountingConnection] = {}
+
+    def connect() -> _CountingConnection:
+        conn = _CountingConnection(_connect(db_path))
+        holder["conn"] = conn
+        return conn
+
+    monkeypatch.setattr(service, "get_conn", connect)
+
+    report = service.paper_live_candidate_report("BTCUSDT", "10m")
+
+    assert report["payloadSource"] == "candidate_status_snapshot"
+    assert report["allCandidateCount"] == 1
+    assert report["allCandidates"][0]["candidateKey"] == "factor_snapshot"
+    assert holder["conn"].prediction_select_count == 0
 
 
 class _CountingConnection:
@@ -143,6 +180,16 @@ def _create_db(path: Path) -> None:
           details_json TEXT NOT NULL,
           changed_at TEXT NOT NULL
         );
+        CREATE TABLE paper_live_candidate_status (
+          candidate_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          status TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          details_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(candidate_key, symbol, duration)
+        );
         CREATE TABLE auto_trade_strategies (
           strategy_key TEXT NOT NULL,
           symbol TEXT NOT NULL,
@@ -156,6 +203,54 @@ def _create_db(path: Path) -> None:
         );
         """
     )
+    conn.close()
+
+
+def _insert_status_snapshot(path: Path) -> None:
+    conn = _connect(path)
+    candidate = {
+        "candidateKey": "factor_snapshot",
+        "strategyKey": "factor_snapshot",
+        "candidateType": "factor",
+        "factorName": "snapshot",
+        "paperLiveWinRate": 0.7,
+        "paperLiveSampleCount": 30,
+        "paperLiveStatus": "paper_stable",
+        "status": "paper_stable",
+        "reason": "stable_paper_live_target_met",
+        "metrics": {
+            "sampleCount": 30,
+            "winRate": 0.7,
+            "profitFactor": 2.0,
+            "avgReturn": 0.01,
+            "paperStability": {
+                "rollingWindows": [{"sampleCount": 10, "winRate": 0.7}],
+            },
+            "paperLiveWindows": {
+                "recent30": {"sampleCount": 30, "winRate": 0.7},
+                "recent60": {"sampleCount": 30, "winRate": 0.7},
+                "recent100": {"sampleCount": 30, "winRate": 0.7},
+            },
+        },
+    }
+    conn.execute(
+        """
+        INSERT INTO paper_live_candidate_status(
+          candidate_key, symbol, duration, status, reason, details_json, updated_at
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "factor_snapshot",
+            "BTCUSDT",
+            "10m",
+            "paper_stable",
+            "stable_paper_live_target_met",
+            json.dumps(candidate),
+            "2026-06-12T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
     conn.close()
 
 

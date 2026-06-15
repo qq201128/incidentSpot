@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { researchSummary, settledRows } from "./researchDashboardData";
-import { ResearchHeader, SummaryStrip } from "./ResearchDashboardSummary";
+import { LiveTradingOverview, ResearchHeader, SummaryStrip } from "./ResearchDashboardSummary";
 import { ResearchSidePanel } from "./ResearchDashboardEvidence";
 import { SettledSampleMatrix } from "./ResearchDashboardMatrix";
 import { useResearchDashboard } from "./useResearchDashboard";
@@ -20,6 +20,8 @@ export default function ResearchDashboardPage() {
     loading,
     mergingModels,
     report,
+    liveOverview,
+    liveOverviewError,
     runDailyLoop,
     status,
     toggleCandidateLiveTrading,
@@ -39,6 +41,7 @@ export default function ResearchDashboardPage() {
         symbol={symbol}
       />
       <SummaryStrip summary={summary} />
+      <LiveTradingOverview error={liveOverviewError} overview={liveOverview} />
       <section className="research-main-grid">
         <SettledSampleMatrix
           liveToggleKey={liveToggleKey}

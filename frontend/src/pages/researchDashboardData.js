@@ -102,11 +102,14 @@ export function mergeModelFamilyStatusRows(report, models) {
   const presentFamilies = new Set(
     mergedCandidates.filter((row) => row?.candidateType === "model").map((row) => row.modelFamily),
   );
+  for (const family of report?.candidateModelFamilies || []) {
+    presentFamilies.add(family);
+  }
   const modelFamilyStatusRows = statusRows.filter((row) => row?.modelFamily && !presentFamilies.has(row.modelFamily));
   return {
     ...report,
     allCandidates: mergedCandidates,
-    allCandidateCount: mergedCandidates.length + modelFamilyStatusRows.length,
+    allCandidateCount: candidateTotal(report) + modelFamilyStatusRows.length,
     modelFamilyStatusRows,
     modelFamilyStatuses: statusRows,
   };
@@ -417,6 +420,8 @@ function candidateTotal(report) {
 }
 
 function settledCandidateTotal(report) {
+  const settledCount = Number(report?.settledCandidateCount);
+  if (Number.isFinite(settledCount)) return settledCount;
   if (!Array.isArray(report?.allCandidates)) return 0;
   return report.allCandidates.filter((row) => Number(row.paperLiveSampleCount || row.metrics?.sampleCount || 0) > 0).length;
 }

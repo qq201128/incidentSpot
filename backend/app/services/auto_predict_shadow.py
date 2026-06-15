@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from app.services.auto_trade_types import AutoTradeSettings
 
@@ -31,13 +32,26 @@ class ShadowBackfillBatchError(RuntimeError):
         super().__init__(f"model family shadow backfill failed for: {targets}")
 
 
+DEFAULT_BACKFILL_TIMEOUT_SECONDS = 20.0
+DEFAULT_BACKFILL_ENTRY_LIMIT = 24
+
+
 async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], deps: dict[str, Any]) -> None:
     targets = deps["ready_targets"](settings_list)
     if not targets:
         return
+    timeout_seconds = _backfill_timeout_seconds()
+    entry_limit = _backfill_entry_limit()
     summaries = await asyncio.gather(
         *(
-            asyncio.to_thread(deps["backfill"], family, symbol, duration, deps["current_entry"](duration))
+            _backfill_one(
+                deps,
+                family,
+                symbol,
+                duration,
+                timeout_seconds=timeout_seconds,
+                entry_limit=entry_limit,
+            )
             for family, symbol, duration in targets
         ),
         return_exceptions=True,
@@ -49,6 +63,28 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
             failures.append(failure)
     if failures:
         raise ShadowBackfillBatchError(failures)
+
+
+async def _backfill_one(
+    deps: dict[str, Any],
+    family: str,
+    symbol: str,
+    duration: str,
+    *,
+    timeout_seconds: float,
+    entry_limit: int,
+) -> dict[str, Any]:
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            deps["backfill"],
+            family,
+            symbol,
+            duration,
+            deps["current_entry"](duration),
+            max_entries=entry_limit,
+        ),
+        timeout=timeout_seconds,
+    )
 
 
 def handle_backfill_summary(
@@ -114,3 +150,21 @@ def _failure_detail(failure: ShadowBackfillFailure) -> dict[str, str]:
         "error": str(failure.exception),
         "exceptionType": type(failure.exception).__name__,
     }
+
+
+def _backfill_timeout_seconds() -> float:
+    raw = os.getenv("MODEL_SHADOW_BACKFILL_TIMEOUT_SECONDS", str(DEFAULT_BACKFILL_TIMEOUT_SECONDS))
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"MODEL_SHADOW_BACKFILL_TIMEOUT_SECONDS must be numeric: {raw!r}") from exc
+    return max(0.1, value)
+
+
+def _backfill_entry_limit() -> int:
+    raw = os.getenv("MODEL_SHADOW_BACKFILL_ENTRY_LIMIT", str(DEFAULT_BACKFILL_ENTRY_LIMIT))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"MODEL_SHADOW_BACKFILL_ENTRY_LIMIT must be an integer: {raw!r}") from exc
+    return max(1, value)

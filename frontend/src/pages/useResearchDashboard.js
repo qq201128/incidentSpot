@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchPaperLiveCandidates, runPaperLiveDailyLoop, setPaperLiveCandidateLiveTrading } from "../api/factorCombinations";
+import {
+  fetchPaperLiveCandidates,
+  fetchPaperLiveLiveSummary,
+  runPaperLiveDailyLoop,
+  setPaperLiveCandidateLiveTrading,
+} from "../api/factorCombinations";
 import { fetchResearchModelBundle } from "../api/researchDashboardClient";
 import {
   errorMessage,
@@ -11,6 +16,8 @@ import { peekResearchDashboardCache, storeResearchDashboardCache } from "./resea
 export function useResearchDashboard(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const [state, setState] = useState(() => initialState(normalizedSymbol, duration));
+  const [liveOverview, setLiveOverview] = useState(null);
+  const [liveOverviewError, setLiveOverviewError] = useState(null);
 
   const load = useCallback(
     async (signal) => {
@@ -18,6 +25,18 @@ export function useResearchDashboard(symbol, duration) {
     },
     [duration, normalizedSymbol],
   );
+
+  const refreshLiveOverview = useCallback(async (signal) => {
+    try {
+      const overview = await fetchPaperLiveLiveSummary({ signal });
+      if (signal?.aborted) return;
+      setLiveOverview(overview);
+      setLiveOverviewError(null);
+    } catch (error) {
+      if (signal?.aborted) return;
+      setLiveOverviewError(errorMessage(error));
+    }
+  }, []);
 
   useEffect(() => {
     const cached = peekResearchDashboardCache(normalizedSymbol, duration);
@@ -35,12 +54,14 @@ export function useResearchDashboard(symbol, duration) {
     }
     const ac = new AbortController();
     void load(ac.signal);
+    void refreshLiveOverview(ac.signal);
     return () => ac.abort();
-  }, [duration, load, normalizedSymbol]);
+  }, [duration, load, normalizedSymbol, refreshLiveOverview]);
 
   const runDailyLoop = useCallback(async () => {
     await runDailyLoopReport({ duration, normalizedSymbol, setState });
-  }, [duration, normalizedSymbol]);
+    void refreshLiveOverview();
+  }, [duration, normalizedSymbol, refreshLiveOverview]);
 
   const toggleCandidateLiveTrading = useCallback(
     async (row, liveTradingEnabled) => {
@@ -51,11 +72,12 @@ export function useResearchDashboard(symbol, duration) {
         row,
         setState,
       });
+      void refreshLiveOverview();
     },
-    [duration, normalizedSymbol],
+    [duration, normalizedSymbol, refreshLiveOverview],
   );
 
-  return { ...state, runDailyLoop, toggleCandidateLiveTrading };
+  return { ...state, liveOverview, liveOverviewError, runDailyLoop, toggleCandidateLiveTrading };
 }
 
 function initialState(symbol, duration) {

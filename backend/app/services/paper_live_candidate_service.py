@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -25,7 +26,7 @@ from app.services.paper_live_candidate_status_store import (
     recent_status_changes,
     write_candidate_status,
 )
-from app.services.paper_live_json_fields import parse_json_field
+from app.services.paper_live_json_fields import parse_details_json, parse_json_field
 from app.services.paper_live_stage_log import ensure_stage_log_table, recent_stage_logs
 
 STATUS_COLLECTING = "paper_collecting"
@@ -53,9 +54,21 @@ def refresh_paper_live_candidate_states(symbol: str, duration: str) -> dict[str,
 
 
 def paper_live_candidate_report(symbol: str, duration: str) -> dict[str, Any]:
+    return _candidate_report(symbol, duration, include_all_candidates=False)
+
+
+def paper_live_candidate_full_report(symbol: str, duration: str) -> dict[str, Any]:
+    return _candidate_report(symbol, duration, include_all_candidates=True)
+
+
+def _candidate_report(symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
     conn = get_conn()
     try:
-        report = _report_from_conn(conn, symbol, duration)
+        if not include_all_candidates:
+            cached_report = _status_snapshot_report(conn, symbol, duration)
+            if cached_report is not None:
+                return cached_report
+        report = _report_from_conn(conn, symbol, duration, include_all_candidates=include_all_candidates)
     finally:
         conn.close()
     return report
@@ -65,7 +78,7 @@ def _refresh_states(symbol: str, duration: str) -> dict[str, Any]:
     conn = get_conn()
     try:
         _ensure_report_write_tables(conn)
-        report = _report_from_conn(conn, symbol, duration)
+        report = _report_from_conn(conn, symbol, duration, include_all_candidates=True)
         for candidate in report["allCandidates"]:
             write_candidate_status(conn, symbol, duration, candidate=candidate)
         report["statusChanges"] = recent_status_changes(conn, symbol, duration)
@@ -81,7 +94,7 @@ def _ensure_report_write_tables(conn: Any) -> None:
     ensure_stage_log_table(conn)
 
 
-def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
+def _report_from_conn(conn: Any, symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
     rows = _candidate_rows(conn, symbol, duration)
     settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
     live_states = live_state_by_strategy(conn, symbol, duration)
@@ -97,7 +110,77 @@ def _report_from_conn(conn: Any, symbol: str, duration: str) -> dict[str, Any]:
     stage_logs = recent_stage_logs(conn, symbol, duration)
     status_changes = recent_status_changes(conn, symbol, duration)
     ranked = sorted(candidates, key=candidate_rank_key, reverse=True)
-    return _report_payload(ReportPayloadInput(symbol, duration, ranked, failures, stage_logs, status_changes))
+    return _report_payload(
+        ReportPayloadInput(symbol, duration, ranked, failures, stage_logs, status_changes),
+        include_all_candidates=include_all_candidates,
+    )
+
+
+def _status_snapshot_report(conn: Any, symbol: str, duration: str) -> dict[str, Any] | None:
+    rows = _status_snapshot_rows(conn, symbol, duration)
+    if not rows:
+        return None
+    live_states = live_state_by_strategy(conn, symbol, duration)
+    candidates = [
+        _candidate_from_status_snapshot(row, live_states)
+        for row in rows
+    ]
+    ranked = sorted(candidates, key=candidate_rank_key, reverse=True)
+    failures = recent_prediction_failures(conn, symbol, duration)
+    stage_logs = recent_stage_logs(conn, symbol, duration)
+    status_changes = recent_status_changes(conn, symbol, duration)
+    report = _report_payload(
+        ReportPayloadInput(symbol, duration, ranked, failures, stage_logs, status_changes),
+        include_all_candidates=False,
+    )
+    return {
+        **report,
+        "payloadSource": "candidate_status_snapshot",
+        "updatedAt": max(str(row.get("updated_at") or "") for row in rows) or report["updatedAt"],
+    }
+
+
+def _status_snapshot_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any]]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT candidate_key, status, reason, details_json, updated_at
+            FROM paper_live_candidate_status
+            WHERE symbol = ? AND duration = ?
+            ORDER BY updated_at DESC
+            """,
+            (symbol.strip().upper(), duration),
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
+    return [dict(row) for row in rows]
+
+
+def _candidate_from_status_snapshot(
+    row: dict[str, Any],
+    live_states: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    parsed = parse_details_json(row.get("details_json"))
+    candidate = dict(parsed.value) if isinstance(parsed.value, dict) else {}
+    strategy_key = str(candidate.get("strategyKey") or "")
+    live_state = live_states.get(strategy_key)
+    if live_state is not None:
+        candidate = {
+            **candidate,
+            "autoTradeEnabled": live_state["autoTradeEnabled"],
+            "liveTradingEnabled": live_state["liveTradingEnabled"],
+            "liveTradingUpdatedAt": live_state["updatedAt"],
+        }
+    candidate.setdefault("candidateKey", row.get("candidate_key"))
+    candidate.setdefault("status", row.get("status"))
+    candidate.setdefault("paperLiveStatus", row.get("status"))
+    candidate.setdefault("reason", row.get("reason"))
+    candidate.setdefault("metrics", {})
+    if parsed.error:
+        candidate["metadataParseErrors"] = [parsed.error]
+    return candidate
 
 
 def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any]]:
@@ -222,32 +305,41 @@ def _candidate_decision(
     return high_winrate_decision(metrics)
 
 
-def _report_payload(data: ReportPayloadInput) -> dict[str, Any]:
+def _report_payload(data: ReportPayloadInput, *, include_all_candidates: bool) -> dict[str, Any]:
     focused = focus_pool(data.ranked, OBSERVATION_POOL_LIMIT)
+    failed = [
+        row
+        for row in data.ranked
+        if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}
+    ][:FAILED_LIST_LIMIT]
     avoid_next_search = _avoid_next_search(data.ranked, data.failures)
+    all_candidates = data.ranked if include_all_candidates else _dashboard_all_candidates(data.ranked, focused, failed)
+    candidates = focused if include_all_candidates else _dashboard_candidate_rows(focused)
+    failed_rows = failed if include_all_candidates else _dashboard_candidate_rows(failed)
+    stable_rows = [row for row in candidates if row["status"] == STATUS_STABLE]
+    collecting_rows = [row for row in candidates if row["status"] == STATUS_COLLECTING]
     return {
         "version": "paper_live_candidate_pool_v1",
+        "payloadMode": "full" if include_all_candidates else "dashboard_slim",
         "symbol": data.symbol.strip().upper(),
         "duration": data.duration,
         "updatedAt": _utc_now(),
         "realTradingEnabled": any(bool(row.get("liveTradingEnabled")) for row in data.ranked),
         "observationPoolLimit": OBSERVATION_POOL_LIMIT,
         "allCandidateCount": len(data.ranked),
-        "allCandidates": data.ranked,
-        "candidates": focused,
+        "settledCandidateCount": _settled_candidate_count(data.ranked),
+        "candidateModelFamilies": _candidate_model_families(data.ranked),
+        "allCandidates": all_candidates if include_all_candidates else _dashboard_candidate_rows(all_candidates),
+        "candidates": candidates,
         "rankingPolicy": _ranking_policy(),
-        "collecting": [row for row in focused if row["status"] == STATUS_COLLECTING],
-        "stable": [row for row in focused if row["status"] == STATUS_STABLE],
-        "failed": [
-            row
-            for row in data.ranked
-            if row["status"] in {STATUS_FAILED, STATUS_LEAKAGE}
-        ][:FAILED_LIST_LIMIT],
-        "predictionFailures": data.failures,
-        "stageLogs": data.stage_logs,
-        "statusChanges": data.status_changes,
+        "collecting": collecting_rows,
+        "stable": stable_rows,
+        "failed": failed_rows,
+        "predictionFailures": data.failures if include_all_candidates else _dashboard_failures(data.failures),
+        "stageLogs": data.stage_logs if include_all_candidates else _dashboard_stage_logs(data.stage_logs),
+        "statusChanges": data.status_changes if include_all_candidates else _dashboard_status_changes(data.status_changes),
         "avoidNextSearch": avoid_next_search,
-        "answers": candidate_pool_answers(focused, data.ranked, data.failures, avoid_next_search),
+        "answers": candidate_pool_answers(focused, data.ranked, data.failures, avoid_next_search) if include_all_candidates else {},
     }
 
 
@@ -261,6 +353,124 @@ def _ranking_policy() -> list[str]:
         "avgReturn",
         "settled sample count",
     ]
+
+
+def _dashboard_all_candidates(
+    ranked: list[dict[str, Any]],
+    focused: list[dict[str, Any]],
+    failed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    live_rows = [row for row in ranked if row.get("liveTradingEnabled")]
+    return _dedupe_candidates([*live_rows, *focused, *failed])
+
+
+def _dashboard_candidate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_dashboard_candidate_row(row) for row in rows]
+
+
+def _dashboard_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    return {
+        "candidateKey": row.get("candidateKey"),
+        "strategyKey": row.get("strategyKey"),
+        "candidateType": row.get("candidateType"),
+        "factorName": row.get("factorName"),
+        "modelFamily": row.get("modelFamily"),
+        "modelVersion": row.get("modelVersion"),
+        "featureWindow": row.get("featureWindow"),
+        "minConfidence": row.get("minConfidence"),
+        "validationWinRate": row.get("validationWinRate"),
+        "backtestWinRate": row.get("backtestWinRate"),
+        "oosWinRate": row.get("oosWinRate"),
+        "paperLiveWinRate": row.get("paperLiveWinRate"),
+        "paperLiveSampleCount": row.get("paperLiveSampleCount"),
+        "paperLiveStatus": row.get("paperLiveStatus"),
+        "autoTradeEnabled": row.get("autoTradeEnabled"),
+        "liveTradingEnabled": row.get("liveTradingEnabled"),
+        "liveTradingUpdatedAt": row.get("liveTradingUpdatedAt"),
+        "status": row.get("status"),
+        "reason": row.get("reason"),
+        "metrics": {
+            "sampleCount": metrics.get("sampleCount"),
+            "winRate": metrics.get("winRate"),
+            "profitFactor": metrics.get("profitFactor"),
+            "avgReturn": metrics.get("avgReturn"),
+            "maxConsecutiveLosses": metrics.get("maxConsecutiveLosses"),
+            "paperStability": metrics.get("paperStability"),
+            "paperLiveWindows": metrics.get("paperLiveWindows"),
+        },
+        "dataFreshnessStatus": row.get("dataFreshnessStatus"),
+        "missingFeatureStatus": row.get("missingFeatureStatus"),
+        "predictionCreatedAt": row.get("predictionCreatedAt"),
+        "firstPredictionCreatedAt": row.get("firstPredictionCreatedAt"),
+        "predictionCount": row.get("predictionCount"),
+    }
+
+
+def _dashboard_failures(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "candidateKey": row.get("candidateKey"),
+            "strategyKey": row.get("strategyKey"),
+            "stage": row.get("stage"),
+            "reason": row.get("reason"),
+            "createdAt": row.get("createdAt"),
+        }
+        for row in rows
+    ]
+
+
+def _dashboard_stage_logs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "signalKey": row.get("signalKey"),
+            "strategyKey": row.get("strategyKey"),
+            "entryOpenTime": row.get("entryOpenTime"),
+            "stage": row.get("stage"),
+            "status": row.get("status"),
+            "reason": row.get("reason"),
+            "createdAt": row.get("createdAt"),
+        }
+        for row in rows
+    ]
+
+
+def _dashboard_status_changes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "candidateKey": row.get("candidateKey"),
+            "oldStatus": row.get("oldStatus"),
+            "newStatus": row.get("newStatus"),
+            "reason": row.get("reason"),
+            "changedAt": row.get("changedAt"),
+        }
+        for row in rows
+    ]
+
+
+def _dedupe_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for row in rows:
+        key = str(row.get("candidateKey") or row.get("strategyKey") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
+def _settled_candidate_count(rows: list[dict[str, Any]]) -> int:
+    return sum(1 for row in rows if int(row.get("paperLiveSampleCount") or row.get("metrics", {}).get("sampleCount") or 0) > 0)
+
+
+def _candidate_model_families(rows: list[dict[str, Any]]) -> list[str]:
+    families = {
+        str(row["modelFamily"])
+        for row in rows
+        if row.get("candidateType") == "model" and row.get("modelFamily")
+    }
+    return sorted(families)
 
 
 def _empty_metrics() -> dict[str, Any]:

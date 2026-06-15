@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from app.services.model_family_config import MODEL_FAMILIES
 from app.services.model_family_status_service import model_family_status
-from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_candidate_service import paper_live_candidate_full_report
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ def model_family_daily_candidate_report(
     *,
     families: tuple[str, ...] = MODEL_FAMILIES,
     status_loader: Callable[[str, str, str], dict[str, Any]] = model_family_status,
-    lifecycle_loader: Callable[[str, str], dict[str, Any]] = paper_live_candidate_report,
+    lifecycle_loader: Callable[[str, str], dict[str, Any]] = paper_live_candidate_full_report,
 ) -> dict[str, Any]:
     lifecycle = _model_lifecycle_by_family(symbol, duration, lifecycle_loader)
     rows = [

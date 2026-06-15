@@ -31,17 +31,25 @@ async def predict_due_entries(targets: list[AutoTradeSettings], deps: PredictDue
     collection_targets = await asyncio.to_thread(deps.candidate_collection_targets, targets)
     cycle_targets = deps.prediction_cycle_targets(targets, due_targets, collection_targets, skipped_targets=skipped_targets)
     primary_due_targets, final_due_targets = _split_final_decision_targets(due_targets)
+    live_due_targets = [target for target in primary_due_targets if target.live_trading_enabled]
     active_targets = list(cycle_targets.active)
+    non_blocking_errors: list[Exception] = []
     deps.record_prediction_progress(cycle_targets, "inputs_preparing")
     if not active_targets:
         return deps.prediction_cycle_summary(cycle_targets)
     await deps.prepare_prediction_inputs(active_targets)
     prediction_error = await _run_primary_predictions(primary_due_targets, cycle_targets, deps)
-    final_batches = await _run_required_final_candidates(final_due_targets, collection_targets, cycle_targets, deps)
-    final_error = await _run_final_predictions(final_due_targets, cycle_targets, deps)
-    await _run_observe_only_work(collection_targets, final_batches, cycle_targets, active_targets, deps)
+    final_batches, collection_error = await _run_required_final_candidates(final_due_targets, collection_targets, cycle_targets, deps)
+    if collection_error is not None:
+        non_blocking_errors.append(collection_error)
+    final_error = await _run_final_predictions([] if collection_error else final_due_targets, cycle_targets, deps)
+    shadow_error = await _run_observe_only_work(collection_targets, final_batches, cycle_targets, active_targets, deps)
+    if shadow_error is not None:
+        non_blocking_errors.append(shadow_error)
     _raise_prediction_errors(prediction_error, final_error)
-    return deps.prediction_cycle_summary(cycle_targets)
+    if non_blocking_errors and not live_due_targets:
+        raise non_blocking_errors[0]
+    return _cycle_summary_with_errors(deps.prediction_cycle_summary(cycle_targets), non_blocking_errors)
 
 
 async def _run_primary_predictions(settings_list: list[AutoTradeSettings], cycle_targets: Any, deps: PredictDueEntryDeps) -> Exception | None:
@@ -64,14 +72,22 @@ async def _run_required_final_candidates(
     collection_targets: list[AutoTradeSettings],
     cycle_targets: Any,
     deps: PredictDueEntryDeps,
-) -> list[Any]:
+) -> tuple[list[Any], Exception | None]:
     if final_due_targets and collection_targets:
         deps.record_prediction_progress(cycle_targets, "final_decision_candidates_running")
-        return await deps.run_final_decision_required_candidate_batch(collection_targets)
+        try:
+            return await deps.run_final_decision_required_candidate_batch(collection_targets), None
+        except Exception as exc:
+            deps.logger.exception("final decision candidate batch failed")
+            return [], exc
     if collection_targets:
         deps.record_prediction_progress(cycle_targets, "candidate_collection_running")
-        await deps.run_candidate_collection_batch(collection_targets)
-    return []
+        try:
+            await deps.run_candidate_collection_batch(collection_targets)
+        except Exception as exc:
+            deps.logger.exception("candidate collection batch failed")
+            return [], exc
+    return [], None
 
 
 async def _run_final_predictions(settings_list: list[AutoTradeSettings], cycle_targets: Any, deps: PredictDueEntryDeps) -> Exception | None:
@@ -92,12 +108,21 @@ async def _run_observe_only_work(
     cycle_targets: Any,
     active_targets: list[AutoTradeSettings],
     deps: PredictDueEntryDeps,
-) -> None:
+) -> Exception | None:
     if final_batches:
         deps.record_prediction_progress(cycle_targets, "observe_only_candidate_collection_running")
-        await deps.run_observe_only_candidate_collection_batch(collection_targets, final_batches)
+        try:
+            await deps.run_observe_only_candidate_collection_batch(collection_targets, final_batches)
+        except Exception as exc:
+            deps.logger.exception("observe-only candidate collection failed")
+            return exc
     deps.record_prediction_progress(cycle_targets, "shadow_backfill_running")
-    await deps.backfill_lstm_shadow_predictions(active_targets)
+    try:
+        await deps.backfill_lstm_shadow_predictions(active_targets)
+    except Exception as exc:
+        deps.logger.exception("shadow backfill failed")
+        return exc
+    return None
 
 
 def _split_final_decision_targets(
@@ -118,3 +143,22 @@ def _raise_prediction_errors(prediction_error: Exception | None, final_error: Ex
         raise prediction_error
     if final_error is not None:
         raise final_error
+
+
+def _cycle_summary_with_errors(summary: dict[str, Any], errors: list[Exception]) -> dict[str, Any]:
+    result = dict(summary)
+    if errors:
+        result["nonBlockingErrorCount"] = len(errors)
+        result["nonBlockingErrors"] = [_error_payload(error) for error in errors]
+    return result
+
+
+def _error_payload(error: Exception) -> dict[str, Any]:
+    details = getattr(error, "details", None)
+    payload: dict[str, Any] = {
+        "error": str(error),
+        "exceptionType": type(error).__name__,
+    }
+    if details is not None:
+        payload["details"] = details
+    return payload

@@ -53,3 +53,32 @@ def test_missing_shadow_entries_skip_database_when_no_feature_rows(monkeypatch) 
     )
 
     assert missing == ()
+
+
+def test_backfill_model_family_shadow_predictions_limits_entries(monkeypatch) -> None:
+    predicted_entries = []
+    saved_predictions = []
+    entries = (INTERVAL_MS, 2 * INTERVAL_MS, 3 * INTERVAL_MS, 4 * INTERVAL_MS)
+
+    monkeypatch.setattr(service, "missing_model_family_shadow_entry_times", lambda *_args: entries)
+    monkeypatch.setattr(
+        service,
+        "predict_model_family_shadow_predictions",
+        lambda _family, _symbol, _duration, selected: predicted_entries.extend(selected)
+        or [{"open_time": item} for item in selected],
+    )
+    monkeypatch.setattr(service, "save_prediction", lambda prediction: saved_predictions.append(prediction) or True)
+
+    summary = service.backfill_model_family_shadow_predictions(
+        "lstm",
+        "btcusdt",
+        DEFAULT_DURATION,
+        4 * INTERVAL_MS,
+        max_entries=2,
+    )
+
+    assert predicted_entries == [INTERVAL_MS, 2 * INTERVAL_MS]
+    assert saved_predictions == [{"open_time": INTERVAL_MS}, {"open_time": 2 * INTERVAL_MS}]
+    assert summary["missingCount"] == 2
+    assert summary["remainingMissingCount"] == 2
+    assert summary["savedCount"] == 2

@@ -839,6 +839,45 @@ def test_predict_due_entries_collects_candidates_when_primary_batch_fails(monkey
     ]
 
 
+def test_predict_due_entries_keeps_live_prediction_when_collection_fails(monkeypatch) -> None:
+    calls = []
+    live = _settings(factor_candidate_signal_key("rsi_14"), live_trading_enabled=True)
+    collection = _settings(FACTOR_COMBO_STRATEGY_KEY)
+
+    async def prepare(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("prepare", [item.strategy_key for item in settings_list]))
+
+    async def run_batch(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("run_batch", [item.strategy_key for item in settings_list]))
+
+    async def collect(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("collect", [item.strategy_key for item in settings_list]))
+        raise RuntimeError("candidate source failed")
+
+    async def backfill(settings_list: list[AutoTradeSettings]) -> None:
+        calls.append(("backfill", [item.strategy_key for item in settings_list]))
+
+    monkeypatch.setattr(service, "_ready_due_prediction_targets", lambda _targets: _ready_result([live]))
+    monkeypatch.setattr(service, "_candidate_collection_targets", lambda _targets: [collection])
+    monkeypatch.setattr(service, "_prepare_prediction_inputs", prepare)
+    monkeypatch.setattr(service, "_run_prediction_batch", run_batch)
+    monkeypatch.setattr(service, "_run_candidate_collection_batch", collect)
+    monkeypatch.setattr(service, "_backfill_lstm_shadow_predictions", backfill)
+
+    summary = asyncio.run(service._predict_due_entries([live, collection]))
+
+    assert calls == [
+        ("prepare", [live.strategy_key, FACTOR_COMBO_STRATEGY_KEY]),
+        ("run_batch", [live.strategy_key]),
+        ("collect", [FACTOR_COMBO_STRATEGY_KEY]),
+        ("backfill", [live.strategy_key, FACTOR_COMBO_STRATEGY_KEY]),
+    ]
+    assert summary["readyDueCount"] == 1
+    assert summary["collectionTargetCount"] == 1
+    assert summary["nonBlockingErrorCount"] == 1
+    assert summary["nonBlockingErrors"][0]["error"] == "candidate source failed"
+
+
 def test_predict_due_entries_continues_ready_targets_when_one_is_skipped(monkeypatch) -> None:
     calls = []
     ready = _settings(FACTOR_COMBO_STRATEGY_KEY, duration="30m")
@@ -1397,7 +1436,7 @@ def test_backfill_shadow_predictions_exposes_returned_exception(monkeypatch) -> 
         def error(self, message: str, *args, exc_info=None) -> None:
             logged.append((message, args, exc_info))
 
-    def backfill(*_args) -> None:
+    def backfill(*_args, **_kwargs) -> None:
         raise failure
 
     monkeypatch.setattr(
@@ -1438,6 +1477,43 @@ def test_backfill_shadow_predictions_exposes_returned_exception(monkeypatch) -> 
     ]
 
 
+def test_backfill_shadow_predictions_passes_entry_limit(monkeypatch) -> None:
+    calls = []
+
+    class Logger:
+        def error(self, *_args, **_kwargs) -> None:
+            raise AssertionError("no error expected")
+
+        def info(self, *_args, **_kwargs) -> None:
+            return None
+
+    def backfill(*args, **kwargs) -> dict:
+        calls.append((args, kwargs))
+        return {"savedCount": 0}
+
+    monkeypatch.setenv("MODEL_SHADOW_BACKFILL_ENTRY_LIMIT", "7")
+    monkeypatch.setenv("MODEL_SHADOW_BACKFILL_TIMEOUT_SECONDS", "5")
+
+    asyncio.run(
+        service.shadow_helpers.backfill_shadow_predictions(
+            [_settings(FACTOR_COMBO_STRATEGY_KEY)],
+            {
+                "ready_targets": lambda _settings_list: [("gru", "BTCUSDT", DEFAULT_DURATION)],
+                "backfill": backfill,
+                "current_entry": lambda _duration: ENTRY_OPEN_TIME,
+                "logger": Logger(),
+            },
+        )
+    )
+
+    assert calls == [
+        (
+            ("gru", "BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME),
+            {"max_entries": 7},
+        )
+    ]
+
+
 def test_backfill_shadow_summary_exposes_base_exception() -> None:
     logged = []
 
@@ -1470,7 +1546,7 @@ def test_auto_predict_loop_records_shadow_backfill_failure_details(monkeypatch) 
     stop_event = asyncio.Event()
     failure = RuntimeError("backfill failed")
 
-    def backfill(*_args) -> None:
+    def backfill(*_args, **_kwargs) -> None:
         stop_event.set()
         raise failure
 

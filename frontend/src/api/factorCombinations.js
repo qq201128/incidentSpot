@@ -46,6 +46,14 @@ export async function fetchPaperLiveCandidates(symbol, duration = "10m", options
   return data;
 }
 
+export async function fetchPaperLiveLiveSummary(options = {}) {
+  const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/paper-live/live-summary`, {
+    signal: options.signal,
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
+  return data;
+}
+
 export async function runPaperLiveDailyLoop(symbol, duration = "10m") {
   const { data } = await axios.post(`${API_BASE_URL}/api/factors/combinations/paper-live/daily-loop`, null, {
     params: { symbol, duration },

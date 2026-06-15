@@ -18,15 +18,27 @@ def backfill_model_family_shadow_predictions(
     symbol: str,
     duration: str,
     current_entry_open_time: int,
+    *,
+    max_entries: int | None = None,
 ) -> dict[str, Any]:
     selected = normalize_model_family(family)
     sym = symbol.strip().upper()
     entries = missing_model_family_shadow_entry_times(selected, sym, duration, current_entry_open_time)
     if not entries:
-        return _summary(selected, sym, duration, current_entry_open_time, (), 0)
-    predictions = predict_model_family_shadow_predictions(selected, sym, duration, list(entries))
+        return _summary(selected, sym, duration, current_entry_open_time, (), 0, remaining_count=0)
+    selected_entries = _limited_entries(entries, max_entries)
+    remaining_count = len(entries) - len(selected_entries)
+    predictions = predict_model_family_shadow_predictions(selected, sym, duration, list(selected_entries))
     saved = sum(1 for prediction in predictions if save_prediction(prediction))
-    return _summary(selected, sym, duration, current_entry_open_time, entries, saved)
+    return _summary(
+        selected,
+        sym,
+        duration,
+        current_entry_open_time,
+        selected_entries,
+        saved,
+        remaining_count=remaining_count,
+    )
 
 
 def missing_model_family_shadow_entry_times(
@@ -96,13 +108,30 @@ def _parse_iso_ms(value: str) -> int:
     return int(parsed.timestamp() * 1000)
 
 
-def _summary(family: str, symbol: str, duration: str, current_entry_open_time: int, entries: tuple[int, ...], saved: int) -> dict:
+def _limited_entries(entries: tuple[int, ...], max_entries: int | None) -> tuple[int, ...]:
+    if max_entries is None:
+        return entries
+    limit = max(1, int(max_entries))
+    return tuple(entries[:limit])
+
+
+def _summary(
+    family: str,
+    symbol: str,
+    duration: str,
+    current_entry_open_time: int,
+    entries: tuple[int, ...],
+    saved: int,
+    *,
+    remaining_count: int,
+) -> dict:
     return {
         "modelFamily": family,
         "symbol": symbol,
         "duration": duration,
         "currentEntryOpenTime": int(current_entry_open_time),
         "missingCount": len(entries),
+        "remainingMissingCount": int(remaining_count),
         "savedCount": int(saved),
         "firstMissingEntryOpenTime": entries[0] if entries else None,
         "lastMissingEntryOpenTime": entries[-1] if entries else None,
