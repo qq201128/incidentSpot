@@ -113,24 +113,41 @@ def _run_symbol_duration_agent(
 ) -> dict[str, Any]:
     stage = "queue_refresh"
     try:
-        queued = mark_factor_learning_refresh_queued(symbol, duration, run_agent=True)
+        queued = mark_factor_learning_refresh_queued(
+            symbol,
+            duration,
+            run_agent=True,
+            lookback_days=factor_lookback_days,
+        )
         mark_factor_learning_agent_pending(queued)
         stage = "refresh_memory"
-        mark_factor_learning_refresh_running(symbol, duration, run_agent=True)
+        mark_factor_learning_refresh_running(
+            symbol,
+            duration,
+            run_agent=True,
+            lookback_days=factor_lookback_days,
+        )
         memory = refresh_factor_learning_memory(
             symbol,
             duration,
             run_llm_agent=False,
             factor_lookback_days=factor_lookback_days,
         )
-        completed = mark_factor_learning_refresh_completed(memory, run_agent=True)
+        completed = mark_factor_learning_refresh_completed(memory, run_agent=True, lookback_days=factor_lookback_days)
         stage = "llm_agent"
         mark_factor_learning_agent_running(completed)
         memory = run_factor_learning_llm_agent(symbol, duration, factor_lookback_days=factor_lookback_days)
         return _target_report(memory, factor_lookback_days=factor_lookback_days)
     except Exception as exc:
         error = f"{stage}: {exc}"
-        mark_factor_learning_refresh_failed(symbol, duration, error, run_agent=True)
+        if stage == "refresh_memory":
+            mark_factor_learning_refresh_failed(
+                symbol,
+                duration,
+                error,
+                run_agent=True,
+                lookback_days=factor_lookback_days,
+            )
         mark_factor_learning_agent_failed(symbol, duration, error)
         raise RuntimeError(
             f"continuous agent factor mining failed symbol={symbol} duration={duration} stage={stage}: {exc}"

@@ -18,7 +18,12 @@ from app.services.event_final_decision_service import (
 from app.services.ensemble_ranker_prediction_service import predict_ensemble_ranker_prediction
 from app.services.kline_timing import current_rule_entry_open_time_for_duration, seconds_until_next_rule_entry_for_duration, utc_now_ms
 from app.services.model_family_config import MODEL_FAMILIES, is_model_family_shadow_strategy, parse_model_family_strategy
-from app.services.model_family_shadow_backfill_service import backfill_model_family_shadow_predictions, missing_model_family_shadow_entry_times
+from app.services.model_family_shadow_backfill_service import (
+    backfill_model_family_shadow_predictions,
+    build_model_family_shadow_backfill_prediction_batch,
+    missing_model_family_shadow_entry_times,
+    save_model_family_shadow_backfill_prediction_batch,
+)
 from app.services.prediction_cache_service import prediction_exists, prediction_response, save_prediction
 from app.services.auto_predict_loop_status import record_auto_predict_cycle_failure, record_auto_predict_cycle_success, record_auto_predict_loop_start, record_auto_predict_loop_stopped
 from app.services.rule_signal_service import predict_rule_direction
@@ -309,7 +314,19 @@ def _log_model_family_shadow_skip(settings: AutoTradeSettings, family: str, stat
         role=role,
     )
 def _shadow_deps() -> dict[str, Any]:
-    return {"ready_targets": _ready_model_family_shadow_backfill_targets, "unique_targets": _unique_model_family_shadow_targets, "backfill": backfill_model_family_shadow_predictions, "current_entry": current_rule_entry_open_time_for_duration, "lstm_status": lstm_model_status, "family_status": model_family_status, "logger": logger}
+    return {
+        "ready_targets": _ready_model_family_shadow_backfill_targets,
+        "unique_targets": _unique_model_family_shadow_targets,
+        "backfill": backfill_model_family_shadow_predictions,
+        "build_backfill": build_model_family_shadow_backfill_prediction_batch,
+        "save_backfill": save_model_family_shadow_backfill_prediction_batch,
+        "current_entry": current_rule_entry_open_time_for_duration,
+        "lstm_status": lstm_model_status,
+        "family_status": model_family_status,
+        "logger": logger,
+        "current_entry_only": True,
+        "cycle_context": PredictionCycleContext(),
+    }
 def lstm_model_status(symbol: str, duration: str) -> dict:
     return model_family_status("lstm", symbol, duration)
 def predict_lstm_shadow_prediction(symbol: str, duration: str, *, entry_open_time: int | None = None) -> dict:

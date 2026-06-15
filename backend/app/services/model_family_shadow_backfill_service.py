@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,12 @@ from app.services.model_family_prediction_service import predict_model_family_sh
 from app.services.prediction_cache_service import save_prediction
 
 
+@dataclass(frozen=True)
+class ShadowBackfillPredictionBatch:
+    summary: dict[str, Any]
+    predictions: tuple[dict[str, Any], ...]
+
+
 def backfill_model_family_shadow_predictions(
     family: str,
     symbol: str,
@@ -20,25 +27,64 @@ def backfill_model_family_shadow_predictions(
     current_entry_open_time: int,
     *,
     max_entries: int | None = None,
+    current_entry_only: bool = False,
+    cycle_context: Any | None = None,
 ) -> dict[str, Any]:
+    batch = build_model_family_shadow_backfill_prediction_batch(
+        family,
+        symbol,
+        duration,
+        current_entry_open_time,
+        max_entries=max_entries,
+        current_entry_only=current_entry_only,
+        cycle_context=cycle_context,
+    )
+    return save_model_family_shadow_backfill_prediction_batch(batch)
+
+
+def build_model_family_shadow_backfill_prediction_batch(
+    family: str,
+    symbol: str,
+    duration: str,
+    current_entry_open_time: int,
+    *,
+    max_entries: int | None = None,
+    current_entry_only: bool = False,
+    cycle_context: Any | None = None,
+) -> ShadowBackfillPredictionBatch:
     selected = normalize_model_family(family)
     sym = symbol.strip().upper()
     entries = missing_model_family_shadow_entry_times(selected, sym, duration, current_entry_open_time)
     if not entries:
-        return _summary(selected, sym, duration, current_entry_open_time, (), 0, remaining_count=0)
-    selected_entries = _limited_entries(entries, max_entries)
+        summary = _summary(selected, sym, duration, current_entry_open_time, (), 0, remaining_count=0)
+        return ShadowBackfillPredictionBatch(summary, ())
+    selected_entries = _current_entry_entries(entries, current_entry_open_time) if current_entry_only else _limited_entries(entries, max_entries)
     remaining_count = len(entries) - len(selected_entries)
-    predictions = predict_model_family_shadow_predictions(selected, sym, duration, list(selected_entries))
-    saved = sum(1 for prediction in predictions if save_prediction(prediction))
-    return _summary(
+    if not selected_entries:
+        summary = _summary(selected, sym, duration, current_entry_open_time, (), 0, remaining_count=remaining_count)
+        return ShadowBackfillPredictionBatch(summary, ())
+    predictions = predict_model_family_shadow_predictions(
+        selected,
+        sym,
+        duration,
+        list(selected_entries),
+        cycle_context=cycle_context,
+    )
+    summary = _summary(
         selected,
         sym,
         duration,
         current_entry_open_time,
         selected_entries,
-        saved,
+        0,
         remaining_count=remaining_count,
     )
+    return ShadowBackfillPredictionBatch(summary, tuple(predictions))
+
+
+def save_model_family_shadow_backfill_prediction_batch(batch: ShadowBackfillPredictionBatch) -> dict[str, Any]:
+    saved = sum(1 for prediction in batch.predictions if save_prediction(prediction))
+    return {**batch.summary, "savedCount": int(saved)}
 
 
 def missing_model_family_shadow_entry_times(
@@ -113,6 +159,11 @@ def _limited_entries(entries: tuple[int, ...], max_entries: int | None) -> tuple
         return entries
     limit = max(1, int(max_entries))
     return tuple(entries[:limit])
+
+
+def _current_entry_entries(entries: tuple[int, ...], current_entry_open_time: int) -> tuple[int, ...]:
+    current = int(current_entry_open_time)
+    return (current,) if current in entries else ()
 
 
 def _summary(

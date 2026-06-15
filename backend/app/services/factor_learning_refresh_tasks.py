@@ -13,12 +13,24 @@ from app.services.factor_learning_memory_store import (
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 
-def mark_factor_learning_refresh_queued(symbol: str, duration: str, *, run_agent: bool) -> dict[str, Any]:
-    return _save_refresh_status(symbol, duration, "queued", run_agent=run_agent)
+def mark_factor_learning_refresh_queued(
+    symbol: str,
+    duration: str,
+    *,
+    run_agent: bool,
+    lookback_days: int | None = None,
+) -> dict[str, Any]:
+    return _save_refresh_status(symbol, duration, "queued", run_agent=run_agent, lookback_days=lookback_days)
 
 
-def mark_factor_learning_refresh_running(symbol: str, duration: str, *, run_agent: bool) -> dict[str, Any]:
-    return _save_refresh_status(symbol, duration, "running", run_agent=run_agent)
+def mark_factor_learning_refresh_running(
+    symbol: str,
+    duration: str,
+    *,
+    run_agent: bool,
+    lookback_days: int | None = None,
+) -> dict[str, Any]:
+    return _save_refresh_status(symbol, duration, "running", run_agent=run_agent, lookback_days=lookback_days)
 
 
 def mark_factor_learning_refresh_failed(
@@ -27,13 +39,19 @@ def mark_factor_learning_refresh_failed(
     error: str,
     *,
     run_agent: bool,
+    lookback_days: int | None = None,
 ) -> dict[str, Any]:
-    return _save_refresh_status(symbol, duration, "failed", error, run_agent=run_agent)
+    return _save_refresh_status(symbol, duration, "failed", error, run_agent=run_agent, lookback_days=lookback_days)
 
 
-def mark_factor_learning_refresh_completed(memory: dict[str, Any], *, run_agent: bool) -> dict[str, Any]:
+def mark_factor_learning_refresh_completed(
+    memory: dict[str, Any],
+    *,
+    run_agent: bool,
+    lookback_days: int | None = None,
+) -> dict[str, Any]:
     updated = deepcopy(memory)
-    updated["refreshTask"] = _refresh_task_payload("completed", run_agent)
+    updated["refreshTask"] = _refresh_task_payload("completed", run_agent, lookback_days=lookback_days)
     return _save_memory_payload(updated)
 
 
@@ -44,17 +62,27 @@ def _save_refresh_status(
     error: str | None = None,
     *,
     run_agent: bool,
+    lookback_days: int | None = None,
 ) -> dict[str, Any]:
     _validate_duration(duration)
+    _validate_lookback_days(lookback_days)
     sym = symbol.strip().upper()
     memory = load_factor_learning_memory(sym, duration) or _queued_memory(sym, duration)
     updated = deepcopy(memory)
-    updated["refreshTask"] = _refresh_task_payload(status, run_agent, error)
+    updated["refreshTask"] = _refresh_task_payload(status, run_agent, error, lookback_days=lookback_days)
     return _save_memory_payload(updated)
 
 
-def _refresh_task_payload(status: str, run_agent: bool, error: str | None = None) -> dict[str, Any]:
+def _refresh_task_payload(
+    status: str,
+    run_agent: bool,
+    error: str | None = None,
+    *,
+    lookback_days: int | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"status": status, "runAgent": run_agent, "updatedAt": utc_now()}
+    if lookback_days is not None:
+        payload["lookbackDays"] = int(lookback_days)
     if error:
         payload["error"] = error
     return payload
@@ -80,6 +108,11 @@ def _save_memory_payload(memory: dict[str, Any]) -> dict[str, Any]:
 def _validate_duration(duration: str) -> None:
     if duration not in SUPPORTED_RULE_DURATIONS:
         raise ValueError(f"unsupported duration: {duration}")
+
+
+def _validate_lookback_days(lookback_days: int | None) -> None:
+    if lookback_days is not None and int(lookback_days) <= 0:
+        raise ValueError("lookback_days must be greater than 0")
 
 
 def _path_payload(path: Path) -> str:

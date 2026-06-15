@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 
 from app.services.background_loop_status import record_loop_failure, record_loop_start, record_loop_stopped, record_loop_success
+from app.services.background_threads import run_blocking_daemon
 from app.services.settlement_service import scan_due_open_events, settle_event
 
 logger = logging.getLogger(__name__)
@@ -26,14 +27,18 @@ async def auto_settlement_loop(stop_event: asyncio.Event, poll_seconds: int = 3)
         return
     while not stop_event.is_set():
         try:
-            scan = scan_due_open_events()
-            _settle_due_events(scan.due_ids, scan.invalid_events)
+            await run_blocking_daemon(_run_settlement_scan_once)
         except Exception as exc:
             record_loop_failure(LOOP_NAME, exc, {"stage": "scan"})
             logger.exception("auto settlement scan failed")
         if await _wait_for_next_poll(stop_event, poll_seconds):
             record_loop_stopped(LOOP_NAME, "stop_between_scans")
             return
+
+
+def _run_settlement_scan_once() -> None:
+    scan = scan_due_open_events()
+    _settle_due_events(scan.due_ids, scan.invalid_events)
 
 
 def _settle_due_events(due_ids: list[int], invalid_events: list[dict]) -> None:

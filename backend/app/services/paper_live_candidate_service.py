@@ -37,6 +37,14 @@ STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 150
 FAILED_LIST_LIMIT = 40
 RECENT_SETTLED_ROW_LIMIT = 100
+LIVE_READINESS_METRIC_KEYS = (
+    "consecutiveLosses",
+    "sampleCount",
+    "winRate",
+    "profitFactor",
+    "avgReturn",
+    "paperStability",
+)
 
 
 @dataclass(frozen=True)
@@ -165,6 +173,11 @@ def _candidate_from_status_snapshot(
     parsed = parse_details_json(row.get("details_json"))
     candidate = dict(parsed.value) if isinstance(parsed.value, dict) else {}
     strategy_key = str(candidate.get("strategyKey") or "")
+    candidate.setdefault("candidateKey", row.get("candidate_key"))
+    candidate.setdefault("status", row.get("status"))
+    candidate.setdefault("paperLiveStatus", row.get("status"))
+    candidate.setdefault("reason", row.get("reason"))
+    candidate.setdefault("metrics", {})
     live_state = live_states.get(strategy_key)
     if live_state is not None:
         candidate = {
@@ -173,11 +186,14 @@ def _candidate_from_status_snapshot(
             "liveTradingEnabled": live_state["liveTradingEnabled"],
             "liveTradingUpdatedAt": live_state["updatedAt"],
         }
-    candidate.setdefault("candidateKey", row.get("candidate_key"))
-    candidate.setdefault("status", row.get("status"))
-    candidate.setdefault("paperLiveStatus", row.get("status"))
-    candidate.setdefault("reason", row.get("reason"))
-    candidate.setdefault("metrics", {})
+        metrics = candidate.get("metrics") if isinstance(candidate.get("metrics"), dict) else {}
+        if _has_live_readiness_metrics(metrics):
+            candidate["liveReadiness"] = live_readiness_gate(
+                metrics,
+                candidate.get("status") or candidate.get("paperLiveStatus"),
+                status_reason=candidate.get("reason"),
+                real_trading_enabled=bool(live_state["liveTradingEnabled"]),
+            )
     if parsed.error:
         candidate["metadataParseErrors"] = [parsed.error]
     return candidate
@@ -458,6 +474,10 @@ def _dedupe_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         unique.append(row)
     return unique
+
+
+def _has_live_readiness_metrics(metrics: dict[str, Any]) -> bool:
+    return all(key in metrics for key in LIVE_READINESS_METRIC_KEYS)
 
 
 def _settled_candidate_count(rows: list[dict[str, Any]]) -> int:

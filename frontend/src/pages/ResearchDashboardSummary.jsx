@@ -107,10 +107,22 @@ function LiveTradingGroup({ group }) {
         {candidates.map((candidate) => (
           <li key={`${candidate.symbol}:${candidate.duration}:${candidate.strategyKey}`}>
             <span title={candidate.candidateName}>{candidate.candidateName || candidate.strategyKey || EMPTY}</span>
-            <small>{candidate.strategyKey || EMPTY}</small>
-            <small className={`research-live-runtime ${runtimeTone(candidate)}`}>
-              {runtimeLabel(candidate)} · {predictionLabel(candidate)}
+            <small
+              className={`research-live-settlement ${settlementTone(candidate)}`}
+              title={settlementTitle(candidate)}
+            >
+              {settlementLabel(candidate)}
             </small>
+            {priceLabel(candidate) ? (
+              <small className="research-live-prices" title={priceTitle(candidate)}>
+                {priceLabel(candidate)}
+              </small>
+            ) : null}
+            {timeLabel(candidate) ? (
+              <small className="research-live-times" title={timeTitle(candidate)}>
+                {timeLabel(candidate)}
+              </small>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -118,27 +130,78 @@ function LiveTradingGroup({ group }) {
   );
 }
 
-function runtimeLabel(candidate) {
-  const reason = candidate?.runtimeReason || "unknown";
-  const labels = {
-    ready_to_place_order: "可下单",
-    waiting_fresh_prediction: "等待新预测",
-    waiting_prediction: "待预测",
-    waiting_open_position_settled: "等持仓结算",
-    confidence_below_threshold: "置信不足",
-    production_target_failed: "生产目标未过",
-    high_winrate_gate_failed: "胜率门未过",
-    quality_gate_failed: "质量门未过",
-    signal_condition_not_met: "信号未触发",
-    disabled: "已停用",
-  };
-  return labels[reason] || reason;
+function settlementLabel(candidate) {
+  const correct = candidate?.lastSettledPredictionCorrect;
+  if (correct === true) return "上次预测：正确";
+  if (correct === false) return "上次预测：错误";
+  return "上次预测：未结算";
 }
 
-function predictionLabel(candidate) {
-  if (!candidate?.latestPredictionAt) return "无预测";
-  const freshness = candidate.latestPredictionFresh ? "新鲜" : "过期";
-  return `${freshness} ${formatRuntimeDate(candidate.latestPredictionAt)}`;
+function settlementTitle(candidate) {
+  const settledAt = formatRuntimeDate(candidate?.lastSettledAt);
+  if (settledAt === EMPTY) return settlementLabel(candidate);
+  return `${settlementLabel(candidate)} · ${settledAt}`;
+}
+
+function priceLabel(candidate) {
+  const entry = formatPrice(candidate?.lastSettledEntryPrice);
+  const exit = formatPrice(candidate?.lastSettledExitPrice);
+  if (entry === EMPTY && exit === EMPTY) return "";
+  return `开仓价 ${entry} · 结算价 ${exit}`;
+}
+
+function priceTitle(candidate) {
+  const settledAt = formatRuntimeDate(candidate?.lastSettledAt);
+  const suffix = settledAt === EMPTY ? "" : ` · ${settledAt}`;
+  return `${priceLabel(candidate)}${suffix}`;
+}
+
+function timeLabel(candidate) {
+  const openedAt = formatRuntimeDate(candidate?.lastSettledOpenTime);
+  const endedAt = formatRuntimeDate(exitOpenTime(candidate));
+  if (openedAt === EMPTY && endedAt === EMPTY) return "";
+  return `开仓 ${openedAt} · 结束 ${endedAt}`;
+}
+
+function timeTitle(candidate) {
+  const writtenAt = formatRuntimeDate(candidate?.lastSettledAt);
+  const predictionOpen = formatRuntimeDate(candidate?.lastSettledPredictionOpenTime);
+  const parts = [timeLabel(candidate)];
+  if (predictionOpen !== EMPTY) parts.push(`预测周期 ${predictionOpen}`);
+  if (writtenAt !== EMPTY) parts.push(`结算写入 ${writtenAt}`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function formatPrice(value) {
+  if (value == null) return EMPTY;
+  const price = Number(value);
+  if (!Number.isFinite(price)) return EMPTY;
+  return price.toLocaleString(undefined, {
+    maximumFractionDigits: 8,
+    minimumFractionDigits: price >= 100 ? 2 : 4,
+  });
+}
+
+function exitOpenTime(candidate) {
+  if (candidate?.lastSettledEventEndTime != null) return candidate.lastSettledEventEndTime;
+  if (candidate?.lastSettledExitOpenTime != null) return candidate.lastSettledExitOpenTime;
+  if (candidate?.lastSettledOpenTime == null) return null;
+  const durationMs = durationToMs(candidate?.duration);
+  if (durationMs == null) return null;
+  return Number(candidate.lastSettledOpenTime) + durationMs;
+}
+
+function durationToMs(duration) {
+  const value = String(duration || "");
+  if (value.endsWith("m")) {
+    const minutes = Number(value.slice(0, -1));
+    return Number.isFinite(minutes) ? minutes * 60_000 : null;
+  }
+  if (value.endsWith("d")) {
+    const days = Number(value.slice(0, -1));
+    return Number.isFinite(days) ? days * 24 * 60 * 60_000 : null;
+  }
+  return null;
 }
 
 function formatRuntimeDate(value) {
@@ -147,14 +210,11 @@ function formatRuntimeDate(value) {
   return date.toLocaleString();
 }
 
-function runtimeTone(candidate) {
-  if (candidate?.latestPredictionFresh && candidate?.runtimeReason === "ready_to_place_order") {
-    return "is-ready";
-  }
-  if (candidate?.runtimeReason === "waiting_fresh_prediction" || candidate?.runtimeReason === "waiting_prediction") {
-    return "is-waiting";
-  }
-  return "is-muted";
+function settlementTone(candidate) {
+  const correct = candidate?.lastSettledPredictionCorrect;
+  if (correct === true) return "is-correct";
+  if (correct === false) return "is-wrong";
+  return "is-empty";
 }
 
 function explicitFailureCount(summary) {

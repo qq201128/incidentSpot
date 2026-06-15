@@ -64,7 +64,7 @@ def test_backfill_model_family_shadow_predictions_limits_entries(monkeypatch) ->
     monkeypatch.setattr(
         service,
         "predict_model_family_shadow_predictions",
-        lambda _family, _symbol, _duration, selected: predicted_entries.extend(selected)
+        lambda _family, _symbol, _duration, selected, **_kwargs: predicted_entries.extend(selected)
         or [{"open_time": item} for item in selected],
     )
     monkeypatch.setattr(service, "save_prediction", lambda prediction: saved_predictions.append(prediction) or True)
@@ -82,3 +82,56 @@ def test_backfill_model_family_shadow_predictions_limits_entries(monkeypatch) ->
     assert summary["missingCount"] == 2
     assert summary["remainingMissingCount"] == 2
     assert summary["savedCount"] == 2
+
+
+def test_backfill_model_family_shadow_predictions_can_select_current_entry_only(monkeypatch) -> None:
+    predicted_entries = []
+    saved_predictions = []
+    entries = (INTERVAL_MS, 2 * INTERVAL_MS, 3 * INTERVAL_MS, 4 * INTERVAL_MS)
+
+    monkeypatch.setattr(service, "missing_model_family_shadow_entry_times", lambda *_args: entries)
+    monkeypatch.setattr(
+        service,
+        "predict_model_family_shadow_predictions",
+        lambda _family, _symbol, _duration, selected, **_kwargs: predicted_entries.extend(selected)
+        or [{"open_time": item} for item in selected],
+    )
+    monkeypatch.setattr(service, "save_prediction", lambda prediction: saved_predictions.append(prediction) or True)
+
+    summary = service.backfill_model_family_shadow_predictions(
+        "lstm",
+        "btcusdt",
+        DEFAULT_DURATION,
+        4 * INTERVAL_MS,
+        max_entries=2,
+        current_entry_only=True,
+    )
+
+    assert predicted_entries == [4 * INTERVAL_MS]
+    assert saved_predictions == [{"open_time": 4 * INTERVAL_MS}]
+    assert summary["missingCount"] == 1
+    assert summary["remainingMissingCount"] == 3
+    assert summary["savedCount"] == 1
+
+
+def test_backfill_model_family_shadow_predictions_skips_history_when_current_exists(monkeypatch) -> None:
+    entries = (INTERVAL_MS, 2 * INTERVAL_MS)
+
+    monkeypatch.setattr(service, "missing_model_family_shadow_entry_times", lambda *_args: entries)
+
+    def fail_predict(*_args, **_kwargs):
+        raise AssertionError("historical gaps should not be predicted in current-only mode")
+
+    monkeypatch.setattr(service, "predict_model_family_shadow_predictions", fail_predict)
+
+    summary = service.backfill_model_family_shadow_predictions(
+        "lstm",
+        "btcusdt",
+        DEFAULT_DURATION,
+        4 * INTERVAL_MS,
+        current_entry_only=True,
+    )
+
+    assert summary["missingCount"] == 0
+    assert summary["remainingMissingCount"] == 2
+    assert summary["savedCount"] == 0

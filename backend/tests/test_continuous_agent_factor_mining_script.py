@@ -66,12 +66,16 @@ def test_agent_mining_script_marks_failed_and_surfaces_error(monkeypatch: pytest
     monkeypatch.setattr(
         mining_script,
         "mark_factor_learning_refresh_running",
-        lambda symbol, duration, *, run_agent: calls.append(("refresh_running", symbol, duration, run_agent)),
+        lambda symbol, duration, *, run_agent, lookback_days=None: calls.append(
+            ("refresh_running", symbol, duration, run_agent)
+        ),
     )
     monkeypatch.setattr(
         mining_script,
         "mark_factor_learning_refresh_failed",
-        lambda symbol, duration, error, *, run_agent: calls.append(("refresh_failed", symbol, duration, error)),
+        lambda symbol, duration, error, *, run_agent, lookback_days=None: calls.append(
+            ("refresh_failed", symbol, duration, error)
+        ),
     )
     monkeypatch.setattr(mining_script, "mark_factor_learning_agent_pending", lambda memory: memory)
     monkeypatch.setattr(mining_script, "mark_factor_learning_agent_running", lambda memory: memory)
@@ -93,6 +97,36 @@ def test_agent_mining_script_marks_failed_and_surfaces_error(monkeypatch: pytest
     assert calls[-2][0] == "refresh_failed"
     assert calls[-1][0] == "agent_failed"
     assert "ranking cache crashed" in calls[-1][3]
+
+
+def test_agent_mining_script_keeps_refresh_completed_when_agent_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _patch_successful_cycle(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["continuous_agent_factor_mining.py", "btcusdt"])
+
+    def fail_agent(symbol: str, duration: str, *, factor_lookback_days: int | None) -> dict:
+        calls.append(("run_agent", symbol, duration, factor_lookback_days))
+        raise RuntimeError("llm network stalled")
+
+    monkeypatch.setattr(mining_script, "run_factor_learning_llm_agent", fail_agent)
+    monkeypatch.setattr(
+        mining_script,
+        "mark_factor_learning_refresh_failed",
+        lambda symbol, duration, error, *, run_agent, lookback_days=None: calls.append(
+            ("refresh_failed", symbol, duration, error)
+        ),
+    )
+    monkeypatch.setattr(
+        mining_script,
+        "mark_factor_learning_agent_failed",
+        lambda symbol, duration, error: calls.append(("agent_failed", symbol, duration, error)),
+    )
+
+    with pytest.raises(RuntimeError, match="stage=llm_agent"):
+        mining_script.main()
+
+    assert not any(call[0] == "refresh_failed" for call in calls)
+    assert calls[-1][0] == "agent_failed"
+    assert "llm_agent: llm network stalled" in calls[-1][3]
 
 
 def test_selected_durations_rejects_unsupported_duration() -> None:
@@ -131,12 +165,14 @@ def _patch_successful_cycle(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
     monkeypatch.setattr(
         mining_script,
         "mark_factor_learning_refresh_running",
-        lambda symbol, duration, *, run_agent: calls.append(("refresh_running", symbol, duration, run_agent)),
+        lambda symbol, duration, *, run_agent, lookback_days=None: calls.append(
+            ("refresh_running", symbol, duration, run_agent)
+        ),
     )
     monkeypatch.setattr(
         mining_script,
         "mark_factor_learning_refresh_completed",
-        lambda memory, *, run_agent: calls.append(("refresh_completed", run_agent)) or memory,
+        lambda memory, *, run_agent, lookback_days=None: calls.append(("refresh_completed", run_agent)) or memory,
     )
     monkeypatch.setattr(
         mining_script,
@@ -168,7 +204,7 @@ def _fake_refresh(calls: list[tuple]):
 
 
 def _fake_mark_refresh_queued(calls: list[tuple]):
-    def mark(symbol: str, duration: str, *, run_agent: bool) -> dict:
+    def mark(symbol: str, duration: str, *, run_agent: bool, lookback_days: int | None = None) -> dict:
         calls.append(("refresh_queued", symbol, duration, run_agent))
         return {"symbol": symbol, "duration": duration}
 

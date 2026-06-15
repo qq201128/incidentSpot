@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable
 
 import numpy as np
@@ -17,12 +18,15 @@ FeatureWindowLoader = Callable[..., tuple[np.ndarray, dict[str, Any]]]
 class PredictionCycleContext:
     artifact_json: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]] = field(default_factory=dict)
     feature_windows: dict[tuple[Any, ...], tuple[np.ndarray, dict[str, Any]]] = field(default_factory=dict)
+    backends: dict[str, Any] = field(default_factory=dict)
+    _lock: RLock = field(default_factory=RLock)
 
     def artifacts(self, paths) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
         key = str(paths.root)
-        if key not in self.artifact_json:
-            self.artifact_json[key] = prediction_artifacts(paths)
-        return self.artifact_json[key]
+        with self._lock:
+            if key not in self.artifact_json:
+                self.artifact_json[key] = prediction_artifacts(paths)
+            return self.artifact_json[key]
 
     def live_feature_window(
         self,
@@ -35,10 +39,17 @@ class PredictionCycleContext:
         model_family: str,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         key = (symbol, duration, int(entry_open_time or 0), tuple(columns), int(feature_window))
-        if key not in self.feature_windows:
-            self.feature_windows[key] = loader(symbol, duration, columns, feature_window, entry_open_time, model_family=model_family)
-        window, meta = self.feature_windows[key]
+        with self._lock:
+            if key not in self.feature_windows:
+                self.feature_windows[key] = loader(symbol, duration, columns, feature_window, entry_open_time, model_family=model_family)
+            window, meta = self.feature_windows[key]
         return window.copy(), dict(meta)
+
+    def backend(self, family: str, factory: Callable[[str], Any]):
+        with self._lock:
+            if family not in self.backends:
+                self.backends[family] = factory(family)
+            return self.backends[family]
 
 
 def prediction_artifacts(paths) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:

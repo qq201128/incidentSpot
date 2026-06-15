@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -11,6 +12,7 @@ from app.services import paper_live_candidate_live_control as control
 from app.services import paper_live_candidate_service as report_service
 from app.services import paper_live_report_cache as report_cache
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
+from app.services.high_winrate_strategy_metrics import high_winrate_metrics
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +55,34 @@ def test_stable_candidate_live_trading_can_be_enabled(monkeypatch: pytest.Monkey
     assert result["report"]["realTradingEnabled"] is True
     assert cached["cache"]["hit"] is True
     assert cached["stable"][0]["liveTradingEnabled"] is True
+
+
+def test_live_trading_uses_status_snapshot_without_full_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-control-snapshot") / "candidates.db"
+    candidate_key = factor_candidate_signal_key("snapshot")
+    _create_db(db_path)
+    _insert_status_snapshot(db_path, candidate_key)
+    _patch_db(monkeypatch, db_path)
+    monkeypatch.setattr(
+        control,
+        "refresh_paper_live_candidate_states",
+        lambda *_args, **_kwargs: pytest.fail("expected status snapshot, not full refresh"),
+    )
+
+    result = control.set_candidate_live_trading(
+        "BTCUSDT",
+        "10m",
+        candidate_key=candidate_key,
+        live_trading_enabled=True,
+    )
+
+    slot = _slot_row(db_path, candidate_key)
+    candidate = result["report"]["stable"][0]
+    assert slot["enabled"] == 1
+    assert slot["live_trading_enabled"] == 1
+    assert candidate["candidateKey"] == candidate_key
+    assert candidate["liveTradingEnabled"] is True
+    assert result["report"]["payloadSource"] == "candidate_status_snapshot"
 
 
 def test_non_stable_candidate_live_trading_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,6 +173,51 @@ def _create_db(path: Path) -> None:
           updated_at TEXT NOT NULL,
           PRIMARY KEY(strategy_key, symbol, duration)
         );
+        CREATE TABLE paper_live_prediction_failures (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          candidate_key TEXT NOT NULL,
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          details_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE paper_live_prediction_stage_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          signal_key TEXT NOT NULL,
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          open_time INTEGER,
+          stage TEXT NOT NULL,
+          status TEXT NOT NULL,
+          reason TEXT,
+          details_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE paper_live_candidate_status_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          candidate_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          old_status TEXT,
+          new_status TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          details_json TEXT NOT NULL,
+          changed_at TEXT NOT NULL
+        );
+        CREATE TABLE paper_live_candidate_status (
+          candidate_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          status TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          details_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(candidate_key, symbol, duration)
+        );
         """
     )
     conn.close()
@@ -159,6 +234,38 @@ def _insert_slot(path: Path, strategy_key: str, *, live_trading_enabled: bool) -
         VALUES(?, 'BTCUSDT', '10m', 1, ?, 10, 5.0, '2026-05-26T00:00:00+00:00')
         """,
         (strategy_key, int(live_trading_enabled)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _insert_status_snapshot(path: Path, candidate_key: str) -> None:
+    conn = _connect(path)
+    candidate = {
+        "candidateKey": candidate_key,
+        "strategyKey": candidate_key,
+        "candidateType": "factor",
+        "factorName": "snapshot",
+        "paperLiveWinRate": 0.6,
+        "paperLiveSampleCount": 30,
+        "paperLiveStatus": "paper_stable",
+        "status": "paper_stable",
+        "reason": "stable_paper_live_target_met",
+        "metrics": _stable_metrics(),
+        "liveTradingEnabled": False,
+    }
+    conn.execute(
+        """
+        INSERT INTO paper_live_candidate_status(
+          candidate_key, symbol, duration, status, reason, details_json, updated_at
+        )
+        VALUES(?, 'BTCUSDT', '10m', 'paper_stable', 'stable_paper_live_target_met', ?, ?)
+        """,
+        (
+            candidate_key,
+            json.dumps(candidate),
+            "2026-05-26T00:00:00+00:00",
+        ),
     )
     conn.commit()
     conn.close()
@@ -217,6 +324,14 @@ def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _stable_metrics() -> dict:
+    rows = [
+        {"actual_return": 0.01, "prediction_correct": 1}
+        for _index in range(30)
+    ]
+    return high_winrate_metrics(rows)
 
 
 def _runtime_path(name: str) -> Path:

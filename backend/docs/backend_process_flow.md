@@ -306,7 +306,7 @@ flowchart LR
 
 ### 6.4 LLM Agent 复盘
 
-`POST /api/factor-learning/refresh?runAgent=true` 或 `POST /api/factor-learning/agent/review` 会触发 Agent 复盘。
+`POST /api/factor-learning/refresh?runAgent=true` 或 `POST /api/factor-learning/agent/review` 会触发 Agent 复盘。刷新接口默认使用近 30 天因子窗口，避免页面联网挖掘因全量复盘超过 stale 阈值；可用 `factorLookbackDays` 覆盖窗口。
 
 Agent 的输出不会直接当成事实，它提出的是候选单因子公式，随后会进入：
 

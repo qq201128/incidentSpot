@@ -40,8 +40,11 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
     targets = deps["ready_targets"](settings_list)
     if not targets:
         return
+    save_backfill = deps.get("save_backfill")
     timeout_seconds = _backfill_timeout_seconds()
     entry_limit = _backfill_entry_limit()
+    current_entry_only = bool(deps.get("current_entry_only"))
+    cycle_context = deps.get("cycle_context")
     summaries = await asyncio.gather(
         *(
             _backfill_one(
@@ -51,6 +54,8 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
                 duration,
                 timeout_seconds=timeout_seconds,
                 entry_limit=entry_limit,
+                current_entry_only=current_entry_only,
+                cycle_context=cycle_context,
             )
             for family, symbol, duration in targets
         ),
@@ -58,7 +63,12 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
     )
     failures = []
     for target_tuple, summary in zip(targets, summaries):
-        failure = handle_backfill_summary(_backfill_target(target_tuple), summary, deps["logger"])
+        target = _backfill_target(target_tuple)
+        try:
+            saved_summary = _save_backfill_summary(summary, save_backfill)
+        except BaseException as exc:
+            saved_summary = exc
+        failure = handle_backfill_summary(target, saved_summary, deps["logger"])
         if failure is not None:
             failures.append(failure)
     if failures:
@@ -73,18 +83,28 @@ async def _backfill_one(
     *,
     timeout_seconds: float,
     entry_limit: int,
-) -> dict[str, Any]:
+    current_entry_only: bool,
+    cycle_context: Any | None,
+) -> object:
     return await asyncio.wait_for(
         asyncio.to_thread(
-            deps["backfill"],
+            deps.get("build_backfill") or deps["backfill"],
             family,
             symbol,
             duration,
             deps["current_entry"](duration),
             max_entries=entry_limit,
+            current_entry_only=current_entry_only,
+            cycle_context=cycle_context,
         ),
         timeout=timeout_seconds,
     )
+
+
+def _save_backfill_summary(summary: object, save_backfill) -> object:
+    if isinstance(summary, BaseException) or save_backfill is None:
+        return summary
+    return save_backfill(summary)
 
 
 def handle_backfill_summary(

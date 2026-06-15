@@ -75,7 +75,14 @@ def predict_model_family_signal(
         )
     )
     raw_probability = float(
-        predict_backend(selected, paths.model, apply_standardizer(window, scaler), backend, _default_backend, timings)[0]
+        predict_backend(
+            selected,
+            paths.model,
+            apply_standardizer(window, scaler),
+            backend,
+            _default_backend_for_context(cycle_context),
+            timings,
+        )[0]
     )
     payload = _version_payload(version, report)
     probability_up = _calibrated_probability(raw_probability, payload)
@@ -145,7 +152,12 @@ def predict_model_family_shadow_predictions(
         ),
     )
     raw_probabilities = predict_backend(
-        selected, paths.model, apply_standardizer(windows, scaler), backend, _default_backend, timings
+        selected,
+        paths.model,
+        apply_standardizer(windows, scaler),
+        backend,
+        _default_backend_for_context(cycle_context),
+        timings,
     )
     version_payload = _version_payload(version, report)
     probabilities = _calibrated_probabilities(raw_probabilities, version_payload)
@@ -294,3 +306,9 @@ def _trade_gate_passed(confidence: float, threshold: float | None, status: dict,
 
 def _default_backend(family: str):
     return JoblibModelBackend() if family in JOBLIB_MODEL_FAMILIES else TorchSequenceBackend()
+
+
+def _default_backend_for_context(cycle_context: PredictionCycleContext | None):
+    if cycle_context is None:
+        return _default_backend
+    return lambda family: cycle_context.backend(family, _default_backend)

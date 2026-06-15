@@ -18,6 +18,7 @@ from app.services.factor_combo_simulation_keys import (
 from app.services.factor_candidate_signal_keys import factor_candidate_signal_key
 from app.services.lstm_config import lstm_shadow_strategy_key
 from app.services.lstm_dataset_core import LstmDataError
+from app.services.model_family_shadow_backfill_service import ShadowBackfillPredictionBatch
 from app.services.rule_config import DURATION_TO_MINUTES
 from app.services.strategy_prediction_readiness import PredictionReadiness
 from app.services.strategy_registry import (
@@ -1449,7 +1450,7 @@ def test_backfill_shadow_predictions_exposes_returned_exception(monkeypatch) -> 
         "current_rule_entry_open_time_for_duration",
         lambda _duration: ENTRY_OPEN_TIME,
     )
-    monkeypatch.setattr(service, "backfill_model_family_shadow_predictions", backfill)
+    monkeypatch.setattr(service, "build_model_family_shadow_backfill_prediction_batch", backfill)
     monkeypatch.setattr(service, "logger", Logger())
 
     try:
@@ -1509,9 +1510,66 @@ def test_backfill_shadow_predictions_passes_entry_limit(monkeypatch) -> None:
     assert calls == [
         (
             ("gru", "BTCUSDT", DEFAULT_DURATION, ENTRY_OPEN_TIME),
-            {"max_entries": 7},
+            {"max_entries": 7, "current_entry_only": False, "cycle_context": None},
         )
     ]
+
+
+def test_auto_predict_shadow_deps_use_current_entry_only() -> None:
+    deps = service._shadow_deps()
+
+    assert deps["current_entry_only"] is True
+    assert isinstance(deps["cycle_context"], PredictionCycleContext)
+
+
+def test_backfill_shadow_predictions_builds_then_saves_batches(monkeypatch) -> None:
+    calls = []
+
+    class Logger:
+        def error(self, *_args, **_kwargs) -> None:
+            raise AssertionError("no error expected")
+
+        def info(self, *_args, **_kwargs) -> None:
+            return None
+
+    def build(family, symbol, duration, current_entry, **kwargs):
+        calls.append(("build", family, kwargs["current_entry_only"]))
+        summary = {
+            "modelFamily": family,
+            "symbol": symbol,
+            "duration": duration,
+            "currentEntryOpenTime": current_entry,
+            "missingCount": 1,
+            "remainingMissingCount": 0,
+            "savedCount": 0,
+        }
+        return ShadowBackfillPredictionBatch(summary, ({"family": family},))
+
+    def save(batch: ShadowBackfillPredictionBatch) -> dict:
+        calls.append(("save", batch.summary["modelFamily"], len(batch.predictions)))
+        return {**batch.summary, "savedCount": len(batch.predictions)}
+
+    asyncio.run(
+        service.shadow_helpers.backfill_shadow_predictions(
+            [_settings(FACTOR_COMBO_STRATEGY_KEY)],
+            {
+                "ready_targets": lambda _settings_list: [
+                    ("gru", "BTCUSDT", DEFAULT_DURATION),
+                    ("cnn", "BTCUSDT", DEFAULT_DURATION),
+                ],
+                "build_backfill": build,
+                "save_backfill": save,
+                "current_entry": lambda _duration: ENTRY_OPEN_TIME,
+                "current_entry_only": True,
+                "cycle_context": PredictionCycleContext(),
+                "logger": Logger(),
+            },
+        )
+    )
+
+    assert ("build", "gru", True) in calls
+    assert ("build", "cnn", True) in calls
+    assert calls[-2:] == [("save", "gru", 1), ("save", "cnn", 1)]
 
 
 def test_backfill_shadow_summary_exposes_base_exception() -> None:
@@ -1562,7 +1620,7 @@ def test_auto_predict_loop_records_shadow_backfill_failure_details(monkeypatch) 
         lambda _settings_list: [("gru", "BTCUSDT", DEFAULT_DURATION)],
     )
     monkeypatch.setattr(service, "current_rule_entry_open_time_for_duration", lambda _duration: ENTRY_OPEN_TIME)
-    monkeypatch.setattr(service, "backfill_model_family_shadow_predictions", backfill)
+    monkeypatch.setattr(service, "build_model_family_shadow_backfill_prediction_batch", backfill)
 
     asyncio.run(service.auto_predict_loop(stop_event, poll_seconds=1))
 

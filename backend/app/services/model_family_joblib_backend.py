@@ -62,12 +62,22 @@ class JoblibModelBackend:
 
     def predict(self, model_path: Path, x: np.ndarray, *, timings: dict[str, Any] | None = None) -> np.ndarray:
         started = time.perf_counter()
-        model = joblib.load(model_path)
+        model = self._model_for_path(model_path)
         record_timing(timings, "modelLoadSeconds", started)
         started = time.perf_counter()
         result = _predict_model(model, x)
         record_timing(timings, "modelPredictSeconds", started)
         return result
+
+    def _model_for_path(self, model_path: Path):
+        cache = getattr(self, "_loaded_models", None)
+        if cache is None:
+            cache = {}
+            self._loaded_models = cache
+        key = str(model_path)
+        if key not in cache:
+            cache[key] = joblib.load(model_path)
+        return cache[key]
 
 
 def _estimator(options: JoblibModelOptions):

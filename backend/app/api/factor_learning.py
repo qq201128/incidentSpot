@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
@@ -30,6 +31,7 @@ from app.services.factor_operator_library import factor_operator_payload
 router = APIRouter(prefix="/api/factor-learning", tags=["factor-learning"])
 logger = logging.getLogger("uvicorn.error")
 BACKGROUND_REFRESH_LOOP = "factor_learning_refresh"
+DEFAULT_FACTOR_LEARNING_REFRESH_LOOKBACK_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ class FactorLearningRefreshJob:
     symbol: str
     duration: str
     run_agent: bool
+    factor_lookback_days: int | None = DEFAULT_FACTOR_LEARNING_REFRESH_LOOKBACK_DAYS
 
 
 @router.get("/memory")
@@ -63,10 +66,16 @@ def factor_learning_refresh(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
     run_agent: bool = Query(True, alias="runAgent"),
+    factor_lookback_days: int | None = Query(
+        DEFAULT_FACTOR_LEARNING_REFRESH_LOOKBACK_DAYS,
+        alias="factorLookbackDays",
+        ge=1,
+        le=2000,
+    ),
 ) -> dict:
     sym_u = symbol.upper()
     try:
-        job = FactorLearningRefreshJob(sym_u, duration, run_agent)
+        job = FactorLearningRefreshJob(sym_u, duration, run_agent, _query_factor_lookback_days(factor_lookback_days))
         return _queue_factor_learning_refresh(background_tasks, job)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -90,7 +99,12 @@ def _queue_factor_learning_refresh(
     background_tasks: BackgroundTasks,
     job: FactorLearningRefreshJob,
 ) -> dict:
-    queued = mark_factor_learning_refresh_queued(job.symbol, job.duration, run_agent=job.run_agent)
+    queued = mark_factor_learning_refresh_queued(
+        job.symbol,
+        job.duration,
+        run_agent=job.run_agent,
+        lookback_days=job.factor_lookback_days,
+    )
     if job.run_agent:
         queued = mark_factor_learning_agent_pending(queued)
     background_tasks.add_task(_background_factor_learning_refresh, job)
@@ -108,18 +122,39 @@ def _background_factor_learning_refresh(job: FactorLearningRefreshJob) -> None:
     stage = "refresh_memory"
     record_loop_start(BACKGROUND_REFRESH_LOOP, details)
     try:
-        mark_factor_learning_refresh_running(job.symbol, job.duration, run_agent=job.run_agent)
-        memory = refresh_factor_learning_memory(job.symbol, job.duration, run_llm_agent=False)
-        completed = mark_factor_learning_refresh_completed(memory, run_agent=job.run_agent)
+        mark_factor_learning_refresh_running(
+            job.symbol,
+            job.duration,
+            run_agent=job.run_agent,
+            lookback_days=job.factor_lookback_days,
+        )
+        memory = refresh_factor_learning_memory(
+            job.symbol,
+            job.duration,
+            run_llm_agent=False,
+            factor_lookback_days=job.factor_lookback_days,
+        )
+        completed = mark_factor_learning_refresh_completed(
+            memory,
+            run_agent=job.run_agent,
+            lookback_days=job.factor_lookback_days,
+        )
         if job.run_agent:
             stage = "llm_agent"
             mark_factor_learning_agent_running(completed)
-            run_factor_learning_llm_agent(job.symbol, job.duration)
+            run_factor_learning_llm_agent(job.symbol, job.duration, factor_lookback_days=job.factor_lookback_days)
         record_loop_success(BACKGROUND_REFRESH_LOOP, {**details, "stage": "completed"})
     except Exception as exc:
         failure_details = {**details, "stage": stage}
         record_loop_failure(BACKGROUND_REFRESH_LOOP, exc, failure_details)
-        mark_factor_learning_refresh_failed(job.symbol, job.duration, str(exc), run_agent=job.run_agent)
+        if stage == "refresh_memory":
+            mark_factor_learning_refresh_failed(
+                job.symbol,
+                job.duration,
+                str(exc),
+                run_agent=job.run_agent,
+                lookback_days=job.factor_lookback_days,
+            )
         if job.run_agent:
             mark_factor_learning_agent_failed(job.symbol, job.duration, str(exc))
         logger.exception("background factor learning refresh failed: %s %s", job.symbol, job.duration)
@@ -127,13 +162,28 @@ def _background_factor_learning_refresh(job: FactorLearningRefreshJob) -> None:
 
 
 def _loop_details(job: FactorLearningRefreshJob) -> dict:
-    return {"symbol": job.symbol, "duration": job.duration, "runAgent": job.run_agent}
+    return {
+        "symbol": job.symbol,
+        "duration": job.duration,
+        "runAgent": job.run_agent,
+        "factorLookbackDays": job.factor_lookback_days,
+    }
 
 
 def _refresh_queue_message(run_agent: bool) -> str:
     if run_agent:
         return "本地复盘与联网 Agent 挖掘已排队（先复盘记忆，再调用 LLM），完成后会写回记忆。"
     return "本地因子学习复盘已排队，完成后会写回记忆。"
+
+
+def _query_factor_lookback_days(value: Any) -> int | None:
+    selected = getattr(value, "default", value)
+    if selected is None:
+        return None
+    parsed = int(selected)
+    if parsed <= 0:
+        raise ValueError("factorLookbackDays must be greater than 0")
+    return parsed
 
 
 @router.get("/operators")

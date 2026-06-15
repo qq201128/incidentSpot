@@ -250,10 +250,9 @@
 .research-live-overview-group ul {
   display: grid;
   gap: 4px;
-  max-height: 84px;
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow: visible;
   list-style: none;
 }
 
@@ -270,7 +269,9 @@
   font-weight: 800;
 }
 
-.research-live-runtime {
+.research-live-settlement,
+.research-live-prices,
+.research-live-times {
   display: inline-flex;
   width: fit-content;
   max-width: 100%;
@@ -283,18 +284,36 @@
   white-space: nowrap;
 }
 
-.research-live-runtime.is-ready {
+.research-live-settlement {
+  border-color: rgba(147, 161, 170, 0.3);
+  background: rgba(147, 161, 170, 0.07);
+}
+
+.research-live-prices {
+  color: #d8e5e3;
+  border-color: rgba(126, 169, 215, 0.32);
+  background: rgba(126, 169, 215, 0.07);
+}
+
+.research-live-times {
+  color: #b7c9d7;
+  border-color: rgba(137, 180, 210, 0.28);
+  background: rgba(137, 180, 210, 0.06);
+}
+
+.research-live-settlement.is-correct {
   color: #baf7e5;
   border-color: rgba(51, 195, 123, 0.5);
+  background: rgba(51, 195, 123, 0.08);
 }
 
-.research-live-runtime.is-waiting {
-  color: #ffd38a;
-  border-color: rgba(255, 183, 77, 0.45);
-  background: rgba(255, 183, 77, 0.08);
+.research-live-settlement.is-wrong {
+  color: #ffb7ad;
+  border-color: rgba(238, 95, 84, 0.5);
+  background: rgba(238, 95, 84, 0.09);
 }
 
-.research-live-runtime.is-muted {
+.research-live-settlement.is-empty {
   color: var(--muted);
 }
 

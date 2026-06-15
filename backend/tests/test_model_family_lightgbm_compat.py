@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from app.services.model_family_joblib_backend import _predict_model
+from app.services.model_family_joblib_backend import JoblibModelBackend
 from app.services.model_family_joblib_extra_estimators import lightgbm_estimator
 from app.services.model_family_prediction_runtime import predict_backend
 
@@ -63,6 +64,25 @@ def test_lightgbm_default_backend_entry_patches_validation_hooks(monkeypatch) ->
     assert result.tolist() == [0.75]
 
 
+def test_joblib_backend_reuses_loaded_model_for_same_path(monkeypatch) -> None:
+    loads = []
+
+    def fake_load(path):
+        loads.append(path)
+        return _FakeProbabilityModel()
+
+    monkeypatch.setattr("app.services.model_family_joblib_backend.joblib.load", fake_load)
+    backend = JoblibModelBackend()
+    x = np.ones((1, 2, 3), dtype=np.float32)
+
+    first = backend.predict(Path("model.joblib"), x)
+    second = backend.predict(Path("model.joblib"), x)
+
+    assert first.tolist() == [0.75]
+    assert second.tolist() == [0.75]
+    assert loads == [Path("model.joblib")]
+
+
 def _check_array(_value, *, ensure_all_finite=True):
     return ensure_all_finite
 
@@ -81,6 +101,11 @@ class _FakeLoadedLGBMClassifier:
 
 
 _FakeLoadedLGBMClassifier.__module__ = "lightgbm.sklearn"
+
+
+class _FakeProbabilityModel:
+    def predict_proba(self, _x: np.ndarray) -> np.ndarray:
+        return np.array([[0.25, 0.75]], dtype=np.float32)
 
 
 class _FakeRuntimeBackend:

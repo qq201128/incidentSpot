@@ -79,6 +79,17 @@ class TorchSequenceBackend:
 
     def predict(self, model_path: Path, x: np.ndarray) -> np.ndarray:
         torch, nn = _torch_modules()
+        model = self._model_for_path(torch, nn, model_path)
+        return _predict_model(torch, model, x, None)
+
+    def _model_for_path(self, torch, nn, model_path: Path):
+        cache = getattr(self, "_loaded_models", None)
+        if cache is None:
+            cache = {}
+            self._loaded_models = cache
+        key = str(model_path)
+        if key in cache:
+            return cache[key]
         payload = torch.load(model_path, map_location="cpu", weights_only=True)
         options = TorchSequenceOptions(
             family=str(payload["family"]),
@@ -95,7 +106,8 @@ class TorchSequenceBackend:
         )
         model = _model_for_family(nn, options)
         model.load_state_dict(payload["state_dict"])
-        return _predict_model(torch, model, x, None)
+        cache[key] = model
+        return model
 
 
 def _predict_model(torch, model, x: np.ndarray, scaler) -> np.ndarray:
