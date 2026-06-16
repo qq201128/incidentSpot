@@ -6,7 +6,6 @@ import time
 from typing import Any, Callable
 
 DEFAULT_TTL_SECONDS = 30.0
-STALE_SECONDS = 300.0
 
 _lock = threading.Lock()
 _refresh_lock = threading.Lock()
@@ -36,9 +35,8 @@ def get_cached_paper_live_report(
             age = now - entry[0]
             if age <= ttl:
                 return _with_cache_meta(entry[1], hit=True, stale=False, warming=False, age_seconds=age)
-            if age <= STALE_SECONDS:
-                _schedule_refresh(key, build)
-                return _with_cache_meta(entry[1], hit=True, stale=True, warming=True, age_seconds=age)
+            _schedule_refresh(key, build)
+            return _with_cache_meta(entry[1], hit=True, stale=True, warming=True, age_seconds=age)
 
     payload = build(key[0], key[1])
     with _lock:
