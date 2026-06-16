@@ -29,6 +29,16 @@ const STATUS_PRIORITY = Object.freeze({
 });
 
 const SETTLED_SOURCE_LIMIT = 120;
+const SORT_SAMPLE_PRIOR = 50;
+const WILSON_Z = 1.96;
+const SORT_WEIGHTS = Object.freeze({
+  winRateLowerBound: 0.3,
+  recentWindowStability: 0.2,
+  rollingWindowStability: 0.15,
+  returnQuality: 0.15,
+  regimeConsistency: 0.1,
+  sampleConfidence: 0.1,
+});
 
 export function settledRows(report) {
   const rows = [
@@ -284,11 +294,14 @@ function rowPayload(row) {
     backtestWinRate,
     backtestGap: gapValue(backtestWinRate, paperWinRate),
     oosWinRate: numberOrNull(row.oosWinRate),
+    robustScore: numberOrNull(row.robustScore),
+    scoreBreakdown: row.scoreBreakdown,
     profitFactor: numberOrNull(metrics.profitFactor),
     avgReturn: numberOrNull(metrics.avgReturn),
     maxConsecutiveLosses: Number(metrics.maxConsecutiveLosses || 0),
     dataFreshnessStatus: row.dataFreshnessStatus,
     missingFeatureStatus: row.missingFeatureStatus,
+    regimeValidation: row.regimeValidation,
     stability: metrics.paperStability || {},
     windows: metrics.paperLiveWindows || {},
   };
@@ -372,13 +385,135 @@ function rowKey(row, name) {
 
 function sampleSort(left, right) {
   return statusPriority(right) - statusPriority(left)
-    || right.sampleCount - left.sampleCount
+    || robustSortScore(right) - robustSortScore(left)
+    || effectiveSampleCount(right) - effectiveSampleCount(left)
     || (right.winRate ?? 0) - (left.winRate ?? 0)
     || (right.profitFactor ?? 0) - (left.profitFactor ?? 0);
 }
 
 function statusPriority(row) {
   return STATUS_PRIORITY[row.status] ?? 0;
+}
+
+function robustSortScore(row) {
+  if (row.robustScore != null) return row.robustScore;
+  const score = SORT_WEIGHTS.winRateLowerBound * winRateLowerBound(row)
+    + SORT_WEIGHTS.recentWindowStability * recentWindowStabilityScore(row)
+    + SORT_WEIGHTS.rollingWindowStability * rollingWindowStabilityScore(row)
+    + SORT_WEIGHTS.returnQuality * returnQualityScore(row)
+    + SORT_WEIGHTS.regimeConsistency * regimeConsistencyScore(row)
+    + SORT_WEIGHTS.sampleConfidence * sampleConfidence(row);
+  return score - backtestGapPenalty(row) - lossStreakPenalty(row);
+}
+
+function winRateLowerBound(row) {
+  return wilsonLowerBound(row.winRate, effectiveSampleCount(row));
+}
+
+function recentWindowStabilityScore(row) {
+  const windows = [row.windows?.recent30, row.windows?.recent60, row.windows?.recent100]
+    .map(windowScorePayload)
+    .filter(Boolean);
+  if (!windows.length) return winRateLowerBound(row);
+  return stableWinRateScore(windows.map((window) => window.winRate), row.winRate);
+}
+
+function rollingWindowStabilityScore(row) {
+  const windows = Array.isArray(row?.stability?.rollingWindows) ? row.stability.rollingWindows : [];
+  const winRates = windows.map(windowScorePayload).filter(Boolean).map((window) => window.winRate);
+  if (!winRates.length) return recentWindowStabilityScore(row);
+  return stableWinRateScore(winRates, row.winRate);
+}
+
+function returnQualityScore(row) {
+  const pfScore = row.profitFactor == null ? 0 : clamp((row.profitFactor - 1) / 1);
+  const avgReturnScore = row.avgReturn == null ? 0 : clamp(0.5 + row.avgReturn / 0.01);
+  return 0.7 * pfScore + 0.3 * avgReturnScore;
+}
+
+function regimeConsistencyScore(row) {
+  const buckets = regimeBuckets(row.regimeValidation);
+  if (!buckets.length) return 0.5;
+  const totalSamples = buckets.reduce((sum, bucket) => sum + bucket.sampleCount, 0);
+  if (totalSamples <= 0) return 0.5;
+  const lowerBounds = buckets.map((bucket) => ({
+    sampleCount: bucket.sampleCount,
+    score: wilsonLowerBound(bucket.winRate, bucket.sampleCount),
+  }));
+  const weightedLower = lowerBounds.reduce(
+    (sum, bucket) => sum + bucket.score * bucket.sampleCount,
+    0,
+  ) / totalSamples;
+  const spread = Math.max(...buckets.map((bucket) => bucket.winRate))
+    - Math.min(...buckets.map((bucket) => bucket.winRate));
+  const coverageConfidence = Math.sqrt(buckets.length / (buckets.length + 3));
+  return clamp(weightedLower - spread * 0.35 + coverageConfidence * 0.1);
+}
+
+function sampleConfidence(row) {
+  const sampleCount = effectiveSampleCount(row);
+  if (sampleCount <= 0) return 0;
+  return Math.sqrt(sampleCount / (sampleCount + SORT_SAMPLE_PRIOR));
+}
+
+function backtestGapPenalty(row) {
+  const gap = Number(row.backtestGap);
+  if (!Number.isFinite(gap) || gap <= 0) return 0;
+  return clamp(gap, 0, 0.25);
+}
+
+function lossStreakPenalty(row) {
+  const losses = Number(row.maxConsecutiveLosses || 0);
+  if (!Number.isFinite(losses)) return 0;
+  return Math.max(losses - 2, 0) * 0.03;
+}
+
+function effectiveSampleCount(row) {
+  return Math.max(Number(row.sampleCount || 0), Number(row.validationSampleCount || 0));
+}
+
+function windowScorePayload(window) {
+  const sampleCount = Number(window?.sampleCount || 0);
+  const winRate = numberOrNull(window?.winRate);
+  if (sampleCount <= 0 || winRate == null) return null;
+  return { sampleCount, winRate };
+}
+
+function stableWinRateScore(winRates, fallback) {
+  const values = winRates.filter((value) => Number.isFinite(value));
+  if (!values.length) return numberOrNull(fallback) ?? 0;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const reference = numberOrNull(fallback) ?? average;
+  const averageDeviation = values.reduce((sum, value) => sum + Math.abs(value - reference), 0) / values.length;
+  return clamp(average - averageDeviation);
+}
+
+function regimeBuckets(regimeValidation) {
+  if (!regimeValidation || typeof regimeValidation !== "object") return [];
+  return Object.values(regimeValidation).map((payload) => {
+    const winRate = numberOrNull(payload?.winRate ?? payload?.accuracy);
+    const sampleCount = Number(payload?.sampleCount ?? payload?.n ?? 0);
+    if (winRate == null || sampleCount <= 0) return null;
+    return { sampleCount, winRate };
+  }).filter(Boolean);
+}
+
+function wilsonLowerBound(winRate, sampleCount) {
+  const n = Number(sampleCount || 0);
+  const p = numberOrNull(winRate);
+  if (!Number.isFinite(n) || n <= 0 || p == null) return 0;
+  const boundedP = clamp(p);
+  const z2 = WILSON_Z * WILSON_Z;
+  const denominator = 1 + z2 / n;
+  const centre = boundedP + z2 / (2 * n);
+  const margin = WILSON_Z * Math.sqrt((boundedP * (1 - boundedP) + z2 / (4 * n)) / n);
+  return clamp((centre - margin) / denominator);
+}
+
+function clamp(value, min = 0, max = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.min(Math.max(number, min), max);
 }
 
 function countRowStatus(rows, statuses) {

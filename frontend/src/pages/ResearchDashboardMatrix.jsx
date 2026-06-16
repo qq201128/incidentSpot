@@ -19,12 +19,16 @@ export function SettledSampleMatrix({
   loadError,
   loading,
   onLiveToggle,
+  onPageChange,
+  onPageSizeChange,
+  pagination,
   reportLoaded,
   rows,
 }) {
   const candidateCountText = matrixStatusText({
     loadError,
     loading,
+    pagination,
     reportLoaded,
     rowCount: rows.length,
   });
@@ -35,10 +39,23 @@ export function SettledSampleMatrix({
           <span className="section-kicker">Settled sample matrix</span>
           <h2>结算样本矩阵</h2>
         </div>
-        <small>{candidateCountText}</small>
+        <div className="research-matrix-head-actions">
+          <small>{candidateCountText}</small>
+          <PaginationControls
+            loading={loading}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            pagination={pagination}
+          />
+        </div>
       </header>
       {rows.length ? (
-        <MatrixTable liveToggleKey={liveToggleKey} onLiveToggle={onLiveToggle} rows={rows} />
+        <MatrixTable
+          liveToggleKey={liveToggleKey}
+          onLiveToggle={onLiveToggle}
+          pageSize={pagination?.pageSize || TOP_ROW_LIMIT}
+          rows={rows}
+        />
       ) : (
         <p className="research-empty" role={loadError ? "alert" : undefined}>
           {matrixEmptyText(loadError, loading, reportLoaded)}
@@ -48,7 +65,7 @@ export function SettledSampleMatrix({
   );
 }
 
-function MatrixTable({ liveToggleKey, onLiveToggle, rows }) {
+function MatrixTable({ liveToggleKey, onLiveToggle, pageSize, rows }) {
   return (
     <div className="research-table-wrap">
       <table className="research-table">
@@ -72,7 +89,7 @@ function MatrixTable({ liveToggleKey, onLiveToggle, rows }) {
           </tr>
         </thead>
         <tbody>
-          {visibleSettledRows(rows, TOP_ROW_LIMIT).map((row) => (
+          {visibleSettledRows(rows, pageSize).map((row) => (
             <SettledRow
               key={row.rowKey}
               liveToggleKey={liveToggleKey}
@@ -82,6 +99,42 @@ function MatrixTable({ liveToggleKey, onLiveToggle, rows }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PaginationControls({ loading, onPageChange, onPageSizeChange, pagination }) {
+  if (!pagination) return null;
+  const page = Number(pagination.page || 1);
+  const pageSize = Number(pagination.pageSize || TOP_ROW_LIMIT);
+  const totalPages = Math.max(Number(pagination.totalPages || 1), 1);
+  return (
+    <div className="research-pagination" aria-label="候选分页">
+      <button
+        disabled={loading || page <= 1}
+        onClick={() => onPageChange?.(page - 1)}
+        type="button"
+      >
+        上一页
+      </button>
+      <span>{page} / {totalPages}</span>
+      <button
+        disabled={loading || page >= totalPages}
+        onClick={() => onPageChange?.(page + 1)}
+        type="button"
+      >
+        下一页
+      </button>
+      <select
+        aria-label="每页候选数"
+        disabled={loading}
+        onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
+        value={pageSize}
+      >
+        {[18, 30, 50, 100].map((value) => (
+          <option key={value} value={value}>{value}/页</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -165,9 +218,15 @@ function metricClass(value, target) {
   return Number(value) >= target ? "is-good" : "is-bad";
 }
 
-function matrixStatusText({ loadError, loading, reportLoaded, rowCount }) {
+function matrixStatusText({ loadError, loading, pagination, reportLoaded, rowCount }) {
   if (loadError) return "候选报告读取失败";
   if (loading) return "正在读取候选报告";
+  if (reportLoaded && pagination) {
+    const totalRows = Number(pagination.totalRows || rowCount);
+    const returnedRows = Number(pagination.returnedRows || rowCount);
+    const totalCandidates = Number(pagination.allCandidateCount || totalRows);
+    return `本页 ${returnedRows} / 可展示 ${totalRows} · 全量 ${totalCandidates}`;
+  }
   if (reportLoaded) return `${rowCount} 个候选，含模型族观察行`;
   return "等待报告返回";
 }

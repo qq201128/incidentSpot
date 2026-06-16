@@ -17,6 +17,7 @@ from app.services.paper_live_candidate_service import (
     paper_live_candidate_report,
     refresh_paper_live_candidate_states,
 )
+from app.services.paper_live_report_cache import store_paper_live_report_cache
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ def _candidate_report_stage(context: CandidateReportContext) -> dict[str, Any]:
     def load_report() -> dict[str, Any]:
         report = context.deps.candidate_report(context.symbol, context.duration)
         box["report"] = report
+        store_paper_live_report_cache(context.symbol, context.duration, report)
         return _candidate_summary(report)
 
     _append_stage(context.stages, "candidate_pool_report", load_report)

@@ -38,8 +38,11 @@ export async function fetchFactorCombinationPositions(symbol, duration, factorNa
 }
 
 export async function fetchPaperLiveCandidates(symbol, duration = "10m", options = {}) {
+  const params = { symbol, duration };
+  if (options.page) params.page = options.page;
+  if (options.pageSize) params.pageSize = options.pageSize;
   const { data } = await axios.get(`${API_BASE_URL}/api/factors/combinations/paper-live/candidates`, {
-    params: { symbol, duration },
+    params,
     signal: options.signal,
     timeout: options.timeoutMs ?? PAPER_LIVE_CANDIDATES_TIMEOUT_MS,
   });

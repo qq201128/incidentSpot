@@ -325,3 +325,93 @@ const liveOutsidePooledLimitRows = settledRows({
   })),
 });
 assert.ok(liveOutsidePooledLimitRows.some((row) => row.name === "live_outside_limit"));
+
+const robustSortedRows = settledRows({
+  allCandidateCount: 2,
+  allCandidates: [
+    {
+      candidateKey: "sample_rich_but_fragile",
+      candidateType: "factor",
+      factorName: "sample_rich_but_fragile",
+      paperLiveStatus: "paper_collecting",
+      paperLiveWinRate: 0.58,
+      paperLiveSampleCount: 120,
+      backtestWinRate: 0.75,
+      metrics: {
+        sampleCount: 120,
+        winRate: 0.58,
+        profitFactor: 1.02,
+        avgReturn: -0.002,
+        maxConsecutiveLosses: 5,
+        paperLiveWindows: {
+          recent30: { sampleCount: 30, winRate: 0.5 },
+          recent60: { sampleCount: 60, winRate: 0.55 },
+          recent100: { sampleCount: 100, winRate: 0.58 },
+        },
+        paperStability: {
+          rollingWindows: [
+            { sampleCount: 10, winRate: 0.4 },
+            { sampleCount: 10, winRate: 0.5 },
+            { sampleCount: 10, winRate: 0.6 },
+          ],
+        },
+      },
+    },
+    {
+      candidateKey: "balanced_lower_sample",
+      candidateType: "factor",
+      factorName: "balanced_lower_sample",
+      paperLiveStatus: "paper_collecting",
+      paperLiveWinRate: 0.62,
+      paperLiveSampleCount: 54,
+      backtestWinRate: 0.63,
+      metrics: {
+        sampleCount: 54,
+        winRate: 0.62,
+        profitFactor: 1.45,
+        avgReturn: 0.002,
+        maxConsecutiveLosses: 1,
+        paperLiveWindows: {
+          recent30: { sampleCount: 30, winRate: 0.63 },
+          recent60: { sampleCount: 54, winRate: 0.62 },
+        },
+        paperStability: {
+          rollingWindows: [
+            { sampleCount: 10, winRate: 0.6 },
+            { sampleCount: 10, winRate: 0.6 },
+            { sampleCount: 10, winRate: 0.7 },
+          ],
+        },
+      },
+    },
+  ],
+});
+assert.equal(robustSortedRows[0].name, "balanced_lower_sample");
+
+const backendScoredRows = settledRows({
+  allCandidateCount: 2,
+  allCandidates: [
+    {
+      candidateKey: "backend_score_top",
+      candidateType: "factor",
+      factorName: "backend_score_top",
+      paperLiveStatus: "paper_collecting",
+      paperLiveWinRate: 0.5,
+      paperLiveSampleCount: 5,
+      robustScore: 0.9,
+      metrics: { sampleCount: 5, winRate: 0.5, profitFactor: 0.8 },
+    },
+    {
+      candidateKey: "backend_score_low",
+      candidateType: "factor",
+      factorName: "backend_score_low",
+      paperLiveStatus: "paper_collecting",
+      paperLiveWinRate: 0.9,
+      paperLiveSampleCount: 100,
+      robustScore: 0.1,
+      metrics: { sampleCount: 100, winRate: 0.9, profitFactor: 2.0 },
+    },
+  ],
+});
+assert.equal(backendScoredRows[0].name, "backend_score_top");
+assert.equal(backendScoredRows[0].robustScore, 0.9);

@@ -61,6 +61,33 @@ def test_candidate_report_trims_public_all_candidates(monkeypatch: pytest.Monkey
     assert len(full_report["allCandidates"]) == 220
 
 
+def test_candidate_report_paginates_dashboard_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-paged-report") / "candidates.db"
+    _create_db(db_path)
+    _insert_candidate_predictions(db_path, candidate_count=45, settled_per_candidate=1)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.paper_live_candidate_report("BTCUSDT", "10m")
+    first_page = service.paginate_paper_live_candidate_report(report, page=1, page_size=18)
+    second_page = service.paginate_paper_live_candidate_report(report, page=2, page_size=18)
+
+    assert first_page["pagination"] == {
+        "page": 1,
+        "pageSize": 18,
+        "totalRows": 45,
+        "totalPages": 3,
+        "returnedRows": 18,
+        "hasPrevious": False,
+        "hasNext": True,
+        "allCandidateCount": 45,
+    }
+    assert len(first_page["allCandidates"]) == 18
+    assert len(second_page["allCandidates"]) == 18
+    assert {row["candidateKey"] for row in first_page["allCandidates"]}.isdisjoint(
+        {row["candidateKey"] for row in second_page["allCandidates"]}
+    )
+
+
 def test_candidate_report_prefers_status_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live-status-snapshot") / "candidates.db"
     _create_db(db_path)

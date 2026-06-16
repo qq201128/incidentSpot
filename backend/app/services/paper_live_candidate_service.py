@@ -17,6 +17,7 @@ from app.services.paper_live_candidate_live_state import live_state_by_strategy
 from app.services.paper_live_candidate_ranking import (
     ValidationMetadata,
     candidate_rank_key,
+    candidate_robust_score,
     focus_pool,
     performance_comparison,
 )
@@ -37,6 +38,8 @@ STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 150
 FAILED_LIST_LIMIT = 40
 RECENT_SETTLED_ROW_LIMIT = 100
+DEFAULT_CANDIDATE_PAGE_SIZE = 18
+MAX_CANDIDATE_PAGE_SIZE = 100
 LIVE_READINESS_METRIC_KEYS = (
     "consecutiveLosses",
     "sampleCount",
@@ -67,6 +70,43 @@ def paper_live_candidate_report(symbol: str, duration: str) -> dict[str, Any]:
 
 def paper_live_candidate_full_report(symbol: str, duration: str) -> dict[str, Any]:
     return _candidate_report(symbol, duration, include_all_candidates=True)
+
+
+def paginate_paper_live_candidate_report(
+    report: dict[str, Any],
+    *,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
+    rows = report.get("allCandidates") if isinstance(report.get("allCandidates"), list) else []
+    safe_page_size = min(max(int(page_size or DEFAULT_CANDIDATE_PAGE_SIZE), 1), MAX_CANDIDATE_PAGE_SIZE)
+    total_rows = len(rows)
+    total_pages = max((total_rows + safe_page_size - 1) // safe_page_size, 1)
+    safe_page = min(max(int(page or 1), 1), total_pages)
+    start = (safe_page - 1) * safe_page_size
+    page_rows = rows[start : start + safe_page_size]
+    return {
+        **report,
+        "allCandidates": page_rows,
+        "candidates": _page_focus_rows(page_rows),
+        "stable": [row for row in page_rows if row.get("status") == STATUS_STABLE],
+        "collecting": [row for row in page_rows if row.get("status") == STATUS_COLLECTING],
+        "failed": [
+            row
+            for row in page_rows
+            if row.get("status") in {STATUS_FAILED, STATUS_LEAKAGE}
+        ],
+        "pagination": {
+            "page": safe_page,
+            "pageSize": safe_page_size,
+            "totalRows": total_rows,
+            "totalPages": total_pages,
+            "returnedRows": len(page_rows),
+            "hasPrevious": safe_page > 1,
+            "hasNext": safe_page < total_pages,
+            "allCandidateCount": report.get("allCandidateCount", total_rows),
+        },
+    }
 
 
 def _candidate_report(symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
@@ -196,6 +236,10 @@ def _candidate_from_status_snapshot(
             )
     if parsed.error:
         candidate["metadataParseErrors"] = [parsed.error]
+    if candidate.get("robustScore") is None:
+        score = candidate_robust_score(candidate)
+        candidate["robustScore"] = score["score"]
+        candidate["scoreBreakdown"] = score
     return candidate
 
 
@@ -266,6 +310,14 @@ def _candidate_payload(
     walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
     recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
     live_enabled = bool(live_state and live_state["liveTradingEnabled"])
+    robust_score = candidate_robust_score(
+        {
+            "backtestWinRate": candidate.get("high_winrate_gate_value"),
+            "paperLiveWinRate": metrics.get("winRate"),
+            "paperLiveSampleCount": metrics.get("sampleCount"),
+            "metrics": metrics,
+        }
+    )
     payload = {
         "candidateKey": _candidate_key(candidate),
         "strategyKey": candidate["strategy_key"],
@@ -282,6 +334,8 @@ def _candidate_payload(
         "recentRollingResult": recent_rolling.value,
         "paperLiveWinRate": metrics.get("winRate"),
         "paperLiveSampleCount": metrics.get("sampleCount"),
+        "robustScore": robust_score["score"],
+        "scoreBreakdown": robust_score,
         "paperLiveStatus": decision["status"],
         "autoTradeEnabled": bool(live_state and live_state["autoTradeEnabled"]),
         "liveTradingEnabled": live_enabled,
@@ -362,12 +416,12 @@ def _report_payload(data: ReportPayloadInput, *, include_all_candidates: bool) -
 def _ranking_policy() -> list[str]:
     return [
         "paper-live lifecycle stability",
-        "OOS performance",
-        "walk-forward performance",
-        "recent rolling stability",
-        "profitFactor",
-        "avgReturn",
-        "settled sample count",
+        "robust paper-live score: Wilson win-rate lower bound",
+        "recent 30/60/100 stability",
+        "rolling window stability",
+        "profitFactor and avgReturn quality",
+        "regime consistency when available",
+        "sqrt sample confidence with backtest-gap and loss-streak penalties",
     ]
 
 
@@ -382,6 +436,14 @@ def _dashboard_all_candidates(
 
 def _dashboard_candidate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [_dashboard_candidate_row(row) for row in rows]
+
+
+def _page_focus_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if row.get("status") not in {STATUS_FAILED, STATUS_LEAKAGE}
+    ]
 
 
 def _dashboard_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -400,6 +462,8 @@ def _dashboard_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
         "oosWinRate": row.get("oosWinRate"),
         "paperLiveWinRate": row.get("paperLiveWinRate"),
         "paperLiveSampleCount": row.get("paperLiveSampleCount"),
+        "robustScore": row.get("robustScore"),
+        "scoreBreakdown": row.get("scoreBreakdown"),
         "paperLiveStatus": row.get("paperLiveStatus"),
         "autoTradeEnabled": row.get("autoTradeEnabled"),
         "liveTradingEnabled": row.get("liveTradingEnabled"),

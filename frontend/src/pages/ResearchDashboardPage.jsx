@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { researchSummary, settledRows } from "./researchDashboardData";
+import { TOP_ROW_LIMIT, researchSummary, settledRows } from "./researchDashboardData";
 import { LiveTradingOverview, ResearchHeader, SummaryStrip } from "./ResearchDashboardSummary";
 import { ResearchSidePanel } from "./ResearchDashboardEvidence";
 import { SettledSampleMatrix } from "./ResearchDashboardMatrix";
@@ -14,6 +14,8 @@ export default function ResearchDashboardPage() {
   const [searchParams] = useSearchParams();
   const [symbol, setSymbol] = useState(searchParams.get("symbol") || "BTCUSDT");
   const [duration, setDuration] = useState(searchParams.get("duration") || "10m");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(TOP_ROW_LIMIT);
   const {
     liveToggleKey,
     loadError,
@@ -25,18 +27,31 @@ export default function ResearchDashboardPage() {
     runDailyLoop,
     status,
     toggleCandidateLiveTrading,
-  } = useResearchDashboard(symbol, duration);
+  } = useResearchDashboard(symbol, duration, { page, pageSize });
   const rows = useMemo(() => settledRows(report), [report]);
   const summary = useMemo(() => researchSummary(report, rows), [report, rows]);
+  const pagination = report?.pagination || {
+    page,
+    pageSize,
+    totalRows: rows.length,
+    totalPages: 1,
+    returnedRows: rows.length,
+  };
 
   return (
     <main className="research-page layout">
       <ResearchHeader
         duration={duration}
         loading={loading || mergingModels}
-        onDurationChange={setDuration}
+        onDurationChange={(value) => {
+          setDuration(value);
+          setPage(1);
+        }}
         onRunDailyLoop={runDailyLoop}
-        onSymbolChange={setSymbol}
+        onSymbolChange={(value) => {
+          setSymbol(value);
+          setPage(1);
+        }}
         status={status}
         symbol={symbol}
       />
@@ -48,6 +63,12 @@ export default function ResearchDashboardPage() {
           loadError={loadError}
           loading={loading && !report}
           onLiveToggle={toggleCandidateLiveTrading}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => {
+            setPageSize(value);
+            setPage(1);
+          }}
+          pagination={pagination}
           reportLoaded={summary.reportLoaded}
           rows={rows}
         />

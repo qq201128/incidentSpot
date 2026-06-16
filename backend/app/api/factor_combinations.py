@@ -11,7 +11,12 @@ from app.services.experiment_profiles import normalize_experiment_profile
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.high_winrate_combo_view import build_high_winrate_combo_view
 from app.services.high_winrate_combo_view import regular_ranking_view
-from app.services.paper_live_candidate_service import paper_live_candidate_report
+from app.services.paper_live_candidate_service import (
+    DEFAULT_CANDIDATE_PAGE_SIZE,
+    MAX_CANDIDATE_PAGE_SIZE,
+    paginate_paper_live_candidate_report,
+    paper_live_candidate_report,
+)
 from app.services.paper_live_candidate_live_state import live_trading_overview
 from app.services.paper_live_candidate_live_control import set_candidate_live_trading
 from app.services.paper_live_report_cache import get_cached_paper_live_report
@@ -114,11 +119,19 @@ def factor_combination_signals(
 def paper_live_candidates(
     symbol: str = Query(..., min_length=6),
     duration: str = Query("10m"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(
+        DEFAULT_CANDIDATE_PAGE_SIZE,
+        alias="pageSize",
+        ge=1,
+        le=MAX_CANDIDATE_PAGE_SIZE,
+    ),
 ) -> dict:
     safe_duration = _query_str(duration, "10m") or "10m"
     _validate_duration(safe_duration)
     sym = symbol.upper()
-    return get_cached_paper_live_report(sym, safe_duration, build=paper_live_candidate_report)
+    report = get_cached_paper_live_report(sym, safe_duration, build=paper_live_candidate_report)
+    return paginate_paper_live_candidate_report(report, page=page, page_size=page_size)
 
 
 @router.get("/paper-live/live-summary")

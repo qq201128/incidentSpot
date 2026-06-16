@@ -1,23 +1,26 @@
 const TTL_MS = 60_000;
 const cache = new Map();
 
-function cacheKey(symbol, duration) {
-  return `${String(symbol || "").trim().toUpperCase()}:${duration}`;
+function cacheKey(symbol, duration, pagination = {}) {
+  const page = pagination.page ?? 1;
+  const pageSize = pagination.pageSize ?? "default";
+  return `${String(symbol || "").trim().toUpperCase()}:${duration}:${page}:${pageSize}`;
 }
 
-export function peekResearchDashboardCache(symbol, duration) {
-  const entry = cache.get(cacheKey(symbol, duration));
+export function peekResearchDashboardCache(symbol, duration, pagination = {}) {
+  const key = cacheKey(symbol, duration, pagination);
+  const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.at > TTL_MS) {
-    cache.delete(cacheKey(symbol, duration));
+    cache.delete(key);
     return null;
   }
   return entry;
 }
 
-export function storeResearchDashboardCache(symbol, duration, report) {
+export function storeResearchDashboardCache(symbol, duration, report, pagination = {}) {
   if (!report) return;
-  cache.set(cacheKey(symbol, duration), { at: Date.now(), report });
+  cache.set(cacheKey(symbol, duration, pagination), { at: Date.now(), report });
 }
 
 export function clearResearchDashboardCache() {
