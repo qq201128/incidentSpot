@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,7 @@ class ShadowBackfillBatchError(RuntimeError):
 
 DEFAULT_BACKFILL_TIMEOUT_SECONDS = 20.0
 DEFAULT_BACKFILL_ENTRY_LIMIT = 24
+DEFAULT_BACKFILL_CONCURRENCY = 4
 
 
 async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], deps: dict[str, Any]) -> None:
@@ -43,23 +45,17 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
     save_backfill = deps.get("save_backfill")
     timeout_seconds = _backfill_timeout_seconds()
     entry_limit = _backfill_entry_limit()
+    concurrency = _backfill_concurrency()
     current_entry_only = bool(deps.get("current_entry_only"))
     cycle_context = deps.get("cycle_context")
-    summaries = await asyncio.gather(
-        *(
-            _backfill_one(
-                deps,
-                family,
-                symbol,
-                duration,
-                timeout_seconds=timeout_seconds,
-                entry_limit=entry_limit,
-                current_entry_only=current_entry_only,
-                cycle_context=cycle_context,
-            )
-            for family, symbol, duration in targets
-        ),
-        return_exceptions=True,
+    summaries = await _backfill_targets(
+        targets,
+        deps,
+        timeout_seconds=timeout_seconds,
+        entry_limit=entry_limit,
+        current_entry_only=current_entry_only,
+        cycle_context=cycle_context,
+        concurrency=concurrency,
     )
     failures = []
     for target_tuple, summary in zip(targets, summaries):
@@ -75,6 +71,35 @@ async def backfill_shadow_predictions(settings_list: list[AutoTradeSettings], de
         raise ShadowBackfillBatchError(failures)
 
 
+async def _backfill_targets(
+    targets: list[tuple[str, str, str]],
+    deps: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    entry_limit: int,
+    current_entry_only: bool,
+    cycle_context: Any | None,
+    concurrency: int,
+) -> list[object]:
+    limiter = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def run_one(target: tuple[str, str, str]) -> object:
+        async with limiter:
+            family, symbol, duration = target
+            return await _backfill_one(
+                deps,
+                family,
+                symbol,
+                duration,
+                timeout_seconds=timeout_seconds,
+                entry_limit=entry_limit,
+                current_entry_only=current_entry_only,
+                cycle_context=cycle_context,
+            )
+
+    return await asyncio.gather(*(run_one(target) for target in targets), return_exceptions=True)
+
+
 async def _backfill_one(
     deps: dict[str, Any],
     family: str,
@@ -86,19 +111,25 @@ async def _backfill_one(
     current_entry_only: bool,
     cycle_context: Any | None,
 ) -> object:
-    return await asyncio.wait_for(
-        asyncio.to_thread(
-            deps.get("build_backfill") or deps["backfill"],
-            family,
-            symbol,
-            duration,
-            deps["current_entry"](duration),
-            max_entries=entry_limit,
-            current_entry_only=current_entry_only,
-            cycle_context=cycle_context,
-        ),
-        timeout=timeout_seconds,
+    started = time.perf_counter()
+    summary = await asyncio.to_thread(
+        deps.get("build_backfill") or deps["backfill"],
+        family,
+        symbol,
+        duration,
+        deps["current_entry"](duration),
+        max_entries=entry_limit,
+        current_entry_only=current_entry_only,
+        cycle_context=cycle_context,
     )
+    elapsed = time.perf_counter() - started
+    if elapsed > timeout_seconds:
+        raise TimeoutError(
+            f"model family shadow backfill exceeded {timeout_seconds:.1f}s: "
+            f"{family}:{symbol}:{duration} took {elapsed:.3f}s"
+        )
+    return summary
+
 
 
 def _save_backfill_summary(summary: object, save_backfill) -> object:
@@ -187,4 +218,13 @@ def _backfill_entry_limit() -> int:
         value = int(raw)
     except ValueError as exc:
         raise ValueError(f"MODEL_SHADOW_BACKFILL_ENTRY_LIMIT must be an integer: {raw!r}") from exc
+    return max(1, value)
+
+
+def _backfill_concurrency() -> int:
+    raw = os.getenv("MODEL_SHADOW_BACKFILL_CONCURRENCY", str(DEFAULT_BACKFILL_CONCURRENCY))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"MODEL_SHADOW_BACKFILL_CONCURRENCY must be an integer: {raw!r}") from exc
     return max(1, value)

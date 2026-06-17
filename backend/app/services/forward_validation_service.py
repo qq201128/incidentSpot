@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
+from app.services.kline_timing import KLINE_ENTRY_GRACE_MS
 from app.services.paper_live_stage_log import log_settlement_pending, log_settlement_success
 from app.services.event_final_decision_service import settle_due_final_decisions
+from app.services.rule_config import MS_PER_MINUTE
 from app.services.trading_costs import ROUNDTRIP_COST_RATE
 
 DAY_MS = 86_400_000
@@ -59,9 +61,14 @@ def _due_prediction_rows(conn, symbol: str, duration: str) -> list[dict[str, Any
     if latest is None:
         return []
     max_open_time = int(latest) - _duration_ms(duration)
+    columns = _table_columns(conn, "predictions")
+    signal_key_expr = _column_expr(columns, "signal_key", "'forward_validation' AS signal_key")
+    strategy_key_expr = _column_expr(columns, "strategy_key", "'forward_validation' AS strategy_key")
+    created_at_expr = _column_expr(columns, "created_at", "NULL AS created_at")
     rows = conn.execute(
-        """
-        SELECT id, signal_key, strategy_key, symbol, duration, open_time, direction, entry_price
+        f"""
+        SELECT id, {signal_key_expr}, {strategy_key_expr}, symbol, duration, open_time, direction, entry_price,
+               {created_at_expr}
         FROM predictions
         WHERE symbol = ? AND duration = ? AND settled_at IS NULL AND open_time <= ?
         ORDER BY open_time
@@ -80,8 +87,9 @@ def _max_open_time(conn, symbol: str) -> int | None:
 
 
 def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
-    entry_price = row["entry_price"] or _kline_close(conn, row["symbol"], int(row["open_time"]))
-    exit_open_time = int(row["open_time"]) + _duration_ms(duration)
+    entry_open_time = _settlement_entry_open_time(row)
+    entry_price = _settlement_entry_price(conn, row, entry_open_time)
+    exit_open_time = entry_open_time + _duration_ms(duration)
     exit_price = _kline_close(conn, row["symbol"], exit_open_time)
     if entry_price is None or exit_price is None:
         log_settlement_pending(
@@ -113,6 +121,20 @@ def _settle_prediction(conn, row: dict[str, Any], duration: str) -> bool:
         prediction_correct=prediction_correct,
     )
     return True
+
+
+def _settlement_entry_open_time(row: dict[str, Any]) -> int:
+    open_time = int(row["open_time"])
+    created_at_ms = _iso_timestamp_ms(row.get("created_at"))
+    if created_at_ms is None or created_at_ms <= open_time + KLINE_ENTRY_GRACE_MS:
+        return open_time
+    return _minute_bucket(created_at_ms)
+
+
+def _settlement_entry_price(conn, row: dict[str, Any], entry_open_time: int) -> float | None:
+    if entry_open_time == int(row["open_time"]) and row.get("entry_price") is not None:
+        return float(row["entry_price"])
+    return _kline_close(conn, row["symbol"], entry_open_time)
 
 
 def _settled_prediction_rows(conn, symbol: str, duration: str) -> list[dict[str, Any]]:
@@ -203,6 +225,31 @@ def _kline_close(conn, symbol: str, open_time: int) -> float | None:
         (symbol.upper(), open_time),
     ).fetchone()
     return None if row is None else float(row["close"])
+
+
+def _table_columns(conn, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _column_expr(columns: set[str], column: str, fallback: str) -> str:
+    return column if column in columns else fallback
+
+
+def _iso_timestamp_ms(value: Any) -> int | None:
+    if not value:
+        return None
+    try:
+        normalized = str(value).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def _minute_bucket(timestamp_ms: int) -> int:
+    return (int(timestamp_ms) // MS_PER_MINUTE) * MS_PER_MINUTE
 
 
 def _directional_return(entry_price: float, exit_price: float, direction: str) -> float:

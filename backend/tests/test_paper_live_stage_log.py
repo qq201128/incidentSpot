@@ -64,7 +64,7 @@ def test_settle_due_predictions_records_settlement_stages(monkeypatch, tmp_path:
     result = forward_validation_service.settle_due_predictions("BTCUSDT", "10m")
 
     logs = _stage_logs(db_path)
-    assert result == {"checked": 1, "settled": 1, "pendingData": 0}
+    assert result == {"checked": 1, "settled": 1, "pendingData": 0, "finalDecisionsSettled": 0}
     assert [row["stage"] for row in logs] == ["label_construction", "settlement_update"]
     assert {row["status"] for row in logs} == {"passed"}
     assert logs[1]["reason"] == "settled_with_real_kline"
@@ -130,6 +130,11 @@ def _init_settlement_db(path: Path) -> None:
               open_time INTEGER, direction TEXT, entry_price REAL,
               exit_price REAL, actual_return REAL, prediction_correct INTEGER,
               settled_at TEXT, created_at TEXT
+            );
+            CREATE TABLE event_final_decisions(
+              symbol TEXT, duration TEXT, open_time INTEGER, direction TEXT,
+              settled_at TEXT, decision_correct INTEGER, actual_direction TEXT,
+              exit_price REAL
             );
             """
         )

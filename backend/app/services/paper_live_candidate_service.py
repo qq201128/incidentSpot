@@ -8,6 +8,7 @@ from typing import Any
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.high_winrate_strategy_metrics import high_winrate_decision, high_winrate_metrics
 from app.services.live_readiness_gate import live_readiness_gate
+from app.services.event_pnl_rows import settled_event_metric_rows
 from app.services.paper_live_failure_store import (
     ensure_prediction_failure_table,
     log_prediction_failure,
@@ -145,11 +146,13 @@ def _ensure_report_write_tables(conn: Any) -> None:
 def _report_from_conn(conn: Any, symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
     rows = _candidate_rows(conn, symbol, duration)
     settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
+    event_rows_by_identity = _settled_event_rows_by_identity(conn, symbol, duration, rows)
     live_states = live_state_by_strategy(conn, symbol, duration)
     candidates = [
         _candidate_payload(
             item,
             settled_by_identity.get(_candidate_identity_key(item), []),
+            event_rows_by_identity.get(_candidate_identity_key(item), []),
             live_states.get(str(item["strategy_key"])),
         )
         for item in rows
@@ -300,12 +303,34 @@ def _settled_rows_by_identity(conn: Any, symbol: str, duration: str) -> dict[tup
     return grouped
 
 
+def _settled_event_rows_by_identity(
+    conn: Any,
+    symbol: str,
+    duration: str,
+    candidates: list[dict[str, Any]],
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        event_rows = settled_event_metric_rows(
+            conn,
+            symbol,
+            duration,
+            strategy_key=str(candidate["strategy_key"]),
+            high_winrate_rule=_event_high_winrate_rule(candidate),
+            limit=None,
+        )
+        if event_rows:
+            grouped[_candidate_identity_key(candidate)] = event_rows
+    return grouped
+
+
 def _candidate_payload(
     candidate: dict[str, Any],
     rows: list[dict[str, Any]],
+    event_rows: list[dict[str, Any]],
     live_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    metrics = _candidate_metrics(candidate, rows)
+    metrics = _candidate_metrics(candidate, rows, event_rows)
     decision = _candidate_decision(candidate, metrics, rows)
     walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
     recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
@@ -561,7 +586,13 @@ def _empty_metrics() -> dict[str, Any]:
     return high_winrate_metrics([])
 
 
-def _candidate_metrics(candidate: dict[str, Any], recent_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _candidate_metrics(
+    candidate: dict[str, Any],
+    recent_rows: list[dict[str, Any]],
+    event_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if event_rows:
+        return high_winrate_metrics(event_rows)
     sample_count = int(candidate.get("settled_sample_count") or 0)
     if sample_count <= 0:
         return _empty_metrics()
@@ -611,6 +642,11 @@ def _identity_value(candidate: dict[str, Any]) -> str:
         or candidate.get("model_version")
         or candidate["signal_key"]
     )
+
+
+def _event_high_winrate_rule(candidate: dict[str, Any]) -> str | None:
+    value = candidate.get("high_winrate_rule")
+    return None if value is None else str(value)
 
 
 def _candidate_identity_key(candidate: dict[str, Any]) -> tuple[str, str]:

@@ -84,8 +84,43 @@ def test_forward_validation_prediction_correct_tracks_direction_without_cost(mon
         "SELECT actual_return, prediction_correct FROM predictions WHERE id = 1"
     ).fetchone()
     conn.close()
-    assert result == {"checked": 1, "settled": 1, "pendingData": 0}
+    assert result == {"checked": 1, "settled": 1, "pendingData": 0, "finalDecisionsSettled": 0}
     assert row["actual_return"] == pytest.approx(0.0005)
+    assert row["prediction_correct"] == 1
+
+
+def test_forward_validation_late_prediction_uses_created_at_entry(monkeypatch) -> None:
+    db_path = _runtime_path("forward-late-entry") / "predictions.db"
+    _create_forward_validation_db(db_path)
+    conn = _connect(db_path)
+    conn.executemany(
+        "INSERT INTO klines VALUES(?, ?, ?, ?)",
+        [
+            ("BTCUSDT", "1m", 540_000, 90.0),
+            ("BTCUSDT", "1m", 1_140_000, 95.0),
+        ],
+    )
+    conn.execute(
+        """
+        UPDATE predictions
+        SET created_at = '1970-01-01T00:09:32+00:00'
+        WHERE id = 1
+        """
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(forward_validation_service, "get_conn", lambda: _connect(db_path))
+
+    result = forward_validation_service.settle_due_predictions("BTCUSDT", "10m")
+
+    conn = _connect(db_path)
+    row = conn.execute(
+        "SELECT entry_price, exit_price, prediction_correct FROM predictions WHERE id = 1"
+    ).fetchone()
+    conn.close()
+    assert result == {"checked": 1, "settled": 1, "pendingData": 0, "finalDecisionsSettled": 0}
+    assert row["entry_price"] == pytest.approx(90.0)
+    assert row["exit_price"] == pytest.approx(95.0)
     assert row["prediction_correct"] == 1
 
 
@@ -109,7 +144,18 @@ def _create_forward_validation_db(path: Path) -> None:
           exit_price REAL,
           actual_return REAL,
           prediction_correct INTEGER,
-          settled_at TEXT
+          settled_at TEXT,
+          created_at TEXT
+        );
+        CREATE TABLE event_final_decisions (
+          symbol TEXT NOT NULL,
+          duration TEXT NOT NULL,
+          open_time INTEGER NOT NULL,
+          direction TEXT,
+          settled_at TEXT,
+          decision_correct INTEGER,
+          actual_direction TEXT,
+          exit_price REAL
         );
         """
     )
@@ -123,10 +169,10 @@ def _create_forward_validation_db(path: Path) -> None:
     )
     conn.execute(
         """
-        INSERT INTO predictions(symbol, duration, open_time, direction, entry_price)
-        VALUES(?, ?, ?, ?, ?)
+        INSERT INTO predictions(symbol, duration, open_time, direction, entry_price, created_at)
+        VALUES(?, ?, ?, ?, ?, ?)
         """,
-        ("BTCUSDT", "10m", 0, "up", 100.0),
+        ("BTCUSDT", "10m", 0, "up", 100.0, "1970-01-01T00:00:00+00:00"),
     )
     conn.commit()
     conn.close()

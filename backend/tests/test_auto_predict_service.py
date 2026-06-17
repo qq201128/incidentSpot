@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 
 import numpy as np
 
@@ -1513,6 +1515,50 @@ def test_backfill_shadow_predictions_passes_entry_limit(monkeypatch) -> None:
             {"max_entries": 7, "current_entry_only": False, "cycle_context": None},
         )
     ]
+
+
+def test_backfill_shadow_predictions_limits_concurrency(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    class Logger:
+        def error(self, *_args, **_kwargs) -> None:
+            raise AssertionError("no error expected")
+
+        def info(self, *_args, **_kwargs) -> None:
+            return None
+
+    def backfill(*_args, **_kwargs) -> dict:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return {"savedCount": 0}
+
+    monkeypatch.setenv("MODEL_SHADOW_BACKFILL_CONCURRENCY", "1")
+    monkeypatch.setenv("MODEL_SHADOW_BACKFILL_TIMEOUT_SECONDS", "5")
+
+    asyncio.run(
+        service.shadow_helpers.backfill_shadow_predictions(
+            [_settings(FACTOR_COMBO_STRATEGY_KEY)],
+            {
+                "ready_targets": lambda _settings_list: [
+                    ("gru", "BTCUSDT", DEFAULT_DURATION),
+                    ("cnn", "BTCUSDT", DEFAULT_DURATION),
+                    ("xgboost", "BTCUSDT", DEFAULT_DURATION),
+                ],
+                "backfill": backfill,
+                "current_entry": lambda _duration: ENTRY_OPEN_TIME,
+                "logger": Logger(),
+            },
+        )
+    )
+
+    assert max_active == 1
 
 
 def test_auto_predict_shadow_deps_use_current_entry_only() -> None:

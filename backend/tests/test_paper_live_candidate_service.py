@@ -63,6 +63,24 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     assert report["answers"]["avoidNextSearch"][0]["candidateKey"] == "factor_alpha"
 
 
+def test_candidate_report_prefers_event_metrics_when_live_events_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-events") / "candidates.db"
+    _create_db(db_path)
+    _create_event_metric_tables(db_path)
+    _insert_prediction_outcomes(db_path, "factor_live", "live_factor", [False] * 30)
+    _insert_event_outcomes(db_path, "factor_live", "live_factor", [True] * 30)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
+
+    candidate = report["stable"][0]
+    assert candidate["candidateKey"] == "factor_live"
+    assert candidate["paperLiveWinRate"] == pytest.approx(1.0)
+    assert candidate["paperLiveSampleCount"] == 30
+    assert candidate["metrics"]["metricsSource"] == "events"
+    assert candidate["paperLiveStatus"] == "paper_stable"
+
+
 def test_candidate_status_changes_are_recorded_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live-history") / "candidates.db"
     _create_db(db_path)
@@ -260,6 +278,88 @@ def _insert_gamma_failures(path: Path) -> None:
         """,
         rows,
     )
+    conn.commit()
+    conn.close()
+
+
+def _insert_prediction_outcomes(path: Path, signal_key: str, factor_name: str, outcomes: list[bool]) -> None:
+    conn = _connect(path)
+    rows = [_prediction_row(signal_key, factor_name, 0.82, idx, correct) for idx, correct in enumerate(outcomes)]
+    conn.executemany(
+        """
+        INSERT INTO predictions(
+          signal_key, strategy_key, symbol, duration, open_time, direction,
+          high_winrate_rule, high_winrate_gate_value, oos_win_rate,
+          walk_forward_result, recent_rolling_result, data_freshness_status,
+          missing_feature_status, actual_return, prediction_correct, settled_at, created_at
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def _create_event_metric_tables(path: Path) -> None:
+    conn = _connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          event_interval TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          status TEXT NOT NULL,
+          result TEXT,
+          ai_predicted_direction TEXT,
+          ai_prediction_correct INTEGER,
+          ai_high_winrate_rule TEXT,
+          prediction_open_time INTEGER,
+          market_regime_gate_passed INTEGER
+        );
+        CREATE TABLE orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id INTEGER NOT NULL,
+          side TEXT NOT NULL,
+          qty REAL NOT NULL,
+          price REAL NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _insert_event_outcomes(path: Path, strategy_key: str, factor_name: str, outcomes: list[bool]) -> None:
+    conn = _connect(path)
+    for index, correct in enumerate(outcomes):
+        result = "YES" if correct else "NO"
+        cursor = conn.execute(
+            """
+            INSERT INTO events(
+              strategy_key, symbol, event_interval, start_time, end_time, status,
+              result, ai_predicted_direction, ai_prediction_correct,
+              ai_high_winrate_rule, prediction_open_time, market_regime_gate_passed
+            )
+            VALUES(?, 'BTCUSDT', '10m', ?, ?, 'SETTLED', ?, 'up', ?, ?, ?, 1)
+            """,
+            (
+                strategy_key,
+                f"2026-05-26T00:{index:02d}:00+00:00",
+                f"2026-05-26T00:{index:02d}:30+00:00",
+                result,
+                int(correct),
+                factor_name,
+                index,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO orders(event_id, side, qty, price) VALUES(?, 'BUY', 5.0, 0.8)",
+            (cursor.lastrowid,),
+        )
     conn.commit()
     conn.close()
 
