@@ -50,8 +50,6 @@ app.state.lstm_candidate_retry_task = None
 app.state.lstm_candidate_retry_stop_event = None
 app.state.lstm_daily_review_task = None
 app.state.lstm_daily_review_stop_event = None
-app.state.combo_event_governance_task = None
-app.state.combo_event_governance_stop_event = None
 
 app.add_middleware(
     CORSMiddleware,

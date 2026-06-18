@@ -80,6 +80,53 @@ def settled_event_metric_rows(
     return [_metric_row(dict(row)) for row in rows]
 
 
+def settled_event_metric_rows_by_prediction_identity(
+    conn: Any,
+    symbol: str,
+    duration: str,
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    if not _events_table_available(conn) or not _market_regime_gate_column_available(conn):
+        return {}
+    if not _events_prediction_id_column_available(conn):
+        return {}
+    rows = conn.execute(
+        """
+        SELECT
+          p.signal_key,
+          COALESCE(p.high_winrate_rule, p.model_version, p.signal_key) AS lifecycle_identity,
+          e.id AS event_id,
+          e.strategy_key,
+          e.start_time,
+          e.end_time,
+          e.prediction_open_time,
+          e.ai_predicted_direction,
+          e.ai_prediction_correct,
+          e.ai_high_winrate_rule,
+          e.result,
+          o.side AS order_side,
+          o.qty AS order_qty,
+          o.price AS order_price
+        FROM events e
+        INNER JOIN predictions p ON p.id = e.prediction_id
+        LEFT JOIN orders o ON o.id = (
+            SELECT id FROM orders WHERE event_id = e.id ORDER BY id DESC LIMIT 1
+        )
+        WHERE e.status = 'SETTLED'
+          AND e.symbol = ?
+          AND e.event_interval = ?
+          AND e.market_regime_gate_passed = 1
+        ORDER BY e.start_time DESC
+        """,
+        (symbol.strip().upper(), duration),
+    ).fetchall()
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        item = dict(row)
+        key = (str(item.pop("signal_key")), str(item.pop("lifecycle_identity")))
+        grouped.setdefault(key, []).append(_metric_row(item))
+    return grouped
+
+
 def settled_event_rows_for_high_winrate_rule(
     conn: Any,
     symbol: str,
@@ -194,6 +241,11 @@ def factor_candidate_strategy_keys(conn: Any, symbol: str, duration: str) -> lis
 def _market_regime_gate_column_available(conn: Any) -> bool:
     columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
     return "market_regime_gate_passed" in columns
+
+
+def _events_prediction_id_column_available(conn: Any) -> bool:
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    return "prediction_id" in columns
 
 
 def _metric_row(row: dict[str, Any]) -> dict[str, Any]:

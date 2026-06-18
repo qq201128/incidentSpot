@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from app.services import (
     auto_settlement_service,
-    combo_event_governance_background,
     factor_ranking_background,
     market_context_background,
     settlement_service,
@@ -233,86 +232,6 @@ def test_market_context_initial_stop_is_recorded(monkeypatch) -> None:
     asyncio.run(run_loop())
 
     status = background_loop_statuses()["market_context"]
-    assert status["status"] == "stopped"
-    assert status["stopReason"] == "stop_during_initial_delay"
-
-
-def test_combo_governance_invalid_interval_is_recorded(monkeypatch) -> None:
-    reset_background_loop_statuses()
-    monkeypatch.setenv("COMBO_EVENT_GOVERNANCE_REFRESH_SECONDS", "bad")
-
-    async def run_loop() -> None:
-        import asyncio
-
-        await combo_event_governance_background.combo_event_governance_refresh_loop(asyncio.Event())
-
-    import asyncio
-
-    try:
-        asyncio.run(run_loop())
-    except ValueError as exc:
-        assert "COMBO_EVENT_GOVERNANCE_REFRESH_SECONDS must be numeric" in str(exc)
-    else:
-        raise AssertionError("invalid combo governance interval was not exposed")
-
-    status = background_loop_statuses()["combo_event_governance"]
-    assert status["status"] == "failed"
-    assert status["lastFailureDetails"]["stage"] == "startup_config"
-
-
-def test_combo_governance_batch_failure_is_recorded(monkeypatch) -> None:
-    reset_background_loop_statuses()
-    monkeypatch.setattr(combo_event_governance_background, "_refresh_interval_seconds", lambda: 60.0)
-    monkeypatch.setattr(combo_event_governance_background, "_initial_delay_seconds", lambda: 0.0)
-    monkeypatch.setattr(
-        combo_event_governance_background,
-        "run_blocking_daemon",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("governance batch failed")),
-    )
-
-    async def stop_after_batch(stop_event, _seconds):
-        stop_event.set()
-        return True
-
-    monkeypatch.setattr(combo_event_governance_background, "_sleep_for", stop_after_batch)
-
-    async def run_loop() -> None:
-        import asyncio
-
-        await combo_event_governance_background.combo_event_governance_refresh_loop(asyncio.Event())
-
-    import asyncio
-
-    asyncio.run(run_loop())
-
-    status = background_loop_statuses()["combo_event_governance"]
-    assert status["status"] == "failed"
-    assert status["lastError"] == "governance batch failed"
-    assert status["lastFailureDetails"]["stage"] == "batch"
-
-
-def test_combo_governance_initial_stop_is_recorded(monkeypatch) -> None:
-    reset_background_loop_statuses()
-    monkeypatch.setattr(combo_event_governance_background, "_refresh_interval_seconds", lambda: 60.0)
-    monkeypatch.setattr(combo_event_governance_background, "_initial_delay_seconds", lambda: 5.0)
-    monkeypatch.setattr(combo_event_governance_background, "run_blocking_daemon", _unexpected_background_run)
-
-    async def stop_during_delay(stop_event, _seconds):
-        stop_event.set()
-        return True
-
-    monkeypatch.setattr(combo_event_governance_background, "_sleep_for", stop_during_delay)
-
-    async def run_loop() -> None:
-        import asyncio
-
-        await combo_event_governance_background.combo_event_governance_refresh_loop(asyncio.Event())
-
-    import asyncio
-
-    asyncio.run(run_loop())
-
-    status = background_loop_statuses()["combo_event_governance"]
     assert status["status"] == "stopped"
     assert status["stopReason"] == "stop_during_initial_delay"
 

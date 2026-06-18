@@ -11,7 +11,7 @@ import pytest
 from app.services import paper_live_candidate_service as service
 
 
-def test_candidate_report_batches_settled_prediction_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_candidate_report_batches_settled_event_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live-batched-report") / "candidates.db"
     _create_db(db_path)
     _insert_candidate_predictions(db_path, candidate_count=3, settled_per_candidate=2)
@@ -28,7 +28,8 @@ def test_candidate_report_batches_settled_prediction_lookup(monkeypatch: pytest.
 
     assert report["allCandidateCount"] == 3
     assert {row["paperLiveSampleCount"] for row in report["allCandidates"]} == {2}
-    assert holder["conn"].prediction_select_count == 2
+    assert holder["conn"].prediction_select_count == 1
+    assert holder["conn"].event_select_count == 1
     assert holder["conn"].ddl_count == 0
 
 
@@ -113,11 +114,14 @@ class _CountingConnection:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self.prediction_select_count = 0
+        self.event_select_count = 0
         self.ddl_count = 0
 
     def execute(self, sql: str, parameters: tuple = ()):
         if _is_prediction_select(sql):
             self.prediction_select_count += 1
+        if _is_event_select(sql):
+            self.event_select_count += 1
         if _is_ddl(sql):
             self.ddl_count += 1
         return self._conn.execute(sql, parameters)
@@ -132,6 +136,11 @@ class _CountingConnection:
 def _is_prediction_select(sql: str) -> bool:
     normalized = " ".join(sql.upper().split())
     return normalized.startswith(("SELECT", "WITH")) and " FROM PREDICTIONS" in normalized
+
+
+def _is_event_select(sql: str) -> bool:
+    normalized = " ".join(sql.upper().split())
+    return normalized.startswith(("SELECT", "WITH")) and " FROM EVENTS" in normalized
 
 
 def _is_ddl(sql: str) -> bool:
@@ -228,6 +237,29 @@ def _create_db(path: Path) -> None:
           updated_at TEXT NOT NULL,
           PRIMARY KEY(strategy_key, symbol, duration)
         );
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          event_interval TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          status TEXT NOT NULL,
+          result TEXT,
+          ai_predicted_direction TEXT,
+          ai_prediction_correct INTEGER,
+          ai_high_winrate_rule TEXT,
+          prediction_open_time INTEGER,
+          prediction_id INTEGER,
+          market_regime_gate_passed INTEGER
+        );
+        CREATE TABLE orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id INTEGER NOT NULL,
+          side TEXT NOT NULL,
+          qty REAL NOT NULL,
+          price REAL NOT NULL
+        );
         """
     )
     conn.close()
@@ -299,6 +331,7 @@ def _insert_candidate_predictions(path: Path, *, candidate_count: int, settled_p
         """,
         rows,
     )
+    _insert_event_outcomes(conn, candidate_count=candidate_count, settled_per_candidate=settled_per_candidate)
     conn.commit()
     conn.close()
 
@@ -322,6 +355,35 @@ def _prediction_row(candidate: int, sample: int) -> tuple:
         "2026-05-26T00:00:00+00:00",
         "2026-05-26T00:00:00+00:00",
     )
+
+
+def _insert_event_outcomes(conn: sqlite3.Connection, *, candidate_count: int, settled_per_candidate: int) -> None:
+    for candidate in range(candidate_count):
+        key = f"factor_{candidate}"
+        for sample in range(settled_per_candidate):
+            prediction_id = candidate * settled_per_candidate + sample + 1
+            cursor = conn.execute(
+                """
+                INSERT INTO events(
+                  strategy_key, symbol, event_interval, start_time, end_time, status,
+                  result, ai_predicted_direction, ai_prediction_correct,
+                  ai_high_winrate_rule, prediction_open_time, prediction_id, market_regime_gate_passed
+                )
+                VALUES(?, 'BTCUSDT', '10m', ?, ?, 'SETTLED', 'YES', 'up', 1, ?, ?, ?, 1)
+                """,
+                (
+                    key,
+                    f"2026-05-26T00:{sample % 60:02d}:00+00:00",
+                    f"2026-05-26T00:{sample % 60:02d}:30+00:00",
+                    key,
+                    candidate * 100 + sample,
+                    prediction_id,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO orders(event_id, side, qty, price) VALUES(?, 'BUY', 5.0, 0.8)",
+                (cursor.lastrowid,),
+            )
 
 
 def _connect(path: Path) -> sqlite3.Connection:

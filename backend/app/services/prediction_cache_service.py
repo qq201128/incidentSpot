@@ -31,6 +31,11 @@ INSERT_PREDICTION_SQL = """INSERT INTO predictions(
 )
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
+EXECUTION_BLOCKED = "blocked"
+EXECUTION_EVENT_CREATED = "event_created"
+EXECUTION_GENERATED = "generated"
+EXECUTION_SKIPPED = "skipped"
+
 
 def save_prediction(result: dict, *, allow_existing: bool = False) -> bool:
     payload = _paper_live_boundary_payload(result)
@@ -85,6 +90,31 @@ def prediction_exists_conn(conn, request: dict) -> bool:
     return row is not None
 
 
+def mark_prediction_execution(
+    prediction_id: int,
+    *,
+    status: str,
+    reason: str,
+    event_id: int | None = None,
+) -> None:
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE predictions
+            SET execution_status = ?,
+                execution_reason = ?,
+                execution_checked_at = ?,
+                execution_event_id = ?
+            WHERE id = ?
+            """,
+            (status, reason, _utc_now_iso(), event_id, int(prediction_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_latest_prediction(
     symbol: str,
     duration: str,
@@ -103,7 +133,9 @@ def get_latest_prediction(
           actual_return, prediction_correct, settled_at, expected_return,
           model_version, model_family, validation_win_rate, feature_window, model_duration, model_trained_at,
           oos_win_rate, walk_forward_result, recent_rolling_result,
-          data_freshness_status, missing_feature_status, created_at
+          data_freshness_status, missing_feature_status,
+          execution_status, execution_reason, execution_checked_at, execution_event_id,
+          created_at
         FROM predictions
         WHERE signal_key = ? AND symbol = ? AND duration = ?
         ORDER BY id DESC
@@ -193,6 +225,10 @@ def _settlement_response_fields(result: dict) -> dict[str, Any]:
         "actualReturn": result.get("actual_return"),
         "predictionCorrect": _as_bool(result.get("prediction_correct")),
         "settledAt": result.get("settled_at"),
+        "executionStatus": result.get("execution_status"),
+        "executionReason": result.get("execution_reason"),
+        "executionCheckedAt": result.get("execution_checked_at"),
+        "executionEventId": result.get("execution_event_id"),
     }
 
 

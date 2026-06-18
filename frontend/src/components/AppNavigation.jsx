@@ -2,8 +2,6 @@ import { NavLink } from "react-router-dom";
 
 const NAV_ITEMS = Object.freeze([
   { key: "trade", label: "工作台", path: "/" },
-  { key: "hit-rate", label: "规则命中率", path: "/rule-hit-rate" },
-  { key: "governance", label: "样本观测", path: "/event-governance" },
   { key: "research", label: "研究驾驶舱", path: "/research-dashboard" },
   { key: "factors", label: "因子库", path: "/factors" },
   { key: "learning", label: "自动挖掘", path: "/learning" },

@@ -70,9 +70,9 @@ def _insert_event(conn: Any, payload: EventCreate, rule_type: str, predicted: st
           strategy_key, symbol, title, event_interval, rule_type, strike_value, upper_bound,
           start_time, end_time, status, ai_probability_up, ai_predicted_direction, ai_quality_score,
           ai_quality_passed, ai_high_winrate_gate, ai_high_winrate_rule, ai_high_winrate_passed,
-          ai_high_winrate_value
+          ai_high_winrate_value, prediction_id
         )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         _event_values(payload, rule_type, predicted, strategy_key),
     )
@@ -87,7 +87,7 @@ def _event_values(payload: EventCreate, rule_type: str, predicted: str | None, s
         int(bool(payload.aiQualityPassed)) if payload.aiQualityPassed is not None else None,
         payload.aiHighWinrateGate, payload.aiHighWinrateRule,
         int(bool(payload.aiHighWinratePassed)) if payload.aiHighWinratePassed is not None else None,
-        payload.aiHighWinrateValue,
+        payload.aiHighWinrateValue, payload.predictionId,
     )
 
 

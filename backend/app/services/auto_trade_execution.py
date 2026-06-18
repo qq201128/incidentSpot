@@ -117,6 +117,7 @@ def _build_quick_trade_payload(
             aiHighWinrateRule=prediction.get("high_winrate_rule"),
             aiHighWinratePassed=_as_bool(prediction.get("high_winrate_gate_passed")),
             aiHighWinrateValue=prediction.get("high_winrate_gate_value"),
+            predictionId=int(prediction["id"]) if prediction.get("id") is not None else None,
         ),
         order=AutoTradeOrderPayload(
             side=side,

@@ -313,6 +313,7 @@ def _quick_trade_conn(db_uri: str) -> sqlite3.Connection:
           result TEXT,
           settlement_source TEXT,
           prediction_open_time INTEGER,
+          prediction_id INTEGER,
           ai_probability_up REAL,
           ai_predicted_direction TEXT,
           ai_quality_score REAL,

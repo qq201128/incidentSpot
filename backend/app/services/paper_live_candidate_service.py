@@ -8,7 +8,7 @@ from typing import Any
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.high_winrate_strategy_metrics import high_winrate_decision, high_winrate_metrics
 from app.services.live_readiness_gate import live_readiness_gate
-from app.services.event_pnl_rows import settled_event_metric_rows
+from app.services.event_pnl_rows import settled_event_metric_rows_by_prediction_identity
 from app.services.paper_live_failure_store import (
     ensure_prediction_failure_table,
     log_prediction_failure,
@@ -38,7 +38,6 @@ STATUS_BACKTEST = "backtest_candidate"
 STATUS_LEAKAGE = "invalid_data_leakage"
 OBSERVATION_POOL_LIMIT = 150
 FAILED_LIST_LIMIT = 40
-RECENT_SETTLED_ROW_LIMIT = 100
 DEFAULT_CANDIDATE_PAGE_SIZE = 18
 MAX_CANDIDATE_PAGE_SIZE = 100
 LIVE_READINESS_METRIC_KEYS = (
@@ -145,13 +144,11 @@ def _ensure_report_write_tables(conn: Any) -> None:
 
 def _report_from_conn(conn: Any, symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
     rows = _candidate_rows(conn, symbol, duration)
-    settled_by_identity = _settled_rows_by_identity(conn, symbol, duration)
     event_rows_by_identity = _settled_event_rows_by_identity(conn, symbol, duration, rows)
     live_states = live_state_by_strategy(conn, symbol, duration)
     candidates = [
         _candidate_payload(
             item,
-            settled_by_identity.get(_candidate_identity_key(item), []),
             event_rows_by_identity.get(_candidate_identity_key(item), []),
             live_states.get(str(item["strategy_key"])),
         )
@@ -254,53 +251,14 @@ def _candidate_rows(conn: Any, symbol: str, duration: str) -> list[dict[str, Any
                model_duration, model_trained_at, data_freshness_status,
                missing_feature_status, oos_win_rate, walk_forward_result,
                recent_rolling_result, MIN(created_at) AS first_created_at,
-               MAX(created_at) AS latest_created_at, COUNT(*) AS prediction_count,
-               SUM(CASE WHEN settled_at IS NOT NULL THEN 1 ELSE 0 END) AS settled_sample_count,
-               SUM(CASE WHEN settled_at IS NOT NULL AND prediction_correct THEN 1 ELSE 0 END) AS settled_win_count,
-               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return IS NOT NULL THEN 1 ELSE 0 END) AS settled_return_count,
-               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return > 0 THEN actual_return ELSE 0 END) AS settled_gain_sum,
-               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return < 0 THEN -actual_return ELSE 0 END) AS settled_loss_sum,
-               SUM(CASE WHEN settled_at IS NOT NULL AND actual_return IS NOT NULL THEN actual_return ELSE 0 END) AS settled_return_sum,
-               SUM(CASE WHEN settled_at IS NOT NULL AND data_freshness_status = ? THEN 1 ELSE 0 END) AS settled_leakage_count
+               MAX(created_at) AS latest_created_at, COUNT(*) AS prediction_count
         FROM predictions
         WHERE symbol = ? AND duration = ?
         GROUP BY signal_key, strategy_key, COALESCE(high_winrate_rule, model_version, signal_key)
         """,
-        (STATUS_LEAKAGE, symbol.strip().upper(), duration),
+        (symbol.strip().upper(), duration),
     ).fetchall()
     return [dict(row) for row in rows]
-
-
-def _settled_rows_by_identity(conn: Any, symbol: str, duration: str) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    rows = conn.execute(
-        """
-        WITH ranked AS (
-            SELECT signal_key, COALESCE(high_winrate_rule, model_version, signal_key) AS lifecycle_identity,
-                   open_time, direction, entry_price, exit_price, actual_return,
-                   prediction_correct, high_winrate_rule, data_freshness_status,
-                   missing_feature_status, settled_at,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY signal_key, COALESCE(high_winrate_rule, model_version, signal_key)
-                       ORDER BY open_time DESC
-                   ) AS row_number
-            FROM predictions
-            WHERE symbol = ? AND duration = ? AND settled_at IS NOT NULL
-        )
-        SELECT signal_key, lifecycle_identity, open_time, direction, entry_price, exit_price,
-               actual_return, prediction_correct, high_winrate_rule, data_freshness_status,
-               missing_feature_status, settled_at
-        FROM ranked
-        WHERE row_number <= ?
-        ORDER BY open_time DESC
-        """,
-        (symbol.strip().upper(), duration, RECENT_SETTLED_ROW_LIMIT),
-    ).fetchall()
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in rows:
-        item = dict(row)
-        key = (str(item.pop("signal_key")), str(item.pop("lifecycle_identity")))
-        grouped.setdefault(key, []).append(item)
-    return grouped
 
 
 def _settled_event_rows_by_identity(
@@ -309,29 +267,18 @@ def _settled_event_rows_by_identity(
     duration: str,
     candidates: list[dict[str, Any]],
 ) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for candidate in candidates:
-        event_rows = settled_event_metric_rows(
-            conn,
-            symbol,
-            duration,
-            strategy_key=str(candidate["strategy_key"]),
-            high_winrate_rule=_event_high_winrate_rule(candidate),
-            limit=None,
-        )
-        if event_rows:
-            grouped[_candidate_identity_key(candidate)] = event_rows
-    return grouped
+    available = settled_event_metric_rows_by_prediction_identity(conn, symbol, duration)
+    candidate_keys = {_candidate_identity_key(candidate) for candidate in candidates}
+    return {key: rows for key, rows in available.items() if key in candidate_keys}
 
 
 def _candidate_payload(
     candidate: dict[str, Any],
-    rows: list[dict[str, Any]],
     event_rows: list[dict[str, Any]],
     live_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    metrics = _candidate_metrics(candidate, rows, event_rows)
-    decision = _candidate_decision(candidate, metrics, rows)
+    metrics = _candidate_metrics(event_rows)
+    decision = _candidate_decision(candidate, metrics)
     walk_forward = parse_json_field("walkForwardResult", candidate.get("walk_forward_result"))
     recent_rolling = parse_json_field("recentRollingResult", candidate.get("recent_rolling_result"))
     live_enabled = bool(live_state and live_state["liveTradingEnabled"])
@@ -369,8 +316,8 @@ def _candidate_payload(
         "status": decision["status"],
         "reason": decision["reason"],
         "metrics": metrics,
-        "dataFreshnessStatus": _latest_status(candidate, rows, "data_freshness_status"),
-        "missingFeatureStatus": _latest_status(candidate, rows, "missing_feature_status"),
+        "dataFreshnessStatus": _latest_status(candidate, "data_freshness_status"),
+        "missingFeatureStatus": _latest_status(candidate, "missing_feature_status"),
         "predictionCreatedAt": candidate.get("latest_created_at"),
         "firstPredictionCreatedAt": candidate.get("first_created_at"),
         "predictionCount": candidate.get("prediction_count"),
@@ -392,9 +339,8 @@ def _candidate_payload(
 def _candidate_decision(
     candidate: dict[str, Any],
     metrics: dict[str, Any],
-    rows: list[dict[str, Any]],
 ) -> dict[str, str]:
-    leakage = _data_leakage_reason(candidate, rows)
+    leakage = _data_leakage_reason(candidate)
     if leakage:
         return {"status": STATUS_LEAKAGE, "reason": leakage}
     return high_winrate_decision(metrics)
@@ -587,46 +533,11 @@ def _empty_metrics() -> dict[str, Any]:
 
 
 def _candidate_metrics(
-    candidate: dict[str, Any],
-    recent_rows: list[dict[str, Any]],
     event_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if event_rows:
         return high_winrate_metrics(event_rows)
-    sample_count = int(candidate.get("settled_sample_count") or 0)
-    if sample_count <= 0:
-        return _empty_metrics()
-    recent_metrics = high_winrate_metrics(recent_rows)
-    return {
-        **recent_metrics,
-        "sampleCount": sample_count,
-        "winRate": _ratio(int(candidate.get("settled_win_count") or 0), sample_count),
-        "profitFactor": _profit_factor(
-            gain_sum=float(candidate.get("settled_gain_sum") or 0.0),
-            loss_sum=float(candidate.get("settled_loss_sum") or 0.0),
-            return_count=int(candidate.get("settled_return_count") or 0),
-        ),
-        "avgReturn": _avg_return(
-            return_sum=float(candidate.get("settled_return_sum") or 0.0),
-            return_count=int(candidate.get("settled_return_count") or 0),
-        ),
-    }
-
-
-def _ratio(numerator: int, denominator: int) -> float | None:
-    return None if denominator <= 0 else round(numerator / denominator, 4)
-
-
-def _profit_factor(*, gain_sum: float, loss_sum: float, return_count: int) -> float | None:
-    if return_count <= 0 or loss_sum == 0:
-        return None
-    return round(gain_sum / loss_sum, 4)
-
-
-def _avg_return(*, return_sum: float, return_count: int) -> float | None:
-    if return_count <= 0:
-        return None
-    return round(return_sum / return_count, 8)
+    return _empty_metrics()
 
 
 def _candidate_type(candidate: dict[str, Any]) -> str:
@@ -644,11 +555,6 @@ def _identity_value(candidate: dict[str, Any]) -> str:
     )
 
 
-def _event_high_winrate_rule(candidate: dict[str, Any]) -> str | None:
-    value = candidate.get("high_winrate_rule")
-    return None if value is None else str(value)
-
-
 def _candidate_identity_key(candidate: dict[str, Any]) -> tuple[str, str]:
     return str(candidate["signal_key"]), _identity_value(candidate)
 
@@ -659,21 +565,14 @@ def _candidate_key(candidate: dict[str, Any]) -> str:
     return str(candidate["signal_key"])
 
 
-def _latest_status(candidate: dict[str, Any], rows: list[dict[str, Any]], key: str) -> str | None:
-    if rows and rows[0].get(key):
-        return str(rows[0][key])
+def _latest_status(candidate: dict[str, Any], key: str) -> str | None:
     value = candidate.get(key)
     return None if value is None else str(value)
 
 
-def _data_leakage_reason(candidate: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
+def _data_leakage_reason(candidate: dict[str, Any]) -> str | None:
     if candidate.get("data_freshness_status") == STATUS_LEAKAGE:
         return STATUS_LEAKAGE
-    if int(candidate.get("settled_leakage_count") or 0) > 0:
-        return STATUS_LEAKAGE
-    for row in rows:
-        if row.get("data_freshness_status") == STATUS_LEAKAGE:
-            return STATUS_LEAKAGE
     return None
 
 

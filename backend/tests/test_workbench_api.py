@@ -22,7 +22,8 @@ def test_workbench_summary_returns_symbol_counts_and_flags(monkeypatch) -> None:
     assert result["eventCounts"] == {"OPEN": 1, "SETTLED": 1, "FAILED": 0}
     assert result["eventTotal"] == 2
     assert result["hasOpenPosition"] is True
-    assert "overall" in result["aiHistorySuccess"]
+    assert "aiHistorySuccess" not in result
+    assert "shadowEventDeviation" not in result
     assert "events" not in result
 
 

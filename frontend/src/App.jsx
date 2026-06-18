@@ -15,15 +15,11 @@ import { useLatestPrediction } from "./hooks/useLatestPrediction";
 import { useTradingMarket } from "./hooks/useTradingMarket";
 
 const EVENTS_POLL_MS = 5000;
-const EventGovernancePage = lazy(() => import("./pages/EventGovernancePage"));
 const FactorLearningPage = lazy(() => import("./pages/FactorLearningPage"));
 const FactorsPage = lazy(() => import("./pages/FactorsPage"));
 const ResearchDashboardPage = lazy(() => import("./pages/ResearchDashboardPage"));
-const RuleHitRatePage = lazy(() => import("./pages/RuleHitRatePage"));
 const VIEW_BY_PATH = Object.freeze({
   "/": "trade",
-  "/rule-hit-rate": "hit-rate",
-  "/event-governance": "governance",
   "/research-dashboard": "research",
   "/factors": "factors",
   "/learning": "learning",
@@ -44,9 +40,7 @@ export default function App() {
 }
 
 function pageForView(appView, tradeProps) {
-  if (appView === "hit-rate") return lazyPage(<RuleHitRatePage />);
   if (appView === "factors") return lazyPage(<FactorsPage />);
-  if (appView === "governance") return lazyPage(<EventGovernancePage />);
   if (appView === "research") return lazyPage(<ResearchDashboardPage />);
   if (appView === "learning") return lazyPage(<FactorLearningPage />);
   return <TradingView {...tradeProps} />;

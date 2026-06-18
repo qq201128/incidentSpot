@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS events (
   ai_high_winrate_passed INTEGER,
   ai_high_winrate_value REAL,
   prediction_open_time INTEGER,
+  prediction_id INTEGER,
   market_regime_gate_version TEXT,
   market_regime_gate_passed INTEGER,
   market_regime_gate_reason TEXT,
@@ -214,6 +215,10 @@ CREATE TABLE IF NOT EXISTS predictions (
   actual_return REAL,
   prediction_correct INTEGER,
   settled_at TEXT,
+  execution_status TEXT NOT NULL DEFAULT 'generated',
+  execution_reason TEXT,
+  execution_checked_at TEXT,
+  execution_event_id INTEGER,
   created_at TEXT NOT NULL
 );
 

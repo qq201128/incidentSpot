@@ -38,7 +38,6 @@ STOP_EVENT_ATTRS = (
     "factor_combo_daily_stop_event",
     "lstm_candidate_retry_stop_event",
     "lstm_daily_review_stop_event",
-    "combo_event_governance_stop_event",
 )
 BACKGROUND_TASK_ATTRS = (
     "settlement_task",
@@ -49,7 +48,6 @@ BACKGROUND_TASK_ATTRS = (
     "factor_combo_daily_task",
     "lstm_candidate_retry_task",
     "lstm_daily_review_task",
-    "combo_event_governance_task",
 )
 BACKGROUND_LOOP_STATUS_NAMES = {
     "settlement": "auto_settlement",
@@ -60,7 +58,6 @@ BACKGROUND_LOOP_STATUS_NAMES = {
     "factor_combo_daily": "factor_combo_daily",
     "lstm_candidate_retry": "lstm_candidate_retry",
     "lstm_daily_review": "lstm_daily_review",
-    "combo_event_governance": "combo_event_governance",
 }
 
 
@@ -98,7 +95,6 @@ async def _deferred_bootstrap(app: FastAPI) -> None:
         for router in routers:
             app.include_router(router)
         await asyncio.to_thread(_warm_background_imports)
-        await asyncio.to_thread(_warm_ai_history_cache)
         _spawn_background_tasks(app)
         _set_bootstrap_state(app, BOOTSTRAP_STATUS_READY)
         record_loop_success(BOOTSTRAP_LOOP_NAME, {"stage": "deferred_bootstrap"})
@@ -155,7 +151,6 @@ def _warm_background_imports() -> None:
     import app.services.auto_predict_service  # noqa: F401
     import app.services.auto_settlement_service  # noqa: F401
     import app.services.auto_trade_service  # noqa: F401
-    import app.services.combo_event_governance_background  # noqa: F401
     import app.services.factor_combination_background  # noqa: F401
     import app.services.factor_ranking_background  # noqa: F401
     import app.services.lstm_candidate_retry_background  # noqa: F401
@@ -167,7 +162,6 @@ def _spawn_background_tasks(app: FastAPI) -> None:
     from app.services.auto_predict_service import auto_predict_loop
     from app.services.auto_settlement_service import auto_settlement_loop
     from app.services.auto_trade_service import auto_trade_loop
-    from app.services.combo_event_governance_background import combo_event_governance_refresh_loop
     from app.services.factor_combination_background import factor_combination_daily_refresh_loop
     from app.services.factor_ranking_background import factor_ranking_refresh_loop
     from app.services.lstm_candidate_retry_background import (
@@ -192,8 +186,6 @@ def _spawn_background_tasks(app: FastAPI) -> None:
 
     if lstm_candidate_retry_enabled():
         _spawn_loop(app, "lstm_candidate_retry", lstm_candidate_retry_loop)
-
-    _spawn_loop(app, "combo_event_governance", combo_event_governance_refresh_loop)
 
 
 def _spawn_loop(app: FastAPI, name: str, loop_factory) -> None:
@@ -226,17 +218,6 @@ def _record_background_task_result(name: str, task: asyncio.Task) -> None:
 def _already_recorded_task_failure(status_name: str, exc: BaseException) -> bool:
     status = background_loop_statuses().get(status_name) or {}
     return status.get("status") == "failed" and status.get("lastError") == str(exc)
-
-
-def _warm_ai_history_cache() -> None:
-    from app.db.session import get_conn
-    from app.services.ai_history_cache import warm_ai_history_cache
-
-    conn = get_conn()
-    try:
-        warm_ai_history_cache(conn)
-    finally:
-        conn.close()
 
 
 async def shutdown_application(app: FastAPI) -> None:

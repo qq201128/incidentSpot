@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.db.session import get_conn
-from app.services.combo_event_governance import combo_event_monitoring
-from app.services.event_ai_history import ai_history_success
 from app.services.workbench_summary_cache import get_cached_workbench_summary
 
 
@@ -14,7 +12,6 @@ def build_workbench_summary(symbol: str, duration: str) -> dict:
     try:
         counts = _event_counts(conn, safe_symbol)
         event_total = sum(counts.values())
-        monitoring = combo_event_monitoring(safe_symbol, duration)
         return {
             "symbol": safe_symbol,
             "duration": duration,
@@ -23,12 +20,6 @@ def build_workbench_summary(symbol: str, duration: str) -> dict:
             "eventCounts": counts,
             "eventTotal": event_total,
             "hasOpenPosition": _has_open_position(conn, safe_symbol),
-            "aiHistorySuccess": ai_history_success(conn, safe_symbol),
-            "shadowEventDeviation": monitoring["shadowEventDeviation"],
-            "batchComboEventDemotion": monitoring["batchComboDemotion"],
-            "factorCandidateEventDemotion": monitoring.get("factorCandidateDemotion"),
-            "simulationObservation": monitoring.get("simulationObservation"),
-            "governanceWarming": bool(monitoring.get("warming")),
         }
     finally:
         conn.close()

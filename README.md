@@ -14,7 +14,7 @@ incidentSpot 是一个面向 Binance USD-M 指数事件交易研究的本地工�
 - 因子研究：提供单因子目录、单因子回测、因子排名、多因子组合排名和组合信号 watchlist。
 - 因子学习：把组合排名、已结算预测、亏损模式、回灌因子库和 Agent 候选写入学习记忆。
 - 多模型族搜索：支持 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、LightGBM、CatBoost、SVM、Bayesian、KNN 等候选搜索任务。
-- 研究驾驶舱：聚合纸面实盘候选、模型族状态、样本观测、稳定性和失败原因。
+- 研究驾驶舱：聚合纸面实盘候选、模型族状态、已结算 Event 证据、稳定性和失败原因。
 
 ## 技术栈
 
@@ -63,7 +63,7 @@ incidentSpot/
 │   │   ├── api/                      # 后端 API client
 │   │   ├── components/               # 工作台、事件、因子、模型、挖掘组件
 │   │   ├── hooks/                    # 行情、预测、图表 UI hooks
-│   │   ├── pages/                    # 样本观测、研究驾驶舱、因子库、自动挖掘页面
+│   │   ├── pages/                    # 研究驾驶舱、因子库、自动挖掘页面
 │   │   └── utils/                    # 标签、时间、K 线和展示工具
 │   ├── vite.config.js                # Vite dev server 与 API/WS 代理
 │   └── package.json                  # 前端依赖与构建脚本
@@ -75,9 +75,7 @@ incidentSpot/
 前端主导航包含以下页面：
 
 - `/`：工作台，展示行情、图表、预测、事件交易和执行状态。
-- `/rule-hit-rate`：规则命中率。
-- `/event-governance`：样本观测与事件治理。
-- `/research-dashboard`：研究驾驶舱，聚合候选、模型和纸面实盘证据。
+- `/research-dashboard`：研究驾驶舱，聚合候选、模型和已结算 Event 证据。
 - `/factors`：因子库、因子排名和组合因子。
 - `/learning`：自动挖掘与因子学习记忆。
 
@@ -94,7 +92,7 @@ incidentSpot/
 - `GET /api/agg-trades`：近期聚合成交。
 - `POST /api/predict`：规则预测。
 - `GET /api/predict/latest`：最新预测缓存。
-- `GET /api/workbench/*`：工作台摘要、样本观测和 AI 历史命中率。
+- `GET /api/workbench/summary`：工作台摘要。
 - `GET|POST|DELETE /api/events`：事件列表、创建和删除。
 - `POST /api/events/quick-trade`：创建快速事件与订单上下文。
 - `POST /api/events/{event_id}/settle`：结算事件。

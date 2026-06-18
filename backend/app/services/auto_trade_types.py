@@ -44,6 +44,7 @@ class AutoTradeEventPayload:
     aiHighWinrateRule: str | None
     aiHighWinratePassed: bool | None
     aiHighWinrateValue: float | None
+    predictionId: int | None = None
 
 
 @dataclass(frozen=True)

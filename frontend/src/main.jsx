@@ -9,8 +9,6 @@ function Root() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
-        <Route path="/rule-hit-rate" element={<App />} />
-        <Route path="/event-governance" element={<App />} />
         <Route path="/research-dashboard" element={<App />} />
         <Route path="/factors" element={<App />} />
         <Route path="/learning" element={<App />} />

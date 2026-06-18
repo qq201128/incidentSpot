@@ -116,49 +116,6 @@ def test_factor_candidate_event_demotion_marks_bad_strategy_without_disabling(mo
     assert row["enabled"] == 1
 
 
-def test_combo_event_monitoring_includes_single_and_batch_sections(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "monitoring.db"
-    _init_db(db_path)
-    monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
-    monkeypatch.setattr(
-        "app.services.combo_event_governance.shadow_event_deviation_report",
-        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}},
-    )
-
-    from app.services.combo_event_governance import compute_combo_event_monitoring
-
-    payload = compute_combo_event_monitoring("BTCUSDT", "10m")
-
-    assert "batchComboDemotion" in payload
-    assert "factorCandidateDemotion" in payload
-    assert "modelShadowSimulation" in payload
-    assert payload["simulationObservation"]["evaluatedCount"] == 0
-    assert payload["simulationObservation"]["modelShadowEventCount"] == 0
-
-
-def test_combo_event_monitoring_reports_model_shadow_simulation(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "model-shadow.db"
-    model_key = model_family_strategy_key("lstm", "10m")
-    _init_db(db_path)
-    _insert_model_prediction(db_path, strategy_key=model_key)
-    _insert_event(db_path, strategy_key=model_key, open_time=40_000, direction="up", result="YES", side="BUY")
-    monkeypatch.setattr("app.db.session.get_conn", lambda: _connect(db_path))
-    monkeypatch.setattr("app.services.model_shadow_simulation_monitor.get_conn", lambda: _connect(db_path))
-    monkeypatch.setattr(
-        "app.services.combo_event_governance.shadow_event_deviation_report",
-        lambda *_args, **_kwargs: {"summary": {"pairedCount": 0}},
-    )
-
-    from app.services.combo_event_governance import compute_combo_event_monitoring
-
-    payload = compute_combo_event_monitoring("BTCUSDT", "10m")
-    model = payload["modelShadowSimulation"]
-
-    assert model["summary"]["qualityPassedCount"] == 1
-    assert model["summary"]["simulationEventCount"] == 1
-    assert payload["simulationObservation"]["modelShadowEventCount"] == 1
-
-
 def test_pre_regime_gate_events_do_not_count_as_current_simulation_samples(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "legacy-events.db"
     _init_db(db_path)

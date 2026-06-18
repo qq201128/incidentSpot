@@ -15,6 +15,7 @@ def test_candidate_report_uses_all_settled_samples(monkeypatch: pytest.MonkeyPat
     db_path = tmp_path / "candidates.db"
     _create_db(db_path)
     _insert_predictions(db_path)
+    _insert_event_outcomes(db_path)
     monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
 
     report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
@@ -69,6 +70,29 @@ def _create_db(path: Path) -> None:
           updated_at TEXT NOT NULL,
           PRIMARY KEY(strategy_key, symbol, duration)
         );
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          strategy_key TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          event_interval TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          status TEXT NOT NULL,
+          result TEXT,
+          ai_predicted_direction TEXT,
+          ai_prediction_correct INTEGER,
+          ai_high_winrate_rule TEXT,
+          prediction_open_time INTEGER,
+          prediction_id INTEGER,
+          market_regime_gate_passed INTEGER
+        );
+        CREATE TABLE orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id INTEGER NOT NULL,
+          side TEXT NOT NULL,
+          qty REAL NOT NULL,
+          price REAL NOT NULL
+        );
         """
     )
     conn.close()
@@ -114,6 +138,36 @@ def _prediction_row(index: int) -> tuple:
         "2026-05-26T00:00:00+00:00",
         "2026-05-26T00:00:00+00:00",
     )
+
+
+def _insert_event_outcomes(path: Path) -> None:
+    conn = _connect(path)
+    for index in range(FULL_SAMPLE_COUNT):
+        correct = index % 2 == 0
+        cursor = conn.execute(
+            """
+            INSERT INTO events(
+              strategy_key, symbol, event_interval, start_time, end_time, status,
+              result, ai_predicted_direction, ai_prediction_correct,
+              ai_high_winrate_rule, prediction_open_time, prediction_id, market_regime_gate_passed
+            )
+            VALUES('factor_bulk', 'BTCUSDT', '10m', ?, ?, 'SETTLED', ?, 'up', ?, 'bulk', ?, ?, 1)
+            """,
+            (
+                f"2026-05-26T00:{index % 60:02d}:00+00:00",
+                f"2026-05-26T00:{index % 60:02d}:30+00:00",
+                "YES" if correct else "NO",
+                int(correct),
+                index,
+                index + 1,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO orders(event_id, side, qty, price) VALUES(?, 'BUY', 5.0, 0.8)",
+            (cursor.lastrowid,),
+        )
+    conn.commit()
+    conn.close()
 
 
 def _connect(path: Path) -> sqlite3.Connection:

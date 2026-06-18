@@ -157,6 +157,7 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
         return {"eventId": len(created), "orderId": len(created), "symbol": settings.symbol}
 
     monkeypatch.setattr(auto_trade_service, "_create_trade", create)
+    monkeypatch.setattr(auto_trade_service, "mark_prediction_execution", lambda *_args, **_kwargs: None)
 
     results = auto_trade_service.run_auto_trade_once()
 
@@ -185,8 +186,24 @@ def test_run_auto_trade_once_skips_when_market_regime_blocks(monkeypatch) -> Non
         "_create_trade",
         lambda *_args: (_ for _ in ()).throw(AssertionError("trade should be blocked")),
     )
+    marked = []
+    monkeypatch.setattr(
+        auto_trade_service,
+        "mark_prediction_execution",
+        lambda prediction_id, **kwargs: marked.append((prediction_id, kwargs)),
+    )
 
     assert auto_trade_service.run_auto_trade_once() == []
+    assert marked == [
+        (
+            1,
+            {
+                "status": auto_trade_service.EXECUTION_BLOCKED,
+                "reason": "counter_trend_down_vs_up",
+                "event_id": None,
+            },
+        )
+    ]
 
 
 def test_list_auto_trade_settings_includes_dynamic_simulation_slots(monkeypatch, tmp_path) -> None:

@@ -27,6 +27,12 @@ from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
 from app.services.market_regime_trade_gate import evaluate_market_regime_trade_gate
+from app.services.prediction_cache_service import (
+    EXECUTION_BLOCKED,
+    EXECUTION_EVENT_CREATED,
+    EXECUTION_SKIPPED,
+    mark_prediction_execution,
+)
 from app.services.prediction_policy import trade_confidence_threshold_for_duration, trade_policy_payload
 from app.services.runtime_symbols import configured_runtime_symbols
 from app.services.strategy_registry import (
@@ -125,16 +131,21 @@ def run_auto_trade_once() -> list[dict[str, Any]]:
 
 
 def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
-    if not settings.enabled or _has_open_position(settings.symbol, settings.strategy_key, settings.duration):
+    if not settings.enabled:
         return None
     prediction = _latest_prediction_row(settings)
     if prediction is None:
+        return None
+    if _has_open_position(settings.symbol, settings.strategy_key, settings.duration):
+        _mark_execution(prediction, EXECUTION_BLOCKED, "open_position_exists")
         return None
     if not _prediction_matches_current_kline_bucket(prediction, settings):
         return None
     if not _is_fresh_prediction(prediction, settings):
         return None
-    if not _is_prediction_tradable(prediction, settings):
+    tradable, skip_reason = _prediction_tradable_result(prediction, settings)
+    if not tradable:
+        _mark_execution(prediction, EXECUTION_SKIPPED, skip_reason)
         return None
     regime_decision = evaluate_market_regime_trade_gate(
         symbol=settings.symbol,
@@ -143,8 +154,10 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
         direction=str(prediction["direction"]),
     )
     if not regime_decision.allowed:
+        _mark_execution(prediction, EXECUTION_BLOCKED, regime_decision.reason)
         return None
     result = _create_trade(settings, prediction)
+    _mark_execution(prediction, EXECUTION_EVENT_CREATED, "event_created", event_id=result.get("eventId"))
     logger.info(
         "auto trade placed strategy=%s event=%s order=%s",
         settings.strategy_key,
@@ -178,20 +191,47 @@ def _prediction_matches_current_kline_bucket(
     return False
 
 
-def _is_prediction_tradable(prediction: dict[str, Any], settings: AutoTradeSettings) -> bool:
+def _prediction_tradable_result(prediction: dict[str, Any], settings: AutoTradeSettings) -> tuple[bool, str]:
     if not strategy_uses_trade_policy_gates(settings.strategy_key):
-        return _as_bool(prediction.get("trade_quality_passed")) is True
+        if _as_bool(prediction.get("trade_quality_passed")) is True:
+            return True, "passed"
+        return False, _quality_gate_reason(prediction)
     probability = float(prediction["probability_up"])
     threshold = trade_confidence_threshold_for_duration(settings.duration)
     policy = trade_policy_payload(settings.duration, strategy_key=settings.strategy_key)
     if not _production_target_passed(policy):
-        return False
+        return False, "production_target_blocked"
     confidence_passed = max(probability, 1 - probability) >= threshold
+    if not confidence_passed:
+        return False, "confidence_below_min"
     if bool(policy.get("highWinrateGateEnabled")):
-        return confidence_passed and _as_bool(prediction.get("high_winrate_gate_passed")) is True
+        if _as_bool(prediction.get("high_winrate_gate_passed")) is True:
+            return True, "passed"
+        return False, "high_winrate_gate_failed"
     score_min = float(policy.get("tradeQualityScoreMin") or 0)
     score = float(prediction.get("trade_quality_score") or 0)
-    return confidence_passed and _as_bool(prediction.get("trade_quality_passed")) and score >= score_min
+    if _as_bool(prediction.get("trade_quality_passed")) is not True:
+        return False, _quality_gate_reason(prediction)
+    if score < score_min:
+        return False, "quality_score_below_min"
+    return True, "passed"
+
+
+def _mark_execution(prediction: dict[str, Any], status: str, reason: str, *, event_id: Any = None) -> None:
+    prediction_id = prediction.get("id")
+    if prediction_id is None:
+        raise ValueError("prediction id is required to record execution status")
+    mark_prediction_execution(
+        int(prediction_id),
+        status=status,
+        reason=reason,
+        event_id=None if event_id is None else int(event_id),
+    )
+
+
+def _quality_gate_reason(prediction: dict[str, Any]) -> str:
+    reason = prediction.get("trade_quality_gate")
+    return str(reason) if reason else "quality_gate_failed"
 
 
 def _latest_prediction_row(settings: AutoTradeSettings) -> dict[str, Any] | None:
@@ -202,6 +242,7 @@ def _latest_prediction_row(settings: AutoTradeSettings) -> dict[str, Any] | None
             SELECT *
             FROM predictions
             WHERE strategy_key = ? AND symbol = ? AND duration = ?
+              AND COALESCE(execution_status, 'generated') = 'generated'
             ORDER BY id DESC
             LIMIT 1
             """,

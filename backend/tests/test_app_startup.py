@@ -95,7 +95,6 @@ def test_deferred_bootstrap_success_is_recorded(monkeypatch) -> None:
     test_app = FastAPI()
     monkeypatch.setattr(app_startup, "_load_deferred_routers", lambda: [])
     monkeypatch.setattr(app_startup, "_warm_background_imports", lambda: None)
-    monkeypatch.setattr(app_startup, "_warm_ai_history_cache", lambda: None)
     monkeypatch.setattr(app_startup, "_spawn_background_tasks", lambda _app: None)
 
     asyncio.run(app_startup._deferred_bootstrap(test_app))
@@ -104,30 +103,6 @@ def test_deferred_bootstrap_success_is_recorded(monkeypatch) -> None:
     status = background_loop_statuses()["application_bootstrap"]
     assert status["status"] == "passed"
     assert status["lastSuccessDetails"] == {"stage": "deferred_bootstrap"}
-
-
-def test_deferred_bootstrap_ai_history_warmup_failure_has_details(monkeypatch) -> None:
-    reset_background_loop_statuses()
-    test_app = FastAPI()
-
-    class WarmupFailure(RuntimeError):
-        details = {"failures": [{"symbol": "ETHUSDT", "error": "meta failed"}]}
-
-    monkeypatch.setattr(app_startup, "_load_deferred_routers", lambda: [])
-    monkeypatch.setattr(app_startup, "_warm_background_imports", lambda: None)
-    monkeypatch.setattr(app_startup, "_warm_ai_history_cache", lambda: (_ for _ in ()).throw(WarmupFailure("warm failed")))
-    monkeypatch.setattr(app_startup, "_spawn_background_tasks", lambda _app: None)
-
-    asyncio.run(app_startup._deferred_bootstrap(test_app))
-
-    assert test_app.state.bootstrap_status == "failed"
-    assert test_app.state.bootstrap_error == "warm failed"
-    status = background_loop_statuses()["application_bootstrap"]
-    assert status["status"] == "failed"
-    assert status["lastFailureDetails"] == {
-        "stage": "deferred_bootstrap",
-        "failureDetails": {"failures": [{"symbol": "ETHUSDT", "error": "meta failed"}]},
-    }
 
 
 def test_spawned_background_task_failure_is_visible() -> None:

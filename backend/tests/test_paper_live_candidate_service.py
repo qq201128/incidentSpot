@@ -15,7 +15,10 @@ from app.services import paper_live_failure_store
 def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live") / "candidates.db"
     _create_db(db_path)
+    _create_event_metric_tables(db_path)
     _insert_predictions(db_path)
+    _insert_event_outcomes(db_path, "factor_alpha", "alpha", [idx % 5 < 3 for idx in range(30)], start_prediction_id=1)
+    _insert_event_outcomes(db_path, "factor_gamma", "gamma", [True], start_prediction_id=31)
     monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
     monkeypatch.setattr(paper_live_failure_store, "get_conn", lambda: _connect(db_path))
     service.log_prediction_failure(
@@ -31,36 +34,35 @@ def test_candidate_report_uses_settled_paper_live_metrics(monkeypatch: pytest.Mo
     report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
 
     candidate = report["candidates"][0]
-    failed = report["failed"][0]
+    collecting = report["collecting"][0]
     assert report["realTradingEnabled"] is False
     assert report["rankingPolicy"][0] == "paper-live lifecycle stability"
-    assert candidate["candidateKey"] == "factor_gamma"
-    assert candidate["paperLiveStatus"] == "paper_collecting"
+    assert candidate["candidateKey"] == "factor_alpha"
+    assert candidate["paperLiveStatus"] == "paper_stable"
     assert candidate["liveReadiness"]["eligible"] is False
-    assert candidate["liveReadiness"]["reason"] == "insufficient_settled_samples"
-    assert failed["candidateKey"] == "factor_alpha"
-    assert failed["backtestWinRate"] == pytest.approx(0.82)
-    assert failed["oosWinRate"] == pytest.approx(0.61)
-    assert failed["walkForwardResult"]["stabilityScore"] == pytest.approx(0.72)
-    assert failed["recentRollingResult"]["winRate"] == pytest.approx(0.64)
-    assert failed["paperLiveWinRate"] == pytest.approx(0.6)
-    assert failed["paperLiveSampleCount"] == 30
-    assert failed["paperLiveStatus"] == "paper_failed"
-    assert failed["liveReadiness"]["eligible"] is False
-    assert failed["liveReadiness"]["reason"] == "paper_live_profit_factor_below_target"
-    assert failed["reason"] == "paper_live_profit_factor_below_target"
-    assert failed["metrics"]["paperLiveWindows"]["recent30"]["winRate"] == pytest.approx(0.6)
-    assert failed["metrics"]["maxConsecutiveLosses"] == 2
-    assert failed["performanceComparison"]["winRateGap"] == pytest.approx(0.22)
-    assert failed["performanceComparison"]["oosWinRate"] == pytest.approx(0.61)
-    assert failed["performanceComparison"]["policy"] == "backtest_oos_walk_forward_recent_rolling_are_prefilter_only"
-    assert report["avoidNextSearch"][0]["candidateKey"] == "factor_alpha"
+    assert candidate["liveReadiness"]["reason"] == "real_trading_disabled_by_project_policy"
+    assert candidate["backtestWinRate"] == pytest.approx(0.82)
+    assert candidate["oosWinRate"] == pytest.approx(0.61)
+    assert candidate["walkForwardResult"]["stabilityScore"] == pytest.approx(0.72)
+    assert candidate["recentRollingResult"]["winRate"] == pytest.approx(0.64)
+    assert candidate["paperLiveWinRate"] == pytest.approx(0.6)
+    assert candidate["paperLiveSampleCount"] == 30
+    assert candidate["metrics"]["metricsSource"] == "events"
+    assert candidate["metrics"]["paperLiveWindows"]["recent30"]["winRate"] == pytest.approx(0.6)
+    assert candidate["metrics"]["maxConsecutiveLosses"] == 2
+    assert candidate["performanceComparison"]["winRateGap"] == pytest.approx(0.22)
+    assert candidate["performanceComparison"]["oosWinRate"] == pytest.approx(0.61)
+    assert candidate["performanceComparison"]["policy"] == "backtest_oos_walk_forward_recent_rolling_are_prefilter_only"
+    assert collecting["candidateKey"] == "factor_gamma"
+    assert collecting["paperLiveStatus"] == "paper_collecting"
+    assert collecting["liveReadiness"]["reason"] == "insufficient_settled_samples"
+    assert report["avoidNextSearch"][0]["candidateKey"] == "factor_beta"
     assert report["predictionFailures"][0]["candidateKey"] == "factor_beta"
     assert report["predictionFailures"][0]["reason"] == "missing completed 10m source row"
     assert report["statusChanges"][0]["newStatus"] in {"paper_collecting", "paper_failed"}
     assert report["answers"]["collectingSamples"][0]["candidateKey"] == "factor_gamma"
-    assert report["answers"]["failedCandidates"][0]["candidateKey"] == "factor_alpha"
-    assert report["answers"]["avoidNextSearch"][0]["candidateKey"] == "factor_alpha"
+    assert report["answers"]["failedCandidates"] == []
+    assert report["answers"]["avoidNextSearch"][0]["candidateKey"] == "factor_beta"
 
 
 def test_candidate_report_prefers_event_metrics_when_live_events_exist(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +70,7 @@ def test_candidate_report_prefers_event_metrics_when_live_events_exist(monkeypat
     _create_db(db_path)
     _create_event_metric_tables(db_path)
     _insert_prediction_outcomes(db_path, "factor_live", "live_factor", [False] * 30)
-    _insert_event_outcomes(db_path, "factor_live", "live_factor", [True] * 30)
+    _insert_event_outcomes(db_path, "factor_live", "live_factor", [True] * 30, start_prediction_id=1)
     monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
 
     report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
@@ -81,14 +83,33 @@ def test_candidate_report_prefers_event_metrics_when_live_events_exist(monkeypat
     assert candidate["paperLiveStatus"] == "paper_stable"
 
 
+def test_candidate_report_ignores_settled_predictions_without_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = _runtime_path("paper-live-event-only") / "candidates.db"
+    _create_db(db_path)
+    _create_event_metric_tables(db_path)
+    _insert_prediction_outcomes(db_path, "factor_shadow", "shadow_only", [True] * 30)
+    monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
+
+    report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
+
+    candidate = report["candidates"][0]
+    assert candidate["candidateKey"] == "factor_shadow"
+    assert candidate["paperLiveSampleCount"] == 0
+    assert candidate["paperLiveWinRate"] is None
+    assert candidate["metrics"]["sampleCount"] == 0
+
+
 def test_candidate_status_changes_are_recorded_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live-history") / "candidates.db"
     _create_db(db_path)
+    _create_event_metric_tables(db_path)
     _insert_predictions(db_path)
+    _insert_event_outcomes(db_path, "factor_gamma", "gamma", [True], start_prediction_id=31)
     monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
 
     service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
     _insert_gamma_failures(db_path)
+    _insert_event_outcomes(db_path, "factor_gamma", "gamma", [False] * 29, start_prediction_id=32)
     report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
 
     gamma_change = next(row for row in report["statusChanges"] if row["candidateKey"] == "factor_gamma")
@@ -101,7 +122,15 @@ def test_candidate_status_changes_are_recorded_with_reason(monkeypatch: pytest.M
 def test_model_candidates_use_model_version_lifecycle_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _runtime_path("paper-live-model") / "candidates.db"
     _create_db(db_path)
+    _create_event_metric_tables(db_path)
     _insert_model_predictions(db_path)
+    _insert_event_outcomes(
+        db_path,
+        "factor_xgboost_shadow_10m",
+        "xgboost_v2",
+        [idx % 2 == 0 for idx in range(30)],
+        start_prediction_id=1,
+    )
     monkeypatch.setattr(service, "get_conn", lambda: _connect(db_path))
 
     report = service.refresh_paper_live_candidate_states("BTCUSDT", "10m")
@@ -318,6 +347,7 @@ def _create_event_metric_tables(path: Path) -> None:
           ai_prediction_correct INTEGER,
           ai_high_winrate_rule TEXT,
           prediction_open_time INTEGER,
+          prediction_id INTEGER,
           market_regime_gate_passed INTEGER
         );
         CREATE TABLE orders (
@@ -333,7 +363,14 @@ def _create_event_metric_tables(path: Path) -> None:
     conn.close()
 
 
-def _insert_event_outcomes(path: Path, strategy_key: str, factor_name: str, outcomes: list[bool]) -> None:
+def _insert_event_outcomes(
+    path: Path,
+    strategy_key: str,
+    factor_name: str,
+    outcomes: list[bool],
+    *,
+    start_prediction_id: int,
+) -> None:
     conn = _connect(path)
     for index, correct in enumerate(outcomes):
         result = "YES" if correct else "NO"
@@ -342,9 +379,9 @@ def _insert_event_outcomes(path: Path, strategy_key: str, factor_name: str, outc
             INSERT INTO events(
               strategy_key, symbol, event_interval, start_time, end_time, status,
               result, ai_predicted_direction, ai_prediction_correct,
-              ai_high_winrate_rule, prediction_open_time, market_regime_gate_passed
+              ai_high_winrate_rule, prediction_open_time, prediction_id, market_regime_gate_passed
             )
-            VALUES(?, 'BTCUSDT', '10m', ?, ?, 'SETTLED', ?, 'up', ?, ?, ?, 1)
+            VALUES(?, 'BTCUSDT', '10m', ?, ?, 'SETTLED', ?, 'up', ?, ?, ?, ?, 1)
             """,
             (
                 strategy_key,
@@ -354,6 +391,7 @@ def _insert_event_outcomes(path: Path, strategy_key: str, factor_name: str, outc
                 int(correct),
                 factor_name,
                 index,
+                start_prediction_id + index,
             ),
         )
         conn.execute(

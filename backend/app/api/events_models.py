@@ -20,6 +20,7 @@ class EventCreate(BaseModel):
     aiHighWinrateRule: str | None = None
     aiHighWinratePassed: bool | None = None
     aiHighWinrateValue: float | None = None
+    predictionId: int | None = None
 
 
 class OrderCreate(BaseModel):
