@@ -119,6 +119,45 @@ assert.equal(summary.backtestGapRiskCount, 1);
 assert.equal(summary.recentWeakCount, 1);
 assert.equal(summary.sampleRichCandidateCount, 2);
 
+const pagedReport = {
+  ...report,
+  allCandidateCount: 100,
+  summary: {
+    sampleCount: 500,
+    settledCandidateCount: 40,
+    unsettledCandidateCount: 60,
+    settledCoverage: 0.4,
+    weightedWinRate: 0.66,
+    avgSamplesPerCandidate: 12.5,
+    sampleRichCandidateCount: 8,
+    stableCount: 3,
+    collectingCount: 35,
+    failedCount: 2,
+    stableSampleCount: 90,
+    collectingSampleCount: 380,
+    failedSampleCount: 30,
+    modelEvidenceCount: 4,
+    backtestGapRiskCount: 6,
+    recentWeakCount: 7,
+    dataIssueCount: 1,
+    featureIssueCount: 2,
+  },
+  allCandidates: report.allCandidates.slice(0, 1),
+};
+const pagedRows = settledRows(pagedReport);
+const globalSummary = researchSummary(pagedReport, pagedRows);
+assert.equal(pagedRows.length, 1);
+assert.equal(globalSummary.sampleCount, 500);
+assert.equal(globalSummary.settledCandidateCount, 40);
+assert.equal(globalSummary.unsettledCandidateCount, 60);
+assert.equal(globalSummary.settledCoverage, 0.4);
+assert.equal(globalSummary.weightedWinRate, 0.66);
+assert.equal(globalSummary.stableCount, 3);
+assert.equal(globalSummary.collectingCount, 35);
+assert.equal(globalSummary.failedCount, 2);
+assert.equal(globalSummary.modelEvidenceCount, 4);
+assert.equal(globalSummary.featureIssueCount, 2);
+
 assert.equal(topReasons(rows, report)[0].reason, "paper_live_win_rate_below_target");
 assert.equal(reasonLabel("paper_live_win_rate_below_target"), "胜率不足");
 
@@ -143,15 +182,11 @@ const observationReport = {
   ],
 };
 const observationRows = settledRows(observationReport);
-assert.equal(observationRows.length, 1);
-assert.equal(observationRows[0].type, "model");
-assert.equal(observationRows[0].sampleCount, 0);
-assert.equal(observationRows[0].validationSampleCount, 60);
-assert.equal(observationRows[0].winRate, 0.61);
+assert.equal(observationRows.length, 0);
 const observationSummary = researchSummary(observationReport, observationRows);
 assert.equal(observationSummary.sampleCount, 0);
 assert.equal(observationSummary.settledCandidateCount, 0);
-assert.equal(observationSummary.modelEvidenceCount, 1);
+assert.equal(observationSummary.modelEvidenceCount, 0);
 assert.equal(observationSummary.weightedWinRate, null);
 assert.equal(reasonLabel("shadow_observation_allowed_without_trade_gate"), "影子观察");
 assert.equal(reasonLabel("candidate_win_rate_beats_active_model"), "胜率优于当前模型");
@@ -223,12 +258,7 @@ const backendModelStatusReport = mergeModelFamilyStatusRows(
 );
 const backendModelRows = settledRows(backendModelStatusReport);
 assert.equal(backendModelStatusReport.allCandidateCount, 1);
-assert.equal(backendModelRows.length, 1);
-assert.equal(backendModelRows[0].type, "model");
-assert.equal(backendModelRows[0].status, "paper_collecting");
-assert.equal(backendModelRows[0].name, "bayesian");
-assert.equal(backendModelRows[0].validationSampleCount, 72);
-assert.equal(backendModelRows[0].winRate, 0.57);
+assert.equal(backendModelRows.length, 0);
 
 const manyFactorRows = Array.from({ length: 20 }, (_, index) => ({
   rowKey: `factor-${index}`,

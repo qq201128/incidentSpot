@@ -25,12 +25,14 @@ export function SettledSampleMatrix({
   reportLoaded,
   rows,
 }) {
+  const pageSize = pagination?.pageSize || TOP_ROW_LIMIT;
+  const visibleRows = visibleSettledRows(rows, pageSize);
   const candidateCountText = matrixStatusText({
     loadError,
     loading,
     pagination,
     reportLoaded,
-    rowCount: rows.length,
+    visibleRowCount: visibleRows.length,
   });
   return (
     <section className="research-matrix">
@@ -53,8 +55,7 @@ export function SettledSampleMatrix({
         <MatrixTable
           liveToggleKey={liveToggleKey}
           onLiveToggle={onLiveToggle}
-          pageSize={pagination?.pageSize || TOP_ROW_LIMIT}
-          rows={rows}
+          rows={visibleRows}
         />
       ) : (
         <p className="research-empty" role={loadError ? "alert" : undefined}>
@@ -65,7 +66,7 @@ export function SettledSampleMatrix({
   );
 }
 
-function MatrixTable({ liveToggleKey, onLiveToggle, pageSize, rows }) {
+function MatrixTable({ liveToggleKey, onLiveToggle, rows }) {
   return (
     <div className="research-table-wrap">
       <table className="research-table">
@@ -89,7 +90,7 @@ function MatrixTable({ liveToggleKey, onLiveToggle, pageSize, rows }) {
           </tr>
         </thead>
         <tbody>
-          {visibleSettledRows(rows, pageSize).map((row) => (
+          {rows.map((row) => (
             <SettledRow
               key={row.rowKey}
               liveToggleKey={liveToggleKey}
@@ -218,16 +219,15 @@ function metricClass(value, target) {
   return Number(value) >= target ? "is-good" : "is-bad";
 }
 
-function matrixStatusText({ loadError, loading, pagination, reportLoaded, rowCount }) {
+function matrixStatusText({ loadError, loading, pagination, reportLoaded, visibleRowCount }) {
   if (loadError) return "候选报告读取失败";
   if (loading) return "正在读取候选报告";
   if (reportLoaded && pagination) {
-    const totalRows = Number(pagination.totalRows || rowCount);
-    const returnedRows = Number(pagination.returnedRows || rowCount);
-    const totalCandidates = Number(pagination.allCandidateCount || totalRows);
-    return `本页 ${returnedRows} / 可展示 ${totalRows} · 全量 ${totalCandidates}`;
+    const returnedRows = Number(pagination.returnedRows || 0);
+    const totalCandidates = Number(pagination.allCandidateCount || returnedRows);
+    return `本页可展示 ${visibleRowCount} · 本页候选 ${returnedRows} · 全量候选 ${totalCandidates}`;
   }
-  if (reportLoaded) return `${rowCount} 个候选，含模型族观察行`;
+  if (reportLoaded) return `可展示 ${visibleRowCount} 个已结算候选`;
   return "等待报告返回";
 }
 

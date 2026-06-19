@@ -82,11 +82,39 @@ def test_candidate_report_paginates_dashboard_rows(monkeypatch: pytest.MonkeyPat
         "hasNext": True,
         "allCandidateCount": 45,
     }
+    assert first_page["summary"]["sampleCount"] == 45
+    assert first_page["summary"]["settledCandidateCount"] == 45
+    assert first_page["summary"]["settledCoverage"] == 1
+    assert first_page["summary"]["weightedWinRate"] == 1
     assert len(first_page["allCandidates"]) == 18
     assert len(second_page["allCandidates"]) == 18
     assert {row["candidateKey"] for row in first_page["allCandidates"]}.isdisjoint(
         {row["candidateKey"] for row in second_page["allCandidates"]}
     )
+
+
+def test_dashboard_pagination_uses_settled_sample_rows() -> None:
+    report = {
+        "payloadMode": "dashboard_slim",
+        "allCandidateCount": 6,
+        "allCandidates": [
+            {"candidateKey": "settled_a", "status": "paper_collecting", "paperLiveSampleCount": 2},
+            {"candidateKey": "empty_a", "status": "paper_collecting", "paperLiveSampleCount": 0},
+            {"candidateKey": "settled_b", "status": "paper_collecting", "paperLiveSampleCount": 1},
+            {"candidateKey": "empty_b", "status": "paper_collecting", "paperLiveSampleCount": 0},
+            {"candidateKey": "settled_c", "status": "paper_failed", "paperLiveSampleCount": 3},
+            {"candidateKey": "empty_c", "status": "paper_collecting", "paperLiveSampleCount": None},
+        ],
+    }
+
+    first_page = service.paginate_paper_live_candidate_report(report, page=1, page_size=2)
+    second_page = service.paginate_paper_live_candidate_report(report, page=2, page_size=2)
+
+    assert first_page["pagination"]["totalRows"] == 3
+    assert first_page["pagination"]["totalPages"] == 2
+    assert first_page["pagination"]["allCandidateCount"] == 6
+    assert [row["candidateKey"] for row in first_page["allCandidates"]] == ["settled_a", "settled_b"]
+    assert [row["candidateKey"] for row in second_page["allCandidates"]] == ["settled_c"]
 
 
 def test_candidate_report_prefers_status_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

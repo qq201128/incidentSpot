@@ -14,6 +14,7 @@ from app.services.auto_predict_model_shadow_collection import (
 )
 from app.services.model_family_config import MODEL_FAMILIES
 from app.services.paper_live_candidate_service import log_prediction_failure
+from app.services.prediction_cache_service import prediction_id_for_result
 from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY, strategy_entry_grace_ms, strategy_supports_duration
 
 MODEL_FAMILY_SHADOW_CONCURRENCY = 3
@@ -175,7 +176,9 @@ async def _save_prediction_and_simulation_trade(
 ) -> None:
     saved = await context.deps["save_prediction"](result, context.write_lock)
     if saved:
-        await asyncio.to_thread(context.deps["create_batch_combo_simulation_trade"], context.settings, result)
+        prediction_id = await asyncio.to_thread(prediction_id_for_result, result)
+        trade_payload = result if prediction_id is None else {**result, "id": prediction_id}
+        await asyncio.to_thread(context.deps["create_batch_combo_simulation_trade"], context.settings, trade_payload)
 
 
 def _log_collection_failure(context: PredictionFailureContext) -> None:

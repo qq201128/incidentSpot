@@ -3,10 +3,15 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
-from app.services.high_winrate_strategy_metrics import high_winrate_decision, high_winrate_metrics
+from app.services.high_winrate_strategy_metrics import (
+    ACTIVE_SAMPLE_COUNT,
+    high_winrate_decision,
+    high_winrate_metrics,
+)
 from app.services.live_readiness_gate import live_readiness_gate
 from app.services.event_pnl_rows import settled_event_metric_rows_by_prediction_identity
 from app.services.paper_live_failure_store import (
@@ -79,6 +84,8 @@ def paginate_paper_live_candidate_report(
     page_size: int,
 ) -> dict[str, Any]:
     rows = report.get("allCandidates") if isinstance(report.get("allCandidates"), list) else []
+    if report.get("payloadMode") == "dashboard_slim":
+        rows = _settled_dashboard_rows(rows)
     safe_page_size = min(max(int(page_size or DEFAULT_CANDIDATE_PAGE_SIZE), 1), MAX_CANDIDATE_PAGE_SIZE)
     total_rows = len(rows)
     total_pages = max((total_rows + safe_page_size - 1) // safe_page_size, 1)
@@ -107,6 +114,10 @@ def paginate_paper_live_candidate_report(
             "allCandidateCount": report.get("allCandidateCount", total_rows),
         },
     }
+
+
+def _settled_dashboard_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if _row_sample_count(row) > 0]
 
 
 def _candidate_report(symbol: str, duration: str, *, include_all_candidates: bool) -> dict[str, Any]:
@@ -369,6 +380,7 @@ def _report_payload(data: ReportPayloadInput, *, include_all_candidates: bool) -
         "observationPoolLimit": OBSERVATION_POOL_LIMIT,
         "allCandidateCount": len(data.ranked),
         "settledCandidateCount": _settled_candidate_count(data.ranked),
+        "summary": _evidence_summary(data.ranked),
         "candidateModelFamilies": _candidate_model_families(data.ranked),
         "allCandidates": all_candidates if include_all_candidates else _dashboard_candidate_rows(all_candidates),
         "candidates": candidates,
@@ -382,6 +394,111 @@ def _report_payload(data: ReportPayloadInput, *, include_all_candidates: bool) -
         "avoidNextSearch": avoid_next_search,
         "answers": candidate_pool_answers(focused, data.ranked, data.failures, avoid_next_search) if include_all_candidates else {},
     }
+
+
+def _evidence_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    settled = [row for row in rows if _row_sample_count(row) > 0]
+    sample_count = sum(_row_sample_count(row) for row in settled)
+    weighted_win_rate = _weighted_win_rate(settled)
+    total_candidates = len(rows)
+    settled_candidate_count = len(settled)
+    return {
+        "sampleCount": sample_count,
+        "settledCandidateCount": settled_candidate_count,
+        "unsettledCandidateCount": max(total_candidates - settled_candidate_count, 0),
+        "settledCoverage": settled_candidate_count / total_candidates if total_candidates else None,
+        "weightedWinRate": weighted_win_rate,
+        "avgSamplesPerCandidate": sample_count / settled_candidate_count if settled_candidate_count else None,
+        "sampleRichCandidateCount": sum(1 for row in settled if _row_sample_count(row) >= ACTIVE_SAMPLE_COUNT),
+        "stableCount": _count_status(settled, {STATUS_STABLE}),
+        "collectingCount": _count_status(settled, {STATUS_COLLECTING, STATUS_BACKTEST}),
+        "failedCount": _count_status(settled, {STATUS_FAILED, STATUS_LEAKAGE}),
+        "stableSampleCount": _sum_status_samples(settled, {STATUS_STABLE}),
+        "collectingSampleCount": _sum_status_samples(settled, {STATUS_COLLECTING, STATUS_BACKTEST}),
+        "failedSampleCount": _sum_status_samples(settled, {STATUS_FAILED, STATUS_LEAKAGE}),
+        "modelEvidenceCount": sum(1 for row in settled if row.get("candidateType") == "model"),
+        "backtestGapRiskCount": sum(1 for row in settled if _backtest_gap(row) >= 0.1),
+        "recentWeakCount": sum(1 for row in settled if _recent_win_rate(row) is not None and _recent_win_rate(row) < 0.58),
+        "dataIssueCount": _issue_count(settled, "dataFreshnessStatus"),
+        "featureIssueCount": _issue_count(settled, "missingFeatureStatus"),
+    }
+
+
+def _weighted_win_rate(rows: list[dict[str, Any]]) -> float | None:
+    weighted_wins = 0.0
+    weighted_samples = 0
+    for row in rows:
+        sample_count = _row_sample_count(row)
+        win_rate = _row_win_rate(row)
+        if sample_count <= 0 or win_rate is None:
+            continue
+        weighted_wins += win_rate * sample_count
+        weighted_samples += sample_count
+    return weighted_wins / weighted_samples if weighted_samples else None
+
+
+def _count_status(rows: list[dict[str, Any]], statuses: set[str]) -> int:
+    return sum(1 for row in rows if str(row.get("status") or row.get("paperLiveStatus") or "") in statuses)
+
+
+def _sum_status_samples(rows: list[dict[str, Any]], statuses: set[str]) -> int:
+    return sum(
+        _row_sample_count(row)
+        for row in rows
+        if str(row.get("status") or row.get("paperLiveStatus") or "") in statuses
+    )
+
+
+def _row_sample_count(row: dict[str, Any]) -> int:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    return int(row.get("paperLiveSampleCount") or metrics.get("sampleCount") or 0)
+
+
+def _row_win_rate(row: dict[str, Any]) -> float | None:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    return _finite_float(row.get("paperLiveWinRate"), metrics.get("winRate"))
+
+
+def _backtest_gap(row: dict[str, Any]) -> float:
+    backtest = _finite_float(row.get("backtestWinRate"))
+    paper = _row_win_rate(row)
+    if backtest is None or paper is None:
+        return 0.0
+    return backtest - paper
+
+
+def _recent_win_rate(row: dict[str, Any]) -> float | None:
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    windows = metrics.get("paperLiveWindows") if isinstance(metrics.get("paperLiveWindows"), dict) else {}
+    recent = windows.get("recent30")
+    if isinstance(recent, dict):
+        return _finite_float(recent.get("winRate"))
+    stability = metrics.get("paperStability") if isinstance(metrics.get("paperStability"), dict) else {}
+    recent = stability.get("recent")
+    return _finite_float(recent.get("winRate")) if isinstance(recent, dict) else None
+
+
+def _issue_count(rows: list[dict[str, Any]], key: str) -> int:
+    return sum(1 for row in rows if _is_issue_status(row.get(key)))
+
+
+def _is_issue_status(value: Any) -> bool:
+    if not value:
+        return False
+    return str(value).lower() not in {"fresh", "complete", "ok"}
+
+
+def _finite_float(*values: Any) -> float | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(number):
+            return number
+    return None
 
 
 def _ranking_policy() -> list[str]:

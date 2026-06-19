@@ -42,6 +42,50 @@ def test_create_batch_combo_simulation_trade_observes_backtest_failed_prediction
     assert created[0][1]["trade_quality_passed"] is False
 
 
+def test_create_batch_combo_simulation_trade_marks_prediction_event(monkeypatch) -> None:
+    created = []
+    marked = []
+    parent = AutoTradeSettings(
+        strategy_key="factor_combo_ranker_v1",
+        enabled=True,
+        symbol="BTCUSDT",
+        duration="10m",
+        duration_minutes=10,
+        qty=5.0,
+        live_trading_enabled=False,
+    )
+    prediction = {
+        "id": 42,
+        "strategy_key": "paper_combo_alpha",
+        "symbol": "BTCUSDT",
+        "duration": "10m",
+        "open_time": 1_700_000_000_000,
+        "direction": "up",
+        "probability_up": 0.7,
+    }
+
+    def create_trade(settings: AutoTradeSettings, row: dict) -> dict:
+        created.append((settings, row))
+        return {"eventId": 99}
+
+    monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
+    monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
+    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(service, "create_trade_from_prediction", create_trade)
+    monkeypatch.setattr(service, "mark_prediction_execution", lambda *args, **kwargs: marked.append((args, kwargs)))
+
+    result = service.create_batch_combo_simulation_trade(parent, prediction)
+
+    assert result == {"eventId": 99}
+    assert created[0][1]["id"] == 42
+    assert marked == [
+        (
+            (42,),
+            {"status": service.EXECUTION_EVENT_CREATED, "reason": "event_created", "event_id": 99},
+        )
+    ]
+
+
 def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(monkeypatch) -> None:
     created = []
     failures = []

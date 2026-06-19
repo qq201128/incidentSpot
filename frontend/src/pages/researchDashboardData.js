@@ -148,7 +148,7 @@ export function researchSummary(report, rows) {
   const weightedWins = settled.reduce((sum, row) => sum + (row.winRate ?? 0) * row.sampleCount, 0);
   const settledCandidateCount = settled.length;
   const totalCandidates = candidateTotal(report);
-  return {
+  const localSummary = {
     reportLoaded: Boolean(report),
     sampleCount,
     settledCandidateCount,
@@ -172,6 +172,7 @@ export function researchSummary(report, rows) {
     stageFailureCount: stageLogRows(report).filter((row) => row.status === "failed").length,
     statusChangeCount: statusChangeRows(report).length,
   };
+  return applyGlobalEvidenceSummary(localSummary, report?.summary || report?.evidenceSummary);
 }
 
 export function prefilterRows(report) {
@@ -271,7 +272,7 @@ function rowPayload(row) {
   const type = row.candidateType || "factor";
   const paperWinRate = numberOrNull(row.paperLiveWinRate ?? (type === "model" ? null : metrics.winRate));
   const validationWinRate = numberOrNull(row.validationWinRate ?? metrics.validationWinRate);
-  const winRate = paperWinRate ?? (type === "model" ? validationWinRate : null);
+  const winRate = paperWinRate;
   const validationSampleCount = Number(row.validationSampleCount ?? metrics.validationSampleCount ?? 0);
   const backtestWinRate = numberOrNull(row.backtestWinRate);
   const name = candidateName(row, type);
@@ -308,7 +309,7 @@ function rowPayload(row) {
 }
 
 function visibleResearchRow(row) {
-  return row.sampleCount > 0 || row.type === "model";
+  return row.sampleCount > 0;
 }
 
 function modelStatusByFamily(rows) {
@@ -572,4 +573,45 @@ function hasBacktestGapRisk(row) {
 function hasRecentWeakness(row) {
   const recent = row.windows?.recent30 || row.stability?.recent;
   return recent?.winRate != null && Number(recent.winRate) < EVIDENCE_TARGETS.recentWinRateMin;
+}
+
+function applyGlobalEvidenceSummary(localSummary, evidenceSummary) {
+  if (!evidenceSummary || typeof evidenceSummary !== "object") return localSummary;
+  return {
+    ...localSummary,
+    sampleCount: numberOrFallback(evidenceSummary.sampleCount, localSummary.sampleCount),
+    settledCandidateCount: numberOrFallback(
+      evidenceSummary.settledCandidateCount,
+      localSummary.settledCandidateCount,
+    ),
+    unsettledCandidateCount: numberOrFallback(
+      evidenceSummary.unsettledCandidateCount,
+      localSummary.unsettledCandidateCount,
+    ),
+    settledCoverage: numberOrNull(evidenceSummary.settledCoverage) ?? localSummary.settledCoverage,
+    weightedWinRate: numberOrNull(evidenceSummary.weightedWinRate) ?? localSummary.weightedWinRate,
+    avgSamplesPerCandidate: numberOrNull(evidenceSummary.avgSamplesPerCandidate) ?? localSummary.avgSamplesPerCandidate,
+    sampleRichCandidateCount: numberOrFallback(
+      evidenceSummary.sampleRichCandidateCount,
+      localSummary.sampleRichCandidateCount,
+    ),
+    stableCount: numberOrFallback(evidenceSummary.stableCount, localSummary.stableCount),
+    collectingCount: numberOrFallback(evidenceSummary.collectingCount, localSummary.collectingCount),
+    failedCount: numberOrFallback(evidenceSummary.failedCount, localSummary.failedCount),
+    stableSampleCount: numberOrFallback(evidenceSummary.stableSampleCount, localSummary.stableSampleCount),
+    collectingSampleCount: numberOrFallback(
+      evidenceSummary.collectingSampleCount,
+      localSummary.collectingSampleCount,
+    ),
+    failedSampleCount: numberOrFallback(evidenceSummary.failedSampleCount, localSummary.failedSampleCount),
+    modelEvidenceCount: numberOrFallback(evidenceSummary.modelEvidenceCount, localSummary.modelEvidenceCount),
+    backtestGapRiskCount: numberOrFallback(evidenceSummary.backtestGapRiskCount, localSummary.backtestGapRiskCount),
+    recentWeakCount: numberOrFallback(evidenceSummary.recentWeakCount, localSummary.recentWeakCount),
+    dataIssueCount: numberOrFallback(evidenceSummary.dataIssueCount, localSummary.dataIssueCount),
+    featureIssueCount: numberOrFallback(evidenceSummary.featureIssueCount, localSummary.featureIssueCount),
+  };
+}
+
+function numberOrFallback(value, fallback) {
+  return numberOrNull(value) ?? fallback;
 }

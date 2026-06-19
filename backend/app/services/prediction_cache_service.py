@@ -90,6 +90,29 @@ def prediction_exists_conn(conn, request: dict) -> bool:
     return row is not None
 
 
+def prediction_id_for_result(result: dict) -> int | None:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM predictions
+            WHERE signal_key = ? AND symbol = ? AND duration = ? AND open_time = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                _signal_key(result),
+                result["symbol"].upper(),
+                result["duration"],
+                int(result["open_time"]),
+            ),
+        ).fetchone()
+        return None if row is None else int(row["id"])
+    finally:
+        conn.close()
+
+
 def mark_prediction_execution(
     prediction_id: int,
     *,

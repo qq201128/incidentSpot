@@ -8,6 +8,7 @@ from app.services.auto_trade_types import AutoTradeSettings
 from app.services.market_regime_trade_gate import MarketRegimeTradeDecision, evaluate_market_regime_trade_gate
 from app.services.paper_live_failure_store import log_prediction_failure
 from app.services.position_guard import has_open_position
+from app.services.prediction_cache_service import EXECUTION_BLOCKED, EXECUTION_EVENT_CREATED, mark_prediction_execution
 from app.services.rule_config import DURATION_TO_MINUTES
 
 MARKET_REGIME_GATE_STAGE = "market_regime_trade_gate"
@@ -19,8 +20,10 @@ def create_batch_combo_simulation_trade(
 ) -> dict[str, Any] | None:
     settings = _batch_settings(parent, prediction)
     if _live_trading_enabled(settings):
+        _mark_execution(prediction, EXECUTION_BLOCKED, "live_trading_enabled")
         return None
     if _has_open_position(settings):
+        _mark_execution(prediction, EXECUTION_BLOCKED, "open_position_exists")
         return None
     regime_decision = evaluate_market_regime_trade_gate(
         symbol=settings.symbol,
@@ -30,8 +33,11 @@ def create_batch_combo_simulation_trade(
     )
     if not regime_decision.allowed:
         _log_market_regime_skip(settings, prediction, regime_decision)
+        _mark_execution(prediction, EXECUTION_BLOCKED, regime_decision.reason)
         return None
-    return create_trade_from_prediction(settings, prediction)
+    result = create_trade_from_prediction(settings, prediction)
+    _mark_execution(prediction, EXECUTION_EVENT_CREATED, "event_created", event_id=result.get("eventId"))
+    return result
 
 
 def _batch_settings(parent: AutoTradeSettings, prediction: dict[str, Any]) -> AutoTradeSettings:
@@ -104,3 +110,15 @@ def _candidate_key(prediction: dict[str, Any]) -> str:
         if value:
             return str(value)
     return str(prediction["strategy_key"])
+
+
+def _mark_execution(prediction: dict[str, Any], status: str, reason: str, *, event_id: Any = None) -> None:
+    prediction_id = prediction.get("id")
+    if prediction_id is None:
+        return
+    mark_prediction_execution(
+        int(prediction_id),
+        status=status,
+        reason=reason,
+        event_id=None if event_id is None else int(event_id),
+    )
