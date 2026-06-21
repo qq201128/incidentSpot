@@ -18,9 +18,19 @@ from app.services.factor_frame_service import load_factor_frame, lookback_days_f
 from app.services.factor_mined_library import mined_factor_rows_for_duration
 from app.services.high_winrate_combo_cache_service import get_cached_high_winrate_combo_ranking
 from app.services.paper_live_candidate_service import OBSERVATION_POOL_LIMIT
+from app.services.paper_live_failure_store import log_prediction_failure
 from app.services.rule_config import SUPPORTED_RULE_DURATIONS
+from app.services.strategy_registry import FACTOR_COMBO_STRATEGY_KEY
 
 OFFLINE_CANDIDATE_LOOKBACK_BARS = 720
+ROW_LEVEL_PREDICTION_FAILURE_PREFIXES = (
+    "combination signal missing factors:",
+    "combination signal has no finite score",
+    "combination signal has insufficient historical median",
+    "combination row missing members:",
+    "combination row missing live or historical winRate:",
+    "factor combo materialization failed:",
+)
 
 
 @dataclass(frozen=True)
@@ -90,16 +100,23 @@ def predict_eligible_factor_combo_rows(
     entry_open_time: int,
     entry_grace_ms: int,
 ) -> list[dict[str, Any]]:
-    return [
-        _prediction_for_backtest_simulation(
-            symbol,
-            duration,
-            row,
-            entry_open_time=entry_open_time,
-            entry_grace_ms=entry_grace_ms,
-        )
-        for row in eligible_factor_combo_rows(symbol, duration)
-    ]
+    predictions: list[dict[str, Any]] = []
+    for row in eligible_factor_combo_rows(symbol, duration):
+        try:
+            predictions.append(
+                _prediction_for_backtest_simulation(
+                    symbol,
+                    duration,
+                    row,
+                    entry_open_time=entry_open_time,
+                    entry_grace_ms=entry_grace_ms,
+                )
+            )
+        except ValueError as exc:
+            if not _is_row_level_prediction_failure(exc):
+                raise
+            _log_row_prediction_failure(symbol, duration, row, entry_open_time, exc)
+    return predictions
 
 
 def _prediction_for_backtest_simulation(
@@ -227,3 +244,31 @@ def _reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         reason = str(row["reason"])
         counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def _is_row_level_prediction_failure(exc: ValueError) -> bool:
+    message = str(exc)
+    return any(message.startswith(prefix) for prefix in ROW_LEVEL_PREDICTION_FAILURE_PREFIXES)
+
+
+def _log_row_prediction_failure(
+    symbol: str,
+    duration: str,
+    row: dict[str, Any],
+    entry_open_time: int,
+    exc: ValueError,
+) -> None:
+    factor_name = str(row.get("factorName") or "").strip() or FACTOR_COMBO_STRATEGY_KEY
+    log_prediction_failure(
+        candidate_key=factor_name,
+        strategy_key=FACTOR_COMBO_STRATEGY_KEY,
+        symbol=symbol,
+        duration=duration,
+        stage="factor_combo_shadow_prediction_row",
+        reason=str(exc),
+        details={
+            "entryOpenTime": int(entry_open_time),
+            "comboRank": row.get("comboRank"),
+            "exceptionType": type(exc).__name__,
+        },
+    )

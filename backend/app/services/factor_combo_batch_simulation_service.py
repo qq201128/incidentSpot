@@ -5,13 +5,14 @@ from typing import Any
 from app.db.session import get_conn
 from app.services.auto_trade_execution import create_trade_from_prediction
 from app.services.auto_trade_types import AutoTradeSettings
-from app.services.market_regime_trade_gate import MarketRegimeTradeDecision, evaluate_market_regime_trade_gate
+from app.services.candidate_regime_admission import CandidateRegimeAdmission, evaluate_candidate_regime_admission
 from app.services.paper_live_failure_store import log_prediction_failure
 from app.services.position_guard import has_open_position
 from app.services.prediction_cache_service import EXECUTION_BLOCKED, EXECUTION_EVENT_CREATED, mark_prediction_execution
 from app.services.rule_config import DURATION_TO_MINUTES
 
-MARKET_REGIME_GATE_STAGE = "market_regime_trade_gate"
+CANDIDATE_REGIME_ADMISSION_STAGE = "candidate_regime_admission"
+MARKET_REGIME_GATE_STAGE = CANDIDATE_REGIME_ADMISSION_STAGE
 
 
 def create_batch_combo_simulation_trade(
@@ -25,18 +26,13 @@ def create_batch_combo_simulation_trade(
     if _has_open_position(settings):
         _mark_execution(prediction, EXECUTION_BLOCKED, "open_position_exists")
         return None
-    regime_decision = evaluate_market_regime_trade_gate(
-        symbol=settings.symbol,
-        duration=settings.duration,
-        open_time=int(prediction["open_time"]),
-        direction=str(prediction["direction"]),
-    )
-    if not regime_decision.allowed:
-        _log_market_regime_skip(settings, prediction, regime_decision)
-        _mark_execution(prediction, EXECUTION_BLOCKED, regime_decision.reason)
+    admission = evaluate_candidate_regime_admission(prediction)
+    if not admission.allowed:
+        _log_candidate_regime_skip(settings, prediction, admission)
+        _mark_execution(prediction, EXECUTION_BLOCKED, admission.reason)
         return None
-    result = create_trade_from_prediction(settings, prediction)
-    _mark_execution(prediction, EXECUTION_EVENT_CREATED, "event_created", event_id=result.get("eventId"))
+    result = create_trade_from_prediction(settings, prediction, regime_decision=admission)
+    _mark_execution(prediction, EXECUTION_EVENT_CREATED, admission.reason, event_id=result.get("eventId"))
     return result
 
 
@@ -83,23 +79,25 @@ def _live_trading_enabled(settings: AutoTradeSettings) -> bool:
         conn.close()
 
 
-def _log_market_regime_skip(
+def _log_candidate_regime_skip(
     settings: AutoTradeSettings,
     prediction: dict[str, Any],
-    decision: MarketRegimeTradeDecision,
+    decision: CandidateRegimeAdmission,
 ) -> None:
     log_prediction_failure(
         candidate_key=_candidate_key(prediction),
         strategy_key=settings.strategy_key,
         symbol=settings.symbol,
         duration=settings.duration,
-        stage=MARKET_REGIME_GATE_STAGE,
+        stage=CANDIDATE_REGIME_ADMISSION_STAGE,
         reason=decision.reason,
         details={
             "mode": decision.mode,
             "openTime": int(prediction["open_time"]),
             "direction": str(prediction["direction"]),
             "regime": decision.regime,
+            "sampleCount": decision.sample_count,
+            "metrics": decision.metrics,
         },
     )
 

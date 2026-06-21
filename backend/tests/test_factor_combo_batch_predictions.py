@@ -102,6 +102,66 @@ def test_prediction_rows_only_use_ranked_offline_focused_pool(monkeypatch) -> No
     assert "combo_0" not in predicted
 
 
+def test_prediction_rows_log_and_skip_row_level_failures(monkeypatch) -> None:
+    focused = [_ranking_row(1), _ranking_row(2)]
+    failures = []
+    monkeypatch.setattr(service, "eligible_factor_combo_rows", lambda *_args: focused)
+    monkeypatch.setattr(service, "log_prediction_failure", lambda **kwargs: failures.append(kwargs))
+
+    def _predict(_symbol, _duration, row, **_kwargs) -> dict:
+        if row["factorName"] == "combo_1":
+            raise ValueError("combination signal missing factors: missing_factor")
+        return _prediction(row)
+
+    monkeypatch.setattr(service, "predict_factor_combo_row_direction", _predict)
+
+    rows = service.predict_eligible_factor_combo_rows(
+        "BTCUSDT",
+        "10m",
+        entry_open_time=1_700_000_000_000,
+        entry_grace_ms=60_000,
+    )
+
+    assert [row["strategy_key"] for row in rows] == ["paper_combo_2"]
+    assert failures == [
+        {
+            "candidate_key": "combo_1",
+            "strategy_key": service.FACTOR_COMBO_STRATEGY_KEY,
+            "symbol": "BTCUSDT",
+            "duration": "10m",
+            "stage": "factor_combo_shadow_prediction_row",
+            "reason": "combination signal missing factors: missing_factor",
+            "details": {
+                "entryOpenTime": 1_700_000_000_000,
+                "comboRank": None,
+                "exceptionType": "ValueError",
+            },
+        }
+    ]
+
+
+def test_prediction_rows_still_raise_system_level_failures(monkeypatch) -> None:
+    focused = [_ranking_row(1)]
+    monkeypatch.setattr(service, "eligible_factor_combo_rows", lambda *_args: focused)
+
+    def _predict(*_args, **_kwargs) -> dict:
+        raise ValueError("factor combination ranking BTCUSDT 10m cache is stale: expired")
+
+    monkeypatch.setattr(service, "predict_factor_combo_row_direction", _predict)
+
+    try:
+        service.predict_eligible_factor_combo_rows(
+            "BTCUSDT",
+            "10m",
+            entry_open_time=1_700_000_000_000,
+            entry_grace_ms=60_000,
+        )
+    except ValueError as exc:
+        assert "cache is stale" in str(exc)
+    else:
+        raise AssertionError("expected stale cache failure to be raised")
+
+
 def test_offline_screening_reports_no_usable_cache_reason(monkeypatch) -> None:
     monkeypatch.setattr(service, "_usable_caches", lambda *_args: [])
 

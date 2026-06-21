@@ -26,7 +26,7 @@ from app.services.factor_candidate_signal_keys import is_factor_candidate_signal
 from app.services.factor_combo_simulation_keys import is_batch_combo_simulation_strategy
 from app.services.position_guard import has_open_position
 from app.services.kline_timing import current_rule_entry_open_time_for_duration
-from app.services.market_regime_trade_gate import evaluate_market_regime_trade_gate
+from app.services.candidate_regime_admission import CandidateRegimeAdmission, evaluate_candidate_regime_admission
 from app.services.prediction_cache_service import (
     EXECUTION_BLOCKED,
     EXECUTION_EVENT_CREATED,
@@ -147,17 +147,15 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
     if not tradable:
         _mark_execution(prediction, EXECUTION_SKIPPED, skip_reason)
         return None
-    regime_decision = evaluate_market_regime_trade_gate(
-        symbol=settings.symbol,
-        duration=settings.duration,
-        open_time=int(prediction["open_time"]),
-        direction=str(prediction["direction"]),
-    )
+    regime_decision = evaluate_candidate_regime_admission(prediction)
     if not regime_decision.allowed:
         _mark_execution(prediction, EXECUTION_BLOCKED, regime_decision.reason)
         return None
-    result = _create_trade(settings, prediction)
-    _mark_execution(prediction, EXECUTION_EVENT_CREATED, "event_created", event_id=result.get("eventId"))
+    if settings.live_trading_enabled and not _live_regime_ready(regime_decision):
+        _mark_execution(prediction, EXECUTION_BLOCKED, "regime_bucket_not_stable_for_live_trading")
+        return None
+    result = _create_trade(settings, prediction, regime_decision=regime_decision)
+    _mark_execution(prediction, EXECUTION_EVENT_CREATED, regime_decision.reason, event_id=result.get("eventId"))
     logger.info(
         "auto trade placed strategy=%s event=%s order=%s",
         settings.strategy_key,
@@ -167,8 +165,17 @@ def _run_strategy_once(settings: AutoTradeSettings) -> dict[str, Any] | None:
     return result
 
 
-def _create_trade(settings: AutoTradeSettings, prediction: dict[str, Any]) -> dict:
-    return create_trade_from_prediction(settings, prediction)
+def _create_trade(
+    settings: AutoTradeSettings,
+    prediction: dict[str, Any],
+    *,
+    regime_decision: CandidateRegimeAdmission,
+) -> dict:
+    return create_trade_from_prediction(settings, prediction, regime_decision=regime_decision)
+
+
+def _live_regime_ready(decision: CandidateRegimeAdmission) -> bool:
+    return decision.mode == "stable"
 
 
 def _prediction_matches_current_kline_bucket(

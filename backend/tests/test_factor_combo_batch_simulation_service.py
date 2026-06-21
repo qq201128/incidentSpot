@@ -25,13 +25,13 @@ def test_create_batch_combo_simulation_trade_observes_backtest_failed_prediction
         "trade_quality_passed": False,
     }
 
-    def create_trade(settings: AutoTradeSettings, row: dict) -> dict:
+    def create_trade(settings: AutoTradeSettings, row: dict, **_kwargs) -> dict:
         created.append((settings, row))
         return {"eventId": 1}
 
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
     monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
-    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(service, "evaluate_candidate_regime_admission", _allowed_regime_admission)
     monkeypatch.setattr(service, "create_trade_from_prediction", create_trade)
 
     result = service.create_batch_combo_simulation_trade(parent, prediction)
@@ -64,13 +64,13 @@ def test_create_batch_combo_simulation_trade_marks_prediction_event(monkeypatch)
         "probability_up": 0.7,
     }
 
-    def create_trade(settings: AutoTradeSettings, row: dict) -> dict:
-        created.append((settings, row))
+    def create_trade(settings: AutoTradeSettings, row: dict, **kwargs) -> dict:
+        created.append((settings, row, kwargs))
         return {"eventId": 99}
 
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
     monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
-    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(service, "evaluate_candidate_regime_admission", _allowed_regime_admission)
     monkeypatch.setattr(service, "create_trade_from_prediction", create_trade)
     monkeypatch.setattr(service, "mark_prediction_execution", lambda *args, **kwargs: marked.append((args, kwargs)))
 
@@ -78,15 +78,20 @@ def test_create_batch_combo_simulation_trade_marks_prediction_event(monkeypatch)
 
     assert result == {"eventId": 99}
     assert created[0][1]["id"] == 42
+    assert created[0][2]["regime_decision"].reason == "regime_exploration_sample_count_below_50"
     assert marked == [
         (
             (42,),
-            {"status": service.EXECUTION_EVENT_CREATED, "reason": "event_created", "event_id": 99},
+            {
+                "status": service.EXECUTION_EVENT_CREATED,
+                "reason": "regime_exploration_sample_count_below_50",
+                "event_id": 99,
+            },
         )
     ]
 
 
-def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(monkeypatch) -> None:
+def test_create_batch_combo_simulation_trade_skips_when_candidate_regime_bucket_blocks(monkeypatch) -> None:
     created = []
     failures = []
     parent = AutoTradeSettings(
@@ -110,7 +115,7 @@ def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(mon
 
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
     monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: False)
-    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _blocked_regime_gate)
+    monkeypatch.setattr(service, "evaluate_candidate_regime_admission", _blocked_regime_admission)
     monkeypatch.setattr(service, "log_prediction_failure", lambda **kwargs: failures.append(kwargs))
     monkeypatch.setattr(service, "create_trade_from_prediction", lambda *_args: created.append(True))
 
@@ -119,9 +124,10 @@ def test_create_batch_combo_simulation_trade_skips_when_market_regime_blocks(mon
     assert result is None
     assert created == []
     assert failures[0]["candidate_key"] == "combo_alpha"
-    assert failures[0]["stage"] == service.MARKET_REGIME_GATE_STAGE
-    assert failures[0]["reason"] == "counter_trend_down_vs_up"
-    assert failures[0]["details"]["mode"] == "skip"
+    assert failures[0]["stage"] == service.CANDIDATE_REGIME_ADMISSION_STAGE
+    assert failures[0]["reason"] == "regime_bucket_win_rate_below_min"
+    assert failures[0]["details"]["mode"] == "evaluable"
+    assert failures[0]["details"]["sampleCount"] == 120
 
 
 def test_create_batch_combo_simulation_trade_skips_live_enabled_candidate(monkeypatch) -> None:
@@ -146,7 +152,7 @@ def test_create_batch_combo_simulation_trade_skips_live_enabled_candidate(monkey
 
     monkeypatch.setattr(service, "_live_trading_enabled", lambda _settings: True)
     monkeypatch.setattr(service, "_has_open_position", lambda _settings: False)
-    monkeypatch.setattr(service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(service, "evaluate_candidate_regime_admission", _allowed_regime_admission)
     monkeypatch.setattr(service, "create_trade_from_prediction", lambda *_args: created.append(True))
 
     result = service.create_batch_combo_simulation_trade(parent, prediction)
@@ -155,17 +161,20 @@ def test_create_batch_combo_simulation_trade_skips_live_enabled_candidate(monkey
     assert created == []
 
 
-class _RegimeDecision:
-    def __init__(self, allowed: bool, reason: str, mode: str) -> None:
+class _RegimeAdmission:
+    def __init__(self, allowed: bool, reason: str, mode: str, sample_count: int = 0) -> None:
         self.allowed = allowed
         self.reason = reason
         self.mode = mode
-        self.regime = {"ready": True, "trendState": "trend_up"}
+        self.regime = {"ready": True, "trendState": "trend_down", "regimeLabel": "trend_down:normal_vol"}
+        self.sample_count = sample_count
+        self.metrics = {"sampleCount": sample_count}
+        self.version = "candidate_regime_admission_v1"
 
 
-def _allowed_regime_gate(**_kwargs):
-    return _RegimeDecision(True, "range_environment_allowed", "range")
+def _allowed_regime_admission(_prediction):
+    return _RegimeAdmission(True, "regime_exploration_sample_count_below_50", "exploration")
 
 
-def _blocked_regime_gate(**_kwargs):
-    return _RegimeDecision(False, "counter_trend_down_vs_up", "skip")
+def _blocked_regime_admission(_prediction):
+    return _RegimeAdmission(False, "regime_bucket_win_rate_below_min", "evaluable", sample_count=120)

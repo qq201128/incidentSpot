@@ -145,15 +145,15 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
     monkeypatch.setattr(auto_trade_service, "list_auto_trade_settings", lambda: settings)
     monkeypatch.setattr(auto_trade_service, "_has_open_position", lambda *_args: False)
     monkeypatch.setattr(auto_trade_service, "_latest_prediction_row", lambda item: predictions[item.symbol])
-    monkeypatch.setattr(auto_trade_service, "evaluate_market_regime_trade_gate", _allowed_regime_gate)
+    monkeypatch.setattr(auto_trade_service, "evaluate_candidate_regime_admission", _allowed_regime_admission)
     monkeypatch.setattr(
         auto_trade_service,
         "current_rule_entry_open_time_for_duration",
         lambda _duration, _now_ms=None: current_open,
     )
 
-    def create(settings: AutoTradeSettings, prediction: dict) -> dict:
-        created.append((settings.symbol, prediction["symbol"]))
+    def create(settings: AutoTradeSettings, prediction: dict, **kwargs) -> dict:
+        created.append((settings.symbol, prediction["symbol"], kwargs["regime_decision"].mode))
         return {"eventId": len(created), "orderId": len(created), "symbol": settings.symbol}
 
     monkeypatch.setattr(auto_trade_service, "_create_trade", create)
@@ -162,10 +162,10 @@ def test_run_auto_trade_once_creates_btc_and_eth_sim_events(monkeypatch) -> None
     results = auto_trade_service.run_auto_trade_once()
 
     assert [row["symbol"] for row in results] == ["BTCUSDT", "ETHUSDT"]
-    assert created == [("BTCUSDT", "BTCUSDT"), ("ETHUSDT", "ETHUSDT")]
+    assert created == [("BTCUSDT", "BTCUSDT", "exploration"), ("ETHUSDT", "ETHUSDT", "exploration")]
 
 
-def test_run_auto_trade_once_skips_when_market_regime_blocks(monkeypatch) -> None:
+def test_run_auto_trade_once_skips_when_candidate_regime_bucket_blocks(monkeypatch) -> None:
     current_open = 1778922000000
     settings = [AutoTradeSettings(FACTOR_COMBO_STRATEGY_KEY, True, "BTCUSDT", "10m", 10, 5.0, False)]
     monkeypatch.setattr(auto_trade_service, "list_auto_trade_settings", lambda: settings)
@@ -180,7 +180,7 @@ def test_run_auto_trade_once_skips_when_market_regime_blocks(monkeypatch) -> Non
         "current_rule_entry_open_time_for_duration",
         lambda _duration, _now_ms=None: current_open,
     )
-    monkeypatch.setattr(auto_trade_service, "evaluate_market_regime_trade_gate", _blocked_regime_gate)
+    monkeypatch.setattr(auto_trade_service, "evaluate_candidate_regime_admission", _blocked_regime_admission)
     monkeypatch.setattr(
         auto_trade_service,
         "_create_trade",
@@ -199,7 +199,48 @@ def test_run_auto_trade_once_skips_when_market_regime_blocks(monkeypatch) -> Non
             1,
             {
                 "status": auto_trade_service.EXECUTION_BLOCKED,
-                "reason": "counter_trend_down_vs_up",
+                "reason": "regime_bucket_win_rate_below_min",
+                "event_id": None,
+            },
+        )
+    ]
+
+
+def test_run_auto_trade_once_blocks_live_trading_until_regime_bucket_stable(monkeypatch) -> None:
+    current_open = 1778922000000
+    settings = [AutoTradeSettings(FACTOR_COMBO_STRATEGY_KEY, True, "BTCUSDT", "10m", 10, 5.0, True)]
+    monkeypatch.setattr(auto_trade_service, "list_auto_trade_settings", lambda: settings)
+    monkeypatch.setattr(auto_trade_service, "_has_open_position", lambda *_args: False)
+    monkeypatch.setattr(
+        auto_trade_service,
+        "_latest_prediction_row",
+        lambda _settings: _auto_trade_prediction("BTCUSDT", current_open, 0.8),
+    )
+    monkeypatch.setattr(
+        auto_trade_service,
+        "current_rule_entry_open_time_for_duration",
+        lambda _duration, _now_ms=None: current_open,
+    )
+    monkeypatch.setattr(auto_trade_service, "evaluate_candidate_regime_admission", _allowed_regime_admission)
+    monkeypatch.setattr(
+        auto_trade_service,
+        "_create_trade",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live trade should wait for stable bucket")),
+    )
+    marked = []
+    monkeypatch.setattr(
+        auto_trade_service,
+        "mark_prediction_execution",
+        lambda prediction_id, **kwargs: marked.append((prediction_id, kwargs)),
+    )
+
+    assert auto_trade_service.run_auto_trade_once() == []
+    assert marked == [
+        (
+            1,
+            {
+                "status": auto_trade_service.EXECUTION_BLOCKED,
+                "reason": "regime_bucket_not_stable_for_live_trading",
                 "event_id": None,
             },
         )
@@ -417,17 +458,20 @@ def _auto_trade_prediction(symbol: str, open_time: int, probability_up: float) -
     }
 
 
-def _allowed_regime_gate(**_kwargs):
-    return _RegimeDecision(True, "trend_up_aligned", "trend")
+def _allowed_regime_admission(_prediction):
+    return _RegimeDecision(True, "regime_exploration_sample_count_below_50", "exploration")
 
 
-def _blocked_regime_gate(**_kwargs):
-    return _RegimeDecision(False, "counter_trend_down_vs_up", "skip")
+def _blocked_regime_admission(_prediction):
+    return _RegimeDecision(False, "regime_bucket_win_rate_below_min", "evaluable", sample_count=120)
 
 
 class _RegimeDecision:
-    def __init__(self, allowed: bool, reason: str, mode: str) -> None:
+    def __init__(self, allowed: bool, reason: str, mode: str, sample_count: int = 0) -> None:
         self.allowed = allowed
         self.reason = reason
         self.mode = mode
-        self.regime = {"ready": True, "trendState": "trend_up"}
+        self.regime = {"ready": True, "trendState": "trend_down", "regimeLabel": "trend_down:normal_vol"}
+        self.sample_count = sample_count
+        self.metrics = {"sampleCount": sample_count}
+        self.version = "candidate_regime_admission_v1"

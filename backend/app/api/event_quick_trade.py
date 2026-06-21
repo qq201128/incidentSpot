@@ -36,6 +36,7 @@ class QuickTradeContext:
     entry_price: float
     live_trading_enabled: bool
     prediction_open_time: int | None = None
+    regime_decision: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,18 @@ def create_quick_trade_record(ctx: QuickTradeContext) -> dict:
 def _enforce_market_regime_trade_gate(ctx: QuickTradeContext) -> MarketRegimeTradeDecision | None:
     if ctx.strategy_key == MANUAL_STRATEGY_KEY or ctx.predicted is None:
         return None
+    if ctx.regime_decision is not None:
+        if ctx.regime_decision.allowed:
+            return ctx.regime_decision
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "market_regime_trade_gate_blocked",
+                "gateReason": ctx.regime_decision.reason,
+                "mode": ctx.regime_decision.mode,
+                "regime": ctx.regime_decision.regime,
+            },
+        )
     if ctx.prediction_open_time is None:
         raise HTTPException(status_code=400, detail="prediction_open_time is required for market regime trade gate")
     decision = evaluate_market_regime_trade_gate(
@@ -202,7 +215,7 @@ def _market_regime_event_values(decision: MarketRegimeTradeDecision | None) -> t
     if decision is None:
         return (None, None, None, None, None)
     return (
-        MARKET_REGIME_TRADE_GATE_VERSION,
+        getattr(decision, "version", MARKET_REGIME_TRADE_GATE_VERSION),
         int(decision.allowed),
         decision.reason,
         decision.mode,

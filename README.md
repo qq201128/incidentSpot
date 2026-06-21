@@ -16,6 +16,19 @@ incidentSpot 是一个面向 Binance USD-M 指数事件交易研究的本地工�
 - 多模型族搜索：支持 LSTM、GRU、CNN、Transformer、RandomForest、XGBoost、LightGBM、CatBoost、SVM、Bayesian、KNN 等候选搜索任务。
 - 研究驾驶舱：聚合纸面实盘候选、模型族状态、已结算 Event 证据、稳定性和失败原因。
 
+## Paper-Live 环境准入
+
+市场环境在 paper-live 链路中只作为分桶标签，不再作为早期硬拦截规则。系统按
+`candidate + symbol + duration + regimeLabel + direction` 统计已结算 Event 证据：
+
+- `0-49` 样本：`exploration`，允许创建 paper-live event，不允许实盘。
+- `50-119` 样本：`collecting`，继续采样和展示临时表现，不拦截 event，不允许实盘。
+- `120-199` 样本：`evaluable`，开始按真实分桶胜率、PF、平均收益、连续亏损和近期胜率拦截。
+- `200-299` 样本：`stable_candidate`，达标后可进入实盘候选池。
+- `300+` 样本：`stable`，达标后才具备实盘准入基础。
+
+这意味着下跌环境中的 `up` prediction 在探索和观察阶段仍会创建模拟 event，用真实结算结果证明该候选在该环境是否有效；样本达到准入阶段后，才由该候选自身的环境分桶表现决定是否继续触发 event。
+
 ## 技术栈
 
 后端：

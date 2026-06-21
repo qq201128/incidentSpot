@@ -22,7 +22,12 @@ PERCENT_DECIMALS = 10
 logger = logging.getLogger("uvicorn.error")
 
 
-def create_trade_from_prediction(settings: AutoTradeSettings, prediction: dict[str, Any]) -> dict:
+def create_trade_from_prediction(
+    settings: AutoTradeSettings,
+    prediction: dict[str, Any],
+    *,
+    regime_decision: Any = None,
+) -> dict:
     entry_price = None
     try:
         entry_price = _fetch_latest_entry_price(settings.symbol)
@@ -40,6 +45,7 @@ def create_trade_from_prediction(settings: AutoTradeSettings, prediction: dict[s
                 entry_price=entry_price,
                 live_trading_enabled=settings.live_trading_enabled,
                 prediction_open_time=int(prediction["open_time"]) if prediction.get("open_time") is not None else None,
+                regime_decision=regime_decision,
             )
         )
     except Exception as exc:

@@ -120,6 +120,7 @@ def _create_events_schema(conn: sqlite3.Connection) -> None:
           result TEXT,
           settlement_source TEXT,
           prediction_open_time INTEGER,
+          prediction_id INTEGER,
           ai_probability_up REAL,
           ai_predicted_direction TEXT,
           ai_quality_score REAL,
