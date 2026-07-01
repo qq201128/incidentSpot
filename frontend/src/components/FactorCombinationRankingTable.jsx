@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { failureReasonLabel } from "../utils/failureReasonLabels";
 import "./FactorCombinationRankingTable.css";
 
 const COMBO_PAGE_SIZE = 6;
@@ -126,6 +127,7 @@ function RegularRankingSection({
 }
 
 function renderRankingRow(row, index) {
+  const sampleMetric = comboSampleMetric(row);
   return (
     <article key={row.factorName || index} className="factor-combo-rank-card">
       <div className="factor-combo-rank-index">
@@ -142,7 +144,7 @@ function renderRankingRow(row, index) {
       </div>
       <div className="factor-combo-rank-metrics">
         <Metric label="胜率" value={formatPct(row.winRate, 1)} strong={isGoalCombo(row)} />
-        <Metric label="日均单量" value={formatNum(row.avgTradesPerDay, 1)} />
+        <Metric label={sampleMetric.label} value={sampleMetric.value} />
         <Metric label="评分" value={formatNum(row.factorScore, 1)} />
         <Metric label="盈亏比" value={formatNum(row.profitFactor, 2)} />
         <Metric label="夏普" value={formatNum(row.sharpe, 2)} />
@@ -211,8 +213,20 @@ function regularCountText(total, unfilteredTotal, passedTotal, evaluatedTotal) {
 
 function walkForwardText(row) {
   if (row.walkForwardPassed === true) return "walk-forward 通过，可进入交易候选";
-  const reason = row.walkForwardFailureReason || "未通过 walk-forward";
+  const reason = row.walkForwardFailureReason
+    ? failureReasonLabel(row.walkForwardFailureReason)
+    : "未通过 walk-forward";
   return `观察候选 · ${reason}`;
+}
+
+function comboSampleMetric(row) {
+  if (row.avgTradesPerDay != null && !Number.isNaN(Number(row.avgTradesPerDay))) {
+    return { label: "日均单量", value: formatNum(row.avgTradesPerDay, 1) };
+  }
+  if (row.trades != null && !Number.isNaN(Number(row.trades))) {
+    return { label: "交易数", value: formatInt(row.trades) };
+  }
+  return { label: "样本数", value: formatInt(row.totalPeriods) };
 }
 
 function highWinrateSummaryText(summary) {
@@ -242,6 +256,11 @@ function memberText(members) {
 function formatNum(value, digits) {
   if (value == null || Number.isNaN(Number(value))) return "—";
   return Number(value).toFixed(digits);
+}
+
+function formatInt(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Math.trunc(Number(value)).toLocaleString();
 }
 
 function formatPct(value, digits) {

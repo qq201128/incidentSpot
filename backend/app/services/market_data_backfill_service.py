@@ -25,7 +25,7 @@ from app.services.rule_config import SUPPORTED_RULE_DURATIONS
 logger = logging.getLogger("uvicorn.error")
 
 DEFAULT_1M_TARGET_ROWS = 50_000
-KLINES_MULTI_INTERVALS = ("5m", "15m", "1h")
+KLINES_MULTI_INTERVALS = ("5m", "10m", "15m", "30m", "60m", "1h", "1d")
 DEFAULT_MARKET_CONTEXT_LIMIT = 1500
 
 

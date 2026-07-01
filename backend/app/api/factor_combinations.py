@@ -83,7 +83,7 @@ def factor_combination_ranking(
             **build_combination_ranking_page(stale_regular_rows(cached), query, safe_page, safe_page_size),
             **high_winrate_view,
         }
-    ranking = regular_ranking_view(regular_ranking_rows(cached))
+    ranking = regular_ranking_view(regular_ranking_rows(cached), cached, safe_duration)
     visibility = ranking_visibility(cached, ranking)
     page_payload = build_combination_ranking_page(ranking, query, safe_page, safe_page_size)
     return {

@@ -8,13 +8,6 @@ from app.services.event_search_index import event_search_match_query
 DEFAULT_PAGE_SIZE = 8
 MAX_PAGE_SIZE = 100
 
-_LATEST_ORDER_JOIN = """
-LEFT JOIN orders latest_order ON latest_order.id = (
-    SELECT id FROM orders WHERE event_id = events.id ORDER BY id DESC LIMIT 1
-)
-"""
-
-
 def paginated_events(
     conn,
     *,
@@ -35,7 +28,7 @@ def paginated_events(
     )
     total = int(
         conn.execute(
-            f"SELECT COUNT(*) AS total FROM events {_LATEST_ORDER_JOIN} WHERE {where_sql}",
+            f"SELECT COUNT(*) AS total FROM events WHERE {where_sql}",
             params,
         ).fetchone()["total"]
     )
@@ -47,7 +40,6 @@ def paginated_events(
         f"""
         SELECT events.*
         FROM events
-        {_LATEST_ORDER_JOIN}
         WHERE {where_sql}
         ORDER BY events.id DESC
         LIMIT ? OFFSET ?
@@ -78,7 +70,7 @@ def _unfiltered_total(
         query=None,
     )
     row = conn.execute(
-        f"SELECT COUNT(*) AS total FROM events {_LATEST_ORDER_JOIN} WHERE {where_sql}",
+        f"SELECT COUNT(*) AS total FROM events WHERE {where_sql}",
         params,
     ).fetchone()
     return int(row["total"])

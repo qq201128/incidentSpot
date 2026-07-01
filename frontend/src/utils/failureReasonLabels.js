@@ -29,6 +29,9 @@ const REASON_LABELS = Object.freeze({
   timeout: "请求超时",
   validation_gate_failed: "验证闸门未通过",
   validation_gate_missing: "验证闸门缺失",
+  validation_profit_factor_below_min: "验证集盈亏比不足",
+  validation_sample_count_below_min: "验证集样本数不足",
+  validation_win_rate_below_min: "验证集胜率不足",
   win_rate_below_min: "胜率不足",
   win_rate_missing: "胜率缺失",
 });

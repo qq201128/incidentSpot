@@ -1,28 +1,12 @@
 from __future__ import annotations
 
 from app.services.data_coverage_report import CoverageOptions, build_data_coverage_report
+from app.services.factor_page_alerts import coverage_gaps
 
 
 def data_coverage_summary(symbol: str, duration: str) -> dict:
-    report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration))
+    report = build_data_coverage_report(CoverageOptions(symbol=symbol, interval=duration, primary_only=True))
     return {
         "mainRange": report["mainRange"],
-        "missingFeatureSources": _missing_feature_sources(report["tables"]),
+        "missingFeatureSources": coverage_gaps(report, primary_interval=duration),
     }
-
-
-def _missing_feature_sources(tables: list[dict]) -> list[dict]:
-    missing = []
-    for table in tables:
-        for row in table.get("rows") or []:
-            if row.get("status") in {"healthy"}:
-                continue
-            missing.append(
-                {
-                    "table": table.get("table"),
-                    "status": row.get("status"),
-                    "coveragePct": row.get("coveragePct"),
-                    "missingReason": row.get("missingReason"),
-                }
-            )
-    return missing

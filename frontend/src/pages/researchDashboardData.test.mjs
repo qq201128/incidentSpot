@@ -9,7 +9,7 @@ import {
   topReasons,
   visibleSettledRows,
 } from "./researchDashboardData.js";
-import { reasonLabel } from "./researchDashboardLabels.js";
+import { dataFreshnessLabel, missingFeatureLabel, reasonLabel } from "./researchDashboardLabels.js";
 
 const report = {
   allCandidateCount: 4,
@@ -160,6 +160,9 @@ assert.equal(globalSummary.featureIssueCount, 2);
 
 assert.equal(topReasons(rows, report)[0].reason, "paper_live_win_rate_below_target");
 assert.equal(reasonLabel("paper_live_win_rate_below_target"), "胜率不足");
+assert.equal(dataFreshnessLabel("market_data_appended"), "已补行情");
+assert.equal(dataFreshnessLabel("fresh"), "数据新鲜");
+assert.equal(missingFeatureLabel("complete"), "特征完整");
 
 assert.equal(researchSummary(null, []).reportLoaded, false);
 

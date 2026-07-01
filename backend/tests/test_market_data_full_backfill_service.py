@@ -3,6 +3,11 @@ from __future__ import annotations
 from app.services import market_data_backfill_service as service
 
 
+def test_multi_interval_defaults_include_page_primary_durations() -> None:
+    assert {"10m", "30m", "60m", "1d"}.issubset(service.KLINES_MULTI_INTERVALS)
+    assert {"5m", "15m", "1h"}.issubset(service.KLINES_MULTI_INTERVALS)
+
+
 def test_full_history_backfill_aggregates_10m_and_backfills_native_durations(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(service, "_backfill_1m", lambda *args, **kwargs: {"after": 12})

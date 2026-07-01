@@ -49,3 +49,32 @@ export function reasonLabel(reason) {
   };
   return labels[reason] || reason || EMPTY;
 }
+
+export function dataFreshnessLabel(status) {
+  const labels = {
+    fresh: "数据新鲜",
+    ok: "数据正常",
+    complete: "数据完整",
+    market_data_appended: "已补行情",
+    invalid_data_leakage: "数据泄漏",
+    stale: "数据过期",
+    missing: "数据缺失",
+    incomplete: "数据不完整",
+    unknown: "状态未知",
+  };
+  return labels[status] || status || EMPTY;
+}
+
+export function missingFeatureLabel(status) {
+  const labels = {
+    complete: "特征完整",
+    fresh: "特征新鲜",
+    ok: "特征正常",
+    missing: "特征缺失",
+    incomplete: "特征不完整",
+    invalid_data_leakage: "特征泄漏",
+    stale: "特征过期",
+    unknown: "状态未知",
+  };
+  return labels[status] || status || EMPTY;
+}

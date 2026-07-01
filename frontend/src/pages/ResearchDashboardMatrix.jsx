@@ -10,7 +10,13 @@ import {
   rollingWindowItems,
   visibleSettledRows,
 } from "./researchDashboardData";
-import { reasonLabel, statusClass, statusLabel } from "./researchDashboardLabels";
+import {
+  dataFreshnessLabel,
+  missingFeatureLabel,
+  reasonLabel,
+  statusClass,
+  statusLabel,
+} from "./researchDashboardLabels";
 
 const STABLE_STATUS = "paper_stable";
 
@@ -166,8 +172,8 @@ function SettledRow({ liveToggleKey, onLiveToggle, row }) {
       <td className={row.maxConsecutiveLosses >= EVIDENCE_TARGETS.lossStreakLimit ? "is-bad" : ""}>{row.maxConsecutiveLosses}</td>
       <td>
         <span className="research-state-stack">
-          <small>{row.dataFreshnessStatus || EMPTY}</small>
-          <small>{row.missingFeatureStatus || EMPTY}</small>
+          <small>{dataFreshnessLabel(row.dataFreshnessStatus)}</small>
+          <small>{missingFeatureLabel(row.missingFeatureStatus)}</small>
         </span>
       </td>
       <td><span className="research-reason">{reasonLabel(row.reason)}</span></td>

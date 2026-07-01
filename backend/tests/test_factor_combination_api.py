@@ -164,6 +164,7 @@ def test_combination_ranking_api_displays_evaluated_rows_without_promoting_to_tr
             "members": [{"name": "failed"}, {"name": "carry"}],
             "walkForwardPassed": False,
             "walkForwardFailureReason": "validation_profit_factor_below_min",
+            "trades": 48,
         },
     ]
     monkeypatch.setattr(
@@ -174,6 +175,7 @@ def test_combination_ranking_api_displays_evaluated_rows_without_promoting_to_tr
             "duration": "10m",
             "ranking": rows,
             "evaluatedRanking": evaluated,
+            "search": {"entryRows": 288},
             "updatedAt": "2026-05-31T00:00:00+00:00",
         },
     )
@@ -189,6 +191,8 @@ def test_combination_ranking_api_displays_evaluated_rows_without_promoting_to_tr
     assert payload["passedRankingTotal"] == 1
     assert payload["evaluatedRankingTotal"] == 2
     assert payload["regularTotal"] == 2
+    failed = next(row for row in payload["ranking"] if row["factorName"] == "combo__failed__carry")
+    assert failed["avgTradesPerDay"] == 24.0
 
 
 def test_combination_ranking_route_normalizes_optional_query_defaults(monkeypatch) -> None:

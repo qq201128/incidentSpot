@@ -55,6 +55,20 @@ def test_paginated_events_clamps_page_to_last_page() -> None:
     assert len(payload["items"]) == 1
 
 
+def test_paginated_events_does_not_join_orders_for_plain_list() -> None:
+    conn = _memory_conn()
+    event_id = _insert_event(conn, "BTCUSDT", strategy_key="manual", status="OPEN")
+    _insert_order(conn, event_id, status="OPEN", external_response="accepted")
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+
+    payload = paginated_events(conn, symbol="BTCUSDT", page=1, page_size=10)
+
+    selected = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+    assert payload["total"] == 1
+    assert not any("FROM orders" in statement for statement in selected)
+
+
 def test_paginated_events_searches_backend_fields() -> None:
     conn = _memory_conn()
     _insert_event(conn, "BTCUSDT", strategy_key="manual", status="OPEN")

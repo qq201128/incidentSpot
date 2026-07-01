@@ -29,8 +29,13 @@ def build_high_winrate_combo_view(payload: dict[str, Any] | None, duration: str)
     }
 
 
-def regular_ranking_view(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{**row, "strategyBucket": REGULAR_BUCKET} for row in rows]
+def regular_ranking_view(
+    rows: list[dict[str, Any]],
+    payload: dict[str, Any] | None = None,
+    duration: str | None = None,
+) -> list[dict[str, Any]]:
+    sample_days = _sample_days(payload, duration) if payload is not None and duration is not None else None
+    return [_regular_row_view(row, sample_days) for row in rows]
 
 
 def _empty_high_winrate_view() -> dict[str, Any]:
@@ -55,6 +60,17 @@ def _goal_row_view(row: dict[str, Any], sample_days: float | None) -> dict[str, 
         "strategyBucket": HIGH_WINRATE_BUCKET,
         "sampleDays": sample_days,
         "avgTradesPerDay": _avg_trades_per_day(trades, sample_days),
+    }
+
+
+def _regular_row_view(row: dict[str, Any], sample_days: float | None) -> dict[str, Any]:
+    trades = _int_or_none(row.get("trades"))
+    avg_trades = row.get("avgTradesPerDay")
+    return {
+        **row,
+        "strategyBucket": REGULAR_BUCKET,
+        "sampleDays": row.get("sampleDays") or sample_days,
+        "avgTradesPerDay": avg_trades if avg_trades is not None else _avg_trades_per_day(trades, sample_days),
     }
 
 

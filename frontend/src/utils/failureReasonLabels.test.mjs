@@ -5,6 +5,7 @@ import {
 } from "./failureReasonLabels.js";
 
 assert.equal(failureReasonLabel("win_rate_below_min"), "胜率不足");
+assert.equal(failureReasonLabel("validation_win_rate_below_min"), "验证集胜率不足");
 assert.equal(failureReasonLabel("cache_unavailable:factor_ranking_cache"), "缓存不可用：排名缓存");
 assert.equal(
   failureReasonLabel("factor candidate signal missing column: ret_good"),

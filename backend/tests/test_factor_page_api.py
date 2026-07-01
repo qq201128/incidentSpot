@@ -133,6 +133,9 @@ def test_combo_factor_list_page_uses_current_cache(monkeypatch: pytest.MonkeyPat
                 {
                     "factorName": "combo__a__b",
                     "factorScore": 11.0,
+                    "sharpe": 0.8,
+                    "trades": 48,
+                    "avgTradesPerDay": 24.0,
                     "walkForwardPassed": False,
                     "walkForwardFailureReason": "validation_win_rate_below_min",
                     "members": [{"name": "a"}, {"name": "b"}],
@@ -162,6 +165,9 @@ def test_combo_factor_list_page_uses_current_cache(monkeypatch: pytest.MonkeyPat
     failed = next(row for row in page["factors"] if row["name"] == "combo__a__b")
     assert failed["paperLiveStatus"] == "observe_only"
     assert failed["walkForwardFailureReason"] == "validation_win_rate_below_min"
+    assert failed["sharpe"] == 0.8
+    assert failed["trades"] == 48
+    assert failed["avgTradesPerDay"] == 24.0
 
 
 def test_build_factor_page_bundle_omits_full_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
