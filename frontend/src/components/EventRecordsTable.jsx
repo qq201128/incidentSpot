@@ -1,31 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEventsPage } from "../api/eventsClient";
 import { eventDurationMinutesFromWindow } from "../utils/eventDuration";
 import { settledExpectedProfitUsdt } from "../utils/eventSettlement";
 import { factorLabel } from "../utils/factorLearningLabels";
 import { eventBacktestWinRatePercent } from "../utils/eventAiMetrics";
 import { simulationTypeLabel, strategyLabel } from "../utils/strategyLabels";
-import EnsembleRankingTable from "./EnsembleRankingTable";
 
 const PAGE_SIZE = 8;
 const EVENT_TAB = "events";
-const ENSEMBLE_TAB = "ensemble-ranking";
 const SEARCH_DEBOUNCE_MS = 280;
-const TABS = Object.freeze([
-  { key: EVENT_TAB, label: "事件合约记录" },
-  { key: ENSEMBLE_TAB, label: "候选信号排名" },
-]);
 
-export default function EventRecordsTable({
+function EventRecordsTable({
   symbol = "",
   compact = false,
   page,
   onPageChange,
   reloadKey = 0,
-  ensembleDuration = "10m",
-  ensembleReloadKey = 0,
 }) {
-  const [activeTab, setActiveTab] = useState(EVENT_TAB);
   const [scope, setScope] = useState("ALL");
   const [items, setItems] = useState([]);
   const [query, setQuery] = useState("");
@@ -33,11 +24,9 @@ export default function EventRecordsTable({
   const [total, setTotal] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
-  const showEnsemble = !compact && activeTab === ENSEMBLE_TAB;
   const effectiveSymbol = scope === "ALL" ? "" : scope;
 
   const loadRecords = useCallback(async () => {
-    if (showEnsemble) return;
     try {
       const data = await fetchEventsPage({
         symbol: effectiveSymbol,
@@ -58,12 +47,12 @@ export default function EventRecordsTable({
       setTotal(0);
       setPageCount(1);
     }
-  }, [compact, debouncedQuery, effectiveSymbol, onPageChange, page, showEnsemble]);
+  }, [compact, debouncedQuery, effectiveSymbol, onPageChange, page]);
 
   useEffect(() => {
     if (compact) return;
     onPageChange?.(1);
-  }, [activeTab, compact, debouncedQuery, effectiveSymbol, onPageChange]);
+  }, [compact, debouncedQuery, effectiveSymbol, onPageChange]);
 
   useEffect(() => {
     void loadRecords();
@@ -74,25 +63,20 @@ export default function EventRecordsTable({
   }, [onPageChange, page, pageCount]);
 
   const view = useMemo(
-    () => (showEnsemble ? null : buildView(items, compact)),
-    [compact, items, showEnsemble],
+    () => buildView(items, compact),
+    [compact, items],
   );
 
   const sectionClass = compact
     ? "event-records event-records--compact"
-    : showEnsemble
-      ? "event-records event-records--ensemble"
-      : "event-records";
+    : "event-records";
 
   return (
     <section className={sectionClass}>
       <RecordTabs
-        activeTab={activeTab}
         compact={compact}
-        ensembleTab={showEnsemble}
         scopeLabel={scopeText(scope)}
         scope={scope}
-        onChange={setActiveTab}
         onScopeChange={setScope}
         page={page}
         pageCount={pageCount}
@@ -101,40 +85,27 @@ export default function EventRecordsTable({
         onQueryChange={setQuery}
         total={total}
       />
-      {showEnsemble ? (
-        <EnsembleRankingTable
-          symbol={symbol}
-          duration={ensembleDuration}
-          reloadKey={ensembleReloadKey}
-        />
-      ) : (
-        <>
-          <div className="event-records-table" role="table" aria-label={view.title}>
-            <div className="event-records-rows">
-              <RecordHeader labels={view.labels} viewKey={view.key} />
-              {view.rows.map((row) => (
-                <RecordRow key={row.key} cells={row.cells} viewKey={view.key} />
-              ))}
-            </div>
-            {errorMessage ? <p className="event-records-error">{errorMessage}</p> : null}
-            {!total && !errorMessage ? <p className="event-records-empty">{view.emptyText}</p> : null}
-          </div>
-          {total ? (
-            <RecordsPagination page={page} pageCount={pageCount} total={total} onPageChange={onPageChange} />
-          ) : null}
-        </>
-      )}
+      <div className="event-records-table" role="table" aria-label={view.title}>
+        <div className="event-records-rows">
+          <RecordHeader labels={view.labels} viewKey={view.key} />
+          {view.rows.map((row) => (
+            <RecordRow key={row.key} cells={row.cells} viewKey={view.key} />
+          ))}
+        </div>
+        {errorMessage ? <p className="event-records-error">{errorMessage}</p> : null}
+        {!total && !errorMessage ? <p className="event-records-empty">{view.emptyText}</p> : null}
+      </div>
+      {total ? (
+        <RecordsPagination page={page} pageCount={pageCount} total={total} onPageChange={onPageChange} />
+      ) : null}
     </section>
   );
 }
 
 function RecordTabs({
-  activeTab,
   compact,
-  ensembleTab,
   errorMessage,
   onScopeChange,
-  onChange,
   onQueryChange,
   page,
   pageCount,
@@ -143,13 +114,12 @@ function RecordTabs({
   scopeLabel,
   total,
 }) {
-  const meta = ensembleTab
-    ? "综合裁判候选列表"
-    : errorMessage
-      ? "加载失败"
-      : total
-        ? `${scopeLabel} · 共 ${total} 条 · ${page}/${pageCount} 页`
-        : `${scopeLabel} · 暂无记录`;
+  const meta = errorMessage
+    ? "加载失败"
+    : total
+      ? `${scopeLabel} · 共 ${total} 条 · ${page}/${pageCount} 页`
+      : `${scopeLabel} · 暂无记录`;
+
   if (compact) {
     return (
       <div className="event-records-head">
@@ -160,20 +130,7 @@ function RecordTabs({
   }
   return (
     <div className="event-records-head">
-      <div className="event-records-tabs" role="tablist" aria-label="事件记录视图">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.key}
-            className={`event-records-tab${activeTab === tab.key ? " is-active" : ""}`}
-            onClick={() => onChange(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <h2>事件合约记录</h2>
       <label className="event-records-scope">
         <span className="sr-only">交易对筛选</span>
         <select value={scope} onChange={(event) => onScopeChange?.(event.target.value)}>
@@ -412,3 +369,12 @@ const eventLabels = () => [
   "类型",
 ];
 const compactLabels = () => ["事件ID", "方向", "入场价", "周期", "状态", "模式", "结果"];
+
+export default memo(EventRecordsTable, (prev, next) =>
+  prev.symbol === next.symbol &&
+  prev.compact === next.compact &&
+  prev.page === next.page &&
+  prev.reloadKey === next.reloadKey &&
+  prev.ensembleDuration === next.ensembleDuration &&
+  prev.ensembleReloadKey === next.ensembleReloadKey
+);

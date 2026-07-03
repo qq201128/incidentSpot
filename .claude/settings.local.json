@@ -4,7 +4,24 @@
       "mcp__ace-tool__search_context",
       "Bash(python -m pytest:*)",
       "Bash(python:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(../.venv/Scripts/python.exe scripts/agents_quality_gate.py --root ..)",
+      "Bash(./.venv/Scripts/python.exe backend/scripts/agents_quality_gate.py --root .)",
+      "Bash(../.venv/Scripts/python.exe -c \"import sqlite3; conn = sqlite3.connect\\('../backend/data.db'\\); print\\('Connected successfully'\\)\")",
+      "Bash(../.venv/Scripts/python.exe scripts/apply_performance_indices.py)",
+      "Bash(./.venv/Scripts/python.exe *)",
+      "Bash(npm list *)",
+      "Bash(sqlite3 *)",
+      "Bash(xargs grep -l \"factor.*combination\\\\|组合因子\")",
+      "Bash(tasklist)",
+      "Bash(findstr python *)",
+      "Bash(curl -X POST http://localhost:8000/api/factors/library/batch-import -H 'Content-Type: application/json' -d @factor_combinations_export.json)",
+      "Bash(curl *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":8000\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(../.venv/Scripts/python.exe test_proxy.py)",
+      "Bash(npm run *)"
     ]
   }
 }

@@ -301,6 +301,69 @@ CREATE TABLE IF NOT EXISTS factor_combo_feature_snapshots (
   PRIMARY KEY(symbol, duration, entry_open_time)
 );
 
+-- Persisted combination factors and backtest results (see diagnose_fix_factors / batch_backtest_factors).
+CREATE TABLE IF NOT EXISTS factor_combinations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  formula TEXT,
+  members TEXT,
+  symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
+  duration TEXT NOT NULL DEFAULT '10m',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  backtest_completed INTEGER NOT NULL DEFAULT 0,
+  backtest_status TEXT NOT NULL DEFAULT 'pending',
+  icir REAL,
+  win_rate REAL,
+  sharpe REAL,
+  max_drawdown REAL,
+  trades INTEGER,
+  last_backtest_at TEXT,
+  period_scores TEXT
+);
+
+CREATE TABLE IF NOT EXISTS factor_trades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  factor_id INTEGER NOT NULL,
+  factor_combination_id INTEGER,
+  symbol TEXT NOT NULL,
+  period TEXT NOT NULL DEFAULT '10m',
+  side TEXT,
+  pnl REAL,
+  position_value REAL,
+  notional REAL,
+  entry_time TEXT,
+  exit_time TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  FOREIGN KEY (factor_id) REFERENCES factor_combinations(id)
+);
+
+CREATE TABLE IF NOT EXISTS factor_period_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  factor_id INTEGER NOT NULL,
+  symbol TEXT NOT NULL,
+  period TEXT NOT NULL,
+  win_rate REAL,
+  icir REAL,
+  sharpe REAL,
+  max_drawdown REAL,
+  trades INTEGER,
+  avg_return REAL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(factor_id, symbol, period),
+  FOREIGN KEY (factor_id) REFERENCES factor_combinations(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_factor_combinations_backtest
+  ON factor_combinations(backtest_completed, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_factor_combinations_icir
+  ON factor_combinations(icir DESC) WHERE icir IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_factor_trades_factor
+  ON factor_trades(factor_id, symbol, period);
+CREATE INDEX IF NOT EXISTS idx_factor_period_metrics_lookup
+  ON factor_period_metrics(factor_id, symbol, period);
+
 CREATE TABLE IF NOT EXISTS high_winrate_strategy_status (
   strategy_key TEXT NOT NULL,
   symbol TEXT NOT NULL,
@@ -463,3 +526,10 @@ CREATE INDEX IF NOT EXISTS idx_orders_event_id ON orders(event_id);
 CREATE INDEX IF NOT EXISTS idx_settlements_event_id ON settlements(event_id);
 CREATE INDEX IF NOT EXISTS idx_market_data_quality_reports_lookup ON market_data_quality_reports(symbol, interval, issue_type, status);
 CREATE INDEX IF NOT EXISTS idx_event_final_decisions_recent ON event_final_decisions(symbol, duration, open_time DESC);
+
+-- Performance optimization indices for high-frequency queries
+CREATE INDEX IF NOT EXISTS idx_events_status_symbol ON events(status, symbol, event_interval);
+CREATE INDEX IF NOT EXISTS idx_klines_query_optimized ON klines(symbol, interval, open_time DESC);
+CREATE INDEX IF NOT EXISTS idx_predictions_strategy_symbol ON predictions(strategy_key, symbol, duration, open_time DESC);
+CREATE INDEX IF NOT EXISTS idx_predictions_execution_status ON predictions(execution_status, symbol, duration, execution_checked_at);
+CREATE INDEX IF NOT EXISTS idx_events_prediction_lookup ON events(prediction_open_time, symbol, event_interval) WHERE prediction_open_time IS NOT NULL;

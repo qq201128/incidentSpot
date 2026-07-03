@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 from app.db.session import get_conn, run_db_write_with_retry
 from app.services.rule_config import BPS_DIVISOR
+
+logger = logging.getLogger(__name__)
+
+# 异步持久化队列
+_ORDERBOOK_PERSIST_QUEUE: deque[dict[str, Any]] = deque(maxlen=200)
+_PERSIST_TASK: asyncio.Task | None = None
+_PERSIST_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -35,12 +45,48 @@ def build_orderbook_snapshot(request: OrderbookSnapshotRequest) -> dict[str, Any
     top = _top_levels(symbol, request)
     snapshot = _snapshot(top)
     _attach_ofi(snapshot, _previous_snapshot(symbol, request.cache))
-    persist_orderbook_tick(snapshot)
+
+    # 判断是否需要持久化（降低写入频率）
+    if _should_persist(snapshot, request.cache.get(symbol)):
+        _enqueue_persist(snapshot)
+
     request.cache[symbol] = snapshot
     return snapshot
 
 
+def _should_persist(current: dict[str, Any], previous: dict[str, Any] | None) -> bool:
+    """判断是否需要持久化：价格变动 > 0.02% 或超过 10 秒未写入"""
+    if previous is None:
+        return True
+
+    # 价格变动超过 0.02%
+    price_change_bps = abs(current["best_bid"] - previous["best_bid"]) / previous["best_bid"]
+    if price_change_bps > 0.0002:
+        return True
+
+    # 超过 10 秒未写入
+    time_elapsed_seconds = (current["timestamp"] - previous["timestamp"]) / 1000.0
+    return time_elapsed_seconds > 10.0
+
+
+def _enqueue_persist(snapshot: dict[str, Any]) -> None:
+    """将订单簿快照加入异步持久化队列"""
+    global _PERSIST_TASK
+    _ORDERBOOK_PERSIST_QUEUE.append(snapshot.copy())
+
+    # 如果没有正在运行的持久化任务，启动一个
+    if _PERSIST_TASK is None or _PERSIST_TASK.done():
+        try:
+            loop = asyncio.get_running_loop()
+            _PERSIST_TASK = loop.create_task(_flush_persist_queue())
+        except RuntimeError:
+            # 不在事件循环中，直接同步写入（回退到原始行为）
+            logger.warning("No event loop available, falling back to synchronous persist")
+            persist_orderbook_tick(snapshot)
+
+
 def persist_orderbook_tick(snapshot: dict[str, Any]) -> None:
+    """立即持久化单个订单簿快照（降级路径）"""
     def _persist() -> None:
         conn = get_conn()
         try:
@@ -59,6 +105,50 @@ def persist_orderbook_tick(snapshot: dict[str, Any]) -> None:
             conn.close()
 
     run_db_write_with_retry(_persist)
+
+
+async def _flush_persist_queue() -> None:
+    """异步批量持久化订单簿快照"""
+    async with _PERSIST_LOCK:
+        batch_size = 20
+        while _ORDERBOOK_PERSIST_QUEUE:
+            batch = []
+            for _ in range(min(batch_size, len(_ORDERBOOK_PERSIST_QUEUE))):
+                if _ORDERBOOK_PERSIST_QUEUE:
+                    batch.append(_ORDERBOOK_PERSIST_QUEUE.popleft())
+
+            if not batch:
+                break
+
+            try:
+                await asyncio.to_thread(_persist_batch, batch)
+            except Exception as exc:
+                logger.error(f"Failed to persist orderbook batch: {exc}", exc_info=True)
+
+            await asyncio.sleep(0.005)
+
+
+def _persist_batch(snapshots: list[dict[str, Any]]) -> None:
+    """批量写入订单簿数据"""
+    def _write() -> None:
+        conn = get_conn()
+        try:
+            for snapshot in snapshots:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO orderbook_ticks(
+                      symbol, quote_time, best_bid, best_ask, best_bid_qty, best_ask_qty,
+                      bid_qty_sum, ask_qty_sum, imbalance, microprice, microprice_bps, ofi, ofi_ratio
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    _tick_values(snapshot),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    run_db_write_with_retry(_write)
 
 
 def _top_levels(symbol: str, request: OrderbookSnapshotRequest) -> OrderbookTop:

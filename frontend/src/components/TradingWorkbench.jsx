@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { DRAWING_TOOLS, useKlineChartUi } from "../hooks/useKlineChartUi";
 import { KLINE_INTERVAL_OPTIONS } from "../utils/klineIntervals";
 import { durationKeyFromChartInterval } from "../utils/tradeDuration";
@@ -9,9 +9,8 @@ import OrderBook from "./OrderBook";
 import RecentTrades from "./RecentTrades";
 import WorkbenchStatusBar from "./WorkbenchStatusBar";
 
-export default function TradingWorkbench(props) {
+function TradingWorkbench(props) {
   const chartUi = useKlineChartUi();
-  const [ensembleReloadKey, setEnsembleReloadKey] = useState(0);
   const [recordsPage, setRecordsPage] = useState(1);
   const [compactRecordsPage, setCompactRecordsPage] = useState(1);
 
@@ -73,7 +72,6 @@ export default function TradingWorkbench(props) {
             onPredict={props.onPredict}
             latestPrediction={props.latestPrediction}
             onClearAllEvents={props.onClearAllEvents}
-            onEnsembleRefreshed={() => setEnsembleReloadKey((value) => value + 1)}
           />
         </section>
         <div className="records-column">
@@ -82,8 +80,6 @@ export default function TradingWorkbench(props) {
             page={recordsPage}
             onPageChange={setRecordsPage}
             reloadKey={props.recordsReloadKey}
-            ensembleDuration={durationKeyFromChartInterval(props.interval)}
-            ensembleReloadKey={ensembleReloadKey}
           />
         </div>
         <div className="records-side">
@@ -93,7 +89,6 @@ export default function TradingWorkbench(props) {
             page={compactRecordsPage}
             onPageChange={setCompactRecordsPage}
             reloadKey={props.recordsReloadKey}
-            ensembleReloadKey={ensembleReloadKey}
           />
         </div>
       </div>
@@ -358,3 +353,15 @@ function useClockLabel() {
   }, []);
   return `${now.toLocaleTimeString("zh-CN", { hour12: false })} (UTC+8)`;
 }
+
+export default memo(TradingWorkbench, (prev, next) =>
+  prev.symbol === next.symbol &&
+  prev.interval === next.interval &&
+  prev.status === next.status &&
+  prev.chartData === next.chartData &&
+  prev.chartLatestData === next.chartLatestData &&
+  prev.currentPrice === next.currentPrice &&
+  prev.lastKlineAt === next.lastKlineAt &&
+  prev.aggTrades === next.aggTrades &&
+  prev.reloadKey === next.reloadKey
+);

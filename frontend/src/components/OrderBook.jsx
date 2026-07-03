@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { fetchOrderbookDepth } from "../api/client";
 
 const POLL_MS = 3000;
@@ -51,7 +51,7 @@ function aggregateByTick(side, rows, tick) {
  * @typedef {{ bids: [number, number][], asks: [number, number][], bestBid: number, bestAsk: number, spread: number, spreadBps: number, timestamp?: number }} DepthPayload
  */
 
-export default function OrderBook({ symbol, lastTrade = null }) {
+function OrderBook({ symbol, lastTrade = null }) {
   const [viewMode, setViewMode] = useState(readStoredView);
   const [depth, setDepth] = useState(/** @type {DepthPayload | null} */ (null));
   const [error, setError] = useState("");
@@ -484,3 +484,10 @@ function fmtNotionalUsdt(n) {
   if (v >= 1_000) return `${(v / 1_000).toFixed(2)}K USDT`;
   return `${v.toFixed(2)} USDT`;
 }
+
+// Memoized OrderBook component to prevent unnecessary re-renders
+export default memo(OrderBook, (prevProps, nextProps) => {
+  return prevProps.symbol === nextProps.symbol &&
+         prevProps.lastTrade?.price === nextProps.lastTrade?.price &&
+         prevProps.lastTrade?.time === nextProps.lastTrade?.time;
+});

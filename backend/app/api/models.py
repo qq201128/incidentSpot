@@ -105,6 +105,7 @@ def model_candidate_search(
     parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
     internal_threads: int = Query(DEFAULT_INTERNAL_THREADS, alias="internalThreads", ge=1),
     xgboost_process_workers: int = Query(DEFAULT_XGBOOST_PROCESS_WORKERS, alias="xgboostProcessWorkers", ge=1),
+    search_mode: str = Query("balanced", alias="searchMode"),  # 新增：智能搜索模式
 ) -> dict:
     try:
         selected_duration = _query_str(duration, "10m") or "10m"
@@ -112,21 +113,43 @@ def model_candidate_search(
         selected = normalize_model_family(family)
         sym = symbol.upper()
         reset_requested = _query_bool(reset_history)
+        mode = _query_str(search_mode, "balanced") or "balanced"
+
+        # 验证搜索模式
+        if mode not in ["fast", "balanced", "exhaustive", "legacy"]:
+            mode = "balanced"
+
         resource = _resource_from_query(
             internal_threads=internal_threads,
             parallel_workers=parallel_workers,
             xgboost_process_workers=xgboost_process_workers,
         )
-        queued = enqueue_untrained_model_search_jobs(
-            symbols=(sym,),
-            durations=(selected_duration,),
-            families=(selected,),
-            profile=selected_profile,
-            priority=QUICK_MODEL_SEARCH_PRIORITY,
-            reset_existing=reset_requested,
-            reset_history=reset_requested,
-            resource=resource,
-        )
+
+        # 如果使用智能搜索模式，走新逻辑
+        if mode != "legacy":
+            from app.services.model_search_smart_enqueue import enqueue_smart_model_search
+
+            queued = enqueue_smart_model_search(
+                family=selected,
+                symbol=sym,
+                duration=selected_duration,
+                mode=mode,
+                priority=QUICK_MODEL_SEARCH_PRIORITY,
+                resource=resource,
+            )
+        else:
+            # 兼容旧逻辑
+            queued = enqueue_untrained_model_search_jobs(
+                symbols=(sym,),
+                durations=(selected_duration,),
+                families=(selected,),
+                profile=selected_profile,
+                priority=QUICK_MODEL_SEARCH_PRIORITY,
+                reset_existing=reset_requested,
+                reset_history=reset_requested,
+                resource=resource,
+            )
+
         _ensure_worker_for_jobs(queued, resource)
         status = model_family_status(selected, sym, selected_duration)
         worker = _candidate_search_worker_status(sym, selected_duration, selected)
@@ -135,6 +158,7 @@ def model_candidate_search(
             "modelSearchJob": queued["jobs"][0] if queued["jobs"] else None,
             "modelSearchQueue": queued,
             "workerStatus": worker,
+            "searchMode": mode,
             "message": _candidate_search_message(selected, worker, queued),
         }
     except ValueError as exc:
@@ -152,29 +176,52 @@ def model_search_retrain_all(
     internal_threads: int = Query(DEFAULT_INTERNAL_THREADS, alias="internalThreads", ge=1),
     parallel_workers: int = Query(DEFAULT_PARALLEL_WORKERS, alias="parallelWorkers", ge=1),
     xgboost_process_workers: int = Query(DEFAULT_XGBOOST_PROCESS_WORKERS, alias="xgboostProcessWorkers", ge=1),
+    search_mode: str = Query("balanced", alias="searchMode"),  # 新增：智能搜索模式
 ) -> dict:
     try:
         selected = _batch_search_targets(symbols=symbols, durations=durations, families=families)
         selected_profile = normalize_experiment_profile(_query_str(profile, "full") or "full")
+        mode = _query_str(search_mode, "balanced") or "balanced"
+
+        # 验证搜索模式
+        if mode not in ["fast", "balanced", "exhaustive", "legacy"]:
+            mode = "balanced"
+
         resource = _resource_from_query(
             internal_threads=internal_threads,
             parallel_workers=parallel_workers,
             xgboost_process_workers=xgboost_process_workers,
         )
-        queued = enqueue_untrained_model_search_jobs(
-            **selected,
-            profile=selected_profile,
-            reset_existing=True,
-            reset_history=_query_bool(reset_history, True),
-            resource=resource,
-        )
+
+        # 如果使用智能搜索模式，走新逻辑
+        if mode != "legacy":
+            from app.services.model_search_smart_batch import enqueue_smart_batch_search
+
+            queued = enqueue_smart_batch_search(
+                symbols=selected["symbols"],
+                durations=selected["durations"],
+                families=selected["families"],
+                mode=mode,
+                resource=resource,
+            )
+        else:
+            # 兼容旧逻辑
+            queued = enqueue_untrained_model_search_jobs(
+                **selected,
+                profile=selected_profile,
+                reset_existing=True,
+                reset_history=_query_bool(reset_history, True),
+                resource=resource,
+            )
+
         _ensure_worker_for_jobs(queued, resource)
         worker = model_search_queue_status(selected, include_symbol_details=False)["workerStatus"]
         return {
-            "version": "model_search_retrain_all_v1",
+            "version": "model_search_retrain_all_v2",
             "targets": {key: list(value) for key, value in selected.items()},
             "modelSearchQueue": queued,
             "workerStatus": worker,
+            "searchMode": mode,
             "message": _batch_search_message(queued, worker),
         }
     except ValueError as exc:

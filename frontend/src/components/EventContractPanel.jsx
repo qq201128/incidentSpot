@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import EnsembleJudgePanel from "./EnsembleJudgePanel";
 import EventFinalDecisionPanel from "./EventFinalDecisionPanel";
 import MarketRegimeStatusBar from "./MarketRegimeStatusBar";
 import TradeControls from "./TradeControls";
 const STORAGE_PANEL_TAB = "eventContract:rightPanelTab";
 const FIXED_PAYOUT_RATE = 0.8;
 const LIVE_TRADING_ENABLED = false;
-const PANEL_TABS = /** @type {const} */ (["final", "judge", "trade"]);
+const PANEL_TABS = /** @type {const} */ (["final", "trade"]);
 
 export default function EventContractPanel({
   symbol,
@@ -16,7 +15,6 @@ export default function EventContractPanel({
   onQuickTrade,
   onPredict,
   latestPrediction,
-  onEnsembleRefreshed,
 }) {
   const [durationMinutes, setDurationMinutes] = useState(() =>
     intervalToTradeMinutes(chartInterval),
@@ -138,16 +136,6 @@ export default function EventContractPanel({
           <button
             type="button"
             role="tab"
-            className={`panel-tab ${panelTab === "judge" ? "is-active" : ""}`}
-            aria-selected={panelTab === "judge"}
-            id="panel-tab-judge"
-            onClick={() => setPanelTab("judge")}
-          >
-            综合裁判
-          </button>
-          <button
-            type="button"
-            role="tab"
             className={`panel-tab ${panelTab === "trade" ? "is-active" : ""}`}
             aria-selected={panelTab === "trade"}
             id="panel-tab-trade"
@@ -163,19 +151,6 @@ export default function EventContractPanel({
           <EventFinalDecisionPanel
             symbol={symbol}
             duration={predictionDuration}
-          />
-        </div>
-      )}
-      {panelTab === "judge" && (
-        <div
-          className="panel-tab-panel panel-tab-panel--judge"
-          role="tabpanel"
-          aria-labelledby="panel-tab-judge"
-        >
-          <EnsembleJudgePanel
-            symbol={symbol}
-            duration={predictionDuration}
-            onRefreshed={() => onEnsembleRefreshed?.()}
           />
         </div>
       )}

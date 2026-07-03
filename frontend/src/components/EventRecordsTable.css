@@ -1,13 +1,3 @@
-.event-records--ensemble {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.event-records--ensemble .ensemble-records {
-  flex: 1;
-  min-height: 0;
-}
-
 .event-records {
   height: 100%;
   min-width: 0;

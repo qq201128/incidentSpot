@@ -62,6 +62,10 @@ def factor_combination_ranking(
     q: str | None = Query(None, description="search combo name/member/display name"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_RANKING_PAGE_SIZE, alias="pageSize", ge=1, le=MAX_RANKING_PAGE_SIZE),
+    use_cache: bool = Query(True, alias="useCache"),
+    min_win_rate: float | None = Query(None, alias="minWinRate", ge=0, le=100),  # 新增：最低胜率
+    min_ir: float | None = Query(None, alias="minIR", ge=0),  # 新增：最低IR
+    sort_by: str = Query("ir", alias="sortBy"),  # 新增：排序字段
 ) -> dict:
     safe_duration = _query_str(duration, "10m") or "10m"
     _validate_duration(safe_duration)
@@ -69,34 +73,96 @@ def factor_combination_ranking(
     query = _query_str(q)
     safe_page = _query_int(page) or 1
     safe_page_size = _query_int(page_size) or DEFAULT_RANKING_PAGE_SIZE
+
+    # 尝试使用智能缓存
+    cache_key = f"{sym_u}_{safe_duration}_{query}_{min_win_rate}_{min_ir}_{sort_by}"
+    if use_cache:
+        from app.services.factor_ranking_cache import get_ranking_cache
+        cache = get_ranking_cache()
+        cached_result = cache.get(sym_u, safe_duration)
+
+        if cached_result:
+            # 从缓存返回（需要重新过滤和分页）
+            cached_ranking = cached_result.get("ranking", [])
+            filtered = _apply_filters(cached_ranking, query, min_win_rate, min_ir, sort_by)
+            page_payload = build_combination_ranking_page(filtered, None, safe_page, safe_page_size)
+
+            return {
+                **cached_result,
+                "ranking": page_payload["ranking"],
+                "total": page_payload["total"],
+                "page": page_payload["page"],
+                "pageSize": page_payload["pageSize"],
+                "pageCount": page_payload["pageCount"],
+                "filtered": True,
+            }
+
+    # 原有逻辑
     cached = get_cached_combination_ranking(sym_u, safe_duration)
     high_winrate_view = _high_winrate_view(sym_u, safe_duration)
     if cached is None:
-        return {
+        result = {
             **_empty_combination_ranking(sym_u, safe_duration),
             **build_combination_ranking_page([], query, safe_page, safe_page_size),
             **high_winrate_view,
         }
-    if not cache_is_usable(cached):
-        return {
+    elif not cache_is_usable(cached):
+        result = {
             **_stale_combination_ranking(sym_u, safe_duration, cached),
             **build_combination_ranking_page(stale_regular_rows(cached), query, safe_page, safe_page_size),
             **high_winrate_view,
         }
-    ranking = regular_ranking_view(regular_ranking_rows(cached), cached, safe_duration)
-    visibility = ranking_visibility(cached, ranking)
-    page_payload = build_combination_ranking_page(ranking, query, safe_page, safe_page_size)
-    return {
-        **cached,
-        "ranking": page_payload["ranking"],
-        "total": page_payload["total"],
-        "passedRankingTotal": len(ranking_rows(cached)),
-        "evaluatedRankingTotal": visibility["evaluatedTotal"],
-        "source": "cache",
-        **page_payload,
-        **visibility,
-        **high_winrate_view,
-    }
+    else:
+        ranking = regular_ranking_view(regular_ranking_rows(cached), cached, safe_duration)
+
+        # 应用过滤和排序
+        filtered = _apply_filters(ranking, query, min_win_rate, min_ir, sort_by)
+
+        visibility = ranking_visibility(cached, ranking)
+        page_payload = build_combination_ranking_page(filtered, None, safe_page, safe_page_size)
+        result = {
+            **cached,
+            "ranking": page_payload["ranking"],
+            "total": page_payload["total"],
+            "passedRankingTotal": len(ranking_rows(cached)),
+            "evaluatedRankingTotal": visibility["evaluatedTotal"],
+            "source": "cache",
+            **page_payload,
+            **visibility,
+            **high_winrate_view,
+        }
+
+    # 缓存结果
+    if use_cache:
+        from app.services.factor_ranking_cache import get_ranking_cache
+        cache = get_ranking_cache()
+        cache.set(sym_u, safe_duration, result)
+
+    return result
+
+
+def _apply_filters(
+    ranking: list[dict],
+    search: str | None,
+    min_win_rate: float | None,
+    min_ir: float | None,
+    sort_by: str,
+) -> list[dict]:
+    """应用过滤和排序"""
+    from app.services.factor_ranking_filter import filter_ranking, sort_ranking
+
+    # 过滤
+    filtered = filter_ranking(
+        ranking,
+        search=search,
+        min_win_rate=min_win_rate,
+        min_ir=min_ir,
+    )
+
+    # 排序
+    filtered = sort_ranking(filtered, sort_by=sort_by)
+
+    return filtered
 
 
 @router.get("/signals")

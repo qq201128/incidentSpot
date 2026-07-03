@@ -23,6 +23,8 @@ def get_conn() -> sqlite3.Connection:
   _enable_foreign_keys(conn)
   _execute_connection_pragma(conn, "PRAGMA journal_mode=WAL", "failed to enable SQLite WAL mode")
   _execute_connection_pragma(conn, "PRAGMA busy_timeout=30000", "failed to configure SQLite busy_timeout")
+  _execute_connection_pragma(conn, "PRAGMA synchronous=NORMAL", "failed to set synchronous mode")
+  _execute_connection_pragma(conn, "PRAGMA wal_autocheckpoint=5000", "failed to set WAL autocheckpoint")
   return conn
 
 

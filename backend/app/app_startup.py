@@ -121,19 +121,19 @@ def _bootstrap_failure_details(stage: str, exc: Exception) -> dict:
 
 def _load_deferred_routers() -> list[APIRouter]:
     from app.api.auto_trade import router as auto_trade_router
-    from app.api.ensemble import router as ensemble_router
     from app.api.event_final_decision import router as event_final_decision_router
     from app.api.factor_combo_positions import router as factor_combo_positions_router
     from app.api.factor_combinations import router as factor_combinations_router
     from app.api.factor_trace import router as factor_trace_router
     from app.api.factor_learning import router as factor_learning_router
     from app.api.factors import router as factors_router
+    from app.api.factor_library import router as factor_library_router
+    from app.api.factor_library_management import router as factor_library_management_router
     from app.api.mining import router as mining_router
     from app.api.models import router as models_router
     from app.api.rules import router as rules_router
 
     return [
-        ensemble_router,
         event_final_decision_router,
         auto_trade_router,
         rules_router,
@@ -142,6 +142,8 @@ def _load_deferred_routers() -> list[APIRouter]:
         factor_combo_positions_router,
         factor_trace_router,
         factor_learning_router,
+        factor_library_router,
+        factor_library_management_router,
         mining_router,
         models_router,
     ]

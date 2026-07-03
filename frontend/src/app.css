@@ -3,7 +3,6 @@
 @import "/src/components/TradingWorkbench.responsive.css";
 @import "/src/components/EventRecordsTable.css";
 @import "/src/components/EventRecordsTable.responsive.css";
-@import "/src/components/EnsembleRankingTable.css";
 
 :root {
   --bg: #071017;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchFactorCombinationRanking,
   fetchFactorCombinationSignals,
@@ -17,10 +17,10 @@ const REFRESH_RELOAD_DELAY_MS = 3000;
 const DURATION_LABELS = { "10m": "10 分钟", "30m": "30 分钟", "60m": "60 分钟", "1d": "1 天" };
 const SIGNAL_IDLE_STATUS = "等待加载周期信号…";
 
-export default function FactorCombinationPanel({ symbol, duration }) {
+export default memo(function FactorCombinationPanel({ symbol, duration }) {
   const combo = useFactorCombinationData(symbol, duration);
   return <ComboPanelView {...combo} duration={duration} />;
-}
+}, (prev, next) => prev.symbol === next.symbol && prev.duration === next.duration);
 
 function useFactorCombinationData(symbol, duration) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);

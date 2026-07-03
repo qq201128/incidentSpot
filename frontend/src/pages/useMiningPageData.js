@@ -106,7 +106,10 @@ export function useMiningPageData(symbol, duration) {
     try {
       await Promise.all(
         MODEL_FAMILIES.map((family) =>
-          requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", DEFAULT_MODEL_SEARCH_RESOURCE),
+          requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", {
+            ...DEFAULT_MODEL_SEARCH_RESOURCE,
+            searchMode: "fast",  // 快速补搜使用 fast 模式
+          }),
         ),
       );
       await load(undefined, { fresh: true });
@@ -127,6 +130,7 @@ export function useMiningPageData(symbol, duration) {
         durations: duration,
         families: MODEL_FAMILIES.join(","),
         resetHistory: true,
+        searchMode: "balanced",  // 重训使用 balanced 模式（默认）
       });
       setStatus(data?.message || "当前模型族重训任务已入队");
       await load(undefined, { fresh: true });
@@ -142,7 +146,10 @@ export function useMiningPageData(symbol, duration) {
       if (!isValidSymbol(normalizedSymbol)) return;
       setBusy(`search-${family}`);
       try {
-        await requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", DEFAULT_MODEL_SEARCH_RESOURCE);
+        await requestModelCandidateSearch(family, normalizedSymbol, duration, "fast", {
+          ...DEFAULT_MODEL_SEARCH_RESOURCE,
+          searchMode: "fast",  // 单个模型搜索使用 fast 模式
+        });
         await load(undefined, { fresh: true });
       } catch (error) {
         setStatus(`${family} 搜索失败：${errorMessage(error)}`);

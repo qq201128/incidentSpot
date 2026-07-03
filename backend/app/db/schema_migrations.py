@@ -340,4 +340,64 @@ SCHEMA_MIGRATIONS = (
   "CREATE INDEX IF NOT EXISTS idx_market_data_quality_reports_lookup ON market_data_quality_reports(symbol, interval, issue_type, status)",
   "CREATE INDEX IF NOT EXISTS idx_event_final_decisions_recent ON event_final_decisions(symbol, duration, open_time DESC)",
   "CREATE INDEX IF NOT EXISTS idx_events_settled_ai_history ON events(symbol, event_interval, strategy_key) WHERE status = 'SETTLED' AND ai_predicted_direction IS NOT NULL AND ai_prediction_correct IS NOT NULL",
+  """
+  CREATE TABLE IF NOT EXISTS factor_combinations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    formula TEXT,
+    members TEXT,
+    symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
+    duration TEXT NOT NULL DEFAULT '10m',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    backtest_completed INTEGER NOT NULL DEFAULT 0,
+    backtest_status TEXT NOT NULL DEFAULT 'pending',
+    icir REAL,
+    win_rate REAL,
+    sharpe REAL,
+    max_drawdown REAL,
+    trades INTEGER,
+    last_backtest_at TEXT,
+    period_scores TEXT
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS factor_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    factor_id INTEGER NOT NULL,
+    factor_combination_id INTEGER,
+    symbol TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '10m',
+    side TEXT,
+    pnl REAL,
+    position_value REAL,
+    notional REAL,
+    entry_time TEXT,
+    exit_time TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (factor_id) REFERENCES factor_combinations(id)
+  )
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS factor_period_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    factor_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    period TEXT NOT NULL,
+    win_rate REAL,
+    icir REAL,
+    sharpe REAL,
+    max_drawdown REAL,
+    trades INTEGER,
+    avg_return REAL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(factor_id, symbol, period),
+    FOREIGN KEY (factor_id) REFERENCES factor_combinations(id)
+  )
+  """,
+  "CREATE INDEX IF NOT EXISTS idx_factor_combinations_backtest ON factor_combinations(backtest_completed, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_factor_combinations_icir ON factor_combinations(icir DESC) WHERE icir IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS idx_factor_trades_factor ON factor_trades(factor_id, symbol, period)",
+  "CREATE INDEX IF NOT EXISTS idx_factor_period_metrics_lookup ON factor_period_metrics(factor_id, symbol, period)",
 )

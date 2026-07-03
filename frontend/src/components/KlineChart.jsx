@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import {
   CandlestickSeries,
   CrosshairMode,
@@ -29,7 +29,7 @@ const MA_STYLES = Object.freeze({
   ma60: { period: 60, color: "#c084fc", label: "MA60" },
 });
 
-export default function KlineChart({
+function KlineChart({
   clearDrawingsToken = 0,
   data,
   drawingTool = "cursor",
@@ -391,3 +391,23 @@ function timeValue(value) {
   if (typeof value === "string") return Date.parse(value) / 1000;
   return Number.NaN;
 }
+
+export default memo(KlineChart, (prev, next) => {
+  // Deep comparison for data and latest to prevent unnecessary chart redraws
+  const dataEqual = prev.data === next.data ||
+    (prev.data?.length === next.data?.length &&
+     prev.data?.[prev.data.length - 1]?.time === next.data?.[next.data.length - 1]?.time);
+
+  const latestEqual = prev.latest === next.latest ||
+    (prev.latest?.time === next.latest?.time &&
+     prev.latest?.close === next.latest?.close);
+
+  return dataEqual &&
+         latestEqual &&
+         prev.drawingTool === next.drawingTool &&
+         prev.drawingsLocked === next.drawingsLocked &&
+         prev.clearDrawingsToken === next.clearDrawingsToken &&
+         prev.fitToken === next.fitToken &&
+         JSON.stringify(prev.indicators) === JSON.stringify(next.indicators) &&
+         JSON.stringify(prev.settings) === JSON.stringify(next.settings);
+});

@@ -23,6 +23,11 @@ from app.services.ws_kline_transform import (
     unwrap_fstream_ws_message,
 )
 from app.services.ws_agg_trade_stream import DEFAULT_AGG_TRADE_SNAPSHOT_LIMIT, proxy_agg_trade_stream
+from app.services.ws_connection_manager import (
+    WebSocketManager,
+    ConnectionConfig,
+    ConnectionState,
+)
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -32,6 +37,17 @@ FSTREAM_MARKET_WS_BASE_URL = "wss://fstream.binance.com/market/ws"
 KLINE_STREAM_KIND = "kline"
 INDEX_PRICE_STREAM_KIND = "index_price_tick"
 INDEX_PRICE_STREAM_NAME = "markPrice@1s"
+
+# 全局WebSocket管理器（可选：用于管理上游连接池）
+_ws_manager: WebSocketManager | None = None
+
+
+def get_ws_manager() -> WebSocketManager:
+    """获取全局WebSocket管理器"""
+    global _ws_manager
+    if _ws_manager is None:
+        _ws_manager = WebSocketManager()
+    return _ws_manager
 
 
 @dataclass(frozen=True)
@@ -44,9 +60,18 @@ class KlineStreamState:
     stream_kind: str = KLINE_STREAM_KIND
     synthetic_state: dict | None = None
     last_closed_open_time: int | None = None
+    reconnect_count: int = 0  # 新增：重连次数统计
 
 
 async def proxy_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -> None:
+    """
+    K线流代理（增强版）
+
+    改进：
+    1. 更好的重连日志
+    2. 重连次数统计
+    3. 重连次数过多时告警
+    """
     state = _contract_stream_state(symbol, interval.strip())
     await client_ws.accept()
 
@@ -55,24 +80,34 @@ async def proxy_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -
             await _backfill_contract_state(state)
             state = await _run_kline_stream(client_ws, state, persist=True)
         except CLIENT_WS_GONE_EXC:
+            logger.info(f"Client disconnected from kline stream: {symbol}@{interval}")
             break
         except TimeoutError:
             _log_stream_timeout("kline", state)
-            state = await _backoff(state)
+            state = await _backoff_with_tracking(state, "timeout")
         except (ConnectionResetError, OSError) as exc:
             _log_stream_connection_error("kline", state, exc)
-            state = await _backoff(state)
+            state = await _backoff_with_tracking(state, f"connection_error:{type(exc).__name__}")
         except RuntimeError as exc:
             if "close message has been sent" in str(exc):
+                logger.info(f"Kline stream closed normally: {symbol}@{interval}")
                 break
-            logger.exception("runtime error in kline stream")
-            state = await _backoff(state)
-        except Exception:
-            logger.exception("kline stream disconnected, retrying")
-            state = await _backoff(state)
+            logger.exception(f"Runtime error in kline stream: {symbol}@{interval}")
+            state = await _backoff_with_tracking(state, "runtime_error")
+        except Exception as exc:
+            logger.exception(f"Kline stream unexpected error: {symbol}@{interval}")
+            state = await _backoff_with_tracking(state, f"unexpected_error:{type(exc).__name__}")
 
 
 async def proxy_index_kline_stream(client_ws: WebSocket, symbol: str, interval: str) -> None:
+    """
+    指数K线流代理（增强版）
+
+    改进：
+    1. 更好的重连日志
+    2. REST降级通知
+    3. 重连次数统计
+    """
     state = _index_stream_state(symbol, interval.strip())
     await client_ws.accept()
 
@@ -80,23 +115,25 @@ async def proxy_index_kline_stream(client_ws: WebSocket, symbol: str, interval: 
         try:
             state = await _run_kline_stream(client_ws, state, persist=False)
         except CLIENT_WS_GONE_EXC:
+            logger.info(f"Client disconnected from index kline stream: {symbol}@{interval}")
             break
         except TimeoutError:
             _log_stream_timeout("index kline", state)
             await send_index_rest_fallback(client_ws, state.symbol, state.interval, "connect timeout")
-            state = await _backoff(state)
+            state = await _backoff_with_tracking(state, "timeout")
         except (ConnectionResetError, OSError) as exc:
             _log_stream_connection_error("index kline", state, exc)
             await send_index_rest_fallback(client_ws, state.symbol, state.interval, type(exc).__name__)
-            state = await _backoff(state)
+            state = await _backoff_with_tracking(state, f"connection_error:{type(exc).__name__}")
         except RuntimeError as exc:
             if "close message has been sent" in str(exc):
+                logger.info(f"Index kline stream closed normally: {symbol}@{interval}")
                 break
-            logger.exception("runtime error in index kline stream")
-            state = await _backoff(state)
-        except Exception:
-            logger.exception("index kline stream disconnected, retrying")
-            state = await _backoff(state)
+            logger.exception(f"Runtime error in index kline stream: {symbol}@{interval}")
+            state = await _backoff_with_tracking(state, "runtime_error")
+        except Exception as exc:
+            logger.exception(f"Index kline stream unexpected error: {symbol}@{interval}")
+            state = await _backoff_with_tracking(state, f"unexpected_error:{type(exc).__name__}")
 
 
 def _contract_stream_state(symbol: str, interval: str) -> KlineStreamState:
@@ -195,29 +232,63 @@ def _candle_from_stream_payload(
 
 
 async def _backoff(state: KlineStreamState) -> KlineStreamState:
+    """原始退避逻辑（保持向后兼容）"""
     await sleep(state.retry_wait_seconds)
     next_wait = min(state.retry_wait_seconds * 2, state.max_retry_wait_seconds)
     return replace(state, retry_wait_seconds=next_wait)
 
 
+async def _backoff_with_tracking(state: KlineStreamState, reason: str) -> KlineStreamState:
+    """
+    带统计的退避逻辑
+
+    Args:
+        state: 当前状态
+        reason: 重连原因
+
+    Returns:
+        更新后的状态（包含重连次数统计）
+    """
+    reconnect_count = state.reconnect_count + 1
+
+    # 告警阈值
+    if reconnect_count % 10 == 0:
+        logger.warning(
+            f"WebSocket reconnection threshold reached: "
+            f"{state.symbol}@{state.interval} reconnected {reconnect_count} times "
+            f"(reason: {reason})"
+        )
+
+    await sleep(state.retry_wait_seconds)
+    next_wait = min(state.retry_wait_seconds * 2, state.max_retry_wait_seconds)
+
+    return replace(
+        state,
+        retry_wait_seconds=next_wait,
+        reconnect_count=reconnect_count,
+    )
+
+
 def _log_stream_timeout(kind: str, state: KlineStreamState) -> None:
     logger.warning(
-        "%s upstream connect timed out for %s@%s, retry in %ss",
+        "%s upstream connect timed out for %s@%s, retry in %ss (reconnect_count=%d)",
         kind,
         state.symbol,
         state.interval,
         state.retry_wait_seconds,
+        state.reconnect_count,
     )
 
 
 def _log_stream_connection_error(kind: str, state: KlineStreamState, exc: BaseException) -> None:
     logger.warning(
-        "%s upstream connection error for %s@%s (%s), retry in %ss",
+        "%s upstream connection error for %s@%s: %s, retry in %ss (reconnect_count=%d)",
         kind,
         state.symbol,
         state.interval,
         type(exc).__name__,
         state.retry_wait_seconds,
+        state.reconnect_count,
     )
 
 

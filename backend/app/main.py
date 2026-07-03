@@ -144,3 +144,29 @@ async def ws_index_klines(websocket: WebSocket, symbol: str = "btcusdt", interva
         )
     except Exception:
         logger.exception("index kline websocket failed: symbol=%s interval=%s", symbol, interval)
+
+
+@app.websocket("/ws/orderbook")
+async def ws_orderbook(websocket: WebSocket, symbol: str = "btcusdt", depth: int = 5) -> None:
+    from app.services.orderbook_stream_manager import get_orderbook_stream_manager
+
+    bounded_depth = max(1, min(int(depth), 20))
+    manager = get_orderbook_stream_manager()
+
+    await websocket.accept()
+
+    try:
+        await manager.subscribe(websocket, symbol, bounded_depth)
+
+        # 保持连接
+        while True:
+            try:
+                await websocket.receive_text()
+            except Exception:
+                break
+    except CLIENT_WS_GONE_EXC:
+        logger.debug("orderbook websocket disconnected: symbol=%s", symbol)
+    except Exception:
+        logger.exception("orderbook websocket failed: symbol=%s", symbol)
+    finally:
+        await manager.unsubscribe(websocket, symbol)

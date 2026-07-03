@@ -62,6 +62,7 @@ export async function requestModelCandidateSearch(
       duration,
       profile,
       resetHistory: Boolean(options.resetHistory),
+      searchMode: options.searchMode || "balanced",  // 新增：搜索模式
       ...resource,
     },
     timeout: REFRESH_QUEUE_TIMEOUT_MS,
@@ -78,6 +79,7 @@ export async function requestModelRetrainAll(options = {}) {
       families: options.families,
       profile: options.profile || "full",
       resetHistory: options.resetHistory !== false,
+      searchMode: options.searchMode || "balanced",  // 新增：搜索模式
       ...resource,
     },
     timeout: RETRAIN_QUEUE_TIMEOUT_MS,
